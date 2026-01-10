@@ -1,0 +1,859 @@
+{
+  "info": {
+    "name": "Sistema de Encartes API",
+    "description": "Collection completa da API do Sistema de Criação de Encartes Promocionais",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "0"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.seudominio.com/v1",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.success && jsonData.data.token) {",
+                  "    pm.collectionVariables.set('token', jsonData.data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"usuario@exemplo.com\",\n  \"password\": \"senha123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Signup",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"João Silva\",\n  \"email\": \"usuario@exemplo.com\",\n  \"password\": \"senha123\",\n  \"confirmPassword\": \"senha123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/signup",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "signup"]
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "refresh"]
+            }
+          }
+        },
+        {
+          "name": "Forgot Password",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"usuario@exemplo.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "forgot-password"]
+            }
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"reset_token_123\",\n  \"password\": \"novaSenha123\",\n  \"confirmPassword\": \"novaSenha123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/reset-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "reset-password"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "List Products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "category", "value": "", "disabled": true },
+                { "key": "minPrice", "value": "", "disabled": true },
+                { "key": "maxPrice", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Product",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/prod_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["products", "prod_001"]
+            }
+          }
+        },
+        {
+          "name": "Create Product",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Arroz Tipo 1 5kg\",\n  \"price\": 24.90,\n  \"originalPrice\": 29.90,\n  \"unit\": \"un\",\n  \"imageUrl\": null,\n  \"category\": \"Mercearia\",\n  \"sku\": \"MERC001\",\n  \"observation\": \"Pacote família\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"]
+            }
+          }
+        },
+        {
+          "name": "Upload Product Image",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/products/prod_001/image",
+              "host": ["{{baseUrl}}"],
+              "path": ["products", "prod_001", "image"]
+            }
+          }
+        },
+        {
+          "name": "Update Product",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Arroz Tipo 1 5kg\",\n  \"price\": 22.90,\n  \"originalPrice\": 29.90,\n  \"unit\": \"un\",\n  \"category\": \"Mercearia\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/products/prod_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["products", "prod_001"]
+            }
+          }
+        },
+        {
+          "name": "Delete Product",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/prod_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["products", "prod_001"]
+            }
+          }
+        },
+        {
+          "name": "Import Products (CSV)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/products/import",
+              "host": ["{{baseUrl}}"],
+              "path": ["products", "import"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clients",
+      "item": [
+        {
+          "name": "List Clients",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/clients?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["clients"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Client",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/clients/cli_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["clients", "cli_001"]
+            }
+          }
+        },
+        {
+          "name": "Create Client",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Supermercado Bom Preço\",\n  \"cnpj\": \"12.345.678/0001-90\",\n  \"logoUrl\": null,\n  \"contacts\": [\n    {\n      \"name\": \"Maria Silva\",\n      \"role\": \"Gerente de Marketing\",\n      \"email\": \"maria@bompreco.com\",\n      \"phone\": \"(11) 99999-9999\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/clients",
+              "host": ["{{baseUrl}}"],
+              "path": ["clients"]
+            }
+          }
+        },
+        {
+          "name": "Update Client",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Supermercado Bom Preço LTDA\",\n  \"cnpj\": \"12.345.678/0001-90\",\n  \"contacts\": [\n    {\n      \"id\": \"cont_001\",\n      \"name\": \"Maria Silva\",\n      \"role\": \"Diretora de Marketing\",\n      \"email\": \"maria@bompreco.com\",\n      \"phone\": \"(11) 99999-9999\"\n    },\n    {\n      \"name\": \"Carlos Souza\",\n      \"role\": \"Assistente\",\n      \"email\": \"carlos@bompreco.com\",\n      \"phone\": \"(11) 97777-7777\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/clients/cli_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["clients", "cli_001"]
+            }
+          }
+        },
+        {
+          "name": "Delete Client",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/clients/cli_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["clients", "cli_001"]
+            }
+          }
+        },
+        {
+          "name": "Upload Client Logo",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/clients/cli_001/logo",
+              "host": ["{{baseUrl}}"],
+              "path": ["clients", "cli_001", "logo"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Collaborators",
+      "item": [
+        {
+          "name": "List Collaborators",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/collaborators?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["collaborators"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "role", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Collaborator",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/collaborators/col_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["collaborators", "col_001"]
+            }
+          }
+        },
+        {
+          "name": "Create Collaborator",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Carlos Santos\",\n  \"email\": \"carlos@empresa.com\",\n  \"phone\": \"(11) 97777-7777\",\n  \"role\": \"collaborator\",\n  \"password\": \"senha123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/collaborators",
+              "host": ["{{baseUrl}}"],
+              "path": ["collaborators"]
+            }
+          }
+        },
+        {
+          "name": "Update Collaborator",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Carlos Santos Silva\",\n  \"phone\": \"(11) 96666-6666\",\n  \"role\": \"manager\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/collaborators/col_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["collaborators", "col_001"]
+            }
+          }
+        },
+        {
+          "name": "Delete Collaborator",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/collaborators/col_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["collaborators", "col_001"]
+            }
+          }
+        },
+        {
+          "name": "Upload Collaborator Avatar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/collaborators/col_001/avatar",
+              "host": ["{{baseUrl}}"],
+              "path": ["collaborators", "col_001", "avatar"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Flyers",
+      "item": [
+        {
+          "name": "List Flyers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/flyers?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["flyers"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "clientId", "value": "", "disabled": true },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Flyer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/flyers/fly_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["flyers", "fly_001"]
+            }
+          }
+        },
+        {
+          "name": "Create Flyer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ofertas de Janeiro\",\n  \"clientId\": \"cli_001\",\n  \"configuration\": {\n    \"version\": \"1.0\",\n    \"template\": \"classic\",\n    \"orientation\": \"portrait\",\n    \"gridLayout\": \"3x4\",\n    \"settings\": {\n      \"showOriginalPrice\": true,\n      \"showUnit\": true,\n      \"priceColor\": \"#FF0000\",\n      \"backgroundColor\": \"#FFFFFF\"\n    },\n    \"sections\": [],\n    \"sectionLayout\": {\n      \"type\": \"auto\",\n      \"config\": {}\n    },\n    \"products\": []\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/flyers",
+              "host": ["{{baseUrl}}"],
+              "path": ["flyers"]
+            }
+          }
+        },
+        {
+          "name": "Update Flyer",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ofertas de Janeiro - Atualizado\",\n  \"clientId\": \"cli_001\",\n  \"configuration\": {\n    \"version\": \"1.0\",\n    \"template\": \"modern\",\n    \"orientation\": \"portrait\",\n    \"gridLayout\": \"3x4\",\n    \"settings\": {\n      \"showOriginalPrice\": true,\n      \"showUnit\": true,\n      \"priceColor\": \"#DC2626\",\n      \"backgroundColor\": \"#FFFBEB\"\n    },\n    \"sections\": [\n      {\n        \"id\": \"sec_001\",\n        \"name\": \"Carnes\",\n        \"backgroundColor\": \"#FEE2E2\",\n        \"textColor\": \"#B91C1C\",\n        \"visible\": true,\n        \"order\": 0\n      }\n    ],\n    \"sectionLayout\": {\n      \"type\": \"auto\",\n      \"config\": {}\n    },\n    \"products\": [\n      {\n        \"id\": \"fp_001\",\n        \"productId\": \"prod_001\",\n        \"sectionId\": \"sec_001\",\n        \"name\": \"Picanha Bovina Premium\",\n        \"price\": 59.90,\n        \"originalPrice\": 89.90,\n        \"unit\": \"kg\",\n        \"imageUrl\": \"https://cdn.exemplo.com/produtos/picanha.jpg\",\n        \"observation\": \"Super oferta!\",\n        \"position\": { \"x\": 0, \"y\": 0 },\n        \"size\": { \"width\": 1, \"height\": 1 }\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/flyers/fly_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["flyers", "fly_001"]
+            }
+          }
+        },
+        {
+          "name": "Delete Flyer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/flyers/fly_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["flyers", "fly_001"]
+            }
+          }
+        },
+        {
+          "name": "Duplicate Flyer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ofertas de Janeiro - Cópia\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/flyers/fly_001/duplicate",
+              "host": ["{{baseUrl}}"],
+              "path": ["flyers", "fly_001", "duplicate"]
+            }
+          }
+        },
+        {
+          "name": "Upload Flyer Thumbnail",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/flyers/fly_001/thumbnail",
+              "host": ["{{baseUrl}}"],
+              "path": ["flyers", "fly_001", "thumbnail"]
+            }
+          }
+        },
+        {
+          "name": "Export Flyer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/flyers/fly_001/export?format=pdf&quality=high",
+              "host": ["{{baseUrl}}"],
+              "path": ["flyers", "fly_001", "export"],
+              "query": [
+                { "key": "format", "value": "pdf" },
+                { "key": "quality", "value": "high" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Templates",
+      "item": [
+        {
+          "name": "List Templates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/templates?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["templates"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "type", "value": "", "disabled": true },
+                { "key": "isDefault", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Template",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/templates/tpl_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["templates", "tpl_001"]
+            }
+          }
+        },
+        {
+          "name": "Create Template",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Header Moderno Azul\",\n  \"type\": \"header\",\n  \"configuration\": {\n    \"width\": 794,\n    \"height\": 120,\n    \"backgroundColor\": \"#1E40AF\",\n    \"elements\": [\n      {\n        \"type\": \"text\",\n        \"content\": \"PROMOÇÃO ESPECIAL\",\n        \"x\": 50,\n        \"y\": 40,\n        \"width\": 400,\n        \"height\": 50,\n        \"style\": {\n          \"fontFamily\": \"Oswald\",\n          \"fontSize\": 36,\n          \"fontWeight\": \"bold\",\n          \"color\": \"#FFFFFF\",\n          \"textAlign\": \"left\"\n        }\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["templates"]
+            }
+          }
+        },
+        {
+          "name": "Update Template",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Header Moderno Azul v2\",\n  \"configuration\": {\n    \"width\": 794,\n    \"height\": 140,\n    \"backgroundColor\": \"#1E3A8A\",\n    \"elements\": [\n      {\n        \"id\": \"el_001\",\n        \"type\": \"text\",\n        \"content\": \"SUPER PROMOÇÃO\",\n        \"x\": 50,\n        \"y\": 50,\n        \"width\": 400,\n        \"height\": 50,\n        \"style\": {\n          \"fontFamily\": \"Oswald\",\n          \"fontSize\": 40,\n          \"fontWeight\": \"bold\",\n          \"color\": \"#FEF08A\",\n          \"textAlign\": \"left\"\n        }\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/templates/tpl_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["templates", "tpl_001"]
+            }
+          }
+        },
+        {
+          "name": "Delete Template",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/templates/tpl_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["templates", "tpl_001"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fonts",
+      "item": [
+        {
+          "name": "List Fonts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fonts",
+              "host": ["{{baseUrl}}"],
+              "path": ["fonts"]
+            }
+          }
+        },
+        {
+          "name": "Upload Font",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" },
+                { "key": "family", "value": "Bebas Neue", "type": "text" },
+                { "key": "weight", "value": "400", "type": "text" },
+                { "key": "style", "value": "normal", "type": "text" }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/fonts",
+              "host": ["{{baseUrl}}"],
+              "path": ["fonts"]
+            }
+          }
+        },
+        {
+          "name": "Delete Font",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fonts/font_001",
+              "host": ["{{baseUrl}}"],
+              "path": ["fonts", "font_001"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Uploads",
+      "item": [
+        {
+          "name": "Upload File",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" },
+                { "key": "folder", "value": "products", "type": "text" }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/uploads",
+              "host": ["{{baseUrl}}"],
+              "path": ["uploads"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Get Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "stats"]
+            }
+          }
+        },
+        {
+          "name": "Get Recent Items",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/recent?limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "recent"],
+              "query": [
+                { "key": "limit", "value": "5" }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
