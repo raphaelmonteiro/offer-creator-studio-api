@@ -61,8 +61,11 @@ export class ProductsService {
 
     const queryBuilder = this.productRepository.createQueryBuilder('product');
 
+    // Sempre filtrar apenas produtos ativos
+    queryBuilder.where('product.active = :active', { active: true });
+
     if (search) {
-      queryBuilder.where(
+      queryBuilder.andWhere(
         '(product.name LIKE :search OR product.sku LIKE :search)',
         { search: `%${search}%` },
       );
