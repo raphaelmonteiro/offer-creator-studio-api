@@ -12,7 +12,7 @@ import {
   HttpStatus,
   BadRequestException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { createFileInterceptor } from '../../common/utils/multer.util';
 import {
   ApiTags,
   ApiOperation,
@@ -39,7 +39,7 @@ export class FontsController {
 
   @Post()
   @SkipValidation()
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(createFileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {

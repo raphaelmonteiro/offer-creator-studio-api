@@ -13,7 +13,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { createFileInterceptor } from '../../common/utils/multer.util';
 import {
   ApiTags,
   ApiOperation,
@@ -91,7 +91,7 @@ export class FlyersController {
 
   @Post(':id/thumbnail')
   @SkipValidation()
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(createFileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {

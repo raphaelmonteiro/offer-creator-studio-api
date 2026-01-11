@@ -25,7 +25,7 @@ async function bootstrap() {
     }
     
     // Apply JSON parser for non-multipart requests
-    bodyParser.json({ limit: '50mb' })(req, res, next);
+    bodyParser.json({ limit: '100mb' })(req, res, next);
   });
 
   // URL encoded body parser - skip for multipart requests
@@ -36,7 +36,7 @@ async function bootstrap() {
       return next();
     }
     
-    bodyParser.urlencoded({ limit: '50mb', extended: true })(req, res, next);
+    bodyParser.urlencoded({ limit: '100mb', extended: true })(req, res, next);
   });
 
   // Global prefix
