@@ -192,6 +192,125 @@ npm run migration:generate -- -n MigrationName
 npm run migration:run
 ```
 
+## 🚀 Deploy em Produção com PM2
+
+### Pré-requisitos
+- Node.js instalado no servidor
+- PM2 instalado globalmente: `npm install -g pm2`
+- PostgreSQL configurado
+- Arquivo `.env` configurado com todas as variáveis necessárias
+
+### Passos para Deploy
+
+1. **No servidor, clone/atualize o repositório:**
+```bash
+git clone <repository-url>
+cd backend-new
+```
+
+2. **Instale as dependências:**
+```bash
+npm install --production
+```
+
+3. **Compile o projeto:**
+```bash
+npm run build
+```
+
+4. **Configure o arquivo `.env` com as variáveis de ambiente:**
+```env
+NODE_ENV=production
+PORT=3001
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=seu_usuario
+DB_PASSWORD=sua_senha
+DB_DATABASE=flyer_db
+JWT_SECRET=seu-jwt-secret-super-seguro
+JWT_EXPIRES_IN=3600s
+JWT_REFRESH_SECRET=seu-refresh-secret-super-seguro
+JWT_REFRESH_EXPIRES_IN=7d
+SMTP_HOST=smtp.mailtrap.io
+SMTP_PORT=587
+SMTP_USER=seu_usuario_smtp
+SMTP_PASS=sua_senha_smtp
+MAIL_FROM="Encartes" <no-reply@encartes.local>
+BASE_URL=https://api.seudominio.com
+FRONTEND_URL=https://seudominio.com
+UPLOAD_DEST=./uploads
+```
+
+5. **Crie a pasta de logs (se não existir):**
+```bash
+mkdir -p logs
+```
+
+6. **Inicie a aplicação com PM2:**
+```bash
+pm2 start ecosystem.config.js
+```
+
+7. **Salve a configuração do PM2 para iniciar automaticamente após reinicialização:**
+```bash
+pm2 save
+pm2 startup
+```
+
+### Comandos PM2 Úteis
+
+```bash
+# Ver status da aplicação
+pm2 status
+
+# Ver logs em tempo real
+pm2 logs flyer-api
+
+# Reiniciar a aplicação
+pm2 restart flyer-api
+
+# Parar a aplicação
+pm2 stop flyer-api
+
+# Remover a aplicação do PM2
+pm2 delete flyer-api
+
+# Ver informações detalhadas
+pm2 show flyer-api
+
+# Monitorar recursos (CPU, memória)
+pm2 monit
+```
+
+### Atualizando a Aplicação
+
+```bash
+# 1. Pare a aplicação
+pm2 stop flyer-api
+
+# 2. Atualize o código (git pull, etc)
+git pull origin main
+
+# 3. Instale novas dependências (se houver)
+npm install --production
+
+# 4. Recompile
+npm run build
+
+# 5. Reinicie a aplicação
+pm2 restart flyer-api
+```
+
+### Configuração da Porta
+
+A porta é configurada via variável de ambiente `PORT` no arquivo `.env` ou no `ecosystem.config.js`. Por padrão, está configurada para **3001**.
+
+Para alterar a porta, edite o arquivo `ecosystem.config.js` ou defina a variável `PORT` no `.env`:
+
+```env
+PORT=3001
+```
+
 ## 📄 Licença
 
 Este projeto é privado e não possui licença pública.
