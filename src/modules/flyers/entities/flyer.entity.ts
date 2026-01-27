@@ -33,6 +33,12 @@ export class Flyer {
   @Column('jsonb')
   configuration: any;
 
+  @Column({ type: 'varchar', length: 20, default: 'auto' })
+  layout: string;
+
+  @Column('jsonb', { nullable: true })
+  customGridConfig: any | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

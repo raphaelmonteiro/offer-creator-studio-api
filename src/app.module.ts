@@ -16,6 +16,7 @@ import { FontsModule } from './modules/fonts/fonts.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HealthModule } from './modules/health/health.module';
+import { GalleryModule } from './modules/gallery/gallery.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { HealthModule } from './modules/health/health.module';
     UploadsModule,
     DashboardModule,
     HealthModule,
+    GalleryModule,
   ],
   providers: [
     {
