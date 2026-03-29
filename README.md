@@ -192,6 +192,19 @@ npm run migration:generate -- -n MigrationName
 npm run migration:run
 ```
 
+### 📖 Instalação e Configuração do PostgreSQL
+
+Para instalar e configurar o PostgreSQL no servidor de produção, consulte o guia completo:
+
+**[📄 Guia de Instalação do PostgreSQL](./docs/POSTGRESQL_SETUP.md)**
+
+O guia inclui:
+- Instalação em Ubuntu/Debian e CentOS/RHEL
+- Criação de usuário e banco de dados
+- Configuração de segurança
+- Backup e restauração
+- Troubleshooting comum
+
 ## 🚀 Deploy em Produção com PM2
 
 ### Pré-requisitos

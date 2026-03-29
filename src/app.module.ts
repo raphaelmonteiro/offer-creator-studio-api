@@ -17,6 +17,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HealthModule } from './modules/health/health.module';
 import { GalleryModule } from './modules/gallery/gallery.module';
+import { AiModule } from './modules/ai/ai.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { GalleryModule } from './modules/gallery/gallery.module';
     DashboardModule,
     HealthModule,
     GalleryModule,
+    AiModule,
   ],
   providers: [
     {
