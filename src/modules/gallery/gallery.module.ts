@@ -10,6 +10,7 @@ import { UploadsModule } from '../uploads/uploads.module';
   imports: [TypeOrmModule.forFeature([GalleryImage, GalleryFolder]), UploadsModule],
   controllers: [GalleryController],
   providers: [GalleryService],
+  exports: [GalleryService],
 })
 export class GalleryModule {}
 

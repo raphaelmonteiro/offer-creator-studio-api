@@ -14,6 +14,8 @@ import { AiService } from './ai.service';
 import { SpellCheckRequestDto } from './dto/spell-check-request.dto';
 import { ImageSearchRequestDto } from './dto/image-search-request.dto';
 import { ImageDownloadRequestDto } from './dto/image-download-request.dto';
+import { TemplateGenerateRequestDto } from './dto/template-generate-request.dto';
+import { TemplateImageGenerateRequestDto } from './dto/template-image-generate-request.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @ApiTags('AI')
@@ -52,7 +54,7 @@ export class AiController {
   @ApiResponse({ status: 200, description: 'Lista de imagens sugeridas' })
   async imageSearch(@Query() dto: ImageSearchRequestDto) {
     try {
-      const result = await this.aiService.searchImages(dto.rawName);
+      const result = await this.aiService.searchImages(dto.rawName, dto.category);
       return { success: true, data: result };
     } catch (error) {
       this.logger.error('Erro ao buscar imagens', error);
@@ -81,6 +83,47 @@ export class AiController {
         error: {
           code: 'IMAGE_DOWNLOAD_ERROR',
           message: 'Não foi possível salvar a imagem. Tente novamente.',
+        },
+      };
+    }
+  }
+
+  @Post('template-image-generate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Gera imagem de fundo para template via GPT-4o Image (Feature 5)' })
+  @ApiResponse({ status: 200, description: 'Imagem gerada com sucesso' })
+  async templateImageGenerate(@Body() dto: TemplateImageGenerateRequestDto) {
+    try {
+      const result = await this.aiService.generateTemplateImage(dto.format, dto.messages);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao gerar imagem de template', error);
+      return {
+        success: false,
+        error: {
+          code: 'TEMPLATE_IMAGE_GENERATION_ERROR',
+          message: 'Não foi possível gerar a imagem. Tente novamente com uma descrição diferente.',
+        },
+      };
+    }
+  }
+
+  @Post('template-generate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Gera um template completo via GPT-4o com suporte a DALL-E 3' })
+  @ApiResponse({ status: 200, description: 'Template gerado com sucesso' })
+  async templateGenerate(@Body() dto: TemplateGenerateRequestDto) {
+    try {
+      const result = await this.aiService.generateTemplate(dto.format, dto.messages);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao gerar template', error);
+      return {
+        success: false,
+        error: {
+          code: 'TEMPLATE_GENERATION_ERROR',
+          message:
+            'Não foi possível gerar o template. Tente novamente com uma descrição diferente.',
         },
       };
     }

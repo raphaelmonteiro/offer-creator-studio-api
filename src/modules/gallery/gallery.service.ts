@@ -45,6 +45,23 @@ export class GalleryService {
     return paginate(items, total, { page, limit });
   }
 
+  async registerImage(params: {
+    filename: string;
+    url: string;
+    mimeType: string;
+    size: number;
+  }): Promise<GalleryImage> {
+    const image = this.imagesRepository.create({
+      filename: params.filename,
+      url: params.url,
+      thumbnailUrl: params.url,
+      mimeType: params.mimeType,
+      size: params.size,
+      folderId: null,
+    });
+    return this.imagesRepository.save(image);
+  }
+
   async uploadImages(
     files: Express.Multer.File[],
     folderId?: string | null,

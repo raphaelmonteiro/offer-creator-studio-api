@@ -30,7 +30,7 @@ export class CreateProductDto {
 
   @ApiProperty({ required: false, nullable: true })
   @IsOptional()
-  @IsUrl()
+  @IsUrl({ require_tld: false })
   imageUrl?: string | null;
 
   @ApiProperty({ required: false, nullable: true, example: 'Mercearia' })
