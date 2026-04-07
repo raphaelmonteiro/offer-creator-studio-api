@@ -9,6 +9,16 @@ import { GalleryService } from '../gallery/gallery.service';
 import { PixabayCategory } from './dto/image-search-request.dto';
 import { FormatDto, ChatMessageDto } from './dto/template-generate-request.dto';
 import { TemplateGenerateResponseDto } from './dto/template-generate-response.dto';
+import {
+  TemplateLayersFormatDto,
+  TemplateLayersMessageDto,
+  TemplateLayersGenerateResponseDto,
+  LayerElementDto,
+} from './dto/template-layers-generate.dto';
+import {
+  ElementAction,
+  TemplateElementResponseDto,
+} from './dto/template-element-request.dto';
 
 const BATCH_SIZE = 10;
 
@@ -251,6 +261,115 @@ Outras regras:
 
 const GENERATE_PREFIX = 'GENERATE:';
 
+const ELEMENT_SYSTEM_PROMPT = `You are a template element assistant for a supermarket flyer builder app.
+
+The user is editing a template in a canvas editor and wants to add, modify or remove individual elements.
+
+IMPORTANT CONTEXT:
+- The canvas has 3 sections: header, footer, and body (background only)
+- The user is currently viewing the "activeSection" — default to that section unless they specify otherwise
+- Coordinates are in pixels at 37.795px per cm (96 DPI)
+- Canvas dimensions are provided as format info
+
+You MUST respond with a JSON object containing:
+{
+  "assistantMessage": "<brief message in Portuguese explaining what was done>",
+  "actions": [<array of actions>]
+}
+
+AVAILABLE ACTIONS:
+
+1. ADD IMAGE — generates an isolated image (transparent background) and adds it to canvas:
+{
+  "type": "add-image",
+  "section": "header|footer",
+  "element": {
+    "type": "image",
+    "src": "GENERATE: <English prompt for isolated object, transparent background, PNG>",
+    "x": <pixels>, "y": <pixels>,
+    "width": <pixels>, "height": <pixels>,
+    "zIndex": 5,
+    "opacity": 1,
+    "objectFit": "contain",
+    "borderRadius": 0
+  }
+}
+
+2. ADD TEXT — adds a text element:
+{
+  "type": "add-text",
+  "section": "header|footer",
+  "element": {
+    "type": "text",
+    "content": "<the text>",
+    "x": <pixels>, "y": <pixels>,
+    "width": <pixels>, "height": <pixels>,
+    "zIndex": 5,
+    "fontSize": <number>,
+    "fontFamily": "Arial",
+    "fontWeight": "bold|normal",
+    "fontStyle": "normal|italic",
+    "color": "#RRGGBB",
+    "textAlign": "left|center|right",
+    "lineHeight": 1.2,
+    "letterSpacing": 0,
+    "textTransform": "none|uppercase|lowercase",
+    "backgroundColor": null,
+    "padding": null,
+    "borderRadius": null
+  }
+}
+
+3. UPDATE ELEMENT — modifies properties of an existing element by ID:
+{
+  "type": "update-element",
+  "section": "header|footer",
+  "elementId": "<id of existing element>",
+  "updates": { "<property>": <new value>, ... }
+}
+To change an image's source, set "src": "GENERATE: <new prompt>"
+
+4. REMOVE ELEMENT — removes an element by ID:
+{
+  "type": "remove-element",
+  "section": "header|footer",
+  "elementId": "<id of existing element>"
+}
+
+5. UPDATE BACKGROUND — changes a section's background:
+{
+  "type": "update-background",
+  "section": "header|footer|body",
+  "background": {
+    "type": "solid|gradient|image",
+    ... (same CanvasBackground schema as the template generator)
+  }
+}
+For generated backgrounds use: "imageUrl": "GENERATE: <prompt>"
+
+RULES FOR IMAGE GENERATION PROMPTS:
+- For element images (add-image), just describe the object itself. Transparent background is handled automatically by the system.
+- Be specific about the object: "3D red megaphone icon, cartoon style" or "golden trophy, metallic render"
+- Do NOT include background descriptions in the prompt — the system removes backgrounds automatically
+- Do NOT generate full scenes — only isolated objects/icons
+- Keep prompts in English
+
+RULES FOR TEXT:
+- Use the exact text the user requests — do not change wording
+- Choose appropriate fontSize based on element importance (titles: 32-48px, labels: 18-24px, small text: 12-16px)
+- Position text logically within the section bounds
+
+RULES FOR POSITIONING:
+- Calculate positions relative to the section, not the full canvas
+- x=0, y=0 is the top-left of the section
+- Consider existing elements to avoid overlaps — check the template context
+
+GENERAL:
+- You can return MULTIPLE actions in one response (e.g., add image + add text)
+- Always respond in Portuguese in assistantMessage
+- If the request is ambiguous, make a reasonable choice and explain in assistantMessage
+- If the user asks something unrelated to template editing, respond with an empty actions array and a helpful message`;
+
 interface PixabayHit {
   id: number;
   previewURL: string;
@@ -268,7 +387,6 @@ interface PixabayResponse {
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly openai: OpenAI | null;
-
   constructor(
     private readonly configService: ConfigService,
     private readonly uploadsService: UploadsService,
@@ -574,6 +692,160 @@ feijão preto → black beans`,
     });
   }
 
+  // ─── Template Element Assistant (incremental add/edit/remove) ────────────────
+
+  async generateTemplateElement(
+    format: FormatDto,
+    activeSection: 'header' | 'footer' | 'body',
+    messages: ChatMessageDto[],
+    templateContext?: Record<string, unknown>,
+  ): Promise<TemplateElementResponseDto> {
+    if (!this.openai) throw new Error('OpenAI não configurada');
+
+    const canvasW = (format.artWidthCm * 37.795).toFixed(0);
+    const headerH = (format.headerHeightCm * 37.795).toFixed(0);
+    const footerH = (format.footerHeightCm * 37.795).toFixed(0);
+
+    const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: 'system', content: ELEMENT_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content:
+          `Format: ${format.type}, ${format.artWidthCm}×${format.artHeightCm}cm\n` +
+          `Canvas: ${canvasW}px wide | Header: ${headerH}px tall | Footer: ${footerH}px tall\n` +
+          `Active section: ${activeSection}`,
+      },
+      { role: 'assistant', content: 'Entendido. Aguardo sua instrução.' },
+    ];
+
+    // Inject current template context
+    if (templateContext) {
+      openaiMessages.push({
+        role: 'user',
+        content: `[TEMPLATE CONTEXT]\n${JSON.stringify(templateContext, null, 2)}`,
+      });
+      openaiMessages.push({
+        role: 'assistant',
+        content: 'Template context loaded. I will use it for positioning and updates.',
+      });
+    }
+
+    // Append conversation
+    for (const msg of messages) {
+      if (msg.role === 'assistant') {
+        openaiMessages.push({ role: 'assistant', content: msg.content });
+        continue;
+      }
+      if (msg.images && msg.images.length > 0) {
+        const parts: OpenAI.Chat.ChatCompletionContentPart[] = [
+          { type: 'text', text: msg.content },
+          ...msg.images.map(
+            (dataUrl): OpenAI.Chat.ChatCompletionContentPart => ({
+              type: 'image_url',
+              image_url: { url: dataUrl, detail: 'low' },
+            }),
+          ),
+        ];
+        openaiMessages.push({ role: 'user', content: parts });
+      } else {
+        openaiMessages.push({ role: 'user', content: msg.content });
+      }
+    }
+
+    const completion = await this.openai.chat.completions.create({
+      model: 'gpt-4o',
+      response_format: { type: 'json_object' },
+      max_tokens: 2000,
+      messages: openaiMessages,
+    });
+
+    const raw = completion.choices[0]?.message?.content;
+    if (!raw) throw new Error('Resposta vazia do GPT-4o');
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('JSON inválido retornado pelo GPT-4o');
+    }
+
+    const assistantMessage = (parsed.assistantMessage as string) ?? 'Pronto!';
+    const actions = (parsed.actions as ElementAction[]) ?? [];
+
+    // Resolve GENERATE: placeholders in all actions
+    for (const action of actions) {
+      if (action.element) {
+        await this.resolveElementPlaceholders(action.element);
+      }
+      if (action.updates) {
+        await this.resolveElementPlaceholders(action.updates);
+      }
+      if (action.background) {
+        await this.resolveElementPlaceholders(action.background);
+      }
+    }
+
+    return { assistantMessage, actions };
+  }
+
+  /** Resolve GENERATE: placeholders in a flat object (element or background) */
+  private async resolveElementPlaceholders(
+    obj: Record<string, unknown>,
+    transparent = false,
+  ): Promise<void> {
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      if (typeof val === 'string' && val.startsWith(GENERATE_PREFIX)) {
+        const prompt = val.slice(GENERATE_PREFIX.length).trim();
+        try {
+          // Use transparent PNG for element images (src), opaque for backgrounds (imageUrl)
+          const useTransparent = transparent || key === 'src';
+          const url = useTransparent
+            ? await this.generateTransparentImage(prompt)
+            : await this.generateAndUploadImage(prompt);
+          obj[key] = url;
+        } catch (err) {
+          this.logger.error(`Image generation failed for "${key}": ${(err as Error).message}`);
+          obj[key] = '';
+        }
+      }
+    }
+  }
+
+  /** Generate an isolated element image with transparent background via gpt-image-1 */
+  private async generateTransparentImage(prompt: string): Promise<string> {
+    if (!this.openai) throw new Error('OpenAI não configurada');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = (await (this.openai.images.generate as any)({
+      model: 'gpt-image-1',
+      prompt: `${prompt}. Isolated object on a completely transparent background, PNG format, no shadows on ground, no floor, no scene.`,
+      size: '1024x1024',
+      quality: 'high',
+      background: 'transparent',
+      n: 1,
+    })) as { data: { b64_json?: string; url?: string }[] };
+
+    const b64 = response.data[0]?.b64_json;
+    if (!b64) throw new Error('gpt-image-1 não retornou imagem');
+
+    const buffer = Buffer.from(b64, 'base64');
+    const slug = this.slugify(prompt.slice(0, 40));
+    const filename = `ai-element-${slug}-${Date.now()}.png`;
+
+    const fakeFile = {
+      buffer,
+      originalname: filename,
+      size: buffer.length,
+      mimetype: 'image/png',
+      fieldname: 'file',
+      encoding: '7bit',
+    } as Express.Multer.File;
+
+    const result = await this.uploadsService.uploadFile(fakeFile, 'templates');
+    return result.url;
+  }
+
   // ─── Feature 4: Template Generation ─────────────────────────────────────────
 
   async generateTemplate(
@@ -813,8 +1085,24 @@ Be extremely specific. This analysis will be used as the direct source for an im
     // images.generate — images.edit is only for small targeted changes.
     const useEditEndpoint = isRefinement && userReferenceImages.length === 0;
 
+    // Physical dimensions context — the user's message may reference percentages
+    const W = format.printWidthCm;
+    const H = format.printHeightCm;
+    const dimensionsCtx = `The template is ${W}×${H} cm (width×height).`;
+
+    // Shared rules for all prompt types
+    const faithfulnessRules = `
+CRITICAL — FAITHFULNESS TO USER REQUEST:
+- Translate the user's description FAITHFULLY into English. Do NOT omit, simplify, or summarize.
+- If the user specifies zone proportions (e.g. "header 25%", "footer 10%"), USE THOSE EXACT proportions.
+- If the user requests specific visual elements (text, objects, textures, icons), include ALL of them in the prompt with their exact placement.
+- If the user requests TEXT to appear in the image (e.g. "Promoção", "Preços válidos até…"), include that text VERBATIM in the prompt — the image generator CAN render text.
+- Convert percentage heights to visual descriptions using the physical size. E.g. for a ${H}cm-tall template, "25% header" = the top ${(H * 0.25).toFixed(1)}cm.
+- If the user does NOT specify proportions, use defaults: header ~25%, body ~65%, footer ~10%.`;
+
     const translationSystemPrompt = useEditEndpoint
       ? `You are a supermarket flyer image prompt engineer.
+${dimensionsCtx}
 The user wants to make a TARGETED edit to an existing promotional flyer background image.
 
 CRITICAL RULES FOR EDIT INSTRUCTIONS:
@@ -827,6 +1115,7 @@ CRITICAL RULES FOR EDIT INSTRUCTIONS:
 Return ONLY the English edit instruction, nothing else.`
       : referenceStyleDescription
         ? `You are a supermarket flyer image prompt engineer.
+${dimensionsCtx}
 The user sent reference image(s). A detailed visual analysis has been performed:
 
 === REFERENCE IMAGE ANALYSIS ===
@@ -835,32 +1124,32 @@ ${referenceStyleDescription}
 
 YOUR TASK: Write a single-image generation prompt that:
 1. Replicates the exact visual style, render quality, color palette, and atmosphere described above
-2. Incorporates the user's specific request: "${lastUserMessage.content}"
-3. The image will be divided into 3 vertical zones:
-   - TOP 28%: header — rich, thematic, high-detail visuals matching the reference style
-   - MIDDLE 60%: body — same style but slightly subdued/darker so white product cards are readable
-   - BOTTOM 12%: footer — darkest tone from the palette for text overlay
-4. NO text, NO logos, NO brand names in the image
+2. Incorporates the user's specific request — translate it FAITHFULLY, keeping ALL requested elements
+3. The image has 3 vertical zones. Use the proportions the user specifies, or default to: top 25% header, middle 65% body, bottom 10% footer
+4. If the user requests text in the image, include it verbatim
 5. Smooth visual continuity between zones
-6. End prompt with: "promotional flyer background, no text, no logos, seamless vertical composition"
+6. End prompt with: "promotional flyer background, seamless vertical composition"
+${faithfulnessRules}
 
 Return ONLY the English generation prompt, nothing else.`
         : `You are a supermarket flyer image prompt engineer.
+${dimensionsCtx}
+
 Convert the user's Portuguese description into a detailed English prompt for generating a promotional flyer background image.
 
-The image will be divided into 3 vertical zones after generation:
-- TOP 28%: header — rich, thematic, impactful visuals
-- MIDDLE 60%: body — subtle texture/pattern, dark enough for white product cards to float on top
-- BOTTOM 12%: footer — darker tone for text overlay
+The image has 3 vertical zones. The user may specify the proportion of each zone — respect their numbers.
+If they don't specify, use defaults: top ~25% header, middle ~65% body, bottom ~10% footer.
 
-Rules:
-- Style: vibrant Brazilian supermarket promotional flyer, bold colors, professional marketing material
-- NO text, NO logos, NO brand names in the image
-- Smooth visual continuity between all three zones
-- The middle zone must be a subdued/darker version of the top theme (not a different design)
-- Specify art style: flat design illustration, watercolor, photorealistic, 3D render, etc.
-- Add relevant thematic elements (e.g. Easter: chocolate eggs, bunnies, spring flowers)
-- End prompt with: "promotional flyer background, no text, no logos, seamless zones from top to bottom"
+ZONE GUIDELINES (apply only when the user does NOT override):
+- HEADER (top): rich, thematic, impactful visuals, decorative elements
+- BODY (middle): calmer continuation of the theme, suitable for product cards overlay
+- FOOTER (bottom): darker/solid tone, suitable for text overlay
+- Smooth visual continuity — the 3 zones should feel like ONE cohesive image, not 3 separate blocks
+- A thick white horizontal line separating zones is OK if the user asks for it
+${faithfulnessRules}
+
+STYLE: Brazilian supermarket promotional flyer, professional marketing material.
+End prompt with: "promotional flyer background, seamless vertical composition"
 
 Return ONLY the English prompt, nothing else.`;
 
@@ -879,17 +1168,17 @@ Return ONLY the English prompt, nothing else.`;
 
     this.logger.log(`Image prompt: ${enrichedPrompt.slice(0, 120)}…`);
 
-    // ── Step 3: pick the best supported size ────────────────────────────────
-    // gpt-image-1 supports: 1024x1024, 1024x1536, 1536x1024, auto
+    // ── Step 3: pick the closest supported size to the format's aspect ratio ─
+    // gpt-image-1 supports: 1024x1024 (1.0), 1024x1536 (0.67), 1536x1024 (1.5)
     const ratio = format.printWidthCm / format.printHeightCm;
-    let size: '1024x1024' | '1536x1024' | '1024x1536';
-    if (ratio > 1.3) {
-      size = '1536x1024'; // landscape
-    } else if (ratio < 0.77) {
-      size = '1024x1536'; // portrait
-    } else {
-      size = '1024x1024'; // square / near-square
-    }
+    const candidates: { size: '1024x1024' | '1024x1536' | '1536x1024'; ratio: number }[] = [
+      { size: '1024x1536', ratio: 1024 / 1536 }, // portrait
+      { size: '1024x1024', ratio: 1.0 }, // square
+      { size: '1536x1024', ratio: 1536 / 1024 }, // landscape
+    ];
+    const size = candidates.reduce((best, c) =>
+      Math.abs(c.ratio - ratio) < Math.abs(best.ratio - ratio) ? c : best,
+    ).size;
 
     // ── Step 4: generate or edit the image ─────────────────────────────────
     // Use images.edit ONLY for small targeted refinements (no reference images).
@@ -913,6 +1202,7 @@ Return ONLY the English prompt, nothing else.`;
         model: 'gpt-image-1',
         image: imageFile,
         prompt: enrichedPrompt,
+        quality: 'high',
         size,
         n: 1,
       })) as { data: { b64_json?: string; url?: string }[] };
@@ -926,6 +1216,7 @@ Return ONLY the English prompt, nothing else.`;
       const genResponse = (await (this.openai.images.generate as any)({
         model: 'gpt-image-1',
         prompt: enrichedPrompt,
+        quality: 'high',
         size,
         n: 1,
       })) as { data: { b64_json?: string; url?: string }[] };
@@ -1002,6 +1293,343 @@ Return ONLY the English prompt, nothing else.`;
       assistantMessage,
       promptUsed: enrichedPrompt,
     };
+  }
+
+  // ─── Feature 6 — Template Layers Generator ──────────────────────────────────
+
+  async generateTemplateLayers(
+    format: TemplateLayersFormatDto,
+    messages: TemplateLayersMessageDto[],
+  ): Promise<TemplateLayersGenerateResponseDto> {
+    if (!this.openai) throw new Error('OpenAI não configurada');
+
+    const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
+    if (!lastUserMessage) throw new Error('Nenhuma mensagem do usuário encontrada');
+
+    const userReferenceImages = lastUserMessage.images ?? [];
+
+    // Current layers state (for refinements — preserves elements not being changed)
+    const currentLayers = lastUserMessage.currentLayers ?? { elements: [] };
+    const isRefinement = currentLayers.elements.length > 0 || !!currentLayers.background;
+
+    // ── Step 1: Vision analysis of reference images (same as F5) ─────────────
+    let referenceStyleDescription = '';
+    if (userReferenceImages.length > 0) {
+      type VisionPart =
+        | { type: 'text'; text: string }
+        | { type: 'image_url'; image_url: { url: string; detail: 'high' } };
+
+      const visionContent: VisionPart[] = [
+        {
+          type: 'text',
+          text: `You are an expert visual design analyst. Analyze the provided image(s) with extreme technical precision.
+For EACH image describe: 1) dominant colors (hex if possible), 2) visual style (photorealistic/flat/3D/watercolor), 3) thematic elements present, 4) background texture/pattern, 5) lighting mood, 6) overall composition feel, 7) any decorative elements and their approximate size/position.
+Respond in English, structured, max 300 words total.`,
+        },
+        ...userReferenceImages.map(
+          (img): VisionPart => ({
+            type: 'image_url',
+            image_url: { url: img, detail: 'high' },
+          }),
+        ),
+      ];
+
+      const visionResponse = await this.openai.chat.completions.create({
+        model: 'gpt-4o',
+        max_tokens: 400,
+        messages: [{ role: 'user', content: visionContent }],
+      });
+      referenceStyleDescription = visionResponse.choices[0]?.message?.content?.trim() ?? '';
+    }
+
+    // ── Step 2: GPT-4o decides the composition (palette + elements) ──────────
+    const canvasWidthPx = Math.round(format.printWidthCm * 37.795);
+    const headerHeightPx = Math.round(format.headerHeightCm * 37.795);
+    const footerHeightPx = Math.round(format.footerHeightCm * 37.795);
+
+    const compositionSystemPrompt = `You are an expert supermarket flyer template designer.
+Your job is to decompose a flyer template into separate visual layers.
+
+The flyer has these pixel dimensions (at 96dpi):
+- Canvas width: ${canvasWidthPx}px
+- Header height: ${headerHeightPx}px (top section — decorative)
+- Footer height: ${footerHeightPx}px (bottom section — solid color bar)
+- Body: the remaining middle area (solid color — product cards go here)
+
+You must return a JSON composition with:
+1. A color palette (4 colors: primary, secondary, dark, light)
+2. A background image description for the HEADER (texture/pattern, NO decorative objects)
+3. Up to 4 decorative elements as separate transparent PNG objects for the HEADER or FOOTER
+4. A body background (solid color or subtle gradient — NEVER an image — must be readable for white product cards)
+5. A footer background (solid dark color)
+
+For each element, specify:
+- A short English prompt for generating it as a transparent PNG (isolated object, no background)
+- Which section it belongs to: "header" or "footer"
+- suggestedPosition: "center" | "right" | "left" | "bottom-left" | "bottom-right" | "top" | "bottom"
+- suggestedSizePct: 10-80 (percentage of canvas width the element should occupy)
+
+${referenceStyleDescription ? `Reference style analysis:\n${referenceStyleDescription}\n` : ''}
+
+${
+  isRefinement
+    ? `This is a REFINEMENT request. Current state:
+- Background prompt: "${currentLayers.background?.prompt ?? 'none'}"
+- Elements: ${JSON.stringify(currentLayers.elements.map((e) => ({ id: e.id, prompt: e.prompt, section: e.section })))}
+
+Identify what the user wants to change. For unchanged elements, return them with regenerate: false.
+For elements to be regenerated or repositioned, set regenerate: true (or positionOnly: true if only moving).`
+    : ''
+}
+
+Respond ONLY with valid JSON, no markdown, no explanation:
+{
+  "palette": { "primary": "#hex", "secondary": "#hex", "dark": "#hex", "light": "#hex" },
+  "backgroundPrompt": "english prompt for header background texture, no objects, seamless",
+  "elements": [
+    {
+      "id": "el-1",
+      "englishPrompt": "isolated object description, transparent background, no shadow",
+      "section": "header",
+      "suggestedPosition": "right",
+      "suggestedSizePct": 40,
+      "regenerate": true,
+      "positionOnly": false
+    }
+  ],
+  "bodyBackground": { "type": "solid", "color": "#hex" },
+  "footerBackground": { "type": "solid", "color": "#hex" },
+  "assistantMessagePt": "mensagem em português explicando o que foi criado"
+}`;
+
+    const compositionResponse = await this.openai.chat.completions.create({
+      model: 'gpt-4o',
+      max_tokens: 1000,
+      temperature: 0.4,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: compositionSystemPrompt },
+        { role: 'user', content: lastUserMessage.content },
+      ],
+    });
+
+    const compositionRaw = compositionResponse.choices[0]?.message?.content?.trim() ?? '{}';
+    let composition: {
+      palette: { primary: string; secondary: string; dark: string; light: string };
+      backgroundPrompt: string;
+      elements: {
+        id: string;
+        englishPrompt: string;
+        section: 'header' | 'footer';
+        suggestedPosition: string;
+        suggestedSizePct: number;
+        regenerate?: boolean;
+        positionOnly?: boolean;
+      }[];
+      bodyBackground: {
+        type: 'solid' | 'gradient';
+        color?: string;
+        gradientStart?: string;
+        gradientEnd?: string;
+        gradientAngle?: number;
+      };
+      footerBackground: { type: 'solid'; color: string };
+      assistantMessagePt: string;
+    };
+
+    try {
+      composition = JSON.parse(compositionRaw);
+    } catch {
+      throw new Error('GPT-4o retornou composição inválida (não é JSON)');
+    }
+
+    // ── Step 3: Generate background + transparent element PNGs in parallel ────
+    // Decide size based on aspect ratio (same logic as F5)
+    const ratio = format.printWidthCm / format.printHeightCm;
+    let bgSize: '1024x1024' | '1536x1024' | '1024x1536';
+    if (ratio > 1.3) bgSize = '1536x1024';
+    else if (ratio < 0.77) bgSize = '1024x1536';
+    else bgSize = '1024x1024';
+
+    const needsNewBackground =
+      !isRefinement ||
+      !currentLayers.background ||
+      composition.elements.every((e) => e.regenerate !== false); // full redo
+
+    const bgPromise = needsNewBackground
+      ? this.generateAndUploadLayerImage(
+          `${composition.backgroundPrompt}, promotional flyer header background, no objects, no text, no logos, seamless texture`,
+          bgSize,
+          format.type,
+          'bg',
+        )
+      : Promise.resolve(currentLayers.background!.imageUrl);
+
+    // Max 4 elements
+    const elementsToProcess = composition.elements.slice(0, 4);
+
+    const elementPromises = elementsToProcess.map(async (el) => {
+      // If position-only change, preserve existing imageUrl
+      if (isRefinement && el.positionOnly) {
+        const existing = currentLayers.elements.find((e) => e.id === el.id);
+        if (existing) {
+          return {
+            id: el.id,
+            imageUrl: existing.imageUrl,
+            prompt: el.englishPrompt,
+            section: el.section,
+          };
+        }
+      }
+      // If refinement and this element hasn't changed, preserve URL
+      if (isRefinement && el.regenerate === false) {
+        const existing = currentLayers.elements.find((e) => e.id === el.id);
+        if (existing) {
+          return {
+            id: el.id,
+            imageUrl: existing.imageUrl,
+            prompt: el.englishPrompt,
+            section: el.section,
+          };
+        }
+      }
+      // Generate new transparent PNG
+      const transparentPrompt = `${el.englishPrompt}, isolated object, transparent background, no shadow, no background, high quality PNG`;
+      const imageUrl = await this.generateAndUploadLayerImage(
+        transparentPrompt,
+        '1024x1024',
+        format.type,
+        el.id,
+        true, // transparent
+      );
+      return { id: el.id, imageUrl, prompt: el.englishPrompt, section: el.section };
+    });
+
+    const [bgUrl, ...generatedElements] = await Promise.all([bgPromise, ...elementPromises]);
+
+    // ── Step 4: Convert suggestedPosition + sizePct → real canvas coordinates ─
+    const layerElements: LayerElementDto[] = generatedElements.map((el, idx) => {
+      const elDef = elementsToProcess[idx];
+      const sectionHeightPx = elDef.section === 'header' ? headerHeightPx : footerHeightPx;
+      const w = Math.round((elDef.suggestedSizePct / 100) * canvasWidthPx);
+      const h = Math.round(w * 0.8); // default aspect ratio; user can resize
+
+      let x = 0;
+      let y = 0;
+      switch (elDef.suggestedPosition) {
+        case 'center':
+          x = Math.round((canvasWidthPx - w) / 2);
+          y = Math.round((sectionHeightPx - h) / 2);
+          break;
+        case 'right':
+          x = canvasWidthPx - w;
+          y = 0;
+          break;
+        case 'left':
+          x = 0;
+          y = 0;
+          break;
+        case 'bottom-left':
+          x = 0;
+          y = sectionHeightPx - h;
+          break;
+        case 'bottom-right':
+          x = canvasWidthPx - w;
+          y = sectionHeightPx - h;
+          break;
+        case 'top':
+          x = 0;
+          y = 0;
+          w === canvasWidthPx ? null : (x = Math.round((canvasWidthPx - w) / 2));
+          break;
+        case 'bottom':
+          x = 0;
+          y = sectionHeightPx - h;
+          break;
+        default:
+          x = Math.round((canvasWidthPx - w) / 2);
+          y = Math.round((sectionHeightPx - h) / 2);
+      }
+
+      return {
+        id: el.id,
+        imageUrl: el.imageUrl,
+        prompt: el.prompt,
+        x,
+        y,
+        width: w,
+        height: h,
+        section: elDef.section,
+        zIndex: idx + 1,
+      };
+    });
+
+    return {
+      assistantMessage: composition.assistantMessagePt || 'Template em camadas gerado com sucesso!',
+      layers: {
+        background: {
+          imageUrl: bgUrl,
+          prompt: composition.backgroundPrompt,
+        },
+        elements: layerElements,
+      },
+      bodyBackground: composition.bodyBackground,
+      footerBackground: composition.footerBackground,
+    };
+  }
+
+  /** Generates an image and uploads to our bucket. Used by Feature 6 for both backgrounds and transparent PNGs. */
+  private async generateAndUploadLayerImage(
+    prompt: string,
+    size: '1024x1024' | '1536x1024' | '1024x1536',
+    formatType: string,
+    suffix: string,
+    transparent = false,
+  ): Promise<string> {
+    if (!this.openai) throw new Error('OpenAI não configurada');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const genResponse = (await (this.openai.images.generate as any)({
+      model: 'gpt-image-1',
+      prompt,
+      size,
+      n: 1,
+      ...(transparent ? { background: 'transparent', output_format: 'png' } : {}),
+    })) as { data: { b64_json?: string; url?: string }[] };
+
+    const b64 = genResponse.data[0]?.b64_json;
+    const url = genResponse.data[0]?.url;
+
+    let buffer: Buffer;
+    let mimetype: string;
+
+    if (b64) {
+      buffer = Buffer.from(b64, 'base64');
+      mimetype = transparent ? 'image/png' : 'image/png';
+    } else if (url) {
+      const fetchResponse = await fetch(url);
+      if (!fetchResponse.ok) throw new Error(`Falha ao baixar imagem: ${fetchResponse.status}`);
+      mimetype = fetchResponse.headers.get('content-type') || 'image/png';
+      buffer = Buffer.from(await fetchResponse.arrayBuffer());
+    } else {
+      throw new Error('gpt-image-1 não retornou imagem');
+    }
+
+    const ext = transparent ? '.png' : mimetype.includes('jpeg') ? '.jpg' : '.png';
+    const slug = this.slugify(formatType);
+    const filename = `ai-layer-${slug}-${suffix}-${Date.now()}${ext}`;
+
+    const fakeFile = {
+      buffer,
+      originalname: filename,
+      size: buffer.length,
+      mimetype,
+      fieldname: 'file',
+      encoding: '7bit',
+    } as Express.Multer.File;
+
+    const uploaded = await this.uploadsService.uploadFile(fakeFile, 'templates');
+    return uploaded.url;
   }
 
   private validateConfiguration(config: Record<string, unknown>): void {

@@ -16,6 +16,8 @@ import { ImageSearchRequestDto } from './dto/image-search-request.dto';
 import { ImageDownloadRequestDto } from './dto/image-download-request.dto';
 import { TemplateGenerateRequestDto } from './dto/template-generate-request.dto';
 import { TemplateImageGenerateRequestDto } from './dto/template-image-generate-request.dto';
+import { TemplateLayersGenerateRequestDto } from './dto/template-layers-generate.dto';
+import { TemplateElementRequestDto } from './dto/template-element-request.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @ApiTags('AI')
@@ -103,6 +105,53 @@ export class AiController {
         error: {
           code: 'TEMPLATE_IMAGE_GENERATION_ERROR',
           message: 'Não foi possível gerar a imagem. Tente novamente com uma descrição diferente.',
+        },
+      };
+    }
+  }
+
+  @Post('template-layers-generate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Gera template em camadas separadas via GPT-4o Image (Feature 6)' })
+  @ApiResponse({ status: 200, description: 'Camadas geradas com sucesso' })
+  async templateLayersGenerate(@Body() dto: TemplateLayersGenerateRequestDto) {
+    try {
+      const result = await this.aiService.generateTemplateLayers(dto.format, dto.messages);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao gerar template em camadas', error);
+      return {
+        success: false,
+        error: {
+          code: 'TEMPLATE_LAYERS_GENERATION_ERROR',
+          message:
+            'Não foi possível gerar as camadas. Tente novamente com uma descrição diferente.',
+        },
+      };
+    }
+  }
+
+
+  @Post('template-element')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Adiciona/edita/remove elementos individuais no template via IA' })
+  @ApiResponse({ status: 200, description: 'Ações executadas com sucesso' })
+  async templateElement(@Body() dto: TemplateElementRequestDto) {
+    try {
+      const result = await this.aiService.generateTemplateElement(
+        dto.format,
+        dto.activeSection,
+        dto.messages,
+        dto.templateContext,
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao processar elemento de template', error);
+      return {
+        success: false,
+        error: {
+          code: 'TEMPLATE_ELEMENT_ERROR',
+          message: error instanceof Error ? error.message : 'Erro ao processar elemento.',
         },
       };
     }
