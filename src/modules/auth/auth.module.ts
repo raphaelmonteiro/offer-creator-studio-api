@@ -23,7 +23,7 @@ import { UploadsModule } from '../uploads/uploads.module';
         if (!secret) {
           throw new Error('JWT_SECRET não está definido nas variáveis de ambiente');
         }
-        let expiresIn = configService.get<string>('JWT_EXPIRES_IN', '3600s');
+        let expiresIn = configService.get<string>('JWT_EXPIRES_IN', '604800s');
         // Se for apenas número, adiciona 's' para segundos
         if (/^\d+$/.test(expiresIn)) {
           expiresIn = `${expiresIn}s`;

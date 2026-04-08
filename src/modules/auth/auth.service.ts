@@ -66,7 +66,7 @@ export class AuthService {
       },
       token,
       refreshToken,
-      expiresIn: this.configService.get<number>('JWT_EXPIRES_IN', 3600),
+      expiresIn: this.configService.get<number>('JWT_EXPIRES_IN', 604800),
     };
   }
 
@@ -148,7 +148,7 @@ export class AuthService {
 
       return {
         token,
-        expiresIn: this.configService.get<number>('JWT_EXPIRES_IN', 3600),
+        expiresIn: this.configService.get<number>('JWT_EXPIRES_IN', 604800),
       };
     } catch (error) {
       throw new UnauthorizedException({
