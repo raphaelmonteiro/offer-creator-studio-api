@@ -42,3 +42,4 @@ pm2-*.log
 # Uploads
 /uploads
 !/uploads/.gitkeep
+/dist
