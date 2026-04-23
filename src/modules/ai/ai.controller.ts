@@ -18,6 +18,13 @@ import { TemplateGenerateRequestDto } from './dto/template-generate-request.dto'
 import { TemplateImageGenerateRequestDto } from './dto/template-image-generate-request.dto';
 import { TemplateLayersGenerateRequestDto } from './dto/template-layers-generate.dto';
 import { TemplateElementRequestDto } from './dto/template-element-request.dto';
+import {
+  CreateTemplateLayersGuidedDraftRequestDto,
+  UpdateTemplateLayersGuidedBackgroundsRequestDto,
+  UpdateTemplateLayersGuidedElementsRequestDto,
+  UpdateTemplateLayersGuidedStyleRequestDto,
+  UpdateTemplateLayersGuidedStructureRequestDto,
+} from './dto/template-layers-guided-draft.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @ApiTags('AI')
@@ -131,7 +138,113 @@ export class AiController {
     }
   }
 
+  @Post('template-layers-guided-draft')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cria o draft guiado inicial para camadas editáveis' })
+  @ApiResponse({ status: 200, description: 'Draft guiado criado com sucesso' })
+  async templateLayersGuidedDraftCreate(@Body() dto: CreateTemplateLayersGuidedDraftRequestDto) {
+    try {
+      const result = this.aiService.createTemplateLayersGuidedDraft(dto);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao criar draft guiado de template em camadas', error);
+      return {
+        success: false,
+        error: {
+          code: 'TEMPLATE_LAYERS_GUIDED_DRAFT_ERROR',
+          message: 'Não foi possível criar o draft guiado. Revise a estrutura informada.',
+        },
+      };
+    }
+  }
 
+  @Post('template-layers-guided-structure')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Atualiza a estrutura do draft guiado para camadas editáveis' })
+  @ApiResponse({ status: 200, description: 'Estrutura do draft atualizada com sucesso' })
+  async templateLayersGuidedStructureUpdate(
+    @Body() dto: UpdateTemplateLayersGuidedStructureRequestDto,
+  ) {
+    try {
+      const result = this.aiService.updateTemplateLayersGuidedStructure(dto);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao atualizar estrutura do draft guiado', error);
+      return {
+        success: false,
+        error: {
+          code: 'TEMPLATE_LAYERS_GUIDED_STRUCTURE_ERROR',
+          message: 'Não foi possível atualizar a estrutura do draft guiado.',
+        },
+      };
+    }
+  }
+
+  @Post('template-layers-guided-backgrounds')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Atualiza fundos globais e por seção do draft guiado' })
+  @ApiResponse({ status: 200, description: 'Fundos do draft guiado atualizados com sucesso' })
+  async templateLayersGuidedBackgroundsUpdate(
+    @Body() dto: UpdateTemplateLayersGuidedBackgroundsRequestDto,
+  ) {
+    try {
+      const result = this.aiService.updateTemplateLayersGuidedBackgrounds(dto);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao atualizar fundos do draft guiado', error);
+      return {
+        success: false,
+        error: {
+          code: 'TEMPLATE_LAYERS_GUIDED_BACKGROUNDS_ERROR',
+          message: 'Não foi possível atualizar os fundos do draft guiado.',
+        },
+      };
+    }
+  }
+
+  @Post('template-layers-guided-style')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Atualiza perfil visual e áreas reservadas do draft guiado' })
+  @ApiResponse({ status: 200, description: 'Perfil visual do draft guiado atualizado com sucesso' })
+  async templateLayersGuidedStyleUpdate(@Body() dto: UpdateTemplateLayersGuidedStyleRequestDto) {
+    try {
+      const result = this.aiService.updateTemplateLayersGuidedStyle(dto);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao atualizar perfil visual do draft guiado', error);
+      return {
+        success: false,
+        error: {
+          code: 'TEMPLATE_LAYERS_GUIDED_STYLE_ERROR',
+          message: 'Não foi possível atualizar o perfil visual do draft guiado.',
+        },
+      };
+    }
+  }
+
+  @Post('template-layers-guided-elements')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Atualiza elementos e locks do draft guiado' })
+  @ApiResponse({ status: 200, description: 'Elementos do draft guiado atualizados com sucesso' })
+  async templateLayersGuidedElementsUpdate(
+    @Body() dto: UpdateTemplateLayersGuidedElementsRequestDto,
+  ) {
+    try {
+      const result = this.aiService.updateTemplateLayersGuidedElements(dto);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao atualizar elementos do draft guiado', error);
+      return {
+        success: false,
+        error: {
+          code: 'TEMPLATE_LAYERS_GUIDED_ELEMENTS_ERROR',
+          message: 'Não foi possível atualizar os elementos do draft guiado.',
+        },
+      };
+    }
+  }
+
+  
   @Post('template-element')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Adiciona/edita/remove elementos individuais no template via IA' })

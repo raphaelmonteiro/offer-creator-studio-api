@@ -21,6 +21,8 @@ export const AI_RESPONSE_SCHEMAS = {
   templateLayersComposition: {
     required: [
       'palette',
+      'compositionMode',
+      'heroElementId',
       'backgroundPrompt',
       'elements',
       'bodyBackground',
@@ -28,7 +30,7 @@ export const AI_RESPONSE_SCHEMAS = {
       'assistantMessagePt',
     ],
     sections: ['header', 'footer'],
-    bodyBackgroundTypes: ['solid', 'gradient'],
+    bodyBackgroundTypes: ['solid', 'gradient', 'image'],
   },
   imageIntentClassification: {
     required: ['category', 'confidence'],
@@ -154,6 +156,8 @@ export const AI_RESPONSE_FORMATS = {
     additionalProperties: false,
     required: [
       'palette',
+      'compositionMode',
+      'heroElementId',
       'backgroundPrompt',
       'elements',
       'bodyBackground',
@@ -174,6 +178,11 @@ export const AI_RESPONSE_FORMATS = {
           light: { type: 'string' },
         },
       },
+      compositionMode: {
+        type: 'string',
+        enum: ['hero-left', 'hero-right', 'center-stage', 'editorial-banner'],
+      },
+      heroElementId: { type: ['string', 'null'] },
       backgroundPrompt: { type: 'string' },
       elements: {
         type: 'array',
@@ -184,6 +193,8 @@ export const AI_RESPONSE_FORMATS = {
             'id',
             'englishPrompt',
             'section',
+            'role',
+            'zone',
             'suggestedPosition',
             'suggestedSizePct',
             'regenerate',
@@ -193,6 +204,26 @@ export const AI_RESPONSE_FORMATS = {
             id: { type: 'string' },
             englishPrompt: { type: 'string' },
             section: { type: 'string', enum: ['header', 'footer'] },
+            role: { type: 'string', enum: ['hero', 'support', 'accent'] },
+            zone: {
+              type: 'string',
+              enum: [
+                'hero-left',
+                'hero-right',
+                'center-stage',
+                'title-band-left',
+                'title-band-center',
+                'title-band-right',
+                'top-left-accent',
+                'top-right-accent',
+                'bottom-left-accent',
+                'bottom-right-accent',
+                'footer-left',
+                'footer-center',
+                'footer-right',
+                'footer-band',
+              ],
+            },
             suggestedPosition: { type: 'string' },
             suggestedSizePct: { type: 'number' },
             regenerate: { type: ['boolean', 'null'] },
@@ -203,22 +234,53 @@ export const AI_RESPONSE_FORMATS = {
       bodyBackground: {
         type: 'object',
         additionalProperties: false,
-        required: ['type', 'color', 'gradientStart', 'gradientEnd', 'gradientAngle'],
+        required: [
+          'type',
+          'color',
+          'gradientStart',
+          'gradientEnd',
+          'gradientAngle',
+          'imageUrl',
+          'imageSize',
+          'imagePosition',
+          'imageOpacity',
+        ],
         properties: {
-          type: { type: 'string', enum: ['solid', 'gradient'] },
+          type: { type: 'string', enum: ['solid', 'gradient', 'image'] },
           color: { type: ['string', 'null'] },
           gradientStart: { type: ['string', 'null'] },
           gradientEnd: { type: ['string', 'null'] },
           gradientAngle: { type: ['number', 'null'] },
+          imageUrl: { type: ['string', 'null'] },
+          imageSize: { type: ['string', 'null'] },
+          imagePosition: { type: ['string', 'null'] },
+          imageOpacity: { type: ['number', 'null'] },
         },
       },
       footerBackground: {
         type: 'object',
         additionalProperties: false,
-        required: ['type', 'color'],
+        required: [
+          'type',
+          'color',
+          'gradientStart',
+          'gradientEnd',
+          'gradientAngle',
+          'imageUrl',
+          'imageSize',
+          'imagePosition',
+          'imageOpacity',
+        ],
         properties: {
-          type: { type: 'string', enum: ['solid'] },
-          color: { type: 'string' },
+          type: { type: 'string', enum: ['solid', 'gradient', 'image'] },
+          color: { type: ['string', 'null'] },
+          gradientStart: { type: ['string', 'null'] },
+          gradientEnd: { type: ['string', 'null'] },
+          gradientAngle: { type: ['number', 'null'] },
+          imageUrl: { type: ['string', 'null'] },
+          imageSize: { type: ['string', 'null'] },
+          imagePosition: { type: ['string', 'null'] },
+          imageOpacity: { type: ['number', 'null'] },
         },
       },
       avoid: {
@@ -245,24 +307,56 @@ export interface ImageIntentSchemaResult {
 
 export interface TemplateLayersCompositionSchemaResult {
   palette: { primary: string; secondary: string; dark: string; light: string };
+  compositionMode: 'hero-left' | 'hero-right' | 'center-stage' | 'editorial-banner';
+  heroElementId?: string;
   backgroundPrompt: string;
   elements: {
     id: string;
     englishPrompt: string;
     section: 'header' | 'footer';
+    role: 'hero' | 'support' | 'accent';
+    zone:
+      | 'hero-left'
+      | 'hero-right'
+      | 'center-stage'
+      | 'title-band-left'
+      | 'title-band-center'
+      | 'title-band-right'
+      | 'top-left-accent'
+      | 'top-right-accent'
+      | 'bottom-left-accent'
+      | 'bottom-right-accent'
+      | 'footer-left'
+      | 'footer-center'
+      | 'footer-right'
+      | 'footer-band';
     suggestedPosition: string;
     suggestedSizePct: number;
     regenerate?: boolean;
     positionOnly?: boolean;
   }[];
   bodyBackground: {
-    type: 'solid' | 'gradient';
+    type: 'solid' | 'gradient' | 'image';
     color?: string;
     gradientStart?: string;
     gradientEnd?: string;
     gradientAngle?: number;
+    imageUrl?: string;
+    imageSize?: string;
+    imagePosition?: string;
+    imageOpacity?: number;
   };
-  footerBackground: { type: 'solid'; color: string };
+  footerBackground: {
+    type: 'solid' | 'gradient' | 'image';
+    color?: string;
+    gradientStart?: string;
+    gradientEnd?: string;
+    gradientAngle?: number;
+    imageUrl?: string;
+    imageSize?: string;
+    imagePosition?: string;
+    imageOpacity?: number;
+  };
   avoid?: string[];
   styleKeywords?: string[];
   assistantMessagePt: string;
@@ -353,6 +447,7 @@ export function parseTemplateLayersComposition(raw: string): TemplateLayersCompo
 
   if (
     !isPalette(parsed.palette) ||
+    !isCompositionMode(parsed.compositionMode) ||
     typeof parsed.backgroundPrompt !== 'string' ||
     !Array.isArray(parsed.elements) ||
     !isBodyBackground(parsed.bodyBackground) ||
@@ -363,6 +458,8 @@ export function parseTemplateLayersComposition(raw: string): TemplateLayersCompo
 
   return {
     palette: parsed.palette,
+    compositionMode: parsed.compositionMode,
+    heroElementId: typeof parsed.heroElementId === 'string' ? parsed.heroElementId : undefined,
     backgroundPrompt: parsed.backgroundPrompt,
     elements: parsed.elements.map(validateLayerElement),
     bodyBackground: parsed.bodyBackground,
@@ -398,6 +495,8 @@ function validateLayerElement(
     typeof element.id !== 'string' ||
     typeof element.englishPrompt !== 'string' ||
     !isLayerSection(element.section) ||
+    !isElementRole(element.role) ||
+    !isElementZone(element.zone) ||
     typeof element.suggestedPosition !== 'string' ||
     typeof element.suggestedSizePct !== 'number'
   ) {
@@ -408,6 +507,8 @@ function validateLayerElement(
     id: element.id,
     englishPrompt: element.englishPrompt,
     section: element.section,
+    role: element.role,
+    zone: element.zone,
     suggestedPosition: element.suggestedPosition,
     suggestedSizePct: element.suggestedSizePct,
     regenerate: optionalBoolean(element.regenerate),
@@ -479,6 +580,44 @@ function isLayerSection(value: unknown): value is 'header' | 'footer' {
   return value === 'header' || value === 'footer';
 }
 
+function isCompositionMode(
+  value: unknown,
+): value is TemplateLayersCompositionSchemaResult['compositionMode'] {
+  return (
+    value === 'hero-left' ||
+    value === 'hero-right' ||
+    value === 'center-stage' ||
+    value === 'editorial-banner'
+  );
+}
+
+function isElementRole(
+  value: unknown,
+): value is TemplateLayersCompositionSchemaResult['elements'][number]['role'] {
+  return value === 'hero' || value === 'support' || value === 'accent';
+}
+
+function isElementZone(
+  value: unknown,
+): value is TemplateLayersCompositionSchemaResult['elements'][number]['zone'] {
+  return (
+    value === 'hero-left' ||
+    value === 'hero-right' ||
+    value === 'center-stage' ||
+    value === 'title-band-left' ||
+    value === 'title-band-center' ||
+    value === 'title-band-right' ||
+    value === 'top-left-accent' ||
+    value === 'top-right-accent' ||
+    value === 'bottom-left-accent' ||
+    value === 'bottom-right-accent' ||
+    value === 'footer-left' ||
+    value === 'footer-center' ||
+    value === 'footer-right' ||
+    value === 'footer-band'
+  );
+}
+
 function isImageIntentCategory(value: unknown): value is ImageIntentCategory {
   return AI_RESPONSE_SCHEMAS.imageIntentClassification.categories.includes(
     value as ImageIntentCategory,
@@ -500,7 +639,7 @@ function isBodyBackground(
 ): value is TemplateLayersCompositionSchemaResult['bodyBackground'] {
   return (
     isRecord(value) &&
-    (value.type === 'solid' || value.type === 'gradient') &&
+    (value.type === 'solid' || value.type === 'gradient' || value.type === 'image') &&
     (value.color === undefined || value.color === null || typeof value.color === 'string') &&
     (value.gradientStart === undefined ||
       value.gradientStart === null ||
@@ -510,14 +649,24 @@ function isBodyBackground(
       typeof value.gradientEnd === 'string') &&
     (value.gradientAngle === undefined ||
       value.gradientAngle === null ||
-      typeof value.gradientAngle === 'number')
+      typeof value.gradientAngle === 'number') &&
+    (value.imageUrl === undefined || value.imageUrl === null || typeof value.imageUrl === 'string') &&
+    (value.imageSize === undefined ||
+      value.imageSize === null ||
+      typeof value.imageSize === 'string') &&
+    (value.imagePosition === undefined ||
+      value.imagePosition === null ||
+      typeof value.imagePosition === 'string') &&
+    (value.imageOpacity === undefined ||
+      value.imageOpacity === null ||
+      typeof value.imageOpacity === 'number')
   );
 }
 
 function isFooterBackground(
   value: unknown,
 ): value is TemplateLayersCompositionSchemaResult['footerBackground'] {
-  return isRecord(value) && value.type === 'solid' && typeof value.color === 'string';
+  return isBodyBackground(value);
 }
 
 function stringArray(value: unknown): string[] | undefined {

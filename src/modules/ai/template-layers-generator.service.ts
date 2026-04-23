@@ -55,6 +55,31 @@ interface ImageIntentContext {
   hasCurrentLayers?: boolean;
 }
 
+type LayerCompositionMode =
+  | 'hero-left'
+  | 'hero-right'
+  | 'center-stage'
+  | 'editorial-banner';
+
+type LayerElementZone =
+  | 'hero-left'
+  | 'hero-right'
+  | 'center-stage'
+  | 'title-band-left'
+  | 'title-band-center'
+  | 'title-band-right'
+  | 'top-left-accent'
+  | 'top-right-accent'
+  | 'bottom-left-accent'
+  | 'bottom-right-accent'
+  | 'footer-left'
+  | 'footer-center'
+  | 'footer-right'
+  | 'footer-band';
+
+type LayerElementRole = 'hero' | 'support' | 'accent';
+type VisualStrategy = 'decorative-template' | 'retail-scene';
+
 @Injectable()
 export class TemplateLayersGeneratorService {
   private readonly logger = new Logger(TemplateLayersGeneratorService.name);
@@ -139,10 +164,18 @@ export class TemplateLayersGeneratorService {
     const canvasWidthPx = Math.round(format.printWidthCm * 37.795);
     const headerHeightPx = Math.round(format.headerHeightCm * 37.795);
     const footerHeightPx = Math.round(format.footerHeightCm * 37.795);
+    const visualStrategy = this.detectVisualStrategy(
+      lastUserMessage.content,
+      referenceStyleDescription,
+    );
     const intentInstruction = buildLayerIntentInstruction({
       category: imageIntent.category,
       isRefinement,
     });
+    const strategyInstruction = this.buildStrategyInstruction(
+      visualStrategy,
+      lastUserMessage.content,
+    );
 
     const compositionSystemPrompt = buildTemplateLayersCompositionSystemPrompt({
       canvasWidthPx,
@@ -150,6 +183,7 @@ export class TemplateLayersGeneratorService {
       footerHeightPx,
       referenceStyleDescription,
       intentInstruction,
+      strategyInstruction,
       isRefinement,
       currentLayers,
     });
@@ -185,7 +219,7 @@ export class TemplateLayersGeneratorService {
       : ', avoid readable text, logos, prices, labels, busy product card area';
 
     // ── Step 3: Generate background + transparent element PNGs in parallel ────
-    const bgSize = selectImageSizeByAspectRatio(format.printWidthCm, format.printHeightCm, {
+    const bgSize = selectImageSizeByAspectRatio(format.printWidthCm, format.headerHeightCm, {
       portraitMaxRatio: 0.77,
       landscapeMinRatio: 1.3,
     });
@@ -204,9 +238,15 @@ export class TemplateLayersGeneratorService {
         !currentLayers.background ||
         composition.elements.every((e) => e.regenerate !== false)); // full redo
 
+    const bgPrompt = this.buildLayerBackgroundPrompt(
+      composition.backgroundPrompt,
+      styleSuffix,
+      avoidSuffix,
+    );
+
     const bgPromise = needsNewBackground
       ? this.generateAndUploadLayerImage(
-          `${composition.backgroundPrompt}, promotional flyer header background, subtle texture, clean editable text safe area, no readable text, no logos, no prices, no labels, no objects covering the central text overlay area, seamless texture${styleSuffix}${avoidSuffix}`,
+          bgPrompt,
           bgSize,
           format.type,
           'bg',
@@ -220,7 +260,7 @@ export class TemplateLayersGeneratorService {
     // Max 4 elements
     const elementsToProcess = preserveCurrentElementsExactly
       ? []
-      : composition.elements.slice(0, 4);
+      : composition.elements.slice(0, 5);
 
     const elementPromises = elementsToProcess.map(async (el) => {
       if (isRefinement && imageIntent.category === 'layout_change') {
@@ -260,7 +300,12 @@ export class TemplateLayersGeneratorService {
         }
       }
       // Generate new transparent PNG
-      const transparentPrompt = `${el.englishPrompt}, isolated decorative object, transparent background, no shadow, no background, no readable text, no logo, no label, no price tag, high quality PNG${styleSuffix}${avoidSuffix}`;
+      const transparentPrompt = this.buildTransparentElementPrompt(
+        el.englishPrompt,
+        el.role,
+        styleSuffix,
+        avoidSuffix,
+      );
       const imageUrl = await this.generateAndUploadLayerImage(
         transparentPrompt,
         '1024x1024',
@@ -279,55 +324,28 @@ export class TemplateLayersGeneratorService {
       ? this.mapCurrentLayerElements(currentLayers.elements)
       : generatedElements.map((el, idx) => {
           const elDef = elementsToProcess[idx];
-          const sectionHeightPx = elDef.section === 'header' ? headerHeightPx : footerHeightPx;
-          const w = Math.round((elDef.suggestedSizePct / 100) * canvasWidthPx);
-          const h = Math.round(w * 0.8); // default aspect ratio; user can resize
-
-          let x = 0;
-          let y = 0;
-          switch (elDef.suggestedPosition) {
-            case 'center':
-              x = Math.round((canvasWidthPx - w) / 2);
-              y = Math.round((sectionHeightPx - h) / 2);
-              break;
-            case 'right':
-              x = canvasWidthPx - w;
-              y = 0;
-              break;
-            case 'left':
-              x = 0;
-              y = 0;
-              break;
-            case 'bottom-left':
-              x = 0;
-              y = sectionHeightPx - h;
-              break;
-            case 'bottom-right':
-              x = canvasWidthPx - w;
-              y = sectionHeightPx - h;
-              break;
-            case 'top':
-              x = 0;
-              y = 0;
-              w === canvasWidthPx ? null : (x = Math.round((canvasWidthPx - w) / 2));
-              break;
-            case 'bottom':
-              x = 0;
-              y = sectionHeightPx - h;
-              break;
-            default:
-              x = Math.round((canvasWidthPx - w) / 2);
-              y = Math.round((sectionHeightPx - h) / 2);
-          }
+          const placement = this.resolveLayerPlacement({
+            canvasWidthPx,
+            headerHeightPx,
+            footerHeightPx,
+            compositionMode: composition.compositionMode,
+            heroElementId: composition.heroElementId,
+            elementId: elDef.id,
+            section: elDef.section,
+            role: elDef.role,
+            zone: elDef.zone,
+            suggestedPosition: elDef.suggestedPosition,
+            suggestedSizePct: elDef.suggestedSizePct,
+          });
 
           return {
             id: el.id,
             imageUrl: el.imageUrl,
             prompt: el.prompt,
-            x,
-            y,
-            width: w,
-            height: h,
+            x: placement.x,
+            y: placement.y,
+            width: placement.width,
+            height: placement.height,
             section: elDef.section,
             zIndex: idx + 1,
           };
@@ -704,5 +722,310 @@ export class TemplateLayersGeneratorService {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 60);
+  }
+
+  private detectVisualStrategy(
+    userMessage: string,
+    referenceStyleDescription: string,
+  ): VisualStrategy {
+    const haystack = `${userMessage} ${referenceStyleDescription}`.toLowerCase();
+    const retailSceneSignals = [
+      'supermercado',
+      'supermarket',
+      'corredor',
+      'aisle',
+      'prateleira',
+      'shelves',
+      'frutas',
+      'legumes',
+      'vegetables',
+      'mulher',
+      'woman',
+      'homem',
+      'person',
+      'people',
+      'shopping bag',
+      'sacola',
+      'realista',
+      'realistic',
+      'photorealistic',
+      'store interior',
+      'loja',
+      'environment',
+      'scene',
+      'cenario',
+      'cenário',
+    ];
+
+    return retailSceneSignals.some((signal) => haystack.includes(signal))
+      ? 'retail-scene'
+      : 'decorative-template';
+  }
+
+  private buildStrategyInstruction(
+    strategy: VisualStrategy,
+    userMessage: string,
+  ): string {
+    if (strategy === 'retail-scene') {
+      const normalized = userMessage.toLowerCase();
+      const preferredSide =
+        normalized.includes('lado esquerdo') || normalized.includes(' left')
+          ? 'hero-left'
+          : normalized.includes('lado direito') || normalized.includes(' right')
+            ? 'hero-right'
+            : 'hero-left';
+
+      return `
+VISUAL STRATEGY: retail-scene.
+- Treat this request as a realistic supermarket campaign scene adapted into an editable flyer header.
+- The header background should behave like a real environment plate or campaign scene, not a generic decorative texture.
+- Prefer compositionMode "${preferredSide}" unless the user explicitly asks for a centered hero.
+- If the user mentions a person, shopper, woman, man, character, or spokesperson, include one clear hero subject with strong visual presence.
+- Hero scale must feel substantial and commercial, never like a tiny sticker.
+- Support/accent elements must remain subordinate to the hero and to the environment scene.
+- Body background should avoid plain empty white when the request asks for realism; prefer a subtle commercial gradient or subtle derived texture.
+- Footer should feel intentional and branded, not like a generic dark strip.`;
+    }
+
+    return `
+VISUAL STRATEGY: decorative-template.
+- Treat this request as a professional layered retail template with one strong hero plus controlled support/accent elements.
+- Avoid repetitive layouts with tiny floating objects and generic dark footer bars.`;
+  }
+
+  private buildLayerBackgroundPrompt(
+    basePrompt: string,
+    styleSuffix: string,
+    avoidSuffix: string,
+  ): string {
+    return [
+      basePrompt,
+      'professional supermarket flyer header key visual',
+      'commercial art direction',
+      'clean editable text-safe area preserved',
+      'no readable text',
+      'no logos',
+      'no prices',
+      'no labels',
+      'no typographic artwork unless explicitly requested',
+      'avoid tiny floating objects',
+      'avoid empty header composition',
+      styleSuffix ? styleSuffix.trim().replace(/^,/, '') : '',
+      avoidSuffix ? avoidSuffix.trim().replace(/^,/, '') : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  private buildTransparentElementPrompt(
+    basePrompt: string,
+    role: LayerElementRole,
+    styleSuffix: string,
+    avoidSuffix: string,
+  ): string {
+    const roleInstruction =
+      role === 'hero'
+        ? 'isolated hero subject with strong commercial presence'
+        : role === 'support'
+          ? 'isolated supporting visual element'
+          : 'isolated accent detail';
+
+    return [
+      basePrompt,
+      roleInstruction,
+      'transparent background',
+      'no shadow on floor',
+      'no background',
+      'no readable text',
+      'no logo',
+      'no label',
+      'no price tag',
+      'high quality PNG cutout',
+      styleSuffix ? styleSuffix.trim().replace(/^,/, '') : '',
+      avoidSuffix ? avoidSuffix.trim().replace(/^,/, '') : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  private resolveLayerPlacement(options: {
+    canvasWidthPx: number;
+    headerHeightPx: number;
+    footerHeightPx: number;
+    compositionMode: LayerCompositionMode;
+    heroElementId?: string;
+    elementId: string;
+    section: 'header' | 'footer';
+    role: LayerElementRole;
+    zone: LayerElementZone;
+    suggestedPosition: string;
+    suggestedSizePct: number;
+  }): { x: number; y: number; width: number; height: number } {
+    const sectionHeightPx =
+      options.section === 'header' ? options.headerHeightPx : options.footerHeightPx;
+    const isHero = options.role === 'hero' || options.elementId === options.heroElementId;
+    const sizePct = this.resolveElementSizePct(options.suggestedSizePct, options.role, isHero);
+    const width = Math.round((sizePct / 100) * options.canvasWidthPx);
+    const height = Math.round(width * this.resolveAspectRatio(options.role, options.section));
+    const marginX = Math.round(options.canvasWidthPx * 0.05);
+    const marginY = Math.round(sectionHeightPx * 0.08);
+    const maxX = Math.max(0, options.canvasWidthPx - width - marginX);
+    const maxY = Math.max(0, sectionHeightPx - height - marginY);
+
+    const fallbackZone = this.fallbackZoneForComposition(
+      options.compositionMode,
+      options.section,
+      options.role,
+      options.suggestedPosition,
+    );
+    const zone = options.zone ?? fallbackZone;
+
+    switch (zone) {
+      case 'hero-left':
+        return {
+          x: marginX,
+          y: Math.round(Math.min(maxY, sectionHeightPx * 0.1)),
+          width,
+          height,
+        };
+      case 'hero-right':
+        return {
+          x: Math.max(marginX, options.canvasWidthPx - width - marginX),
+          y: Math.round(Math.min(maxY, sectionHeightPx * 0.1)),
+          width,
+          height,
+        };
+      case 'center-stage':
+        return {
+          x: Math.round((options.canvasWidthPx - width) / 2),
+          y: Math.round((sectionHeightPx - height) / 2),
+          width,
+          height,
+        };
+      case 'title-band-left':
+        return {
+          x: marginX,
+          y: Math.round(Math.min(maxY, sectionHeightPx * 0.18)),
+          width,
+          height,
+        };
+      case 'title-band-center':
+        return {
+          x: Math.round((options.canvasWidthPx - width) / 2),
+          y: Math.round(Math.min(maxY, sectionHeightPx * 0.16)),
+          width,
+          height,
+        };
+      case 'title-band-right':
+        return {
+          x: Math.max(marginX, options.canvasWidthPx - width - marginX),
+          y: Math.round(Math.min(maxY, sectionHeightPx * 0.18)),
+          width,
+          height,
+        };
+      case 'top-left-accent':
+        return { x: marginX, y: marginY, width, height };
+      case 'top-right-accent':
+        return {
+          x: Math.max(marginX, options.canvasWidthPx - width - marginX),
+          y: marginY,
+          width,
+          height,
+        };
+      case 'bottom-left-accent':
+        return {
+          x: marginX,
+          y: Math.max(marginY, sectionHeightPx - height - marginY),
+          width,
+          height,
+        };
+      case 'bottom-right-accent':
+        return {
+          x: Math.max(marginX, options.canvasWidthPx - width - marginX),
+          y: Math.max(marginY, sectionHeightPx - height - marginY),
+          width,
+          height,
+        };
+      case 'footer-left':
+        return {
+          x: marginX,
+          y: Math.round((sectionHeightPx - height) / 2),
+          width,
+          height,
+        };
+      case 'footer-center':
+      case 'footer-band':
+        return {
+          x: Math.round((options.canvasWidthPx - width) / 2),
+          y: Math.round((sectionHeightPx - height) / 2),
+          width,
+          height,
+        };
+      case 'footer-right':
+        return {
+          x: Math.max(marginX, options.canvasWidthPx - width - marginX),
+          y: Math.round((sectionHeightPx - height) / 2),
+          width,
+          height,
+        };
+      default:
+        return {
+          x: Math.round((options.canvasWidthPx - width) / 2),
+          y: Math.round((sectionHeightPx - height) / 2),
+          width,
+          height,
+        };
+    }
+  }
+
+  private resolveElementSizePct(
+    requestedSizePct: number,
+    role: LayerElementRole,
+    isHero: boolean,
+  ): number {
+    if (isHero) {
+      return Math.max(28, Math.min(58, requestedSizePct || 40));
+    }
+    if (role === 'support') {
+      return Math.max(16, Math.min(30, requestedSizePct || 22));
+    }
+    return Math.max(8, Math.min(16, requestedSizePct || 12));
+  }
+
+  private resolveAspectRatio(role: LayerElementRole, section: 'header' | 'footer'): number {
+    if (role === 'hero') {
+      return section === 'header' ? 1.08 : 0.95;
+    }
+    if (role === 'support') {
+      return 0.88;
+    }
+    return 0.72;
+  }
+
+  private fallbackZoneForComposition(
+    compositionMode: LayerCompositionMode,
+    section: 'header' | 'footer',
+    role: LayerElementRole,
+    suggestedPosition: string,
+  ): LayerElementZone {
+    if (section === 'footer') {
+      if (suggestedPosition === 'left') return 'footer-left';
+      if (suggestedPosition === 'right') return 'footer-right';
+      return role === 'accent' ? 'footer-band' : 'footer-center';
+    }
+
+    if (role === 'hero') {
+      if (compositionMode === 'hero-right') return 'hero-right';
+      if (compositionMode === 'center-stage') return 'center-stage';
+      return 'hero-left';
+    }
+
+    if (suggestedPosition === 'top') return 'title-band-center';
+    if (suggestedPosition === 'left') return 'top-left-accent';
+    if (suggestedPosition === 'right') return 'top-right-accent';
+    if (suggestedPosition === 'bottom-left') return 'bottom-left-accent';
+    if (suggestedPosition === 'bottom-right') return 'bottom-right-accent';
+
+    return compositionMode === 'hero-right' ? 'top-left-accent' : 'top-right-accent';
   }
 }

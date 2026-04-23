@@ -14,12 +14,21 @@ import {
   TemplateLayersMessageDto,
   TemplateLayersGenerateResponseDto,
 } from './dto/template-layers-generate.dto';
+import {
+  CreateTemplateLayersGuidedDraftRequestDto,
+  TemplateLayersGuidedDraftResultDto,
+  UpdateTemplateLayersGuidedBackgroundsRequestDto,
+  UpdateTemplateLayersGuidedElementsRequestDto,
+  UpdateTemplateLayersGuidedStyleRequestDto,
+  UpdateTemplateLayersGuidedStructureRequestDto,
+} from './dto/template-layers-guided-draft.dto';
 import { TemplateElementResponseDto } from './dto/template-element-request.dto';
 import { PixabayService } from './pixabay.service';
 import { SpellCheckService } from './spell-check.service';
 import { TemplateGenerateService } from './template-generate.service';
 import { TemplateElementAssistantService } from './template-element-assistant.service';
 import { TemplateImageGeneratorService } from './template-image-generator.service';
+import { TemplateLayersGuidedDraftService } from './template-layers-guided-draft.service';
 import { TemplateLayersGeneratorService } from './template-layers-generator.service';
 
 @Injectable()
@@ -30,6 +39,7 @@ export class AiService {
     private readonly templateGenerateService: TemplateGenerateService,
     private readonly templateElementAssistantService: TemplateElementAssistantService,
     private readonly templateImageGeneratorService: TemplateImageGeneratorService,
+    private readonly templateLayersGuidedDraftService: TemplateLayersGuidedDraftService,
     private readonly templateLayersGeneratorService: TemplateLayersGeneratorService,
   ) {}
 
@@ -78,5 +88,35 @@ export class AiService {
     messages: TemplateLayersMessageDto[],
   ): Promise<TemplateLayersGenerateResponseDto> {
     return this.templateLayersGeneratorService.generateTemplateLayers(format, messages);
+  }
+
+  createTemplateLayersGuidedDraft(
+    request: CreateTemplateLayersGuidedDraftRequestDto,
+  ): TemplateLayersGuidedDraftResultDto {
+    return this.templateLayersGuidedDraftService.createDraft(request);
+  }
+
+  updateTemplateLayersGuidedStructure(
+    request: UpdateTemplateLayersGuidedStructureRequestDto,
+  ): TemplateLayersGuidedDraftResultDto {
+    return this.templateLayersGuidedDraftService.updateStructure(request);
+  }
+
+  updateTemplateLayersGuidedBackgrounds(
+    request: UpdateTemplateLayersGuidedBackgroundsRequestDto,
+  ): TemplateLayersGuidedDraftResultDto {
+    return this.templateLayersGuidedDraftService.updateBackgrounds(request);
+  }
+
+  updateTemplateLayersGuidedStyle(
+    request: UpdateTemplateLayersGuidedStyleRequestDto,
+  ): TemplateLayersGuidedDraftResultDto {
+    return this.templateLayersGuidedDraftService.updateStyle(request);
+  }
+
+  updateTemplateLayersGuidedElements(
+    request: UpdateTemplateLayersGuidedElementsRequestDto,
+  ): TemplateLayersGuidedDraftResultDto {
+    return this.templateLayersGuidedDraftService.updateElements(request);
   }
 }

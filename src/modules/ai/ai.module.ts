@@ -7,6 +7,7 @@ import { SpellCheckService } from './spell-check.service';
 import { TemplateGenerateService } from './template-generate.service';
 import { TemplateElementAssistantService } from './template-element-assistant.service';
 import { TemplateImageGeneratorService } from './template-image-generator.service';
+import { TemplateLayersGuidedDraftService } from './template-layers-guided-draft.service';
 import { TemplateLayersGeneratorService } from './template-layers-generator.service';
 import { UploadsModule } from '../uploads/uploads.module';
 import { GalleryModule } from '../gallery/gallery.module';
@@ -22,6 +23,7 @@ import { GalleryModule } from '../gallery/gallery.module';
     TemplateGenerateService,
     TemplateElementAssistantService,
     TemplateImageGeneratorService,
+    TemplateLayersGuidedDraftService,
     TemplateLayersGeneratorService,
   ],
 })

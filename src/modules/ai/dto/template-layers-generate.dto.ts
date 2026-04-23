@@ -118,11 +118,15 @@ export interface LayerBackgroundDto {
 }
 
 export interface LayerBodyBackgroundDto {
-  type: 'solid' | 'gradient';
+  type: 'solid' | 'gradient' | 'image';
   color?: string;
   gradientStart?: string;
   gradientEnd?: string;
   gradientAngle?: number;
+  imageUrl?: string;
+  imageSize?: string;
+  imagePosition?: string;
+  imageOpacity?: number;
 }
 
 export interface TemplateLayersGenerateResponseDto {

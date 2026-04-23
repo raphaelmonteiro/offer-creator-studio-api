@@ -97,7 +97,6 @@ export function normalizeLayerBackgrounds(
       'footer',
       DEFAULT_FOOTER_COLOR,
       adjustments,
-      true,
     ) as unknown as LayerBodyBackgroundDto,
     adjustments,
   };
@@ -121,7 +120,6 @@ export function normalizeTemplateConfigurationLayout(
           section,
           section === 'footer' ? DEFAULT_FOOTER_COLOR : DEFAULT_BODY_COLOR,
           adjustments,
-          section === 'footer',
         )
       : normalizedSection.background;
 
@@ -209,7 +207,6 @@ export function normalizeCanvasBackgroundRecord(
       section,
       solidFallbackColor,
       adjustments,
-      section === 'footer',
     ),
     adjustments,
   };
@@ -317,20 +314,7 @@ function normalizeBackgroundRecord(
   section: LayoutSection | 'body',
   solidFallbackColor: string,
   adjustments: LayoutNormalizationAdjustment[],
-  forceSolid = false,
 ): Record<string, unknown> {
-  if (forceSolid) {
-    recordAdjustment(adjustments, {
-      target: 'background',
-      section,
-      field: 'type',
-      from: background.type,
-      to: 'solid',
-      reason: 'footer-background-must-be-solid',
-    });
-    return normalizeSolidBackground(background, section, solidFallbackColor, adjustments);
-  }
-
   if (background.type === 'solid') {
     return normalizeSolidBackground(background, section, solidFallbackColor, adjustments);
   }

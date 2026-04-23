@@ -73,7 +73,7 @@ describe('ai-layout.util', () => {
   });
 
   describe('normalizeLayerBackgrounds', () => {
-    it('normalizes hex colors, gradient angle and footer background type', () => {
+    it('normalizes hex colors and preserves richer footer backgrounds', () => {
       const bodyBackground = {
         type: 'gradient',
         gradientStart: '#abc',
@@ -82,8 +82,10 @@ describe('ai-layout.util', () => {
       } as LayerBodyBackgroundDto;
       const footerBackground = {
         type: 'gradient',
-        color: 'not-a-color',
-      } as unknown as LayerBodyBackgroundDto;
+        gradientStart: '#123456',
+        gradientEnd: 'not-a-color',
+        gradientAngle: 999,
+      } as LayerBodyBackgroundDto;
 
       const result = normalizeLayerBackgrounds(bodyBackground, footerBackground);
 
@@ -94,11 +96,13 @@ describe('ai-layout.util', () => {
         gradientAngle: 360,
       });
       expect(result.footerBackground).toEqual({
-        type: 'solid',
-        color: '#111827',
+        type: 'gradient',
+        gradientStart: '#123456',
+        gradientEnd: '#F3F4F6',
+        gradientAngle: 360,
       });
       expect(result.adjustments.map((item) => item.field)).toEqual(
-        expect.arrayContaining(['gradientEnd', 'gradientAngle', 'type', 'color']),
+        expect.arrayContaining(['gradientEnd', 'gradientAngle']),
       );
     });
   });
@@ -121,7 +125,12 @@ describe('ai-layout.util', () => {
           ],
         },
         footer: {
-          background: { type: 'gradient', color: '#000000' },
+          background: {
+            type: 'gradient',
+            gradientStart: '#111111',
+            gradientEnd: '#444444',
+            gradientAngle: 90,
+          },
           elements: [],
         },
         bodyBackground: { type: 'solid', color: 'invalid' },
@@ -132,12 +141,19 @@ describe('ai-layout.util', () => {
       const headerElements = header.elements as Record<string, unknown>[];
 
       expect(header.background).toMatchObject({ type: 'solid', color: '#AABBCC' });
+      const footer = result.configuration.footer as Record<string, unknown>;
       expect(headerElements[0]).toMatchObject({
         x: 0,
         y: 0,
         width: 850,
         height: 36,
         zIndex: 1,
+      });
+      expect(footer.background).toMatchObject({
+        type: 'gradient',
+        gradientStart: '#111111',
+        gradientEnd: '#444444',
+        gradientAngle: 90,
       });
       expect(result.configuration.bodyBackground).toMatchObject({
         type: 'solid',
