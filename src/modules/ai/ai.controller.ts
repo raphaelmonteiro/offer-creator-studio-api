@@ -159,7 +159,7 @@ export class AiController {
 
   @Post('template-generate')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Gera um template completo via GPT-4o com suporte a DALL-E 3' })
+  @ApiOperation({ summary: 'Gera um template completo via GPT-4o com suporte a GPT Image' })
   @ApiResponse({ status: 200, description: 'Template gerado com sucesso' })
   async templateGenerate(@Body() dto: TemplateGenerateRequestDto) {
     try {
