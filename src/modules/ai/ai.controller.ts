@@ -18,6 +18,8 @@ import { TemplateGenerateRequestDto } from './dto/template-generate-request.dto'
 import { TemplateImageGenerateRequestDto } from './dto/template-image-generate-request.dto';
 import { TemplateLayersGenerateRequestDto } from './dto/template-layers-generate.dto';
 import { TemplateElementRequestDto } from './dto/template-element-request.dto';
+import { ProductCategorizationRequestDto } from './dto/product-categorization-request.dto';
+import { FlyerAssemblyPlanRequestDto } from './dto/flyer-assembly-plan-request.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @ApiTags('AI')
@@ -45,6 +47,46 @@ export class AiController {
         error: {
           code: 'AI_SERVICE_ERROR',
           message: 'Não foi possível processar a validação. Tente novamente.',
+        },
+      };
+    }
+  }
+
+  @Post('product-categorization')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Sugere categorias de produtos importados com IA' })
+  @ApiResponse({ status: 200, description: 'Categorias sugeridas' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
+  async productCategorization(@Body() dto: ProductCategorizationRequestDto) {
+    try {
+      return await this.aiService.categorizeProducts(dto);
+    } catch (error) {
+      this.logger.error('Erro ao categorizar produtos', error);
+      return {
+        success: false,
+        error: {
+          code: 'PRODUCT_CATEGORIZATION_ERROR',
+          message: 'Não foi possível categorizar os produtos. Revise manualmente.',
+        },
+      };
+    }
+  }
+
+  @Post('flyer-assembly-plan')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Gera plano de montagem automática para encarte V2' })
+  @ApiResponse({ status: 200, description: 'Plano de montagem gerado' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
+  async flyerAssemblyPlan(@Body() dto: FlyerAssemblyPlanRequestDto) {
+    try {
+      return await this.aiService.createFlyerAssemblyPlan(dto);
+    } catch (error) {
+      this.logger.error('Erro ao gerar plano de montagem', error);
+      return {
+        success: false,
+        error: {
+          code: 'FLYER_ASSEMBLY_PLAN_ERROR',
+          message: 'Não foi possível montar o encarte automaticamente.',
         },
       };
     }

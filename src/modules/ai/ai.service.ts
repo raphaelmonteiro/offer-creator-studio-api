@@ -15,12 +15,18 @@ import {
   TemplateLayersGenerateResponseDto,
 } from './dto/template-layers-generate.dto';
 import { TemplateElementResponseDto } from './dto/template-element-request.dto';
+import { ProductCategorizationRequestDto } from './dto/product-categorization-request.dto';
+import { ProductCategorizationResponseDto } from './dto/product-categorization-response.dto';
+import { FlyerAssemblyPlanRequestDto } from './dto/flyer-assembly-plan-request.dto';
+import { FlyerAssemblyPlanResponseDto } from './dto/flyer-assembly-plan-response.dto';
 import { PixabayService } from './pixabay.service';
 import { SpellCheckService } from './spell-check.service';
 import { TemplateGenerateService } from './template-generate.service';
 import { TemplateElementAssistantService } from './template-element-assistant.service';
 import { TemplateImageGeneratorService } from './template-image-generator.service';
 import { TemplateLayersGeneratorService } from './template-layers-generator.service';
+import { ProductCategorizationService } from './product-categorization.service';
+import { FlyerAssemblyPlanService } from './flyer-assembly-plan.service';
 
 @Injectable()
 export class AiService {
@@ -31,10 +37,24 @@ export class AiService {
     private readonly templateElementAssistantService: TemplateElementAssistantService,
     private readonly templateImageGeneratorService: TemplateImageGeneratorService,
     private readonly templateLayersGeneratorService: TemplateLayersGeneratorService,
+    private readonly productCategorizationService: ProductCategorizationService,
+    private readonly flyerAssemblyPlanService: FlyerAssemblyPlanService,
   ) {}
 
   async spellCheck(products: SpellCheckProductDto[]): Promise<SpellCheckResponseDto> {
     return this.spellCheckService.spellCheck(products);
+  }
+
+  async categorizeProducts(
+    dto: ProductCategorizationRequestDto,
+  ): Promise<ProductCategorizationResponseDto> {
+    return this.productCategorizationService.categorizeProducts(dto);
+  }
+
+  async createFlyerAssemblyPlan(
+    dto: FlyerAssemblyPlanRequestDto,
+  ): Promise<FlyerAssemblyPlanResponseDto> {
+    return this.flyerAssemblyPlanService.createPlan(dto);
   }
 
   async searchImages(rawName: string, category?: PixabayCategory): Promise<ImageSearchResponseDto> {

@@ -1,5 +1,14 @@
 import { CorrectionDto } from '../dto/spell-check-response.dto';
 import { ElementAction, TemplateElementResponseDto } from '../dto/template-element-request.dto';
+import {
+  ProductCategoryAssignmentDto,
+  ProductCategoryAssignmentSource,
+} from '../dto/product-categorization-response.dto';
+import {
+  FlyerAssemblyPagePlanDto,
+  FlyerAssemblySectionLayout,
+  FlyerAssemblySectionPlanDto,
+} from '../dto/flyer-assembly-plan-response.dto';
 
 export const AI_RESPONSE_SCHEMA_VERSION = 'v1';
 
@@ -8,6 +17,14 @@ export const AI_RESPONSE_SCHEMAS = {
   spellCheck: {
     required: ['corrections'],
     correctionFields: ['name', 'observation', 'badgeText'],
+  },
+  productCategorization: {
+    required: ['assignments'],
+    assignmentSources: ['ai', 'existing', 'fallback'],
+  },
+  flyerAssemblyPlan: {
+    required: ['pages', 'unplacedProductIds', 'notes'],
+    sectionLayouts: ['balanced-grid', 'dense-grid', 'hero-grid'],
   },
   templateConfiguration: {
     required: ['assistantMessage', 'configuration'],
@@ -63,6 +80,86 @@ export const AI_RESPONSE_FORMATS = {
             suggestion: { type: 'string' },
           },
         },
+      },
+    },
+  }),
+  productCategorization: jsonSchemaResponseFormat('product_categorization_v1', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['assignments'],
+    properties: {
+      assignments: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['productId', 'category', 'confidence', 'source', 'reason'],
+          properties: {
+            productId: { type: 'string' },
+            category: { type: 'string' },
+            confidence: { type: 'number', minimum: 0, maximum: 1 },
+            source: { type: 'string', enum: ['ai', 'existing', 'fallback'] },
+            reason: { type: 'string' },
+          },
+        },
+      },
+    },
+  }),
+  flyerAssemblyPlan: jsonSchemaResponseFormat('flyer_assembly_plan_v1', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['pages', 'unplacedProductIds', 'notes'],
+    properties: {
+      pages: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['name', 'sections'],
+          properties: {
+            name: { type: ['string', 'null'] },
+            sections: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: [
+                  'category',
+                  'title',
+                  'priority',
+                  'layout',
+                  'productIds',
+                  'featuredProductIds',
+                ],
+                properties: {
+                  category: { type: 'string' },
+                  title: { type: 'string' },
+                  priority: { type: 'number' },
+                  layout: {
+                    type: 'string',
+                    enum: ['balanced-grid', 'dense-grid', 'hero-grid'],
+                  },
+                  productIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                  },
+                  featuredProductIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      unplacedProductIds: {
+        type: 'array',
+        items: { type: 'string' },
+      },
+      notes: {
+        type: 'array',
+        items: { type: 'string' },
       },
     },
   }),
@@ -273,6 +370,16 @@ export interface TemplateGenerateSchemaResult {
   configuration: Record<string, unknown>;
 }
 
+export interface ProductCategorizationSchemaResult {
+  assignments: ProductCategoryAssignmentDto[];
+}
+
+export interface FlyerAssemblyPlanSchemaResult {
+  pages: FlyerAssemblyPagePlanDto[];
+  unplacedProductIds: string[];
+  notes?: string[];
+}
+
 export function parseSpellCheckResponse(raw: string): CorrectionDto[] {
   const parsed = parseJsonObject(raw, 'JSON inválido retornado pela IA');
   const corrections = parsed.corrections;
@@ -295,6 +402,37 @@ export function parseSpellCheckResponse(raw: string): CorrectionDto[] {
       suggestion: stringValue(correction.suggestion),
     };
   });
+}
+
+export function parseProductCategorizationResponse(
+  raw: string,
+): ProductCategorizationSchemaResult {
+  const parsed = parseJsonObject(raw, 'JSON inválido retornado pela categorização');
+  const assignments = parsed.assignments;
+
+  if (!Array.isArray(assignments)) {
+    throw new Error('Estrutura inesperada retornada pela categorização');
+  }
+
+  return {
+    assignments: assignments.map(validateProductCategoryAssignment),
+  };
+}
+
+export function parseFlyerAssemblyPlanResponse(raw: string): FlyerAssemblyPlanSchemaResult {
+  const parsed = parseJsonObject(raw, 'JSON inválido retornado pela montagem');
+  const pages = parsed.pages;
+  const unplacedProductIds = parsed.unplacedProductIds;
+
+  if (!Array.isArray(pages) || !Array.isArray(unplacedProductIds)) {
+    throw new Error('Estrutura inesperada retornada pela montagem');
+  }
+
+  return {
+    pages: pages.map(validateFlyerAssemblyPage),
+    unplacedProductIds: stringArray(unplacedProductIds) || [],
+    notes: stringArray(parsed.notes),
+  };
 }
 
 export function parseTemplateElementResponse(raw: string): TemplateElementResponseDto {
@@ -390,6 +528,60 @@ function validateElementAction(item: unknown): ElementAction {
   };
 }
 
+function validateProductCategoryAssignment(item: unknown): ProductCategoryAssignmentDto {
+  const assignment = asRecord(item, 'Categorização inválida retornada pela IA');
+  if (!isProductCategoryAssignmentSource(assignment.source)) {
+    throw new Error('Fonte de categorização inválida retornada pela IA');
+  }
+
+  const confidence =
+    typeof assignment.confidence === 'number' && Number.isFinite(assignment.confidence)
+      ? Math.max(0, Math.min(1, assignment.confidence))
+      : undefined;
+  if (confidence === undefined) {
+    throw new Error('Confiança de categorização inválida retornada pela IA');
+  }
+
+  return {
+    productId: stringValue(assignment.productId),
+    category: stringValue(assignment.category),
+    confidence,
+    source: assignment.source,
+    reason: typeof assignment.reason === 'string' ? assignment.reason : undefined,
+  };
+}
+
+function validateFlyerAssemblyPage(item: unknown): FlyerAssemblyPagePlanDto {
+  const page = asRecord(item, 'Pagina de montagem invalida retornada pela IA');
+  if (!Array.isArray(page.sections)) {
+    throw new Error('Secoes de montagem invalidas retornadas pela IA');
+  }
+
+  return {
+    name: typeof page.name === 'string' ? page.name : undefined,
+    sections: page.sections.map(validateFlyerAssemblySection),
+  };
+}
+
+function validateFlyerAssemblySection(item: unknown): FlyerAssemblySectionPlanDto {
+  const section = asRecord(item, 'Secao de montagem invalida retornada pela IA');
+  if (!isFlyerAssemblySectionLayout(section.layout)) {
+    throw new Error('Layout de montagem invalido retornado pela IA');
+  }
+
+  return {
+    category: stringValue(section.category),
+    title: stringValue(section.title),
+    priority:
+      typeof section.priority === 'number' && Number.isFinite(section.priority)
+        ? section.priority
+        : 0,
+    layout: section.layout,
+    productIds: stringArray(section.productIds) || [],
+    featuredProductIds: stringArray(section.featuredProductIds) || [],
+  };
+}
+
 function validateLayerElement(
   item: unknown,
 ): TemplateLayersCompositionSchemaResult['elements'][number] {
@@ -459,6 +651,20 @@ function stringValue(value: unknown): string {
 
 function isCorrectionField(value: unknown): value is CorrectionDto['field'] {
   return value === 'name' || value === 'observation' || value === 'badgeText';
+}
+
+function isProductCategoryAssignmentSource(
+  value: unknown,
+): value is ProductCategoryAssignmentSource {
+  return value === 'ai' || value === 'existing' || value === 'fallback';
+}
+
+function isFlyerAssemblySectionLayout(
+  value: unknown,
+): value is FlyerAssemblySectionLayout {
+  return AI_RESPONSE_SCHEMAS.flyerAssemblyPlan.sectionLayouts.includes(
+    value as FlyerAssemblySectionLayout,
+  );
 }
 
 function isElementActionType(value: unknown): value is ElementAction['type'] {
