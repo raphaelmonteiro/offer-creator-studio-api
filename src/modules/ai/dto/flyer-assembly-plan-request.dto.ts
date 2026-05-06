@@ -17,6 +17,25 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export type FlyerAssemblyLayoutDensity = 'balanced' | 'dense' | 'premium';
+export type FlyerAssemblyImageQuality = 'good' | 'poor' | 'missing';
+
+export class FlyerAssemblyRectDto {
+  @ApiProperty({ example: 75 })
+  @IsNumber()
+  x: number;
+
+  @ApiProperty({ example: 1632.68 })
+  @IsNumber()
+  y: number;
+
+  @ApiProperty({ example: 2600 })
+  @IsNumber()
+  width: number;
+
+  @ApiProperty({ example: 3431.39 })
+  @IsNumber()
+  height: number;
+}
 
 export class FlyerAssemblyTemplateDto {
   @ApiProperty({ example: 'template-1' })
@@ -33,6 +52,12 @@ export class FlyerAssemblyTemplateDto {
   @IsOptional()
   @IsString()
   format?: string;
+
+  @ApiPropertyOptional({ type: FlyerAssemblyRectDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FlyerAssemblyRectDto)
+  bodyArea?: FlyerAssemblyRectDto;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()
@@ -94,6 +119,11 @@ export class FlyerAssemblyProductDto {
   @ApiProperty({ example: true })
   @IsBoolean()
   hasImage: boolean;
+
+  @ApiPropertyOptional({ enum: ['good', 'poor', 'missing'], example: 'good' })
+  @IsOptional()
+  @IsIn(['good', 'poor', 'missing'])
+  imageQuality?: FlyerAssemblyImageQuality;
 
   @ApiPropertyOptional({ example: 'Oferta valida enquanto durar o estoque' })
   @IsOptional()

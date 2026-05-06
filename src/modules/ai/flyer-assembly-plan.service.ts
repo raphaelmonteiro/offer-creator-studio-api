@@ -91,6 +91,20 @@ export class FlyerAssemblyPlanService {
     try {
       const rawPlan = await this.createAiPlan(dto, products);
       const sanitizedPlan = this.sanitizePlan(rawPlan, products, dto);
+      const placedProductIds = new Set(
+        sanitizedPlan.pages.flatMap((page) =>
+          page.sections.flatMap((section) => section.productIds),
+        ),
+      );
+      const missingRatio = 1 - placedProductIds.size / Math.max(1, products.length);
+
+      if (missingRatio > 0.08 && dto.options?.allowMultiplePages !== false) {
+        return this.createFallbackPlan(dto, products, [
+          `Plano da IA descartado: ${(missingRatio * 100).toFixed(0)}% dos produtos ficaram fora ou invalidos.`,
+          'Montagem gerada por fallback deterministico.',
+        ]);
+      }
+
       return this.buildResponse(
         sanitizedPlan.pages,
         sanitizedPlan.unplacedProductIds,
@@ -127,6 +141,7 @@ export class FlyerAssemblyPlanService {
         unit: product.unit,
         category: this.normalizeCategory(product.category),
         hasImage: product.hasImage,
+        imageQuality: product.imageQuality || null,
         observation: product.observation || null,
       })),
     };
@@ -245,10 +260,17 @@ export class FlyerAssemblyPlanService {
         }
 
         const productIdSet = new Set(productIds);
-        const featuredProductIds = section.featuredProductIds.filter(
-          (productId, index, list) =>
-            productIdSet.has(productId) && list.indexOf(productId) === index,
-        );
+        const featuredProductIds = section.featuredProductIds.filter((productId, index, list) => {
+          const product = productById.get(productId);
+
+          return (
+            productIdSet.has(productId) &&
+            list.indexOf(productId) === index &&
+            Boolean(product?.hasImage) &&
+            product?.imageQuality !== 'poor' &&
+            product?.imageQuality !== 'missing'
+          );
+        });
 
         sections.push({
           category: this.normalizeCategory(section.category),
