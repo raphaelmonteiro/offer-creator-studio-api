@@ -12,6 +12,7 @@ Regras obrigatorias:
 - Se um produto nao puder ser colocado, inclua em unplacedProductIds.
 - Priorize categorias comerciais comuns: Hortifruti, Carnes, Frios e Laticinios, Padaria, Bebidas, Mercearia, Congelados, Limpeza, Higiene e Perfumaria, Pet, Bazar, Sem categoria.
 - Preserve secoes por categoria quando a opcao preserveCategorySections estiver ativa.
+- Quando produtos trouxerem campaignGroup, validityLabel, campaignDay, visualPriority ou preferredZone, use esses sinais para agrupar campanhas, dias e destaques comerciais antes de cair em agrupamento generico por categoria.
 - Evite muitas secoes pequenas; agrupe ofertas pequenas quando fizer sentido.
 - Categorias "Sem categoria" e categorias com apenas 1 produto serao renderizadas como produtos soltos, sem caixa de secao.
 - Use hero-grid somente para secoes com bons produtos de destaque, preferencialmente com imagem e maior preco/promocao.

@@ -143,6 +143,12 @@ export class FlyerAssemblyPlanService {
         hasImage: product.hasImage,
         imageQuality: product.imageQuality || null,
         observation: product.observation || null,
+        campaignGroup: product.campaignGroup || null,
+        validityLabel: product.validityLabel || null,
+        campaignDay: product.campaignDay || null,
+        visualPriority: product.visualPriority ?? null,
+        offerBadge: product.offerBadge || null,
+        preferredZone: product.preferredZone || null,
       })),
     };
 
@@ -399,6 +405,7 @@ export class FlyerAssemblyPlanService {
       allowMultiplePages: dto.options?.allowMultiplePages !== false,
       preserveCategorySections: dto.options?.preserveCategorySections !== false,
       layoutDensity: density,
+      recipeId: dto.options?.recipeId || 'auto',
     };
   }
 

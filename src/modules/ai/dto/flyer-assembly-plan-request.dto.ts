@@ -18,6 +18,20 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export type FlyerAssemblyLayoutDensity = 'balanced' | 'dense' | 'premium';
 export type FlyerAssemblyImageQuality = 'good' | 'poor' | 'missing';
+export type FlyerAssemblyRecipeId =
+  | 'auto'
+  | 'vertical-hero-grid'
+  | 'vertical-dense-catalog'
+  | 'horizontal-day-panels'
+  | 'horizontal-price-campaign';
+export type FlyerAssemblyZoneType =
+  | 'hero'
+  | 'featured'
+  | 'category-grid'
+  | 'dense-grid'
+  | 'strip'
+  | 'campaign-panel'
+  | 'loose';
 
 export class FlyerAssemblyRectDto {
   @ApiProperty({ example: 75 })
@@ -129,6 +143,36 @@ export class FlyerAssemblyProductDto {
   @IsOptional()
   @IsString()
   observation?: string;
+
+  @ApiPropertyOptional({ example: 'Produtos a R$ 1,00' })
+  @IsOptional()
+  @IsString()
+  campaignGroup?: string;
+
+  @ApiPropertyOptional({ example: 'Quarta 25/03/2026' })
+  @IsOptional()
+  @IsString()
+  validityLabel?: string;
+
+  @ApiPropertyOptional({ example: 'Quarta' })
+  @IsOptional()
+  @IsString()
+  campaignDay?: string;
+
+  @ApiPropertyOptional({ example: 80 })
+  @IsOptional()
+  @IsNumber()
+  visualPriority?: number;
+
+  @ApiPropertyOptional({ example: 'Super oferta' })
+  @IsOptional()
+  @IsString()
+  offerBadge?: string;
+
+  @ApiPropertyOptional({ enum: ['hero', 'featured', 'category-grid', 'dense-grid', 'strip', 'campaign-panel', 'loose'] })
+  @IsOptional()
+  @IsIn(['hero', 'featured', 'category-grid', 'dense-grid', 'strip', 'campaign-panel', 'loose'])
+  preferredZone?: FlyerAssemblyZoneType;
 }
 
 export class FlyerAssemblyOptionsDto {
@@ -153,6 +197,14 @@ export class FlyerAssemblyOptionsDto {
   @IsOptional()
   @IsIn(['balanced', 'dense', 'premium'])
   layoutDensity?: FlyerAssemblyLayoutDensity;
+
+  @ApiPropertyOptional({
+    enum: ['auto', 'vertical-hero-grid', 'vertical-dense-catalog', 'horizontal-day-panels', 'horizontal-price-campaign'],
+    default: 'auto',
+  })
+  @IsOptional()
+  @IsIn(['auto', 'vertical-hero-grid', 'vertical-dense-catalog', 'horizontal-day-panels', 'horizontal-price-campaign'])
+  recipeId?: FlyerAssemblyRecipeId;
 }
 
 export class FlyerAssemblyPlanRequestDto {
