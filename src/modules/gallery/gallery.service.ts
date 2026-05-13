@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { GalleryImage } from './entities/gallery-image.entity';
@@ -11,15 +12,53 @@ import { MoveImagesDto } from './dto/move-images.dto';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
 
+interface EmbeddingTrigger {
+  embedAndStoreForImage: (
+    imageId: string,
+    filename: string,
+    folderName?: string | null,
+  ) => Promise<boolean>;
+}
+
 @Injectable()
 export class GalleryService {
+  private readonly logger = new Logger(GalleryService.name);
+
   constructor(
     @InjectRepository(GalleryImage)
     private readonly imagesRepository: Repository<GalleryImage>,
     @InjectRepository(GalleryFolder)
     private readonly foldersRepository: Repository<GalleryFolder>,
     private readonly uploadsService: UploadsService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  private triggerEmbedding(image: GalleryImage): void {
+    void (async () => {
+      try {
+        const embedder = this.moduleRef.get<EmbeddingTrigger>(
+          'GalleryEmbeddingService',
+          { strict: false },
+        );
+        if (!embedder) return;
+        let folderName: string | null = null;
+        if (image.folderId) {
+          const folder = await this.foldersRepository.findOne({
+            where: { id: image.folderId },
+            select: ['name'],
+          });
+          folderName = folder?.name ?? null;
+        }
+        await embedder.embedAndStoreForImage(image.id, image.filename, folderName);
+      } catch (error) {
+        this.logger.warn(
+          `Falha ao gerar embedding para imagem ${image.id}: ${
+            (error as Error).message
+          }`,
+        );
+      }
+    })();
+  }
 
   async listImages(
     query: QueryGalleryDto,
@@ -59,7 +98,9 @@ export class GalleryService {
       size: params.size,
       folderId: null,
     });
-    return this.imagesRepository.save(image);
+    const saved = await this.imagesRepository.save(image);
+    this.triggerEmbedding(saved);
+    return saved;
   }
 
   async uploadImages(
@@ -80,7 +121,9 @@ export class GalleryService {
         folderId: folderId || null,
       });
 
-      images.push(await this.imagesRepository.save(image));
+      const saved = await this.imagesRepository.save(image);
+      this.triggerEmbedding(saved);
+      images.push(saved);
     }
 
     return images;

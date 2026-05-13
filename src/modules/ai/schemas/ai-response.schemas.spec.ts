@@ -1,5 +1,7 @@
 import {
   parseImageIntentClassification,
+  parseFlyerAssemblyPlanResponse,
+  parseProductCategorizationResponse,
   parseSpellCheckResponse,
   parseTemplateElementResponse,
   parseTemplateGenerateResponse,
@@ -51,6 +53,114 @@ describe('ai-response.schemas', () => {
           }),
         ),
       ).toThrow('Campo de correção inválido retornado pela IA');
+    });
+  });
+
+  describe('parseProductCategorizationResponse', () => {
+    it('parses valid category assignments', () => {
+      const result = parseProductCategorizationResponse(
+        json({
+          assignments: [
+            {
+              productId: 'p1',
+              category: 'Mercearia',
+              confidence: 0.94,
+              source: 'ai',
+              reason: 'Produto seco de prateleira.',
+            },
+          ],
+        }),
+      );
+
+      expect(result.assignments).toEqual([
+        {
+          productId: 'p1',
+          category: 'Mercearia',
+          confidence: 0.94,
+          source: 'ai',
+          reason: 'Produto seco de prateleira.',
+        },
+      ]);
+    });
+
+    it('rejects invalid category assignment sources', () => {
+      expect(() =>
+        parseProductCategorizationResponse(
+          json({
+            assignments: [
+              {
+                productId: 'p1',
+                category: 'Mercearia',
+                confidence: 0.8,
+                source: 'manual',
+                reason: 'Teste',
+              },
+            ],
+          }),
+        ),
+      ).toThrow('Fonte de categorização inválida retornada pela IA');
+    });
+  });
+
+  describe('parseFlyerAssemblyPlanResponse', () => {
+    it('parses valid flyer assembly plans', () => {
+      const result = parseFlyerAssemblyPlanResponse(
+        json({
+          pages: [
+            {
+              name: 'Pagina 1',
+              sections: [
+                {
+                  category: 'Hortifruti',
+                  title: 'Hortifruti',
+                  priority: 95,
+                  layout: 'hero-grid',
+                  productIds: ['p1', 'p2'],
+                  featuredProductIds: ['p1'],
+                },
+              ],
+            },
+          ],
+          unplacedProductIds: [],
+          notes: ['Plano criado'],
+        }),
+      );
+
+      expect(result.pages[0].sections[0]).toEqual({
+        category: 'Hortifruti',
+        title: 'Hortifruti',
+        priority: 95,
+        layout: 'hero-grid',
+        productIds: ['p1', 'p2'],
+        featuredProductIds: ['p1'],
+      });
+      expect(result.notes).toEqual(['Plano criado']);
+    });
+
+    it('rejects invalid flyer assembly layouts', () => {
+      expect(() =>
+        parseFlyerAssemblyPlanResponse(
+          json({
+            pages: [
+              {
+                name: 'Pagina 1',
+                sections: [
+                  {
+                    category: 'Bebidas',
+                    title: 'Bebidas',
+                    priority: 80,
+                    layout: 'masonry',
+                    productIds: ['p1'],
+                    featuredProductIds: [],
+                  },
+                ],
+              },
+            ],
+            unplacedProductIds: [],
+            notes: [],
+          }),
+        ),
+      ).toThrow('Layout de montagem invalido retornado pela IA');
     });
   });
 
