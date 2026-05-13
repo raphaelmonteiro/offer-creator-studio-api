@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { GalleryFolder } from './gallery-folder.entity';
 
-@Entity('gallery_images')
+@Entity('gallery_images', { synchronize: false })
 export class GalleryImage {
   @PrimaryGeneratedColumn('uuid')
   id: string;

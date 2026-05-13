@@ -10,6 +10,7 @@ import { TemplateImageGeneratorService } from './template-image-generator.servic
 import { TemplateLayersGeneratorService } from './template-layers-generator.service';
 import { ProductCategorizationService } from './product-categorization.service';
 import { FlyerAssemblyPlanService } from './flyer-assembly-plan.service';
+import { GalleryEmbeddingService } from './gallery-embedding.service';
 import { UploadsModule } from '../uploads/uploads.module';
 import { GalleryModule } from '../gallery/gallery.module';
 
@@ -27,6 +28,9 @@ import { GalleryModule } from '../gallery/gallery.module';
     TemplateLayersGeneratorService,
     ProductCategorizationService,
     FlyerAssemblyPlanService,
+    GalleryEmbeddingService,
+    { provide: 'GalleryEmbeddingService', useExisting: GalleryEmbeddingService },
   ],
+  exports: [GalleryEmbeddingService, 'GalleryEmbeddingService'],
 })
 export class AiModule {}
