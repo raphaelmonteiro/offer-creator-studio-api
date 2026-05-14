@@ -2,6 +2,8 @@
 -- Executed on application boot by GalleryEmbeddingService.onModuleInit.
 
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS unaccent;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 ALTER TABLE gallery_images
   ADD COLUMN IF NOT EXISTS embedding vector(1536);

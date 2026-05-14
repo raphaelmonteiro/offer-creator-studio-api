@@ -29,6 +29,7 @@ import { DeleteManyDto } from './dto/delete-many.dto';
 import { MoveImagesDto } from './dto/move-images.dto';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
+import { UpdateImageDto } from './dto/update-image.dto';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { fileUploadOptions } from '../../common/utils/multer.util';
 import { SkipValidation } from '../../common/decorators/skip-validation.decorator';
@@ -90,6 +91,13 @@ export class GalleryController {
     return { success: true };
   }
 
+  @Patch(':id')
+  @ApiOperation({ summary: 'Atualiza metadados de uma imagem' })
+  @ApiResponse({ status: 200, description: 'Imagem atualizada com sucesso' })
+  updateImage(@Param('id') id: string, @Body() dto: UpdateImageDto) {
+    return this.galleryService.updateImage(id, dto);
+  }
+
   @Post('delete-many')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Remove múltiplas imagens' })
@@ -140,4 +148,3 @@ export class GalleryController {
     return this.galleryService.deleteFolder(id);
   }
 }
-

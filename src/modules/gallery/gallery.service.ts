@@ -1,7 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import { InjectDataSource } from '@nestjs/typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Brackets, DataSource, Repository } from 'typeorm';
 import { GalleryImage } from './entities/gallery-image.entity';
 import { GalleryFolder } from './entities/gallery-folder.entity';
 import { QueryGalleryDto } from './dto/query-gallery.dto';
@@ -11,6 +18,7 @@ import { DeleteManyDto } from './dto/delete-many.dto';
 import { MoveImagesDto } from './dto/move-images.dto';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
+import { UpdateImageDto } from './dto/update-image.dto';
 
 interface EmbeddingTrigger {
   embedAndStoreForImage: (
@@ -21,17 +29,32 @@ interface EmbeddingTrigger {
 }
 
 @Injectable()
-export class GalleryService {
+export class GalleryService implements OnModuleInit {
   private readonly logger = new Logger(GalleryService.name);
+  private readonly fuzzySearchThreshold = 0.25;
 
   constructor(
     @InjectRepository(GalleryImage)
     private readonly imagesRepository: Repository<GalleryImage>,
     @InjectRepository(GalleryFolder)
     private readonly foldersRepository: Repository<GalleryFolder>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly uploadsService: UploadsService,
     private readonly moduleRef: ModuleRef,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.dataSource.query('CREATE EXTENSION IF NOT EXISTS unaccent');
+      await this.dataSource.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao preparar busca tolerante da galeria: ${
+          (error as Error).message
+        }`,
+      );
+    }
+  }
 
   private triggerEmbedding(image: GalleryImage): void {
     void (async () => {
@@ -60,6 +83,44 @@ export class GalleryService {
     })();
   }
 
+  private getFilenameExtension(filename: string): string {
+    const match = filename.match(/(\.[a-z0-9]+)$/i);
+    return match ? match[1] : '';
+  }
+
+  private buildFilenameWithPreservedExtension(currentFilename: string, nextFilename: string): string {
+    const extension = this.getFilenameExtension(currentFilename);
+    const trimmed = nextFilename.trim();
+
+    if (!trimmed) {
+      throw new BadRequestException({
+        code: 'INVALID_GALLERY_IMAGE_FILENAME',
+        message: 'Nome da imagem é obrigatório',
+      });
+    }
+
+    const inputExtension = this.getFilenameExtension(trimmed);
+    if (inputExtension && inputExtension.toLowerCase() !== extension.toLowerCase()) {
+      throw new BadRequestException({
+        code: 'GALLERY_IMAGE_EXTENSION_CHANGE_NOT_ALLOWED',
+        message: 'A extensão da imagem não pode ser alterada',
+      });
+    }
+
+    const baseName = (inputExtension ? trimmed.slice(0, -inputExtension.length) : trimmed)
+      .trim()
+      .replace(/[\\/]/g, '-');
+
+    if (!baseName) {
+      throw new BadRequestException({
+        code: 'INVALID_GALLERY_IMAGE_FILENAME',
+        message: 'Nome da imagem é obrigatório',
+      });
+    }
+
+    return `${baseName}${extension}`;
+  }
+
   async listImages(
     query: QueryGalleryDto,
   ): Promise<PaginationResult<GalleryImage>> {
@@ -68,8 +129,32 @@ export class GalleryService {
 
     const qb = this.imagesRepository.createQueryBuilder('image');
 
-    if (search) {
-      qb.where('image.filename LIKE :search', { search: `%${search}%` });
+    const normalizedSearch = search?.trim();
+    if (normalizedSearch) {
+      const searchableFilename = "unaccent(lower(image.filename))";
+      const searchableQuery = "unaccent(lower(:search))";
+      qb.andWhere(
+        new Brackets((where) => {
+          where
+            .where(`${searchableFilename} LIKE '%' || ${searchableQuery} || '%'`)
+            .orWhere(
+              `similarity(${searchableFilename}, ${searchableQuery}) >= :fuzzySearchThreshold`,
+            );
+        }),
+      )
+        .addSelect(
+          `CASE
+            WHEN ${searchableFilename} LIKE '%' || ${searchableQuery} || '%' THEN 0
+            ELSE 1
+          END`,
+          'gallery_search_rank',
+        )
+        .addSelect(
+          `similarity(${searchableFilename}, ${searchableQuery})`,
+          'gallery_search_similarity',
+        )
+        .setParameter('search', normalizedSearch)
+        .setParameter('fuzzySearchThreshold', this.fuzzySearchThreshold);
     }
 
     if (folderId === 'none') {
@@ -78,7 +163,16 @@ export class GalleryService {
       qb.andWhere('image.folderId = :folderId', { folderId });
     }
 
-    qb.orderBy('image.createdAt', 'DESC').skip(skip).take(limit);
+    if (normalizedSearch) {
+      qb
+        .orderBy('gallery_search_rank', 'ASC')
+        .addOrderBy('gallery_search_similarity', 'DESC')
+        .addOrderBy('image.createdAt', 'DESC');
+    } else {
+      qb.orderBy('image.createdAt', 'DESC');
+    }
+
+    qb.skip(skip).take(limit);
 
     const [items, total] = await qb.getManyAndCount();
     return paginate(items, total, { page, limit });
@@ -139,6 +233,27 @@ export class GalleryService {
     }
 
     await this.imagesRepository.remove(image);
+  }
+
+  async updateImage(id: string, dto: UpdateImageDto): Promise<GalleryImage> {
+    const image = await this.imagesRepository.findOne({ where: { id } });
+    if (!image) {
+      throw new NotFoundException({
+        code: 'GALLERY_IMAGE_NOT_FOUND',
+        message: 'Imagem não encontrada',
+      });
+    }
+
+    const nextFilename = this.buildFilenameWithPreservedExtension(
+      image.filename,
+      dto.filename,
+    );
+
+    image.filename = nextFilename;
+    const saved = await this.imagesRepository.save(image);
+    this.triggerEmbedding(saved);
+
+    return saved;
   }
 
   async deleteMany(dto: DeleteManyDto): Promise<{ success: boolean; deleted: number }> {
@@ -248,4 +363,3 @@ export class GalleryService {
     return { success: true };
   }
 }
-
