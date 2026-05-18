@@ -17,6 +17,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AiService } from './ai.service';
 import { GalleryEmbeddingService } from './gallery-embedding.service';
+import { SocialSectionLayoutService } from './social-section-layout.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { SpellCheckRequestDto } from './dto/spell-check-request.dto';
 import { ImageSearchRequestDto } from './dto/image-search-request.dto';
@@ -29,6 +30,7 @@ import { ProductCategorizationRequestDto } from './dto/product-categorization-re
 import { FlyerAssemblyPlanRequestDto } from './dto/flyer-assembly-plan-request.dto';
 import { ProductImageMatchRequestDto } from './dto/product-image-match-request.dto';
 import { ProductImageCandidatesRequestDto } from './dto/product-image-candidates-request.dto';
+import { SocialSectionLayoutRequestDto } from './dto/social-section-layout-request.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @ApiTags('AI')
@@ -41,6 +43,7 @@ export class AiController {
   constructor(
     private readonly aiService: AiService,
     private readonly galleryEmbeddingService: GalleryEmbeddingService,
+    private readonly socialSectionLayoutService: SocialSectionLayoutService,
     private readonly configService: ConfigService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
@@ -246,6 +249,32 @@ export class AiController {
         error: {
           code: 'IMAGE_DOWNLOAD_ERROR',
           message: 'Não foi possível salvar a imagem. Tente novamente.',
+        },
+      };
+    }
+  }
+
+  @Post('social-section-layout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Reorganiza elementos de header/footer da arte social a partir de uma instrução em linguagem natural',
+  })
+  @ApiResponse({ status: 200, description: 'Layout reorganizado com sucesso' })
+  async socialSectionLayout(@Body() dto: SocialSectionLayoutRequestDto) {
+    try {
+      const result = await this.socialSectionLayoutService.apply(dto);
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error('Erro ao aplicar layout via IA na seção social', error);
+      return {
+        success: false,
+        error: {
+          code: 'SOCIAL_SECTION_LAYOUT_ERROR',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Não foi possível reorganizar a seção. Tente reformular.',
         },
       };
     }

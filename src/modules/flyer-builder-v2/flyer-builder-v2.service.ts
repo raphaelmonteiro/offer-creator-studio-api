@@ -45,7 +45,7 @@ export class FlyerBuilderV2Service {
   async findAll(
     query: QueryFlyerBuilderV2DocumentDto,
   ): Promise<PaginationResult<FlyerBuilderV2Document>> {
-    const { page = 1, limit = 20, search, clientId } = query;
+    const { page = 1, limit = 20, search, clientId, kind } = query;
     const skip = (page - 1) * limit;
 
     const queryBuilder = this.documentRepository
@@ -58,6 +58,19 @@ export class FlyerBuilderV2Service {
 
     if (clientId) {
       queryBuilder.andWhere('document.clientId = :clientId', { clientId });
+    }
+
+    if (kind) {
+      // Filtra pelo campo `documentKind` dentro do JSON `document`.
+      // Documentos antigos não têm o campo — tratamos como 'flyer' (default).
+      if (kind === 'flyer') {
+        queryBuilder.andWhere(
+          "(document.document->>'documentKind' IS NULL OR document.document->>'documentKind' = :kind)",
+          { kind },
+        );
+      } else {
+        queryBuilder.andWhere("document.document->>'documentKind' = :kind", { kind });
+      }
     }
 
     queryBuilder.skip(skip).take(limit).orderBy('document.createdAt', 'DESC');

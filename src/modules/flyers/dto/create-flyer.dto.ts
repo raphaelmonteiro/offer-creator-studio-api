@@ -34,4 +34,15 @@ export class CreateFlyerDto {
   @IsOptional()
   @IsObject()
   customGridConfig?: any | null;
+
+  @ApiProperty({
+    required: false,
+    enum: ['flyer', 'social'],
+    default: 'flyer',
+    description: 'Tipo do documento. `flyer` para encartes impressos, `social` para artes de redes sociais.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['flyer', 'social'])
+  kind?: string;
 }

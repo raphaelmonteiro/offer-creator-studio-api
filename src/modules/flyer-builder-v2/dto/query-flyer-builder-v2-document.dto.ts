@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsOptional, IsString, IsUUID, Min, IsIn } from 'class-validator';
 
 export class QueryFlyerBuilderV2DocumentDto {
   @ApiPropertyOptional({ default: 1 })
@@ -24,5 +24,16 @@ export class QueryFlyerBuilderV2DocumentDto {
   @IsOptional()
   @IsUUID()
   clientId?: string;
+
+  /**
+   * Filtra por tipo de documento (lê `document->>'documentKind'` no JSONB).
+   * Valores aceitos: 'flyer' (encarte tradicional) ou 'social' (arte social).
+   * Omita para retornar todos.
+   */
+  @ApiPropertyOptional({ enum: ['flyer', 'social'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['flyer', 'social'])
+  kind?: string;
 }
 

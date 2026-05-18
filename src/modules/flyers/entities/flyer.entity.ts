@@ -30,6 +30,17 @@ export class Flyer {
   @Column({ type: 'varchar', length: 20, default: 'draft' })
   status: string;
 
+  /**
+   * Tipo de documento. Discrimina entre encarte impresso e arte para redes sociais.
+   * - `'flyer'` (default): encarte tradicional, listado em /flyers
+   * - `'social'`: arte social, listada em /social
+   *
+   * Adicionado para suportar o fluxo de criação de Social Media (V2).
+   * Default mantém compatibilidade com documentos existentes.
+   */
+  @Column({ type: 'varchar', length: 20, default: 'flyer' })
+  kind: string;
+
   @Column('jsonb')
   configuration: any;
 

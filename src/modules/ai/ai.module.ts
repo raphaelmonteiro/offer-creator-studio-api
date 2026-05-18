@@ -11,6 +11,7 @@ import { TemplateLayersGeneratorService } from './template-layers-generator.serv
 import { ProductCategorizationService } from './product-categorization.service';
 import { FlyerAssemblyPlanService } from './flyer-assembly-plan.service';
 import { GalleryEmbeddingService } from './gallery-embedding.service';
+import { SocialSectionLayoutService } from './social-section-layout.service';
 import { UploadsModule } from '../uploads/uploads.module';
 import { GalleryModule } from '../gallery/gallery.module';
 
@@ -29,6 +30,7 @@ import { GalleryModule } from '../gallery/gallery.module';
     ProductCategorizationService,
     FlyerAssemblyPlanService,
     GalleryEmbeddingService,
+    SocialSectionLayoutService,
     { provide: 'GalleryEmbeddingService', useExisting: GalleryEmbeddingService },
   ],
   exports: [GalleryEmbeddingService, 'GalleryEmbeddingService'],

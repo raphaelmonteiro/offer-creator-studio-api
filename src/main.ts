@@ -45,10 +45,23 @@ async function bootstrap() {
   // CORS
   app.enableCors();
 
-  // Serve static files
+  // Serve static files.
+  //
+  // CORS note: `app.enableCors()` above only registers a CORS middleware in
+  // front of NestJS routes — it doesn't apply to static assets served by
+  // express.static. Without these headers the browser still loads images for
+  // <img> tags, but `fetch(url)` and `<canvas>` reading them are blocked.
+  // The social media flow rasterizes uploaded assets into a final art via
+  // html-to-image (which uses canvas internally), so CORS on /uploads/* is
+  // mandatory there.
   const uploadPath = process.env.UPLOAD_DEST || './uploads';
   app.useStaticAssets(join(process.cwd(), uploadPath), {
     prefix: '/uploads/',
+    setHeaders: (res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    },
   });
 
   // Global exception filter

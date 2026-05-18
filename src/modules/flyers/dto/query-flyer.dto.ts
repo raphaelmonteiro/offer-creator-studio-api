@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString, IsNumber, Min, IsUUID, IsDateString } from 'class-validator';
+import { IsOptional, IsString, IsNumber, Min, IsUUID, IsDateString, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryFlyerDto {
@@ -34,4 +34,14 @@ export class QueryFlyerDto {
   @IsOptional()
   @IsDateString()
   endDate?: string;
+
+  @ApiProperty({
+    required: false,
+    enum: ['flyer', 'social'],
+    description: 'Filtra por tipo de documento. Omita para retornar todos.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['flyer', 'social'])
+  kind?: string;
 }

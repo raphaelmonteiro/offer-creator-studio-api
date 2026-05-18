@@ -38,6 +38,7 @@ export class FlyersService {
         clientId: createFlyerDto.clientId || null,
         configuration: createFlyerDto.configuration,
         status: 'draft',
+        kind: createFlyerDto.kind || 'flyer',
       });
 
       return await this.flyerRepository.save(flyer);
@@ -77,7 +78,7 @@ export class FlyersService {
   }
 
   async findAll(query: QueryFlyerDto): Promise<PaginationResult<Flyer>> {
-    const { page = 1, limit = 20, search, clientId, startDate, endDate } = query;
+    const { page = 1, limit = 20, search, clientId, startDate, endDate, kind } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -109,6 +110,10 @@ export class FlyersService {
 
     if (clientId) {
       queryBuilder.andWhere('flyer.clientId = :clientId', { clientId });
+    }
+
+    if (kind) {
+      queryBuilder.andWhere('flyer.kind = :kind', { kind });
     }
 
     if (startDate || endDate) {
