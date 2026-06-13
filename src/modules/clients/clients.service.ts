@@ -37,6 +37,11 @@ export class ClientsService {
       name: createClientDto.name,
       cnpj: createClientDto.cnpj,
       logoUrl: createClientDto.logoUrl || null,
+      email: createClientDto.email ?? null,
+      address: createClientDto.address ?? null,
+      phoneFixed: createClientDto.phoneFixed ?? null,
+      phoneMobile: createClientDto.phoneMobile ?? null,
+      footer: createClientDto.footer ?? null,
     });
 
     const savedClient = await this.clientRepository.save(client);
@@ -124,6 +129,26 @@ export class ClientsService {
 
     if (updateClientDto.logoUrl !== undefined) {
       client.logoUrl = updateClientDto.logoUrl;
+    }
+
+    if (updateClientDto.email !== undefined) {
+      client.email = updateClientDto.email;
+    }
+
+    if (updateClientDto.address !== undefined) {
+      client.address = updateClientDto.address;
+    }
+
+    if (updateClientDto.phoneFixed !== undefined) {
+      client.phoneFixed = updateClientDto.phoneFixed;
+    }
+
+    if (updateClientDto.phoneMobile !== undefined) {
+      client.phoneMobile = updateClientDto.phoneMobile;
+    }
+
+    if (updateClientDto.footer !== undefined) {
+      client.footer = updateClientDto.footer;
     }
 
     await this.clientRepository.save(client);
