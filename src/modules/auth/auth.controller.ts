@@ -122,10 +122,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Atualiza os dados do usuário logado' })
   @ApiResponse({ status: 200, description: 'Perfil atualizado com sucesso' })
   @ApiResponse({ status: 401, description: 'Não autenticado' })
-  async updateProfile(
-    @CurrentUser() user: any,
-    @Body() updateProfileDto: UpdateProfileDto,
-  ) {
+  async updateProfile(@CurrentUser() user: any, @Body() updateProfileDto: UpdateProfileDto) {
     return this.authService.updateProfile(user.id, updateProfileDto);
   }
 

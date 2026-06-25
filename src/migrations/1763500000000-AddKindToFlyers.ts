@@ -13,9 +13,7 @@ export class AddKindToFlyers1763500000000 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE "flyers" ADD COLUMN IF NOT EXISTS "kind" varchar(20) NOT NULL DEFAULT 'flyer'`,
     );
-    await queryRunner.query(
-      `CREATE INDEX IF NOT EXISTS "IDX_flyers_kind" ON "flyers" ("kind")`,
-    );
+    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_flyers_kind" ON "flyers" ("kind")`);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

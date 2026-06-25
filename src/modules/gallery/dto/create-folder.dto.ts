@@ -11,4 +11,3 @@ export class CreateFolderDto {
   @IsString()
   color?: string;
 }
-

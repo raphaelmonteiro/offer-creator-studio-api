@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Post,
-  UseGuards,
-  UseInterceptors,
-  UploadedFile,
-  Body,
-} from '@nestjs/common';
+import { Controller, Post, UseGuards, UseInterceptors, UploadedFile, Body } from '@nestjs/common';
 import { createFileInterceptor } from '../../common/utils/multer.util';
 import {
   ApiTags,
@@ -49,10 +42,7 @@ export class UploadsController {
   })
   @ApiOperation({ summary: 'Upload genérico de arquivos' })
   @ApiResponse({ status: 200, description: 'Arquivo enviado com sucesso' })
-  async uploadFile(
-    @UploadedFile() file: Express.Multer.File,
-    @Body() uploadDto: UploadDto,
-  ) {
+  async uploadFile(@UploadedFile() file: Express.Multer.File, @Body() uploadDto: UploadDto) {
     return this.uploadsService.uploadFile(file, uploadDto.folder || 'general');
   }
 }

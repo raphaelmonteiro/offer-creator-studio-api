@@ -7,4 +7,3 @@ export class UploadGalleryDto {
   @IsUUID()
   folderId?: string | null;
 }
-

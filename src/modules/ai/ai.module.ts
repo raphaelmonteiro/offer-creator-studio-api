@@ -12,8 +12,13 @@ import { ProductCategorizationService } from './product-categorization.service';
 import { FlyerAssemblyPlanService } from './flyer-assembly-plan.service';
 import { GalleryEmbeddingService } from './gallery-embedding.service';
 import { SocialSectionLayoutService } from './social-section-layout.service';
+import { BackgroundRemovalService } from './background-removal.service';
 import { UploadsModule } from '../uploads/uploads.module';
 import { GalleryModule } from '../gallery/gallery.module';
+import { TaxonomyService } from './metadata/taxonomy/taxonomy.service';
+import { ImageMetadataService } from './metadata/image-metadata.service';
+import { ProductNameParserService } from './metadata/product-name-parser.service';
+import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.service';
 
 @Module({
   imports: [UploadsModule, GalleryModule],
@@ -31,8 +36,14 @@ import { GalleryModule } from '../gallery/gallery.module';
     FlyerAssemblyPlanService,
     GalleryEmbeddingService,
     SocialSectionLayoutService,
+    BackgroundRemovalService,
+    TaxonomyService,
+    ImageMetadataService,
+    ProductNameParserService,
+    ProductImageMatchV2Service,
     { provide: 'GalleryEmbeddingService', useExisting: GalleryEmbeddingService },
+    { provide: 'ImageMetadataService', useExisting: ImageMetadataService },
   ],
-  exports: [GalleryEmbeddingService, 'GalleryEmbeddingService'],
+  exports: [GalleryEmbeddingService, 'GalleryEmbeddingService', 'ImageMetadataService'],
 })
 export class AiModule {}

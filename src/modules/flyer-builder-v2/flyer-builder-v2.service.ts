@@ -38,7 +38,11 @@ export class FlyerBuilderV2Service {
 
       return await this.documentRepository.save(document);
     } catch (error) {
-      this.handlePersistenceError(error, 'FLYER_BUILDER_V2_CREATION_ERROR', 'Erro ao criar documento V2');
+      this.handlePersistenceError(
+        error,
+        'FLYER_BUILDER_V2_CREATION_ERROR',
+        'Erro ao criar documento V2',
+      );
     }
   }
 
@@ -127,7 +131,11 @@ export class FlyerBuilderV2Service {
 
       return await this.documentRepository.save(existing);
     } catch (error) {
-      this.handlePersistenceError(error, 'FLYER_BUILDER_V2_UPDATE_ERROR', 'Erro ao atualizar documento V2');
+      this.handlePersistenceError(
+        error,
+        'FLYER_BUILDER_V2_UPDATE_ERROR',
+        'Erro ao atualizar documento V2',
+      );
     }
   }
 
@@ -176,8 +184,8 @@ export class FlyerBuilderV2Service {
     throw new InternalServerErrorException({
       code,
       message,
-      details: process.env.NODE_ENV !== 'production' && error instanceof Error ? error.message : undefined,
+      details:
+        process.env.NODE_ENV !== 'production' && error instanceof Error ? error.message : undefined,
     });
   }
 }
-

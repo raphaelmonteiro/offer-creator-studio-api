@@ -169,7 +169,9 @@ export class FlyerAssemblyProductDto {
   @IsString()
   offerBadge?: string;
 
-  @ApiPropertyOptional({ enum: ['hero', 'featured', 'category-grid', 'dense-grid', 'strip', 'campaign-panel', 'loose'] })
+  @ApiPropertyOptional({
+    enum: ['hero', 'featured', 'category-grid', 'dense-grid', 'strip', 'campaign-panel', 'loose'],
+  })
   @IsOptional()
   @IsIn(['hero', 'featured', 'category-grid', 'dense-grid', 'strip', 'campaign-panel', 'loose'])
   preferredZone?: FlyerAssemblyZoneType;
@@ -199,11 +201,23 @@ export class FlyerAssemblyOptionsDto {
   layoutDensity?: FlyerAssemblyLayoutDensity;
 
   @ApiPropertyOptional({
-    enum: ['auto', 'vertical-hero-grid', 'vertical-dense-catalog', 'horizontal-day-panels', 'horizontal-price-campaign'],
+    enum: [
+      'auto',
+      'vertical-hero-grid',
+      'vertical-dense-catalog',
+      'horizontal-day-panels',
+      'horizontal-price-campaign',
+    ],
     default: 'auto',
   })
   @IsOptional()
-  @IsIn(['auto', 'vertical-hero-grid', 'vertical-dense-catalog', 'horizontal-day-panels', 'horizontal-price-campaign'])
+  @IsIn([
+    'auto',
+    'vertical-hero-grid',
+    'vertical-dense-catalog',
+    'horizontal-day-panels',
+    'horizontal-price-campaign',
+  ])
   recipeId?: FlyerAssemblyRecipeId;
 }
 

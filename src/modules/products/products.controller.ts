@@ -97,10 +97,7 @@ export class ProductsController {
   })
   @ApiOperation({ summary: 'Upload da imagem do produto' })
   @ApiResponse({ status: 200, description: 'Imagem enviada com sucesso' })
-  async uploadImage(
-    @Param('id') id: string,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
+  async uploadImage(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
     const upload = await this.uploadsService.uploadFile(file, 'products');
     const product = await this.productsService.updateImage(id, upload.url);
     return { imageUrl: product.imageUrl };

@@ -4,10 +4,7 @@ import OpenAI from 'openai';
 import { SpellCheckProductDto } from './dto/spell-check-request.dto';
 import { CorrectionDto, SpellCheckResponseDto } from './dto/spell-check-response.dto';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
-import {
-  AI_RESPONSE_FORMATS,
-  parseSpellCheckResponse,
-} from './schemas/ai-response.schemas';
+import { AI_RESPONSE_FORMATS, parseSpellCheckResponse } from './schemas/ai-response.schemas';
 import { SPELLCHECK_SYSTEM_PROMPT } from './prompts/spellcheck.prompts';
 import { withAiLogging } from './utils/ai-telemetry.util';
 

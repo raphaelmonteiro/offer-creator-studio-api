@@ -26,6 +26,14 @@ interface EmbeddingTrigger {
     filename: string,
     folderName?: string | null,
   ) => Promise<boolean>;
+  setMetadataStatus?: (imageId: string, status: 'pending' | 'ready' | 'failed') => Promise<void>;
+  saveImageMetadata?: (imageId: string, metadata: unknown) => Promise<void>;
+  embedAndStoreMetadataForImage?: (imageId: string, metadata: unknown) => Promise<boolean>;
+}
+
+interface MetadataExtractor {
+  isEnabled: () => boolean;
+  extractFromImage: (url: string) => Promise<unknown>;
 }
 
 @Injectable()
@@ -48,21 +56,43 @@ export class GalleryService implements OnModuleInit {
       await this.dataSource.query('CREATE EXTENSION IF NOT EXISTS unaccent');
       await this.dataSource.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
     } catch (error) {
-      this.logger.warn(
-        `Falha ao preparar busca tolerante da galeria: ${
-          (error as Error).message
-        }`,
-      );
+      this.logger.warn(`Falha ao preparar busca tolerante da galeria: ${(error as Error).message}`);
+    }
+
+    try {
+      await this.dataSource.query(`
+        CREATE TABLE IF NOT EXISTS gallery_folders (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          name varchar NOT NULL,
+          color varchar,
+          "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+          "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+        )
+      `);
+      await this.dataSource.query(`
+        CREATE TABLE IF NOT EXISTS gallery_images (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          filename varchar NOT NULL,
+          url varchar NOT NULL,
+          "thumbnailUrl" varchar,
+          "mimeType" varchar NOT NULL,
+          size bigint NOT NULL,
+          "folderId" uuid REFERENCES gallery_folders(id) ON DELETE SET NULL,
+          "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+          "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
+        )
+      `);
+    } catch (error) {
+      this.logger.error(`Falha ao garantir schema da galeria: ${(error as Error).message}`);
     }
   }
 
   private triggerEmbedding(image: GalleryImage): void {
     void (async () => {
       try {
-        const embedder = this.moduleRef.get<EmbeddingTrigger>(
-          'GalleryEmbeddingService',
-          { strict: false },
-        );
+        const embedder = this.moduleRef.get<EmbeddingTrigger>('GalleryEmbeddingService', {
+          strict: false,
+        });
         if (!embedder) return;
         let folderName: string | null = null;
         if (image.folderId) {
@@ -75,10 +105,54 @@ export class GalleryService implements OnModuleInit {
         await embedder.embedAndStoreForImage(image.id, image.filename, folderName);
       } catch (error) {
         this.logger.warn(
-          `Falha ao gerar embedding para imagem ${image.id}: ${
-            (error as Error).message
-          }`,
+          `Falha ao gerar embedding para imagem ${image.id}: ${(error as Error).message}`,
         );
+      }
+    })();
+  }
+
+  private triggerMetadata(image: GalleryImage): void {
+    void (async () => {
+      let embedder: EmbeddingTrigger | null = null;
+      try {
+        embedder = this.moduleRef.get<EmbeddingTrigger>('GalleryEmbeddingService', {
+          strict: false,
+        });
+      } catch {
+        embedder = null;
+      }
+
+      let extractor: MetadataExtractor | null = null;
+      try {
+        extractor = this.moduleRef.get<MetadataExtractor>('ImageMetadataService', {
+          strict: false,
+        });
+      } catch {
+        extractor = null;
+      }
+
+      if (!extractor || !extractor.isEnabled()) {
+        return;
+      }
+
+      try {
+        await embedder?.setMetadataStatus?.(image.id, 'pending');
+        const metadata = await extractor.extractFromImage(image.url);
+        if (!metadata) {
+          await embedder?.setMetadataStatus?.(image.id, 'failed');
+          return;
+        }
+        await embedder?.saveImageMetadata?.(image.id, metadata);
+        await embedder?.embedAndStoreMetadataForImage?.(image.id, metadata);
+      } catch (error) {
+        this.logger.warn(
+          `Falha ao extrair metadata da imagem ${image.id}: ${(error as Error).message}`,
+        );
+        try {
+          await embedder?.setMetadataStatus?.(image.id, 'failed');
+        } catch {
+          /* swallow */
+        }
       }
     })();
   }
@@ -88,7 +162,10 @@ export class GalleryService implements OnModuleInit {
     return match ? match[1] : '';
   }
 
-  private buildFilenameWithPreservedExtension(currentFilename: string, nextFilename: string): string {
+  private buildFilenameWithPreservedExtension(
+    currentFilename: string,
+    nextFilename: string,
+  ): string {
     const extension = this.getFilenameExtension(currentFilename);
     const trimmed = nextFilename.trim();
 
@@ -121,9 +198,7 @@ export class GalleryService implements OnModuleInit {
     return `${baseName}${extension}`;
   }
 
-  async listImages(
-    query: QueryGalleryDto,
-  ): Promise<PaginationResult<GalleryImage>> {
+  async listImages(query: QueryGalleryDto): Promise<PaginationResult<GalleryImage>> {
     const { page = 1, limit = 20, search, folderId } = query;
     const skip = (page - 1) * limit;
 
@@ -131,8 +206,8 @@ export class GalleryService implements OnModuleInit {
 
     const normalizedSearch = search?.trim();
     if (normalizedSearch) {
-      const searchableFilename = "unaccent(lower(image.filename))";
-      const searchableQuery = "unaccent(lower(:search))";
+      const searchableFilename = 'unaccent(lower(image.filename))';
+      const searchableQuery = 'unaccent(lower(:search))';
       qb.andWhere(
         new Brackets((where) => {
           where
@@ -164,8 +239,7 @@ export class GalleryService implements OnModuleInit {
     }
 
     if (normalizedSearch) {
-      qb
-        .orderBy('gallery_search_rank', 'ASC')
+      qb.orderBy('gallery_search_rank', 'ASC')
         .addOrderBy('gallery_search_similarity', 'DESC')
         .addOrderBy('image.createdAt', 'DESC');
     } else {
@@ -194,6 +268,7 @@ export class GalleryService implements OnModuleInit {
     });
     const saved = await this.imagesRepository.save(image);
     this.triggerEmbedding(saved);
+    this.triggerMetadata(saved);
     return saved;
   }
 
@@ -217,6 +292,7 @@ export class GalleryService implements OnModuleInit {
 
       const saved = await this.imagesRepository.save(image);
       this.triggerEmbedding(saved);
+      this.triggerMetadata(saved);
       images.push(saved);
     }
 
@@ -244,14 +320,12 @@ export class GalleryService implements OnModuleInit {
       });
     }
 
-    const nextFilename = this.buildFilenameWithPreservedExtension(
-      image.filename,
-      dto.filename,
-    );
+    const nextFilename = this.buildFilenameWithPreservedExtension(image.filename, dto.filename);
 
     image.filename = nextFilename;
     const saved = await this.imagesRepository.save(image);
     this.triggerEmbedding(saved);
+    this.triggerMetadata(saved);
 
     return saved;
   }
@@ -264,9 +338,7 @@ export class GalleryService implements OnModuleInit {
     };
   }
 
-  async moveImages(
-    dto: MoveImagesDto,
-  ): Promise<{ success: boolean; moved: number }> {
+  async moveImages(dto: MoveImagesDto): Promise<{ success: boolean; moved: number }> {
     const { imageIds, folderId } = dto;
     await this.imagesRepository
       .createQueryBuilder()
@@ -281,9 +353,7 @@ export class GalleryService implements OnModuleInit {
     };
   }
 
-  async listFolders(): Promise<
-    Array<GalleryFolder & { imageCount: number }>
-  > {
+  async listFolders(): Promise<Array<GalleryFolder & { imageCount: number }>> {
     const folders = await this.foldersRepository.find();
 
     const counts = await this.imagesRepository

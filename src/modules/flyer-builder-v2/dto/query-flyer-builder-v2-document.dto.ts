@@ -36,4 +36,3 @@ export class QueryFlyerBuilderV2DocumentDto {
   @IsIn(['flyer', 'social'])
   kind?: string;
 }
-

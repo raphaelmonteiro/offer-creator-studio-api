@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, Between } from 'typeorm';
 import { Product } from './entities/product.entity';
@@ -65,10 +61,9 @@ export class ProductsService {
     queryBuilder.where('product.active = :active', { active: true });
 
     if (search) {
-      queryBuilder.andWhere(
-        '(product.name LIKE :search OR product.sku LIKE :search)',
-        { search: `%${search}%` },
-      );
+      queryBuilder.andWhere('(product.name LIKE :search OR product.sku LIKE :search)', {
+        search: `%${search}%`,
+      });
     }
 
     if (category) {

@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
@@ -12,7 +8,10 @@ import { QueryCollaboratorDto } from './dto/query-collaborator.dto';
 import { paginate, PaginationResult } from '../../common/utils/pagination.util';
 
 // Tipo para retornar usuário sem password e métodos
-type UserWithoutPassword = Omit<User, 'password' | 'hashPassword' | 'hashPasswordIfChanged' | 'validatePassword'>;
+type UserWithoutPassword = Omit<
+  User,
+  'password' | 'hashPassword' | 'hashPasswordIfChanged' | 'validatePassword'
+>;
 
 @Injectable()
 export class CollaboratorsService {
@@ -39,7 +38,7 @@ export class CollaboratorsService {
       emailVerified: false,
     });
     const savedUser = await this.userRepository.save(user);
-    
+
     // Remove password do resultado
     const { password, ...userWithoutPassword } = savedUser;
     return userWithoutPassword;
@@ -52,10 +51,9 @@ export class CollaboratorsService {
     const queryBuilder = this.userRepository.createQueryBuilder('user');
 
     if (search) {
-      queryBuilder.where(
-        '(user.name LIKE :search OR user.email LIKE :search)',
-        { search: `%${search}%` },
-      );
+      queryBuilder.where('(user.name LIKE :search OR user.email LIKE :search)', {
+        search: `%${search}%`,
+      });
     }
 
     if (role) {
@@ -119,7 +117,7 @@ export class CollaboratorsService {
 
     Object.assign(user, updateCollaboratorDto);
     const updatedUser = await this.userRepository.save(user);
-    
+
     // Remove password do resultado
     const { password, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword;
@@ -154,7 +152,7 @@ export class CollaboratorsService {
 
     user.avatarUrl = avatarUrl;
     const updatedUser = await this.userRepository.save(user);
-    
+
     // Remove password do resultado
     const { password, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword;

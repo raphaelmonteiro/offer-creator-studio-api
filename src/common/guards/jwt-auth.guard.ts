@@ -23,10 +23,13 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
   handleRequest(err: any, user: any, info: any) {
     if (err || !user) {
-      throw err || new UnauthorizedException({
-        code: 'UNAUTHORIZED',
-        message: info?.message || 'Token inválido ou expirado',
-      });
+      throw (
+        err ||
+        new UnauthorizedException({
+          code: 'UNAUTHORIZED',
+          message: info?.message || 'Token inválido ou expirado',
+        })
+      );
     }
     return user;
   }

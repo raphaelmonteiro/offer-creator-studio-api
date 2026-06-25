@@ -87,9 +87,7 @@ export class SocialSectionLayoutService {
    *   - content/src/id/type are NEVER copied into the patch (frontend
    *     would refuse to apply them, but we strip just in case).
    */
-  async apply(
-    request: SocialSectionLayoutRequestDto,
-  ): Promise<SocialSectionLayoutResponse> {
+  async apply(request: SocialSectionLayoutRequestDto): Promise<SocialSectionLayoutResponse> {
     if (!this.openai) {
       throw new BadRequestException({
         code: 'AI_NOT_CONFIGURED',
@@ -238,7 +236,11 @@ export class SocialSectionLayoutService {
       if (typeof patch.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(patch.color)) {
         out.color = patch.color;
       }
-      if (patch.textAlign === 'left' || patch.textAlign === 'center' || patch.textAlign === 'right') {
+      if (
+        patch.textAlign === 'left' ||
+        patch.textAlign === 'center' ||
+        patch.textAlign === 'right'
+      ) {
         out.textAlign = patch.textAlign;
       }
       if (

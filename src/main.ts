@@ -14,16 +14,16 @@ async function bootstrap() {
 
   // Register body parsers manually with conditional logic
   const bodyParser = require('body-parser');
-  
+
   // JSON body parser - skip for multipart requests
   app.use((req: any, res: any, next: any) => {
     const contentType = req.headers['content-type'] || '';
-    
+
     if (contentType.includes('multipart/form-data')) {
       // Skip body parsing for multipart - FileInterceptor will handle it
       return next();
     }
-    
+
     // Apply JSON parser for non-multipart requests
     bodyParser.json({ limit: '100mb' })(req, res, next);
   });
@@ -31,11 +31,11 @@ async function bootstrap() {
   // URL encoded body parser - skip for multipart requests
   app.use((req: any, res: any, next: any) => {
     const contentType = req.headers['content-type'] || '';
-    
+
     if (contentType.includes('multipart/form-data')) {
       return next();
     }
-    
+
     bodyParser.urlencoded({ limit: '100mb', extended: true })(req, res, next);
   });
 

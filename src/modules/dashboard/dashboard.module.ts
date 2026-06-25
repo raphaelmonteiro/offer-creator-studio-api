@@ -8,9 +8,7 @@ import { Product } from '../products/entities/product.entity';
 import { Template } from '../templates/entities/template.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Flyer, Client, Product, Template]),
-  ],
+  imports: [TypeOrmModule.forFeature([Flyer, Client, Product, Template])],
   controllers: [DashboardController],
   providers: [DashboardService],
 })

@@ -50,7 +50,11 @@ export class UpdateProfileDto {
   @IsString()
   cpfCnpj?: string;
 
-  @ApiProperty({ required: false, nullable: true, example: 'https://cdn.exemplo.com/avatars/user.jpg' })
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    example: 'https://cdn.exemplo.com/avatars/user.jpg',
+  })
   @IsOptional()
   @IsString()
   avatarUrl?: string | null;

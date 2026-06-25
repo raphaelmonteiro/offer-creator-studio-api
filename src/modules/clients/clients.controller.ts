@@ -97,10 +97,7 @@ export class ClientsController {
   })
   @ApiOperation({ summary: 'Upload do logo do cliente' })
   @ApiResponse({ status: 200, description: 'Logo enviado com sucesso' })
-  async uploadLogo(
-    @Param('id') id: string,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
+  async uploadLogo(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
     const upload = await this.uploadsService.uploadFile(file, 'logos');
     const client = await this.clientsService.updateLogo(id, upload.url);
     return { logoUrl: client.logoUrl };

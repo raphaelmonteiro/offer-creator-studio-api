@@ -1,10 +1,4 @@
-import {
-  ExceptionFilter,
-  Catch,
-  ArgumentsHost,
-  HttpException,
-  HttpStatus,
-} from '@nestjs/common';
+import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import { Response } from 'express';
 
 @Catch()
@@ -57,10 +51,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
     } else if (exception instanceof Error) {
       // Handle database errors and other unhandled errors
       const errorMessage = exception.message;
-      
+
       // Check if this is a multipart/form-data JSON parsing error
       if (
-        errorMessage.includes("Unexpected token '-', \"------WebK\"") ||
+        errorMessage.includes('Unexpected token \'-\', "------WebK"') ||
         errorMessage.includes('is not valid JSON') ||
         (errorMessage.includes('Unexpected token') && errorMessage.includes('------WebK'))
       ) {
@@ -71,12 +65,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
           success: false,
           error: {
             code: 'MULTIPART_VALIDATION_ERROR',
-            message: 'Erro ao processar requisição multipart. Certifique-se de usar multipart/form-data.',
+            message:
+              'Erro ao processar requisição multipart. Certifique-se de usar multipart/form-data.',
             details: process.env.NODE_ENV !== 'production' ? errorMessage : undefined,
           },
         };
         status = HttpStatus.BAD_REQUEST;
-      } else if (errorMessage.includes('value too long') || errorMessage.includes('exceeds maximum')) {
+      } else if (
+        errorMessage.includes('value too long') ||
+        errorMessage.includes('exceeds maximum')
+      ) {
         errorResponse = {
           success: false,
           error: {

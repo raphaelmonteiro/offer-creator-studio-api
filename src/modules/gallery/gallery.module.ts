@@ -13,4 +13,3 @@ import { UploadsModule } from '../uploads/uploads.module';
   exports: [GalleryService],
 })
 export class GalleryModule {}
-

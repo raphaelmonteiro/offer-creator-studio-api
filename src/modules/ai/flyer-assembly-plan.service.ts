@@ -25,11 +25,7 @@ import { withAiLogging } from './utils/ai-telemetry.util';
 const DEFAULT_MAX_PRODUCTS = 300;
 const DEFAULT_MAX_PRODUCTS_PER_PAGE = 36;
 const DEFAULT_CATEGORY = 'Sem categoria';
-const ALLOWED_LAYOUTS: FlyerAssemblySectionLayout[] = [
-  'balanced-grid',
-  'dense-grid',
-  'hero-grid',
-];
+const ALLOWED_LAYOUTS: FlyerAssemblySectionLayout[] = ['balanced-grid', 'dense-grid', 'hero-grid'];
 const COMMERCIAL_CATEGORY_ORDER = [
   'Hortifruti',
   'Carnes',
@@ -400,8 +396,7 @@ export class FlyerAssemblyPlanService {
     const density = dto.options?.layoutDensity || 'balanced';
     return {
       maxProductsPerPage:
-        dto.options?.maxProductsPerPage ||
-        this.getDefaultProductsPerPageForDensity(density),
+        dto.options?.maxProductsPerPage || this.getDefaultProductsPerPageForDensity(density),
       allowMultiplePages: dto.options?.allowMultiplePages !== false,
       preserveCategorySections: dto.options?.preserveCategorySections !== false,
       layoutDensity: density,

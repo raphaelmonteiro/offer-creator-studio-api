@@ -39,10 +39,12 @@ export class GalleryImage {
   @JoinColumn({ name: 'folderId' })
   folder: GalleryFolder | null;
 
+  @Column({ name: 'metadata_status', type: 'varchar', length: 16, nullable: true })
+  metadataStatus: 'pending' | 'ready' | 'failed' | null;
+
   @CreateDateColumn()
   createdAt: Date;
 
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

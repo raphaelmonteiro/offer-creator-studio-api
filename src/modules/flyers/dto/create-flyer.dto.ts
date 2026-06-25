@@ -39,7 +39,8 @@ export class CreateFlyerDto {
     required: false,
     enum: ['flyer', 'social'],
     default: 'flyer',
-    description: 'Tipo do documento. `flyer` para encartes impressos, `social` para artes de redes sociais.',
+    description:
+      'Tipo do documento. `flyer` para encartes impressos, `social` para artes de redes sociais.',
   })
   @IsOptional()
   @IsString()

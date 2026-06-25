@@ -20,12 +20,7 @@ export class DashboardService {
   ) {}
 
   async getStats() {
-    const [
-      totalFlyers,
-      totalClients,
-      totalProducts,
-      totalTemplates,
-    ] = await Promise.all([
+    const [totalFlyers, totalClients, totalProducts, totalTemplates] = await Promise.all([
       this.flyerRepository.count(),
       this.clientRepository.count(),
       this.productRepository.count(),

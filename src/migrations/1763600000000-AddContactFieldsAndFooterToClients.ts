@@ -7,27 +7,15 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *
  * All columns are nullable → existing rows stay compatible.
  */
-export class AddContactFieldsAndFooterToClients1763600000000
-  implements MigrationInterface
-{
+export class AddContactFieldsAndFooterToClients1763600000000 implements MigrationInterface {
   name = 'AddContactFieldsAndFooterToClients1763600000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "email" varchar`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "address" varchar`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "phoneFixed" varchar`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "phoneMobile" varchar`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "footer" jsonb`,
-    );
+    await queryRunner.query(`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "email" varchar`);
+    await queryRunner.query(`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "address" varchar`);
+    await queryRunner.query(`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "phoneFixed" varchar`);
+    await queryRunner.query(`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "phoneMobile" varchar`);
+    await queryRunner.query(`ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "footer" jsonb`);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

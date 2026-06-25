@@ -7,11 +7,7 @@ import { UploadsModule } from '../uploads/uploads.module';
 import { ClientsModule } from '../clients/clients.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Flyer]),
-    UploadsModule,
-    ClientsModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Flyer]), UploadsModule, ClientsModule],
   controllers: [FlyersController],
   providers: [FlyersService],
   exports: [FlyersService],

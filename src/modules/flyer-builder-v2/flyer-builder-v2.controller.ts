@@ -11,12 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { FlyerBuilderV2Service } from './flyer-builder-v2.service';
 import { CreateFlyerBuilderV2DocumentDto } from './dto/create-flyer-builder-v2-document.dto';
@@ -69,4 +64,3 @@ export class FlyerBuilderV2Controller {
     }));
   }
 }
-

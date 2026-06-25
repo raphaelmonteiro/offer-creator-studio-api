@@ -6,10 +6,7 @@ import { Template } from './entities/template.entity';
 import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Template]),
-    UploadsModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Template]), UploadsModule],
   controllers: [TemplatesController],
   providers: [TemplatesService],
   exports: [TemplatesService],

@@ -1,11 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsString,
-  IsEmail,
-  IsOptional,
-  IsEnum,
-  MinLength,
-} from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsEnum, MinLength } from 'class-validator';
 
 export enum CollaboratorRole {
   COLLABORATOR = 'collaborator',

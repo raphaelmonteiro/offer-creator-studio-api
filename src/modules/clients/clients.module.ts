@@ -7,10 +7,7 @@ import { ClientContact } from './entities/client-contact.entity';
 import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Client, ClientContact]),
-    UploadsModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Client, ClientContact]), UploadsModule],
   controllers: [ClientsController],
   providers: [ClientsService],
   exports: [ClientsService, TypeOrmModule],

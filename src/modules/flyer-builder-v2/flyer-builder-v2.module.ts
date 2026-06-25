@@ -12,4 +12,3 @@ import { ClientsModule } from '../clients/clients.module';
   exports: [FlyerBuilderV2Service],
 })
 export class FlyerBuilderV2Module {}
-

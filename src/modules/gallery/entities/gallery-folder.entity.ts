@@ -28,4 +28,3 @@ export class GalleryFolder {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

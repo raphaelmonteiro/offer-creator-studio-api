@@ -28,4 +28,3 @@ export class QueryGalleryDto {
   @IsString()
   folderId?: string;
 }
-
