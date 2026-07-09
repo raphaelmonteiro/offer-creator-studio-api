@@ -25,7 +25,7 @@ export class FlyersService {
       // Validate configuration size
       const configSize = JSON.stringify(createFlyerDto.configuration).length;
       const maxSize = 10 * 1024 * 1024; // 10MB
-      
+
       if (configSize > maxSize) {
         throw new BadRequestException({
           code: 'CONFIGURATION_TOO_LARGE',
@@ -46,19 +46,20 @@ export class FlyersService {
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
+
       // Handle database errors
       if (error instanceof Error) {
         const errorMessage = error.message.toLowerCase();
-        
+
         if (errorMessage.includes('value too long') || errorMessage.includes('exceeds maximum')) {
           throw new BadRequestException({
             code: 'PAYLOAD_TOO_LARGE',
-            message: 'O payload é muito grande. Tente reduzir o tamanho das imagens base64 ou usar URLs de imagens.',
+            message:
+              'O payload é muito grande. Tente reduzir o tamanho das imagens base64 ou usar URLs de imagens.',
             details: process.env.NODE_ENV !== 'production' ? error.message : undefined,
           });
         }
-        
+
         if (errorMessage.includes('invalid input syntax') || errorMessage.includes('json')) {
           throw new BadRequestException({
             code: 'INVALID_JSON',
@@ -67,12 +68,17 @@ export class FlyersService {
           });
         }
       }
-      
+
       // Re-throw as internal server error with more context
       throw new InternalServerErrorException({
         code: 'FLYER_CREATION_ERROR',
         message: 'Erro ao criar encarte',
-        details: process.env.NODE_ENV !== 'production' ? (error instanceof Error ? error.message : String(error)) : undefined,
+        details:
+          process.env.NODE_ENV !== 'production'
+            ? error instanceof Error
+              ? error.message
+              : String(error)
+            : undefined,
       });
     }
   }
@@ -101,7 +107,8 @@ export class FlyersService {
       }
     }
 
-    const queryBuilder = this.flyerRepository.createQueryBuilder('flyer')
+    const queryBuilder = this.flyerRepository
+      .createQueryBuilder('flyer')
       .leftJoinAndSelect('flyer.client', 'client');
 
     if (search) {
@@ -178,7 +185,7 @@ export class FlyersService {
       if (updateFlyerDto.configuration) {
         const configSize = JSON.stringify(updateFlyerDto.configuration).length;
         const maxSize = 10 * 1024 * 1024; // 10MB
-        
+
         if (configSize > maxSize) {
           throw new BadRequestException({
             code: 'CONFIGURATION_TOO_LARGE',
@@ -193,19 +200,20 @@ export class FlyersService {
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
+
       // Handle database errors
       if (error instanceof Error) {
         const errorMessage = error.message.toLowerCase();
-        
+
         if (errorMessage.includes('value too long') || errorMessage.includes('exceeds maximum')) {
           throw new BadRequestException({
             code: 'PAYLOAD_TOO_LARGE',
-            message: 'O payload é muito grande. Tente reduzir o tamanho das imagens base64 ou usar URLs de imagens.',
+            message:
+              'O payload é muito grande. Tente reduzir o tamanho das imagens base64 ou usar URLs de imagens.',
             details: process.env.NODE_ENV !== 'production' ? error.message : undefined,
           });
         }
-        
+
         if (errorMessage.includes('invalid input syntax') || errorMessage.includes('json')) {
           throw new BadRequestException({
             code: 'INVALID_JSON',
@@ -214,11 +222,16 @@ export class FlyersService {
           });
         }
       }
-      
+
       throw new InternalServerErrorException({
         code: 'FLYER_UPDATE_ERROR',
         message: 'Erro ao atualizar encarte',
-        details: process.env.NODE_ENV !== 'production' ? (error instanceof Error ? error.message : String(error)) : undefined,
+        details:
+          process.env.NODE_ENV !== 'production'
+            ? error instanceof Error
+              ? error.message
+              : String(error)
+            : undefined,
       });
     }
   }
@@ -267,7 +280,11 @@ export class FlyersService {
     return this.flyerRepository.save(flyer);
   }
 
-  async export(id: string, format: string, quality: string): Promise<{ downloadUrl: string; expiresAt: Date }> {
+  async export(
+    id: string,
+    format: string,
+    quality: string,
+  ): Promise<{ downloadUrl: string; expiresAt: Date }> {
     const flyer = await this.findOne(id);
     // TODO: Implement actual export logic (PDF, PNG, JPG generation)
     const baseUrl = process.env.BASE_URL || 'http://localhost:3000';

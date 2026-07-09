@@ -105,7 +105,7 @@ export class AuthService {
     });
 
     const savedUser = await this.userRepository.save(user);
-    
+
     // Envia email de verificação
     try {
       await this.emailService.sendEmailVerification(
@@ -162,7 +162,9 @@ export class AuthService {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) {
       // Don't reveal if email exists for security
-      return { message: 'Se o email estiver cadastrado, você receberá um link para redefinir sua senha.' };
+      return {
+        message: 'Se o email estiver cadastrado, você receberá um link para redefinir sua senha.',
+      };
     }
 
     // Gera token de reset de senha
@@ -177,11 +179,7 @@ export class AuthService {
 
     // Envia email de reset de senha
     try {
-      await this.emailService.sendPasswordReset(
-        user.email,
-        user.name,
-        resetToken,
-      );
+      await this.emailService.sendPasswordReset(user.email, user.name, resetToken);
     } catch (error) {
       console.error('Erro ao enviar email de reset de senha:', error);
       // Limpa o token se o email não foi enviado
@@ -194,7 +192,9 @@ export class AuthService {
       });
     }
 
-    return { message: 'Se o email estiver cadastrado, você receberá um link para redefinir sua senha.' };
+    return {
+      message: 'Se o email estiver cadastrado, você receberá um link para redefinir sua senha.',
+    };
   }
 
   async resetPassword(token: string, password: string, confirmPassword?: string) {

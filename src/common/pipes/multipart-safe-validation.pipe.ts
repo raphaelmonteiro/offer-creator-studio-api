@@ -1,10 +1,4 @@
-import {
-  PipeTransform,
-  Injectable,
-  ArgumentMetadata,
-  Scope,
-  Inject,
-} from '@nestjs/common';
+import { PipeTransform, Injectable, ArgumentMetadata, Scope, Inject } from '@nestjs/common';
 import { ValidationPipe, ValidationPipeOptions } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { Request } from 'express';
@@ -14,10 +8,7 @@ export class MultipartSafeValidationPipe implements PipeTransform {
   private validationPipe: ValidationPipe;
   private request: Request;
 
-  constructor(
-    @Inject(REQUEST) request: Request,
-    options?: ValidationPipeOptions,
-  ) {
+  constructor(@Inject(REQUEST) request: Request, options?: ValidationPipeOptions) {
     this.validationPipe = new ValidationPipe(options);
     this.request = request;
   }

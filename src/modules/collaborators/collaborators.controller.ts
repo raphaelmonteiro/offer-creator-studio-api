@@ -66,10 +66,7 @@ export class CollaboratorsController {
   @Patch(':id')
   @ApiOperation({ summary: 'Atualiza um colaborador' })
   @ApiResponse({ status: 200, description: 'Colaborador atualizado' })
-  update(
-    @Param('id') id: string,
-    @Body() updateCollaboratorDto: UpdateCollaboratorDto,
-  ) {
+  update(@Param('id') id: string, @Body() updateCollaboratorDto: UpdateCollaboratorDto) {
     return this.collaboratorsService.update(id, updateCollaboratorDto);
   }
 
@@ -100,10 +97,7 @@ export class CollaboratorsController {
   })
   @ApiOperation({ summary: 'Upload do avatar do colaborador' })
   @ApiResponse({ status: 200, description: 'Avatar enviado com sucesso' })
-  async uploadAvatar(
-    @Param('id') id: string,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
+  async uploadAvatar(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
     const upload = await this.uploadsService.uploadFile(file, 'avatars');
     const collaborator = await this.collaboratorsService.updateAvatar(id, upload.url);
     return { avatarUrl: collaborator.avatarUrl };

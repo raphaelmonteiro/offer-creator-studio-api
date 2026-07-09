@@ -239,7 +239,8 @@ export class ProductCategorizationService {
       if (!value) return acc;
 
       const exists = acc.some(
-        (candidate) => this.normalizeComparableText(candidate) === this.normalizeComparableText(value),
+        (candidate) =>
+          this.normalizeComparableText(candidate) === this.normalizeComparableText(value),
       );
       if (!exists) {
         acc.push(value);
@@ -313,7 +314,8 @@ export class ProductCategorizationService {
   ): ProductCategoryAssignmentDto {
     return {
       productId,
-      category: this.findAllowedCategory(FALLBACK_CATEGORY, allowedCategories) || allowedCategories[0],
+      category:
+        this.findAllowedCategory(FALLBACK_CATEGORY, allowedCategories) || allowedCategories[0],
       confidence: 0,
       source: 'fallback',
       reason: 'Categoria não identificada com segurança.',

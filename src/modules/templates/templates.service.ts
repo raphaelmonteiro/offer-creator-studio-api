@@ -24,7 +24,7 @@ export class TemplatesService {
       // Validate configuration size
       const configSize = JSON.stringify(createTemplateDto.configuration).length;
       const maxSize = 10 * 1024 * 1024; // 10MB
-      
+
       if (configSize > maxSize) {
         throw new BadRequestException({
           code: 'CONFIGURATION_TOO_LARGE',
@@ -38,19 +38,20 @@ export class TemplatesService {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      
+
       // Handle database errors
       if (error instanceof Error) {
         const errorMessage = error.message.toLowerCase();
-        
+
         if (errorMessage.includes('value too long') || errorMessage.includes('exceeds maximum')) {
           throw new BadRequestException({
             code: 'PAYLOAD_TOO_LARGE',
-            message: 'O payload é muito grande. Tente reduzir o tamanho das imagens base64 ou usar URLs de imagens.',
+            message:
+              'O payload é muito grande. Tente reduzir o tamanho das imagens base64 ou usar URLs de imagens.',
             details: process.env.NODE_ENV !== 'production' ? error.message : undefined,
           });
         }
-        
+
         if (errorMessage.includes('invalid input syntax') || errorMessage.includes('json')) {
           throw new BadRequestException({
             code: 'INVALID_JSON',
@@ -59,12 +60,17 @@ export class TemplatesService {
           });
         }
       }
-      
+
       // Re-throw as internal server error with more context
       throw new InternalServerErrorException({
         code: 'TEMPLATE_CREATION_ERROR',
         message: 'Erro ao criar template',
-        details: process.env.NODE_ENV !== 'production' ? (error instanceof Error ? error.message : String(error)) : undefined,
+        details:
+          process.env.NODE_ENV !== 'production'
+            ? error instanceof Error
+              ? error.message
+              : String(error)
+            : undefined,
       });
     }
   }
@@ -126,12 +132,12 @@ export class TemplatesService {
   async update(id: string, updateTemplateDto: UpdateTemplateDto): Promise<Template> {
     try {
       const template = await this.findOne(id);
-      
+
       // Validate configuration size if being updated
       if (updateTemplateDto.configuration) {
         const configSize = JSON.stringify(updateTemplateDto.configuration).length;
         const maxSize = 10 * 1024 * 1024; // 10MB
-        
+
         if (configSize > maxSize) {
           throw new BadRequestException({
             code: 'CONFIGURATION_TOO_LARGE',
@@ -139,26 +145,27 @@ export class TemplatesService {
           });
         }
       }
-      
+
       Object.assign(template, updateTemplateDto);
       return await this.templateRepository.save(template);
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
+
       // Handle database errors
       if (error instanceof Error) {
         const errorMessage = error.message.toLowerCase();
-        
+
         if (errorMessage.includes('value too long') || errorMessage.includes('exceeds maximum')) {
           throw new BadRequestException({
             code: 'PAYLOAD_TOO_LARGE',
-            message: 'O payload é muito grande. Tente reduzir o tamanho das imagens base64 ou usar URLs de imagens.',
+            message:
+              'O payload é muito grande. Tente reduzir o tamanho das imagens base64 ou usar URLs de imagens.',
             details: process.env.NODE_ENV !== 'production' ? error.message : undefined,
           });
         }
-        
+
         if (errorMessage.includes('invalid input syntax') || errorMessage.includes('json')) {
           throw new BadRequestException({
             code: 'INVALID_JSON',
@@ -167,11 +174,16 @@ export class TemplatesService {
           });
         }
       }
-      
+
       throw new InternalServerErrorException({
         code: 'TEMPLATE_UPDATE_ERROR',
         message: 'Erro ao atualizar template',
-        details: process.env.NODE_ENV !== 'production' ? (error instanceof Error ? error.message : String(error)) : undefined,
+        details:
+          process.env.NODE_ENV !== 'production'
+            ? error instanceof Error
+              ? error.message
+              : String(error)
+            : undefined,
       });
     }
   }

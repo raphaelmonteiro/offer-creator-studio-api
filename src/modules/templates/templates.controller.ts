@@ -97,10 +97,7 @@ export class TemplatesController {
   })
   @ApiOperation({ summary: 'Upload/atualiza o thumbnail do template' })
   @ApiResponse({ status: 200, description: 'Thumbnail enviado com sucesso' })
-  async uploadThumbnail(
-    @Param('id') id: string,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
+  async uploadThumbnail(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
     const upload = await this.uploadsService.uploadFile(file, 'thumbnails');
     const template = await this.templatesService.updateThumbnail(id, upload.url);
     return { thumbnailUrl: template.thumbnailUrl };

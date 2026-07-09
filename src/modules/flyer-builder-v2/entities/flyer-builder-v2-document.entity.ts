@@ -45,4 +45,3 @@ export class FlyerBuilderV2Document {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

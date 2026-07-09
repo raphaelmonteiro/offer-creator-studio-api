@@ -12,10 +12,7 @@ import {
   normalizeTemplateConfigurationLayout,
 } from './utils/ai-layout.util';
 import { OpenAiImageService } from './openai-image.service';
-import {
-  AI_RESPONSE_FORMATS,
-  parseTemplateGenerateResponse,
-} from './schemas/ai-response.schemas';
+import { AI_RESPONSE_FORMATS, parseTemplateGenerateResponse } from './schemas/ai-response.schemas';
 import { TEMPLATE_GENERATE_SYSTEM_PROMPT } from './prompts/template-generate.prompts';
 
 interface StructuredChatCompletionOptions<T> {

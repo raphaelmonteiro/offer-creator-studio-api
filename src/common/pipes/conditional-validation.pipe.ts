@@ -1,9 +1,4 @@
-import {
-  PipeTransform,
-  Injectable,
-  ArgumentMetadata,
-  Type,
-} from '@nestjs/common';
+import { PipeTransform, Injectable, ArgumentMetadata, Type } from '@nestjs/common';
 import { ValidationPipe, ValidationPipeOptions } from '@nestjs/common';
 import { Request } from 'express';
 
@@ -18,11 +13,11 @@ export class ConditionalValidationPipe implements PipeTransform {
   transform(value: any, metadata: ArgumentMetadata) {
     // Get the request object from the metadata
     const request = metadata.data as any;
-    
+
     // If we have access to the request, check content-type
     if (request && typeof request === 'object' && 'headers' in request) {
       const contentType = (request as Request).headers['content-type'];
-      
+
       // Skip validation for multipart/form-data
       if (contentType && contentType.includes('multipart/form-data')) {
         return value;
@@ -32,7 +27,7 @@ export class ConditionalValidationPipe implements PipeTransform {
     // For body validation, check if we can access the request through the value
     // This is a workaround since we don't have direct access to the request in the pipe
     // The ValidationPipe will handle the validation, but we need to catch errors for multipart
-    
+
     // Try to use the validation pipe, but catch errors related to JSON parsing
     try {
       return this.validationPipe.transform(value, metadata);

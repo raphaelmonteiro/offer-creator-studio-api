@@ -21,4 +21,3 @@ export class CreateFlyerBuilderV2DocumentDto {
   @IsObject()
   document: any;
 }
-

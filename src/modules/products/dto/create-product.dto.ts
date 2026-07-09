@@ -1,12 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsString,
-  IsNumber,
-  IsOptional,
-  IsBoolean,
-  Min,
-  IsUrl,
-} from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsBoolean, Min, IsUrl } from 'class-validator';
 
 export class CreateProductDto {
   @ApiProperty({ example: 'Arroz Tipo 1 5kg' })

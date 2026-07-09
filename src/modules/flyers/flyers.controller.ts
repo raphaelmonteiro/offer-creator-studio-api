@@ -106,10 +106,7 @@ export class FlyersController {
   })
   @ApiOperation({ summary: 'Upload/atualiza o thumbnail do encarte' })
   @ApiResponse({ status: 200, description: 'Thumbnail enviado com sucesso' })
-  async uploadThumbnail(
-    @Param('id') id: string,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
+  async uploadThumbnail(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
     const upload = await this.uploadsService.uploadFile(file, 'thumbnails');
     const flyer = await this.flyersService.updateThumbnail(id, upload.url);
     return { thumbnailUrl: flyer.thumbnailUrl };

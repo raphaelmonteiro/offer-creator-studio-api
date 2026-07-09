@@ -67,10 +67,7 @@ export class FontsController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Upload de nova fonte' })
   @ApiResponse({ status: 201, description: 'Fonte criada com sucesso' })
-  async create(
-    @UploadedFile() file: Express.Multer.File,
-    @Body() body: any,
-  ) {
+  async create(@UploadedFile() file: Express.Multer.File, @Body() body: any) {
     if (!file) {
       throw new BadRequestException({
         code: 'FILE_REQUIRED',
@@ -80,7 +77,7 @@ export class FontsController {
 
     // Extract and validate form fields
     const { family, weight, style } = body;
-    
+
     if (!family || !weight || !style) {
       throw new BadRequestException({
         code: 'MISSING_FIELDS',
@@ -90,13 +87,13 @@ export class FontsController {
 
     this.fontsService.validateFontFile(file.originalname);
     const upload = await this.uploadsService.uploadFile(file, 'fonts');
-    
+
     const createFontDto: CreateFontDto = {
       family: String(family),
       weight: String(weight),
       style: String(style),
     };
-    
+
     return this.fontsService.create(createFontDto, upload.url);
   }
 

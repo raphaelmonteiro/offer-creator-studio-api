@@ -404,9 +404,7 @@ export function parseSpellCheckResponse(raw: string): CorrectionDto[] {
   });
 }
 
-export function parseProductCategorizationResponse(
-  raw: string,
-): ProductCategorizationSchemaResult {
+export function parseProductCategorizationResponse(raw: string): ProductCategorizationSchemaResult {
   const parsed = parseJsonObject(raw, 'JSON inválido retornado pela categorização');
   const assignments = parsed.assignments;
 
@@ -659,9 +657,7 @@ function isProductCategoryAssignmentSource(
   return value === 'ai' || value === 'existing' || value === 'fallback';
 }
 
-function isFlyerAssemblySectionLayout(
-  value: unknown,
-): value is FlyerAssemblySectionLayout {
+function isFlyerAssemblySectionLayout(value: unknown): value is FlyerAssemblySectionLayout {
   return AI_RESPONSE_SCHEMAS.flyerAssemblyPlan.sectionLayouts.includes(
     value as FlyerAssemblySectionLayout,
   );

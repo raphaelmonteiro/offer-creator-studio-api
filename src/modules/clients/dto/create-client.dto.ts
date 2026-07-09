@@ -1,12 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsString,
-  IsOptional,
-  IsUrl,
-  IsArray,
-  IsObject,
-  ValidateNested,
-} from 'class-validator';
+import { IsString, IsOptional, IsUrl, IsArray, IsObject, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ClientContactDto } from './client-contact.dto';
 

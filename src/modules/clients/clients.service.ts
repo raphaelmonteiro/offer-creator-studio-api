@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { Client } from './entities/client.entity';
@@ -70,14 +66,14 @@ export class ClientsService {
       // Also search by CNPJ
     }
 
-    const queryBuilder = this.clientRepository.createQueryBuilder('client')
+    const queryBuilder = this.clientRepository
+      .createQueryBuilder('client')
       .leftJoinAndSelect('client.contacts', 'contacts');
 
     if (search) {
-      queryBuilder.where(
-        '(client.name LIKE :search OR client.cnpj LIKE :search)',
-        { search: `%${search}%` },
-      );
+      queryBuilder.where('(client.name LIKE :search OR client.cnpj LIKE :search)', {
+        search: `%${search}%`,
+      });
     }
 
     queryBuilder.skip(skip).take(limit).orderBy('client.createdAt', 'DESC');

@@ -17,4 +17,3 @@ export class MoveImagesDto {
   @IsUUID()
   folderId?: string | null;
 }
-
