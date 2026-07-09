@@ -18,6 +18,8 @@ export class HealthService {
       uptime: process.uptime(),
       database: dbStatus ? 'connected' : 'disconnected',
       environment: process.env.NODE_ENV || 'development',
+      version: process.env.APP_VERSION || 'dev',
+      builtAt: process.env.APP_BUILT_AT || null,
     };
 
     return {
