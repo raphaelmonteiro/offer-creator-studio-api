@@ -42,6 +42,9 @@ export class GalleryImage {
   @Column({ name: 'metadata_status', type: 'varchar', length: 16, nullable: true })
   metadataStatus: 'pending' | 'ready' | 'failed' | null;
 
+  @Column({ name: 'metadata_error', type: 'text', nullable: true })
+  metadataError: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -314,18 +314,23 @@ export class GalleryEmbeddingService implements OnModuleInit {
     }));
   }
 
-  async setMetadataStatus(imageId: string, status: MetadataStatus): Promise<void> {
-    await this.dataSource.query(`UPDATE gallery_images SET metadata_status = $1 WHERE id = $2`, [
-      status,
-      imageId,
-    ]);
+  async setMetadataStatus(
+    imageId: string,
+    status: MetadataStatus,
+    errorMessage?: string | null,
+  ): Promise<void> {
+    await this.dataSource.query(
+      `UPDATE gallery_images SET metadata_status = $1, metadata_error = $2 WHERE id = $3`,
+      [status, status === 'failed' ? (errorMessage ?? null) : null, imageId],
+    );
   }
 
   async saveImageMetadata(imageId: string, metadata: ProductMetadata): Promise<void> {
     await this.dataSource.query(
       `UPDATE gallery_images
           SET metadata = $1::jsonb,
-              metadata_status = 'ready'
+              metadata_status = 'ready',
+              metadata_error = NULL
         WHERE id = $2`,
       [JSON.stringify(metadata), imageId],
     );
@@ -364,15 +369,45 @@ export class GalleryEmbeddingService implements OnModuleInit {
    * Backfill helper: yields images that still need metadata extracted. Used
    * by the admin backfill endpoint.
    */
-  async listImagesPendingMetadata(limit: number): Promise<Array<{ id: string; url: string }>> {
+  async listImagesPendingMetadata(
+    limit: number,
+    includeFailed = false,
+  ): Promise<Array<{ id: string; url: string }>> {
     return this.dataSource.query(
       `SELECT id, url
          FROM gallery_images
         WHERE metadata_status IS NULL
            OR metadata_status = 'pending'
+           ${includeFailed ? `OR metadata_status = 'failed'` : ''}
         ORDER BY "createdAt" ASC
         LIMIT $1`,
       [limit],
+    );
+  }
+
+  /**
+   * Lists images stuck in `metadata_status = 'failed'` along with the last
+   * error message, so the admin backfill can be targeted/inspected.
+   */
+  async listFailedMetadataImages(
+    limit: number,
+    offset: number,
+  ): Promise<
+    Array<{
+      id: string;
+      filename: string;
+      url: string;
+      metadataError: string | null;
+      updatedAt: Date;
+    }>
+  > {
+    return this.dataSource.query(
+      `SELECT id, filename, url, metadata_error AS "metadataError", "updatedAt"
+         FROM gallery_images
+        WHERE metadata_status = 'failed'
+        ORDER BY "updatedAt" DESC
+        LIMIT $1 OFFSET $2`,
+      [limit, offset],
     );
   }
 

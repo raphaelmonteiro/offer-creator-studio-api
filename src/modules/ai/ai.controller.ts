@@ -202,6 +202,23 @@ export class AiController {
   }
 
   @Public()
+  @Get('gallery/metadata-failed')
+  @ApiOperation({
+    summary: '[Admin] Lista imagens com metadata_status=failed e o motivo da falha',
+  })
+  async galleryMetadataFailed(
+    @Headers('x-admin-token') adminToken: string | undefined,
+    @Query('limit') limitQuery?: string,
+    @Query('offset') offsetQuery?: string,
+  ) {
+    this.assertAdminToken(adminToken);
+    const limit = Math.min(Math.max(Number(limitQuery) || 50, 1), 200);
+    const offset = Math.max(Number(offsetQuery) || 0, 0);
+    const items = await this.galleryEmbeddingService.listFailedMetadataImages(limit, offset);
+    return { limit, offset, count: items.length, items };
+  }
+
+  @Public()
   @Post('gallery/backfill-metadata')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -209,13 +226,14 @@ export class AiController {
   })
   async galleryBackfillMetadata(
     @Headers('x-admin-token') adminToken: string | undefined,
-    @Body() body: { batchSize?: number; maxBatches?: number } = {},
+    @Body() body: { batchSize?: number; maxBatches?: number; retryFailed?: boolean } = {},
   ) {
     this.assertAdminToken(adminToken);
     const batchSize = Math.min(Math.max(body.batchSize ?? 25, 1), 100);
     // Drains until there's nothing left by default; cap with maxBatches when
     // you want a hard ceiling (useful to limit cost during experiments).
     const maxBatches = Math.max(body.maxBatches ?? 10_000, 1);
+    const retryFailed = body.retryFailed ?? false;
 
     if (!this.imageMetadataService.isEnabled()) {
       return { scanned: 0, processed: 0, failed: 0, disabled: true };
@@ -227,7 +245,10 @@ export class AiController {
     let batches = 0;
 
     while (batches < maxBatches) {
-      const pending = await this.galleryEmbeddingService.listImagesPendingMetadata(batchSize);
+      const pending = await this.galleryEmbeddingService.listImagesPendingMetadata(
+        batchSize,
+        retryFailed,
+      );
       if (pending.length === 0) break;
       scanned += pending.length;
       batches += 1;
@@ -237,7 +258,11 @@ export class AiController {
           await this.galleryEmbeddingService.setMetadataStatus(row.id, 'pending');
           const metadata = await this.imageMetadataService.extractFromImage(row.url);
           if (!metadata) {
-            await this.galleryEmbeddingService.setMetadataStatus(row.id, 'failed');
+            await this.galleryEmbeddingService.setMetadataStatus(
+              row.id,
+              'failed',
+              'Extração de metadata retornou vazio (imagem não reconhecida ou resposta inválida do modelo).',
+            );
             failed += 1;
             continue;
           }
@@ -245,10 +270,11 @@ export class AiController {
           await this.galleryEmbeddingService.embedAndStoreMetadataForImage(row.id, metadata);
           processed += 1;
         } catch (error) {
-          this.logger.warn(`Backfill metadata falhou para ${row.id}: ${(error as Error).message}`);
+          const message = (error as Error).message;
+          this.logger.warn(`Backfill metadata falhou para ${row.id}: ${message}`);
           failed += 1;
           try {
-            await this.galleryEmbeddingService.setMetadataStatus(row.id, 'failed');
+            await this.galleryEmbeddingService.setMetadataStatus(row.id, 'failed', message);
           } catch {
             /* swallow */
           }
@@ -264,7 +290,7 @@ export class AiController {
       if (pending.length < batchSize) break;
     }
 
-    return { scanned, processed, failed, batches };
+    return { scanned, processed, failed, batches, retryFailed };
   }
 
   @Public()

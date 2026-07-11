@@ -15,6 +15,9 @@ ALTER TABLE gallery_images
   ADD COLUMN IF NOT EXISTS metadata_status varchar(16);
 
 ALTER TABLE gallery_images
+  ADD COLUMN IF NOT EXISTS metadata_error text;
+
+ALTER TABLE gallery_images
   ADD COLUMN IF NOT EXISTS metadata_embedding vector(1536);
 
 -- HNSW index for cosine distance. m=16, ef_construction=64 are pgvector defaults
