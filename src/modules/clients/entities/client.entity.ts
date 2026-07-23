@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ClientContact } from './client-contact.entity';
+import { ClientStore } from './client-store.entity';
 
 @Entity('clients')
 export class Client {
@@ -36,17 +37,33 @@ export class Client {
   phoneMobile: string | null;
 
   /**
-   * Modelo de rodapé do cliente (uma `TemplateSection` opaca, no mesmo espírito de
-   * flyer.configuration / user.establishment). Reaplicável a encartes/templates/social.
+   * LEGADO — rodapé "ativo" do cliente (uma `TemplateSection` opaca). Mantido para
+   * retrocompatibilidade: espelha o primeiro item de `footers`. Consumidores antigos que leem
+   * `client.footer` continuam funcionando. Novos fluxos usam a biblioteca `footers`.
    */
   @Column({ type: 'jsonb', nullable: true })
   footer: Record<string, unknown> | null;
+
+  /**
+   * Biblioteca de rodapés do cliente — vários rodapés nomeados reutilizáveis (ex.: uma loja/
+   * endereço por rodapé). Cada item: `{ id, name, section: TemplateSection }`. Opaca, validada
+   * no frontend (mesmo espírito de flyer.configuration / user.establishment).
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  footers: Record<string, unknown>[] | null;
 
   @OneToMany(() => ClientContact, (contact) => contact.client, {
     cascade: true,
     eager: true,
   })
   contacts: ClientContact[];
+
+  /** Lojas/unidades da rede — cada uma com endereço/CNPJ/telefone/horário próprios. */
+  @OneToMany(() => ClientStore, (store) => store.client, {
+    cascade: true,
+    eager: true,
+  })
+  stores: ClientStore[];
 
   @CreateDateColumn()
   createdAt: Date;

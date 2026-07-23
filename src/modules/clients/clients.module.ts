@@ -4,10 +4,11 @@ import { ClientsController } from './clients.controller';
 import { ClientsService } from './clients.service';
 import { Client } from './entities/client.entity';
 import { ClientContact } from './entities/client-contact.entity';
+import { ClientStore } from './entities/client-store.entity';
 import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Client, ClientContact]), UploadsModule],
+  imports: [TypeOrmModule.forFeature([Client, ClientContact, ClientStore]), UploadsModule],
   controllers: [ClientsController],
   providers: [ClientsService],
   exports: [ClientsService, TypeOrmModule],

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { Client } from './entities/client.entity';
 import { ClientContact } from './entities/client-contact.entity';
+import { ClientStore } from './entities/client-store.entity';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { QueryClientDto } from './dto/query-client.dto';
@@ -15,6 +16,8 @@ export class ClientsService {
     private clientRepository: Repository<Client>,
     @InjectRepository(ClientContact)
     private contactRepository: Repository<ClientContact>,
+    @InjectRepository(ClientStore)
+    private storeRepository: Repository<ClientStore>,
   ) {}
 
   async create(createClientDto: CreateClientDto): Promise<Client> {
@@ -38,6 +41,7 @@ export class ClientsService {
       phoneFixed: createClientDto.phoneFixed ?? null,
       phoneMobile: createClientDto.phoneMobile ?? null,
       footer: createClientDto.footer ?? null,
+      footers: createClientDto.footers ?? null,
     });
 
     const savedClient = await this.clientRepository.save(client);
@@ -50,6 +54,16 @@ export class ClientsService {
         }),
       );
       await this.contactRepository.save(contacts);
+    }
+
+    if (createClientDto.stores && createClientDto.stores.length > 0) {
+      const stores = createClientDto.stores.map((storeDto) =>
+        this.storeRepository.create({
+          ...storeDto,
+          clientId: savedClient.id,
+        }),
+      );
+      await this.storeRepository.save(stores);
     }
 
     return this.findOne(savedClient.id);
@@ -68,7 +82,8 @@ export class ClientsService {
 
     const queryBuilder = this.clientRepository
       .createQueryBuilder('client')
-      .leftJoinAndSelect('client.contacts', 'contacts');
+      .leftJoinAndSelect('client.contacts', 'contacts')
+      .leftJoinAndSelect('client.stores', 'stores');
 
     if (search) {
       queryBuilder.where('(client.name LIKE :search OR client.cnpj LIKE :search)', {
@@ -86,7 +101,7 @@ export class ClientsService {
   async findOne(id: string): Promise<Client> {
     const client = await this.clientRepository.findOne({
       where: { id },
-      relations: ['contacts'],
+      relations: ['contacts', 'stores'],
     });
 
     if (!client) {
@@ -147,6 +162,10 @@ export class ClientsService {
       client.footer = updateClientDto.footer;
     }
 
+    if (updateClientDto.footers !== undefined) {
+      client.footers = updateClientDto.footers;
+    }
+
     await this.clientRepository.save(client);
 
     // Update contacts
@@ -163,6 +182,21 @@ export class ClientsService {
           }),
         );
         await this.contactRepository.save(contacts);
+      }
+    }
+
+    // Update stores (mesmo padrão: substitui tudo — remove e recria)
+    if (updateClientDto.stores) {
+      await this.storeRepository.delete({ clientId: id });
+
+      if (updateClientDto.stores.length > 0) {
+        const stores = updateClientDto.stores.map((storeDto) =>
+          this.storeRepository.create({
+            ...storeDto,
+            clientId: id,
+          }),
+        );
+        await this.storeRepository.save(stores);
       }
     }
 
