@@ -19,6 +19,7 @@ import { MoveImagesDto } from './dto/move-images.dto';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
 import { UpdateImageDto } from './dto/update-image.dto';
+import { ClientPreferredImagesService } from './client-preferred-images.service';
 
 interface EmbeddingTrigger {
   embedAndStoreForImage: (
@@ -36,6 +37,11 @@ interface MetadataExtractor {
   extractFromImage: (url: string) => Promise<unknown>;
 }
 
+/** Imagem da galeria com as marcações de cliente anexadas (Feature 13). */
+export type GalleryImageWithClients = GalleryImage & {
+  clients: Array<{ id: string; name: string }>;
+};
+
 @Injectable()
 export class GalleryService implements OnModuleInit {
   private readonly logger = new Logger(GalleryService.name);
@@ -49,6 +55,7 @@ export class GalleryService implements OnModuleInit {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly uploadsService: UploadsService,
     private readonly moduleRef: ModuleRef,
+    private readonly clientPreferredImages: ClientPreferredImagesService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -198,8 +205,8 @@ export class GalleryService implements OnModuleInit {
     return `${baseName}${extension}`;
   }
 
-  async listImages(query: QueryGalleryDto): Promise<PaginationResult<GalleryImage>> {
-    const { page = 1, limit = 20, search, folderId } = query;
+  async listImages(query: QueryGalleryDto): Promise<PaginationResult<GalleryImageWithClients>> {
+    const { page = 1, limit = 20, search, folderId, clientId } = query;
     const skip = (page - 1) * limit;
 
     const qb = this.imagesRepository.createQueryBuilder('image');
@@ -238,6 +245,20 @@ export class GalleryService implements OnModuleInit {
       qb.andWhere('image.folderId = :folderId', { folderId });
     }
 
+    // Feature 13 — filtro por marcação de cliente. Eixo independente da pasta:
+    // usa EXISTS em vez de JOIN para não multiplicar linhas (uma imagem pode
+    // estar marcada para vários clientes) nem interferir no ranking da busca.
+    if (clientId === 'none') {
+      qb.andWhere(
+        'NOT EXISTS (SELECT 1 FROM client_preferred_images cpi WHERE cpi.image_id = image.id)',
+      );
+    } else if (clientId) {
+      qb.andWhere(
+        'EXISTS (SELECT 1 FROM client_preferred_images cpi WHERE cpi.image_id = image.id AND cpi.client_id = :clientId)',
+        { clientId },
+      );
+    }
+
     if (normalizedSearch) {
       qb.orderBy('gallery_search_rank', 'ASC')
         .addOrderBy('gallery_search_similarity', 'DESC')
@@ -249,7 +270,17 @@ export class GalleryService implements OnModuleInit {
     qb.skip(skip).take(limit);
 
     const [items, total] = await qb.getManyAndCount();
-    return paginate(items, total, { page, limit });
+
+    // Anexa as marcações de cliente em UMA query sobre a página atual (evita N+1).
+    const clientsByImage = await this.clientPreferredImages.listClientsForImages(
+      items.map((image) => image.id),
+    );
+    const withClients: GalleryImageWithClients[] = items.map((image) => ({
+      ...image,
+      clients: clientsByImage.get(image.id) ?? [],
+    }));
+
+    return paginate(withClients, total, { page, limit });
   }
 
   async registerImage(params: {

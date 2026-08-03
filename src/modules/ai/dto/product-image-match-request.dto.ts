@@ -40,4 +40,14 @@ export class ProductImageMatchRequestDto {
   @ValidateNested({ each: true })
   @Type(() => ProductImageMatchProductDto)
   products: ProductImageMatchProductDto[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Cliente do encarte em edição. Quando presente, prioriza as imagens preferidas deste cliente (Feature 12).',
+    example: '3f2a...-uuid',
+  })
+  @IsOptional()
+  @IsString()
+  clientId?: string | null;
 }

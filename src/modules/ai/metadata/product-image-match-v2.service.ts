@@ -9,6 +9,18 @@ const AUTO_MATCH_THRESHOLD = 0.75;
 const REVIEW_MIN_THRESHOLD = 0.5;
 const CANDIDATE_POOL = 15;
 const REVIEW_TOP_N = 3;
+// Feature 12 — reforço no score híbrido quando a imagem é preferida do cliente.
+// Suficiente para tirar uma preferida da zona de revisão (0.5) para auto-match
+// (0.75) quando ela já é uma candidata plausível, sem forçar imagens ruins.
+const PREFERENCE_SCORE_BUMP = 0.1;
+
+// Piso para a preferência do cliente decidir sozinha (sem passar por revisão).
+// Igual ao REVIEW_MIN_THRESHOLD de propósito: é o patamar em que a candidata já
+// seria considerada plausível o bastante para ser mostrada a um humano. Abaixo
+// disso a "favorita" provavelmente é de outro produto — o pool de candidatas é
+// o top-N por similaridade, então pode conter fotos marcadas para o cliente que
+// nada têm a ver com o item sendo casado.
+const PREFERENCE_AUTO_MIN = REVIEW_MIN_THRESHOLD;
 
 // Default weights — used when EAN/SKU is available on at least one side.
 const WEIGHTS = {
@@ -48,6 +60,7 @@ export interface ScoredCandidateV2 {
   folderName: string | null;
   score: number;
   reasons: string[];
+  isClientPreferred: boolean;
 }
 
 export interface ProductMatchHitV2 {
@@ -56,6 +69,7 @@ export interface ProductMatchHitV2 {
   imageUrl: string;
   score: number;
   reasons: string[];
+  isClientPreferred: boolean;
 }
 
 export interface ProductReviewCandidatesV2 {
@@ -81,11 +95,13 @@ export class ProductImageMatchV2Service {
     private readonly taxonomy: TaxonomyService,
     private readonly configService: ConfigService,
   ) {
-    this.debugEnabled =
-      this.configService.get<string>('AI_MATCH_DEBUG', '0') === '1';
+    this.debugEnabled = this.configService.get<string>('AI_MATCH_DEBUG', '0') === '1';
   }
 
-  async findBestMatches(products: ProductMatchInputV2[]): Promise<MatchV2Result> {
+  async findBestMatches(
+    products: ProductMatchInputV2[],
+    clientId?: string | null,
+  ): Promise<MatchV2Result> {
     const scanned = products.length;
     if (scanned === 0) {
       return { matches: [], reviewCandidates: [], scanned: 0, matched: 0 };
@@ -102,13 +118,32 @@ export class ProductImageMatchV2Service {
       const product = products[i];
       const metadata = parsed[i];
 
-      const candidates = await this.scoreCandidatesForProduct(product, metadata);
+      const candidates = await this.scoreCandidatesForProduct(product, metadata, clientId);
 
       if (this.debugEnabled) {
         this.logProductDebug(product, metadata, candidates);
       }
 
       if (candidates.length === 0) continue;
+
+      // A preferência do cliente decide antes do score: se alguma candidata
+      // plausível é foto marcada para este cliente, ela é escolhida direto e o
+      // produto NÃO vai para revisão — é a foto que o cliente já disse que quer.
+      // `candidates` vem ordenado por score, então o `find` pega a melhor delas.
+      const preferred = candidates.find(
+        (candidate) => candidate.isClientPreferred && candidate.score >= PREFERENCE_AUTO_MIN,
+      );
+      if (preferred) {
+        matches.push({
+          productId: product.id,
+          imageId: preferred.imageId,
+          imageUrl: preferred.url,
+          score: preferred.score,
+          reasons: preferred.reasons,
+          isClientPreferred: true,
+        });
+        continue;
+      }
 
       const best = candidates[0];
       if (best.score >= AUTO_MATCH_THRESHOLD) {
@@ -118,6 +153,7 @@ export class ProductImageMatchV2Service {
           imageUrl: best.url,
           score: best.score,
           reasons: best.reasons,
+          isClientPreferred: best.isClientPreferred,
         });
       } else if (best.score >= REVIEW_MIN_THRESHOLD) {
         reviewCandidates.push({
@@ -135,19 +171,24 @@ export class ProductImageMatchV2Service {
     };
   }
 
-  async findCandidates(product: ProductMatchInputV2, limit: number): Promise<ScoredCandidateV2[]> {
+  async findCandidates(
+    product: ProductMatchInputV2,
+    limit: number,
+    clientId?: string | null,
+  ): Promise<ScoredCandidateV2[]> {
     const parsed = await this.nameParser.parseSingle({
       name: product.name,
       categoryHint: product.category,
     });
     const sized = Math.min(Math.max(limit, 1), 24);
-    const all = await this.scoreCandidatesForProduct(product, parsed);
+    const all = await this.scoreCandidatesForProduct(product, parsed, clientId);
     return all.slice(0, sized);
   }
 
   private async scoreCandidatesForProduct(
     product: ProductMatchInputV2,
     metadata: ProductMetadata | null,
+    clientId?: string | null,
   ): Promise<ScoredCandidateV2[]> {
     const queryText = metadata
       ? buildEmbeddingText(metadata)
@@ -160,7 +201,9 @@ export class ProductImageMatchV2Service {
     const queryEmbedding = await this.embedding.embedText(queryText);
     if (!queryEmbedding) return [];
 
-    const pool = await this.embedding.searchByMetadataEmbedding(queryEmbedding, CANDIDATE_POOL);
+    const pool = await this.embedding.searchByMetadataEmbedding(queryEmbedding, CANDIDATE_POOL, {
+      clientId,
+    });
 
     const scored = pool.map((row) => this.scoreCandidate(metadata, row));
 
@@ -197,6 +240,8 @@ export class ProductImageMatchV2Service {
     const imageConf = avg(imageMeta?.fieldConfidence);
     const confidence = clamp01((productConf + imageConf) / 2);
 
+    if (row.isClientPreferred) reasons.unshift('preferida do cliente');
+
     const hasEanAnywhere = Boolean(productMeta?.ean || imageMeta?.ean);
     const weights = hasEanAnywhere ? WEIGHTS : WEIGHTS_NO_ID;
 
@@ -207,7 +252,11 @@ export class ProductImageMatchV2Service {
       weights.text * textCosine +
       weights.pack * packScore;
 
-    const final = clamp01(score * (0.8 + 0.2 * confidence));
+    // Bônus explícito por preferência do cliente: o boost na distância cosseno
+    // só afeta o componente `text` (peso baixo), então reforçamos aqui para a
+    // preferida realmente subir no ranking híbrido (Feature 12).
+    const preferenceBump = row.isClientPreferred ? PREFERENCE_SCORE_BUMP : 0;
+    const final = clamp01(score * (0.8 + 0.2 * confidence) + preferenceBump);
 
     return {
       imageId: row.id,
@@ -217,6 +266,7 @@ export class ProductImageMatchV2Service {
       folderName: row.folderName,
       score: Number(final.toFixed(4)),
       reasons,
+      isClientPreferred: row.isClientPreferred,
     };
   }
 
@@ -300,9 +350,7 @@ export class ProductImageMatchV2Service {
     const altCount = metadata.alternatives.length;
     const altSuffix = altCount > 1 ? ` (+${altCount - 1} alt.)` : '';
     const cat = metadata.category ? metadata.category.path.join(' > ') : '∅';
-    const qty = metadata.quantity
-      ? `${metadata.quantity.value}${metadata.quantity.unit}`
-      : '∅';
+    const qty = metadata.quantity ? `${metadata.quantity.value}${metadata.quantity.unit}` : '∅';
     const pack = metadata.pack
       ? `${metadata.pack.count}${metadata.pack.promoCount ? ` (promo ${metadata.pack.promoCount})` : ''}`
       : '∅';

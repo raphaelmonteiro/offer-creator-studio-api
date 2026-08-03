@@ -12,7 +12,29 @@ const EMBEDDING_DIMENSIONS = 1536;
 const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
 const OPENAI_BATCH_LIMIT = 96;
 const DEFAULT_MATCH_THRESHOLD = 0.35;
+// Feature 12 — quanto a foto preferida do cliente "aproxima" na busca por
+// similaridade (distância cosseno: menor = melhor, então subtraímos o bônus).
+// Modesto de propósito: prioriza sem sequestrar o ranking. Configurável via env.
+const DEFAULT_PREFERENCE_BOOST = 0.15;
 const BOOTSTRAP_SQL_PATH = path.join(__dirname, '..', 'gallery', 'sql', '001_pgvector_setup.sql');
+
+export interface EmbeddingSearchOptions {
+  /** Quando presente, prioriza as imagens preferidas deste cliente (Feature 12). */
+  clientId?: string | null;
+}
+
+/** Linha crua devolvida por `querySimilarImages` (antes do mapeamento tipado). */
+interface SimilarImageRow {
+  id: string;
+  filename: string;
+  url: string;
+  thumbnailUrl: string | null;
+  folderId: string | null;
+  folderName: string | null;
+  distance: string;
+  is_client_preferred: boolean;
+  metadata?: ProductMetadata | null;
+}
 
 export interface GalleryEmbeddingMatch {
   id: string;
@@ -22,6 +44,7 @@ export interface GalleryEmbeddingMatch {
   folderId: string | null;
   folderName: string | null;
   distance: number;
+  isClientPreferred: boolean;
 }
 
 export interface BackfillResult {
@@ -42,6 +65,7 @@ export interface ProductImageMatchHit {
   imageId: string;
   imageUrl: string;
   score: number;
+  isClientPreferred: boolean;
 }
 
 export interface ProductImageCandidate {
@@ -51,6 +75,7 @@ export interface ProductImageCandidate {
   filename: string;
   folderName: string | null;
   score: number;
+  isClientPreferred: boolean;
 }
 
 export interface MetadataEmbeddingMatch {
@@ -62,6 +87,7 @@ export interface MetadataEmbeddingMatch {
   folderName: string | null;
   distance: number;
   metadata: ProductMetadata | null;
+  isClientPreferred: boolean;
 }
 
 export type MetadataStatus = 'pending' | 'ready' | 'failed';
@@ -73,6 +99,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
   private readonly embeddingModel: string;
   private readonly enabled: boolean;
   private readonly matchThreshold: number;
+  private readonly preferenceBoost: number;
 
   constructor(
     private readonly configService: ConfigService,
@@ -94,6 +121,16 @@ export class GalleryEmbeddingService implements OnModuleInit {
       Number.isFinite(thresholdParsed) && thresholdParsed >= 0 && thresholdParsed <= 1
         ? thresholdParsed
         : DEFAULT_MATCH_THRESHOLD;
+
+    const boostRaw = this.configService.get<string>(
+      'AI_CLIENT_IMAGE_PREF_BOOST',
+      String(DEFAULT_PREFERENCE_BOOST),
+    );
+    const boostParsed = Number.parseFloat(boostRaw);
+    this.preferenceBoost =
+      Number.isFinite(boostParsed) && boostParsed >= 0 && boostParsed <= 1
+        ? boostParsed
+        : DEFAULT_PREFERENCE_BOOST;
 
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     this.openai = apiKey ? new OpenAI({ apiKey }) : null;
@@ -260,6 +297,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
 
   async findBestImageMatches(
     products: ProductImageMatchInput[],
+    clientId?: string | null,
   ): Promise<{ matches: ProductImageMatchHit[]; scanned: number; matched: number }> {
     const scanned = products.length;
     if (!this.openai || !this.enabled || scanned === 0) {
@@ -274,7 +312,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
       const embedding = embeddings[i];
       if (!embedding) continue;
 
-      const [best] = await this.searchByEmbedding(embedding, 1);
+      const [best] = await this.searchByEmbedding(embedding, 1, { clientId });
       if (!best) continue;
 
       const score = 1 - best.distance;
@@ -285,6 +323,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
         imageId: best.id,
         imageUrl: best.url,
         score,
+        isClientPreferred: best.isClientPreferred,
       });
     }
 
@@ -296,6 +335,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
     category?: string | null;
     unit?: string | null;
     limit?: number;
+    clientId?: string | null;
   }): Promise<ProductImageCandidate[]> {
     if (!this.openai || !this.enabled) return [];
     const queryText = this.buildProductQueryText(input);
@@ -303,7 +343,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
     const embedding = await this.embedText(queryText);
     if (!embedding) return [];
     const limit = Math.min(Math.max(input.limit ?? 12, 1), 48);
-    const matches = await this.searchByEmbedding(embedding, limit);
+    const matches = await this.searchByEmbedding(embedding, limit, { clientId: input.clientId });
     return matches.map((m) => ({
       imageId: m.id,
       url: m.url,
@@ -311,6 +351,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
       filename: m.filename,
       folderName: m.folderName,
       score: 1 - m.distance,
+      isClientPreferred: m.isClientPreferred,
     }));
   }
 
@@ -419,38 +460,14 @@ export class GalleryEmbeddingService implements OnModuleInit {
   async searchByMetadataEmbedding(
     embedding: number[],
     limit = 15,
+    options: EmbeddingSearchOptions = {},
   ): Promise<MetadataEmbeddingMatch[]> {
     if (embedding.length !== EMBEDDING_DIMENSIONS) {
       throw new Error(
         `Embedding com ${embedding.length} dimensões; esperado ${EMBEDDING_DIMENSIONS}.`,
       );
     }
-    const rows: Array<{
-      id: string;
-      filename: string;
-      url: string;
-      thumbnailUrl: string | null;
-      folderId: string | null;
-      folderName: string | null;
-      distance: string;
-      metadata: ProductMetadata | null;
-    }> = await this.dataSource.query(
-      `SELECT gi.id,
-              gi.filename,
-              gi.url,
-              gi."thumbnailUrl",
-              gi."folderId",
-              gf.name AS "folderName",
-              (gi.metadata_embedding <=> $1::vector) AS distance,
-              gi.metadata
-         FROM gallery_images gi
-         LEFT JOIN gallery_folders gf ON gf.id = gi."folderId"
-        WHERE gi.metadata_embedding IS NOT NULL
-        ORDER BY gi.metadata_embedding <=> $1::vector
-        LIMIT $2`,
-      [toSql(embedding), limit],
-    );
-
+    const rows = await this.querySimilarImages('metadata_embedding', embedding, limit, options);
     return rows.map((row) => ({
       id: row.id,
       filename: row.filename,
@@ -458,41 +475,23 @@ export class GalleryEmbeddingService implements OnModuleInit {
       thumbnailUrl: row.thumbnailUrl,
       folderId: row.folderId,
       folderName: row.folderName,
-      distance: Number(row.distance),
-      metadata: row.metadata ?? null,
+      distance: this.effectiveDistance(row),
+      metadata: (row.metadata as ProductMetadata | null) ?? null,
+      isClientPreferred: row.is_client_preferred === true,
     }));
   }
 
-  async searchByEmbedding(embedding: number[], limit = 12): Promise<GalleryEmbeddingMatch[]> {
+  async searchByEmbedding(
+    embedding: number[],
+    limit = 12,
+    options: EmbeddingSearchOptions = {},
+  ): Promise<GalleryEmbeddingMatch[]> {
     if (embedding.length !== EMBEDDING_DIMENSIONS) {
       throw new Error(
         `Embedding com ${embedding.length} dimensões; esperado ${EMBEDDING_DIMENSIONS}.`,
       );
     }
-    const rows: Array<{
-      id: string;
-      filename: string;
-      url: string;
-      thumbnailUrl: string | null;
-      folderId: string | null;
-      folderName: string | null;
-      distance: string;
-    }> = await this.dataSource.query(
-      `SELECT gi.id,
-              gi.filename,
-              gi.url,
-              gi."thumbnailUrl",
-              gi."folderId",
-              gf.name AS "folderName",
-              (gi.embedding <=> $1::vector) AS distance
-         FROM gallery_images gi
-         LEFT JOIN gallery_folders gf ON gf.id = gi."folderId"
-        WHERE gi.embedding IS NOT NULL
-        ORDER BY gi.embedding <=> $1::vector
-        LIMIT $2`,
-      [toSql(embedding), limit],
-    );
-
+    const rows = await this.querySimilarImages('embedding', embedding, limit, options);
     return rows.map((row) => ({
       id: row.id,
       filename: row.filename,
@@ -500,7 +499,78 @@ export class GalleryEmbeddingService implements OnModuleInit {
       thumbnailUrl: row.thumbnailUrl,
       folderId: row.folderId,
       folderName: row.folderName,
-      distance: Number(row.distance),
+      distance: this.effectiveDistance(row),
+      isClientPreferred: row.is_client_preferred === true,
     }));
+  }
+
+  /**
+   * Distância efetiva usada para ranquear e pontuar: quando a imagem é preferida
+   * do cliente, aproximamos pelo boost (nunca abaixo de 0). Espelha exatamente o
+   * ORDER BY do SQL — mantém ranking e score consistentes.
+   */
+  private effectiveDistance(row: SimilarImageRow): number {
+    const raw = Number(row.distance);
+    if (row.is_client_preferred === true) {
+      return Math.max(0, raw - this.preferenceBoost);
+    }
+    return raw;
+  }
+
+  /**
+   * Busca por similaridade cosseno compartilhada por `embedding` (nome/pasta) e
+   * `metadata_embedding` (V2). Sem `clientId`, é a busca clássica ordenada pela
+   * distância pura (usa o índice HNSW). Com `clientId`, faz LEFT JOIN nas
+   * preferidas do cliente e ordena pela distância efetiva (distância − boost),
+   * priorizando as preferidas sem excluir o restante do banco (Feature 12).
+   */
+  private async querySimilarImages(
+    column: 'embedding' | 'metadata_embedding',
+    embedding: number[],
+    limit: number,
+    options: EmbeddingSearchOptions,
+  ): Promise<SimilarImageRow[]> {
+    const vec = toSql(embedding);
+    const metaSelect = column === 'metadata_embedding' ? ', gi.metadata' : '';
+    const clientId = options.clientId ?? null;
+
+    if (!clientId) {
+      return this.dataSource.query(
+        `SELECT gi.id,
+                gi.filename,
+                gi.url,
+                gi."thumbnailUrl",
+                gi."folderId",
+                gf.name AS "folderName",
+                (gi.${column} <=> $1::vector) AS distance,
+                false AS is_client_preferred${metaSelect}
+           FROM gallery_images gi
+           LEFT JOIN gallery_folders gf ON gf.id = gi."folderId"
+          WHERE gi.${column} IS NOT NULL
+          ORDER BY gi.${column} <=> $1::vector
+          LIMIT $2`,
+        [vec, limit],
+      );
+    }
+
+    return this.dataSource.query(
+      `SELECT gi.id,
+              gi.filename,
+              gi.url,
+              gi."thumbnailUrl",
+              gi."folderId",
+              gf.name AS "folderName",
+              (gi.${column} <=> $1::vector) AS distance,
+              (cpi.client_id IS NOT NULL) AS is_client_preferred${metaSelect}
+         FROM gallery_images gi
+         LEFT JOIN gallery_folders gf ON gf.id = gi."folderId"
+         LEFT JOIN client_preferred_images cpi
+                ON cpi.image_id = gi.id AND cpi.client_id = $3
+        WHERE gi.${column} IS NOT NULL
+        ORDER BY (gi.${column} <=> $1::vector)
+                 - CASE WHEN cpi.client_id IS NOT NULL THEN $4 ELSE 0 END
+        LIMIT $2`,
+      [vec, limit, clientId, this.preferenceBoost],
+    );
   }
 }

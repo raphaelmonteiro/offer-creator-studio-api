@@ -44,6 +44,8 @@ PIXABAY_API_KEY               # product image search
 REPLICATE_API_TOKEN           # SAM image segmentation
 ADMIN_API_TOKEN               # gates /ai/gallery/* admin routes (x-admin-token header)
 AI_GALLERY_EMBEDDING_ENABLED  # toggles pgvector setup/backfill on boot
+AI_CLIENT_IMAGE_PREF_BOOST    # Feature 12: cosine-distance bonus for a client's
+                              # preferred images in product-image matching (default 0.15)
 ```
 
 ## Architecture
@@ -312,7 +314,7 @@ Follow the existing pattern: `module.ts` → `controller.ts` → `service.ts` �
 
 **Business rules:**
 - `configuration` max 10MB (same error codes as templates module).
-- Duplicate copies `configuration`, `clientId`, sets `status: 'draft'`.
+- Duplicate copies `configuration`, `clientId`, `kind`, `layout`, `customGridConfig`, and sets `status: 'draft'` (Feature 11 — preserves document type and grid config so duplicating a social art stays `kind='social'`).
 - Date range filter on `createdAt` using `startDate`/`endDate` (ISO date strings).
 - List query joins client to include `clientName` in response.
 
@@ -346,7 +348,9 @@ Follow the existing pattern: `module.ts` → `controller.ts` → `service.ts` �
 
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| GET | `/` | JWT | Query: `page, limit, search, folderId` |
+| GET | `/` | JWT | Query: `page, limit, search, folderId, clientId`. Each image includes `clients: [{id,name}]` (Feature 13) |
+| PUT | `/images/:imageId/clients` | JWT | Body: `{ clientIds[] }` — replaces the image's client tags |
+| POST | `/images/clients/bulk` | JWT | Body: `{ imageIds[], clientIds[], mode: 'add'\|'remove'\|'replace' }` |
 | POST | `/upload` | JWT | multipart/form-data — `files[]` (multiple), `folderId?` |
 | DELETE | `/:id` | JWT | |
 | POST | `/delete-many` | JWT | Body: `{ ids: string[] }` |
@@ -361,11 +365,23 @@ Follow the existing pattern: `module.ts` → `controller.ts` → `service.ts` �
 | PATCH | `/folders/:id` | JWT | Body: `{ name?, color? }` |
 | DELETE | `/folders/:id` | JWT | Moves images to root (folderId = NULL) |
 
+**Client ↔ image link** — the N:N table backing both the matching boost (Feature 12) and the
+gallery tagging UI (Feature 13). Managed by `ClientPreferredImagesService` (raw SQL via
+DataSource, since the link table is SQL-managed — not a TypeORM entity) and exposed through the
+`/gallery/images/...clients` routes above. There is **no** client-side entry point (a
+`/clients/:id/preferred-images` controller existed briefly and was removed): the gallery's
+client filter is the single place to view and edit these links.
+
 **Entities:**
 - `gallery_images`: `id`, `filename`, `url`, `thumbnailUrl` (nullable), `mimeType`, `size` (bigint), `folderId` (nullable FK, onDelete: SET NULL).
 - `gallery_folders`: `id`, `name`, `color` (nullable).
+- `client_preferred_images` (SQL-managed, in `sql/001_pgvector_setup.sql`): `(client_id, image_id)` PK, both FKs `ON DELETE CASCADE`. Not a TypeORM entity.
 
 **Business rules:**
+- **Feature 13 — cliente como tag:** `clientId` in the list query filters by client tag
+  (`'none'` = images with no client). Uses `EXISTS` (not JOIN) so an image tagged for several
+  clients isn't duplicated and the fuzzy-search ranking is untouched. Folder (storage) and
+  client (curation) are **orthogonal axes** — an image lives in one folder but can serve N clients.
 - `folderId = 'none'` in query filters images with no folder (root images).
 - `folderId = null` in move operation moves images to root.
 - Deleting a folder sets all its images' `folderId = NULL` (does not delete images).

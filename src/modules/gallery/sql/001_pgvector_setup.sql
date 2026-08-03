@@ -36,3 +36,19 @@ CREATE INDEX IF NOT EXISTS gallery_images_metadata_embedding_hnsw_idx
 CREATE INDEX IF NOT EXISTS gallery_images_metadata_status_idx
   ON gallery_images (metadata_status)
   WHERE metadata_status IS NULL OR metadata_status = 'pending';
+
+-- Feature 12 — Imagens preferidas por cliente (vínculo real N:N).
+-- Uma foto pode ser preferida por vários clientes; um cliente tem várias
+-- preferidas. Não duplica arquivos: aponta para gallery_images existentes.
+CREATE TABLE IF NOT EXISTS client_preferred_images (
+  client_id  uuid NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  image_id   uuid NOT NULL REFERENCES gallery_images(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (client_id, image_id)
+);
+
+CREATE INDEX IF NOT EXISTS client_preferred_images_client_idx
+  ON client_preferred_images (client_id);
+
+CREATE INDEX IF NOT EXISTS client_preferred_images_image_idx
+  ON client_preferred_images (image_id);

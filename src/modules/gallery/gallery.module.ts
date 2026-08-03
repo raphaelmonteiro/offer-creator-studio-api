@@ -4,12 +4,13 @@ import { GalleryImage } from './entities/gallery-image.entity';
 import { GalleryFolder } from './entities/gallery-folder.entity';
 import { GalleryService } from './gallery.service';
 import { GalleryController } from './gallery.controller';
+import { ClientPreferredImagesService } from './client-preferred-images.service';
 import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([GalleryImage, GalleryFolder]), UploadsModule],
   controllers: [GalleryController],
-  providers: [GalleryService],
+  providers: [GalleryService, ClientPreferredImagesService],
   exports: [GalleryService],
 })
 export class GalleryModule {}

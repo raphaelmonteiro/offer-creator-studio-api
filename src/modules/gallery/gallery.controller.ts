@@ -2,9 +2,11 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Param,
+  ParseUUIDPipe,
   Query,
   UseGuards,
   UseInterceptors,
@@ -30,6 +32,9 @@ import { MoveImagesDto } from './dto/move-images.dto';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
 import { UpdateImageDto } from './dto/update-image.dto';
+import { SetImageClientsDto } from './dto/set-image-clients.dto';
+import { BulkImageClientsDto } from './dto/bulk-image-clients.dto';
+import { ClientPreferredImagesService } from './client-preferred-images.service';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { fileUploadOptions } from '../../common/utils/multer.util';
 import { SkipValidation } from '../../common/decorators/skip-validation.decorator';
@@ -39,7 +44,10 @@ import { SkipValidation } from '../../common/decorators/skip-validation.decorato
 @UseGuards(JwtAuthGuard)
 @Controller('gallery')
 export class GalleryController {
-  constructor(private readonly galleryService: GalleryService) {}
+  constructor(
+    private readonly galleryService: GalleryService,
+    private readonly clientPreferredImages: ClientPreferredImagesService,
+  ) {}
 
   // Imagens
 
@@ -112,6 +120,30 @@ export class GalleryController {
   @ApiResponse({ status: 200, description: 'Imagens movidas com sucesso' })
   moveImages(@Body() dto: MoveImagesDto) {
     return this.galleryService.moveImages(dto);
+  }
+
+  // Marcação de clientes (Feature 13)
+  //
+  // Cliente funciona como TAG de curadoria: uma imagem pode ser marcada para N
+  // clientes, sem mover arquivo e sem conflitar com a pasta (que é organização).
+
+  @Put('images/:imageId/clients')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Define os clientes de uma imagem (substitui a marcação atual)' })
+  @ApiResponse({ status: 200, description: 'Marcação atualizada' })
+  setImageClients(
+    @Param('imageId', ParseUUIDPipe) imageId: string,
+    @Body() dto: SetImageClientsDto,
+  ) {
+    return this.clientPreferredImages.setClientsForImage(imageId, dto.clientIds);
+  }
+
+  @Post('images/clients/bulk')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Marca/desmarca clientes em várias imagens de uma vez' })
+  @ApiResponse({ status: 200, description: 'Marcação aplicada' })
+  bulkImageClients(@Body() dto: BulkImageClientsDto) {
+    return this.clientPreferredImages.bulkAssign(dto.imageIds, dto.clientIds, dto.mode ?? 'add');
   }
 
   // Pastas

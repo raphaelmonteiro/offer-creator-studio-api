@@ -263,6 +263,12 @@ export class FlyersService {
       name: duplicateDto.name,
       clientId: originalFlyer.clientId,
       configuration: originalFlyer.configuration,
+      // Preserva o tipo e a configuração de layout do encarte de origem.
+      // Sem isso, duplicar uma arte social (kind='social') a rebaixava para
+      // 'flyer' (default), e o grid customizado se perdia (Feature 11).
+      kind: originalFlyer.kind,
+      layout: originalFlyer.layout,
+      customGridConfig: originalFlyer.customGridConfig,
       status: 'draft',
     });
     return this.flyerRepository.save(newFlyer);

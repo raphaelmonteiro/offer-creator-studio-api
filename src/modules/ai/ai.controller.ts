@@ -91,7 +91,7 @@ export class AiController {
   @ApiResponse({ status: 200, description: 'Matches com score' })
   async productImageMatch(@Body() dto: ProductImageMatchRequestDto) {
     try {
-      return await this.galleryEmbeddingService.findBestImageMatches(dto.products);
+      return await this.galleryEmbeddingService.findBestImageMatches(dto.products, dto.clientId);
     } catch (error) {
       this.logger.error('Erro ao buscar imagens por similaridade', error);
       return {
@@ -117,6 +117,7 @@ export class AiController {
         category: dto.category,
         unit: dto.unit,
         limit: dto.limit,
+        clientId: dto.clientId,
       });
       return { candidates };
     } catch (error) {
@@ -139,7 +140,7 @@ export class AiController {
   @ApiResponse({ status: 200, description: 'Matches + reviewCandidates' })
   async productImageMatchV2Handler(@Body() dto: ProductImageMatchRequestDto) {
     try {
-      return await this.productImageMatchV2.findBestMatches(dto.products);
+      return await this.productImageMatchV2.findBestMatches(dto.products, dto.clientId);
     } catch (error) {
       this.logger.error('Erro no matching V2', error);
       return {
@@ -168,6 +169,7 @@ export class AiController {
           unit: dto.unit,
         },
         dto.limit ?? 12,
+        dto.clientId,
       );
       return { candidates };
     } catch (error) {
