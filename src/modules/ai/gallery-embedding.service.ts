@@ -534,43 +534,64 @@ export class GalleryEmbeddingService implements OnModuleInit {
     const metaSelect = column === 'metadata_embedding' ? ', gi.metadata' : '';
     const clientId = options.clientId ?? null;
 
+    // `ORDER BY coluna <=> vetor` é a única forma que o índice HNSW atende.
+    // Por isso o escopo de cliente NÃO entra como boost no ORDER BY (isso
+    // tornaria a expressão não-indexável e forçaria varredura completa);
+    // em vez disso rodamos duas buscas indexáveis e combinamos em memória.
+    const globalSql = `
+      SELECT gi.id,
+             gi.filename,
+             gi.url,
+             gi."thumbnailUrl",
+             gi."folderId",
+             gf.name AS "folderName",
+             (gi.${column} <=> $1::vector) AS distance,
+             false AS is_client_preferred${metaSelect}
+        FROM gallery_images gi
+        LEFT JOIN gallery_folders gf ON gf.id = gi."folderId"
+       WHERE gi.${column} IS NOT NULL
+       ORDER BY gi.${column} <=> $1::vector
+       LIMIT $2`;
+
     if (!clientId) {
-      return this.dataSource.query(
-        `SELECT gi.id,
-                gi.filename,
-                gi.url,
-                gi."thumbnailUrl",
-                gi."folderId",
-                gf.name AS "folderName",
-                (gi.${column} <=> $1::vector) AS distance,
-                false AS is_client_preferred${metaSelect}
-           FROM gallery_images gi
-           LEFT JOIN gallery_folders gf ON gf.id = gi."folderId"
-          WHERE gi.${column} IS NOT NULL
-          ORDER BY gi.${column} <=> $1::vector
-          LIMIT $2`,
-        [vec, limit],
-      );
+      return this.dataSource.query(globalSql, [vec, limit]);
     }
 
-    return this.dataSource.query(
-      `SELECT gi.id,
-              gi.filename,
-              gi.url,
-              gi."thumbnailUrl",
-              gi."folderId",
-              gf.name AS "folderName",
-              (gi.${column} <=> $1::vector) AS distance,
-              (cpi.client_id IS NOT NULL) AS is_client_preferred${metaSelect}
-         FROM gallery_images gi
-         LEFT JOIN gallery_folders gf ON gf.id = gi."folderId"
-         LEFT JOIN client_preferred_images cpi
-                ON cpi.image_id = gi.id AND cpi.client_id = $3
-        WHERE gi.${column} IS NOT NULL
-        ORDER BY (gi.${column} <=> $1::vector)
-                 - CASE WHEN cpi.client_id IS NOT NULL THEN $4 ELSE 0 END
-        LIMIT $2`,
-      [vec, limit, clientId, this.preferenceBoost],
-    );
+    // Restrito às preferidas do cliente: o filtro por client_id usa o índice
+    // btree e reduz a um punhado de linhas, então ordenar por distância aí é
+    // barato mesmo sem o índice vetorial.
+    const preferredSql = `
+      SELECT gi.id,
+             gi.filename,
+             gi.url,
+             gi."thumbnailUrl",
+             gi."folderId",
+             gf.name AS "folderName",
+             (gi.${column} <=> $1::vector) AS distance,
+             true AS is_client_preferred${metaSelect}
+        FROM client_preferred_images cpi
+        JOIN gallery_images gi ON gi.id = cpi.image_id
+        LEFT JOIN gallery_folders gf ON gf.id = gi."folderId"
+       WHERE cpi.client_id = $3
+         AND gi.${column} IS NOT NULL
+       ORDER BY gi.${column} <=> $1::vector
+       LIMIT $2`;
+
+    const [globalRows, preferredRows]: [SimilarImageRow[], SimilarImageRow[]] = await Promise.all([
+      this.dataSource.query(globalSql, [vec, limit]),
+      this.dataSource.query(preferredSql, [vec, limit, clientId]),
+    ]);
+
+    // As preferidas têm precedência no dedupe: uma imagem que aparece nas duas
+    // listas precisa carregar is_client_preferred = true.
+    const byId = new Map<string, SimilarImageRow>();
+    for (const row of globalRows) byId.set(row.id, row);
+    for (const row of preferredRows) byId.set(row.id, row);
+
+    // Reproduz em memória o mesmo ranking do ORDER BY anterior
+    // (distância − boost para as preferidas) e corta no limite pedido.
+    return [...byId.values()]
+      .sort((a, b) => this.effectiveDistance(a) - this.effectiveDistance(b))
+      .slice(0, limit);
   }
 }

@@ -114,6 +114,20 @@ esse `clientId` nas chamadas de match/candidates.
 
 ### 4.2 SQL com boost por cliente
 
+> **Implementado com DUAS queries, não com boost no `ORDER BY`.** O esboço abaixo
+> (uma query com `LEFT JOIN` e `ORDER BY distância − boost`) foi a primeira versão e
+> **funciona, mas não é indexável**: o índice HNSW só atende `ORDER BY coluna <=> vetor`.
+> Medido com `EXPLAIN`, essa forma caía em varredura completa — e como o matching roda
+> uma vez por produto, o custo multiplicava pelo tamanho do encarte (produção tem ~13k imagens).
+>
+> A versão final roda duas buscas indexáveis em paralelo e combina em memória:
+> 1. **top-N global** — `ORDER BY coluna <=> vetor` (usa o índice HNSW);
+> 2. **preferidas do cliente** — filtra por `cpi.client_id` (índice btree, conjunto pequeno).
+>
+> O merge deduplica (preferida tem precedência), aplica `distância − boost` e corta no limite,
+> reproduzindo exatamente o ranking pretendido. Coberto por
+> [gallery-embedding.preference-search.spec.ts](../src/modules/ai/gallery-embedding.preference-search.spec.ts).
+
 Amplia-se `searchByEmbedding` / `searchByMetadataEmbedding` para aceitar `clientId` e aplicar
 um bônus de proximidade às imagens do cliente. Exemplo com Opção A:
 
