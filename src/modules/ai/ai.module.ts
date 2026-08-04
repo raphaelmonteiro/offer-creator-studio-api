@@ -44,6 +44,12 @@ import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.se
     { provide: 'GalleryEmbeddingService', useExisting: GalleryEmbeddingService },
     { provide: 'ImageMetadataService', useExisting: ImageMetadataService },
   ],
-  exports: [GalleryEmbeddingService, 'GalleryEmbeddingService', 'ImageMetadataService'],
+  exports: [
+    GalleryEmbeddingService,
+    'GalleryEmbeddingService',
+    'ImageMetadataService',
+    // usado pelo módulo de animações para gerar a imagem base do background
+    OpenAiImageService,
+  ],
 })
 export class AiModule {}

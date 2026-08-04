@@ -19,6 +19,7 @@ import { HealthModule } from './modules/health/health.module';
 import { GalleryModule } from './modules/gallery/gallery.module';
 import { AiModule } from './modules/ai/ai.module';
 import { FlyerBuilderV2Module } from './modules/flyer-builder-v2/flyer-builder-v2.module';
+import { AnimationsModule } from './modules/animations/animations.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { FlyerBuilderV2Module } from './modules/flyer-builder-v2/flyer-builder-v
     GalleryModule,
     AiModule,
     FlyerBuilderV2Module,
+    AnimationsModule,
   ],
   providers: [
     {

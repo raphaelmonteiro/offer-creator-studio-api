@@ -44,6 +44,7 @@
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
     "pg": "^8.11.3",
+    "pg-boss": "^9.0.3",
     "pgvector": "^0.2.1",
     "reflect-metadata": "^0.1.13",
     "replicate": "^1.4.0",
@@ -96,6 +97,9 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "setupFiles": [
+      "reflect-metadata"
+    ]
   }
 }
