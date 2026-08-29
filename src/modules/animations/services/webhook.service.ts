@@ -4,9 +4,9 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { AnimationTask } from '../entities/animation-task.entity';
-import { TaskStatus } from '../domain/task-state-machine';
-import { TaskTransitionService } from './task-transition.service';
-import { AnimationQueueService, QUEUES } from './animation-queue.service';
+import { TaskStatus } from '../../../shared/state/task-state-machine';
+import { TaskTransitionService } from '../../../shared/state/task-transition.service';
+import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 
 /**
  * Webhooks de providers (TDD ADR-04): assinados com HMAC por provider; o

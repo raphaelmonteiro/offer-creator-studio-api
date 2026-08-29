@@ -13,11 +13,13 @@ import { FlyerAssemblyPlanService } from './flyer-assembly-plan.service';
 import { GalleryEmbeddingService } from './gallery-embedding.service';
 import { SocialSectionLayoutService } from './social-section-layout.service';
 import { BackgroundRemovalService } from './background-removal.service';
+import { MascotScriptService } from './mascot-script.service';
 import { UploadsModule } from '../uploads/uploads.module';
 import { GalleryModule } from '../gallery/gallery.module';
 import { TaxonomyService } from './metadata/taxonomy/taxonomy.service';
 import { ImageMetadataService } from './metadata/image-metadata.service';
 import { ProductNameParserService } from './metadata/product-name-parser.service';
+import { FilenameMetadataRecoveryService } from './metadata/filename-metadata-recovery.service';
 import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.service';
 
 @Module({
@@ -37,9 +39,11 @@ import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.se
     GalleryEmbeddingService,
     SocialSectionLayoutService,
     BackgroundRemovalService,
+    MascotScriptService,
     TaxonomyService,
     ImageMetadataService,
     ProductNameParserService,
+    FilenameMetadataRecoveryService,
     ProductImageMatchV2Service,
     { provide: 'GalleryEmbeddingService', useExisting: GalleryEmbeddingService },
     { provide: 'ImageMetadataService', useExisting: ImageMetadataService },
@@ -50,6 +54,8 @@ import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.se
     'ImageMetadataService',
     // usado pelo módulo de animações para gerar a imagem base do background
     OpenAiImageService,
+    // usado pelo módulo de mascotes para recortar o fundo do PNG enviado
+    BackgroundRemovalService,
   ],
 })
 export class AiModule {}

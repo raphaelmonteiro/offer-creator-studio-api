@@ -9,17 +9,25 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { AnimationTask } from '../entities/animation-task.entity';
-import { TaskStatus, TERMINAL_TASK_STATUSES } from '../domain/task-state-machine';
+import { TaskStatus, TERMINAL_TASK_STATUSES } from '../../../shared/state/task-state-machine';
 import { buildPipeline, stepCost } from '../domain/pricing.config';
 import {
+  AnimationTaskType,
   CreateAnimationTaskDto,
   TalkingMascotInputDto,
   VoiceTtsInputDto,
 } from '../dto/create-animation-task.dto';
-import { CreditsService, creditsEnabled } from './credits.service';
-import { TaskTransitionService } from './task-transition.service';
+import {
+  BackgroundMode,
+  MascotPreset,
+  MotionIntensity,
+  buildMascotPrompt,
+} from '../domain/mascot-prompt';
+import { MascotsService } from '../../mascots/mascots.service';
+import { CreditsService, creditsEnabled } from '../../../shared/credits/credits.service';
+import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { TtsCacheService } from './tts-cache.service';
-import { AnimationQueueService, QUEUES } from './animation-queue.service';
+import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 
 const MAX_CONCURRENT_TASKS = Number(process.env.MAX_CONCURRENT_TASKS_PER_USER ?? 3);
 const MAX_TASKS_PER_DAY = Number(process.env.MAX_TASKS_PER_DAY ?? 100);
@@ -32,6 +40,7 @@ export class AnimationTasksService {
     private readonly transitions: TaskTransitionService,
     private readonly ttsCache: TtsCacheService,
     private readonly queue: AnimationQueueService,
+    private readonly mascots: MascotsService,
   ) {}
 
   /**
@@ -43,7 +52,13 @@ export class AnimationTasksService {
     return this.dataSource.transaction(async (manager) => {
       await this.enforceLimits(manager, userId);
 
-      const input = dto.input as unknown as Record<string, unknown>;
+      const input =
+        dto.type === AnimationTaskType.MASCOT_MOTION
+          ? await this.prepareMascotMotionInput(
+              userId,
+              dto.input as unknown as Record<string, unknown>,
+            )
+          : (dto.input as unknown as Record<string, unknown>);
       const steps = buildPipeline(dto.type, input);
 
       // Cache de TTS: etapa 'tts' com hash já existente vira succeeded_cached
@@ -98,6 +113,57 @@ export class AnimationTasksService {
       await this.queue.publish(QUEUES.AI_GENERATE, { taskId: task.id });
       return task;
     });
+  }
+
+  /**
+   * Prepara o input de `mascot_motion` (TDD i2v §8.4).
+   *
+   * Duas coisas acontecem aqui, e as duas de propósito no SERVIDOR:
+   * 1. a imagem é resolvida a partir do `mascotId` — o cliente nunca manda URL,
+   *    então não há superfície de SSRF;
+   * 2. o prompt técnico e o negative prompt são construídos e gravados no
+   *    input, o que dá auditoria e permite "gerar de novo" com o mesmo texto.
+   */
+  private async prepareMascotMotionInput(
+    userId: string,
+    raw: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    // descarta qualquer imageUrl que tenha vindo do cliente
+    const { imageUrl: _clientSupplied, ...input } = raw;
+
+    let resolvedImageUrl: string | null = null;
+    let mascotName: string | undefined;
+    if (typeof input.mascotId === 'string' && input.mascotId) {
+      const mascot = await this.mascots.findOne(userId, input.mascotId);
+      if (!mascot.renderUrl) {
+        throw new BadRequestException({
+          code: 'MASCOT_WITHOUT_CUTOUT',
+          message: 'Este mascote ainda não tem recorte. Faça o recorte do fundo antes de animar.',
+        });
+      }
+      resolvedImageUrl = mascot.renderUrl;
+      mascotName = mascot.name;
+    }
+
+    const built = buildMascotPrompt({
+      preset: input.preset as MascotPreset,
+      userPrompt: typeof input.prompt === 'string' ? input.prompt : undefined,
+      motionIntensity: input.intensity as MotionIntensity,
+      durationS: Number(input.durationS ?? 5),
+      fixedCamera: input.fixedCamera !== false,
+      removeHandheldObjects: input.removeHandheldObjects === true,
+      backgroundMode: (input.backgroundMode as BackgroundMode) ?? 'original',
+      backgroundColor:
+        typeof input.backgroundColor === 'string' ? input.backgroundColor : undefined,
+    });
+
+    return {
+      ...input,
+      ...(resolvedImageUrl ? { imageUrl: resolvedImageUrl } : {}),
+      ...(mascotName ? { mascotName } : {}),
+      generatedPrompt: built.prompt,
+      negativePrompt: built.negativePrompt,
+    };
   }
 
   async findAll(

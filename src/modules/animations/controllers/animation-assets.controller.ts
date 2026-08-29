@@ -17,7 +17,7 @@ import { DataSource, ILike, IsNull } from 'typeorm';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/user.decorator';
-import { AnimationAsset } from '../entities/animation-asset.entity';
+import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 
 class UpdateAssetDto {
   @IsOptional()

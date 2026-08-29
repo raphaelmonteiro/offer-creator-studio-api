@@ -20,6 +20,8 @@ import { GalleryModule } from './modules/gallery/gallery.module';
 import { AiModule } from './modules/ai/ai.module';
 import { FlyerBuilderV2Module } from './modules/flyer-builder-v2/flyer-builder-v2.module';
 import { AnimationsModule } from './modules/animations/animations.module';
+import { MascotsModule } from './modules/mascots/mascots.module';
+import { CommercialsModule } from './modules/commercials/commercials.module';
 
 @Module({
   imports: [
@@ -44,6 +46,9 @@ import { AnimationsModule } from './modules/animations/animations.module';
     AiModule,
     FlyerBuilderV2Module,
     AnimationsModule,
+    MascotsModule,
+    // sempre registrado — a flag MC_ENABLED age nas rotas e no consumer
+    CommercialsModule,
   ],
   providers: [
     {

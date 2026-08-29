@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HttpProviderBase } from './http-provider.base';
+import { HttpProviderBase } from '../../../shared/providers/http-provider.base';
 import { ProviderStatusResult, ProviderSubmitResult, withRetry } from './provider.types';
 
 /** HeyGen — avatar humano falando com lip-sync (TDD §5.3). */

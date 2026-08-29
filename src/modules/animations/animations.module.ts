@@ -1,25 +1,20 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AiModule } from '../ai/ai.module';
-import { AnimationAsset } from './entities/animation-asset.entity';
+import { MascotsModule } from '../mascots/mascots.module';
+import { SharedModule } from '../../shared/shared.module';
+import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queue.service';
+import { ResourceGuardService } from '../../shared/resource-guard/resource-guard.service';
 import { AnimationTask } from './entities/animation-task.entity';
-import { AnimationTaskEvent } from './entities/animation-task-event.entity';
 import { RenderJob } from './entities/render-job.entity';
-import { AiCreditLedgerEntry } from './entities/ai-credit-ledger.entity';
-import { VoiceCatalogEntry } from './entities/voice-catalog.entity';
-import { CreditsService } from './services/credits.service';
-import { TaskTransitionService } from './services/task-transition.service';
-import { AnimationQueueService, QUEUES } from './services/animation-queue.service';
-import { ResourceGuardService } from './services/resource-guard.service';
-import { AnimationEventsService } from './services/animation-events.service';
 import { AnimationTasksService } from './services/animation-tasks.service';
 import { RenderJobsService } from './services/render-jobs.service';
 import { TtsCacheService } from './services/tts-cache.service';
 import { WebhookService } from './services/webhook.service';
 import { RunwayProvider } from './providers/runway.provider';
 import { FalKlingProvider } from './providers/fal-kling.provider';
-import { ElevenLabsProvider } from './providers/elevenlabs.provider';
 import { HeyGenProvider } from './providers/heygen.provider';
+import { MockVideoProvider } from './providers/mock-video.provider';
 import { AiGenerationProcessor } from './processors/ai-generation.processor';
 import { FfmpegRenderProcessor } from './processors/ffmpeg-render.processor';
 import { AnimationTasksController } from './controllers/animation-tasks.controller';
@@ -32,20 +27,21 @@ import { VoiceCatalogController } from './controllers/voice-catalog.controller';
 
 /**
  * Módulo de Animações IA (TDD docs/tdd-modulo-animacoes-ia.md).
- * No processo API os consumers não são registrados; no worker (WORKER_ONLY=true)
- * os consumers assinam as filas com gate do ResourceGuard (TDD ADR-02/§6.5).
+ * A infraestrutura neutra (fila, transições CAS, créditos, assets, ffmpeg,
+ * resource guard, eventos SSE, GC) vive no SharedModule (plano-comerciais
+ * §11) — aqui ficam apenas domínio, providers, processors e controllers.
+ * No processo API os consumers não são registrados; no worker
+ * (WORKER_ONLY=true) os consumers assinam as filas com gate do ResourceGuard
+ * (TDD ADR-02/§6.5).
  */
 @Module({
   imports: [
     AiModule,
-    TypeOrmModule.forFeature([
-      AnimationAsset,
-      AnimationTask,
-      AnimationTaskEvent,
-      RenderJob,
-      AiCreditLedgerEntry,
-      VoiceCatalogEntry,
-    ]),
+    SharedModule,
+    // o formulário de animar mascote resolve a imagem a partir do mascote da
+    // biblioteca — ownership e recorte são validados pelo MascotsService
+    MascotsModule,
+    TypeOrmModule.forFeature([AnimationTask, RenderJob]),
   ],
   controllers: [
     AnimationTasksController,
@@ -57,23 +53,18 @@ import { VoiceCatalogController } from './controllers/voice-catalog.controller';
     VoiceCatalogController,
   ],
   providers: [
-    CreditsService,
-    TaskTransitionService,
-    AnimationQueueService,
-    ResourceGuardService,
-    AnimationEventsService,
     AnimationTasksService,
     RenderJobsService,
     TtsCacheService,
     WebhookService,
     RunwayProvider,
     FalKlingProvider,
-    ElevenLabsProvider,
     HeyGenProvider,
+    MockVideoProvider,
     AiGenerationProcessor,
     FfmpegRenderProcessor,
   ],
-  exports: [AnimationQueueService],
+  exports: [SharedModule],
 })
 export class AnimationsModule implements OnModuleInit {
   constructor(

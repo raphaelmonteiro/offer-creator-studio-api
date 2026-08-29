@@ -24,6 +24,7 @@ import { AiService } from './ai.service';
 import { GalleryEmbeddingService } from './gallery-embedding.service';
 import { ImageMetadataService } from './metadata/image-metadata.service';
 import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.service';
+import { FilenameMetadataRecoveryService } from './metadata/filename-metadata-recovery.service';
 import { SocialSectionLayoutService } from './social-section-layout.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { SpellCheckRequestDto } from './dto/spell-check-request.dto';
@@ -38,6 +39,8 @@ import { FlyerAssemblyPlanRequestDto } from './dto/flyer-assembly-plan-request.d
 import { ProductImageMatchRequestDto } from './dto/product-image-match-request.dto';
 import { ProductImageCandidatesRequestDto } from './dto/product-image-candidates-request.dto';
 import { SocialSectionLayoutRequestDto } from './dto/social-section-layout-request.dto';
+import { MascotScriptRequestDto } from './dto/mascot-script-request.dto';
+import { MascotScriptService } from './mascot-script.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @ApiTags('AI')
@@ -51,9 +54,11 @@ export class AiController {
     private readonly aiService: AiService,
     private readonly galleryEmbeddingService: GalleryEmbeddingService,
     private readonly socialSectionLayoutService: SocialSectionLayoutService,
+    private readonly mascotScriptService: MascotScriptService,
     private readonly backgroundRemovalService: BackgroundRemovalService,
     private readonly imageMetadataService: ImageMetadataService,
     private readonly productImageMatchV2: ProductImageMatchV2Service,
+    private readonly filenameRecovery: FilenameMetadataRecoveryService,
     private readonly configService: ConfigService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
@@ -218,6 +223,56 @@ export class AiController {
     const offset = Math.max(Number(offsetQuery) || 0, 0);
     const items = await this.galleryEmbeddingService.listFailedMetadataImages(limit, offset);
     return { limit, offset, count: items.length, items };
+  }
+
+  @Public()
+  @Get('gallery/filename-recovery-stats')
+  @ApiOperation({
+    summary: '[Admin] Feature 14 Fase 0 — quantas imagens não são consultáveis por descrição',
+  })
+  async galleryFilenameRecoveryStats(@Headers('x-admin-token') adminToken: string | undefined) {
+    this.assertAdminToken(adminToken);
+    const [row] = await this.dataSource.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (
+           WHERE metadata->'alternatives'->0->>'brand' IS NOT NULL
+             AND metadata->'quantity' IS NOT NULL
+             AND metadata->'quantity' <> 'null'::jsonb
+         )::int AS consultaveis
+       FROM gallery_images
+       WHERE metadata IS NOT NULL`,
+    );
+    const pending = await this.filenameRecovery.countImagesNeedingRecovery();
+    return {
+      ...row,
+      pendentes: pending,
+      percentualConsultavel: row.total
+        ? Number(((row.consultaveis / row.total) * 100).toFixed(1))
+        : 0,
+    };
+  }
+
+  @Public()
+  @Post('gallery/filename-recovery')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      '[Admin] Feature 14 Fase 0 — recupera marca/quantidade do filename para imagens não consultáveis',
+  })
+  async galleryFilenameRecovery(
+    @Headers('x-admin-token') adminToken: string | undefined,
+    @Body() body: { batchSize?: number; maxBatches?: number; dryRun?: boolean } = {},
+  ) {
+    this.assertAdminToken(adminToken);
+    if (!this.filenameRecovery.isEnabled()) {
+      throw new ForbiddenException('Parser de nomes desabilitado (OPENAI_API_KEY ausente).');
+    }
+    return this.filenameRecovery.recover({
+      batchSize: body.batchSize,
+      maxBatches: body.maxBatches,
+      dryRun: body.dryRun,
+    });
   }
 
   @Public()
@@ -460,6 +515,20 @@ export class AiController {
         },
       };
     }
+  }
+
+  @Post('mascot-script')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Gera o roteiro de locução do mascote a partir das ofertas reais do encarte (preços por extenso)',
+  })
+  @ApiResponse({ status: 200, description: 'Roteiro gerado, sempre editável antes de virar áudio' })
+  @ApiResponse({ status: 422, description: 'Roteiro estoura o limite de duração do vídeo' })
+  mascotScript(@Body() dto: MascotScriptRequestDto) {
+    // Sem try/catch: os erros deste fluxo (encarte inexistente, roteiro longo
+    // demais) precisam chegar com o status certo e mensagem acionável.
+    return this.mascotScriptService.createScript(dto);
   }
 
   @Post('template-image-generate')

@@ -53,9 +53,7 @@ export class ImageMetadataService {
     const parsed = Number.parseInt(raw, 10);
     this.maxConcurrency = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_CONCURRENCY;
 
-    this.uploadDest = path.resolve(
-      configService.get<string>('UPLOAD_DEST', './uploads'),
-    );
+    this.uploadDest = path.resolve(configService.get<string>('UPLOAD_DEST', './uploads'));
   }
 
   isEnabled(): boolean {

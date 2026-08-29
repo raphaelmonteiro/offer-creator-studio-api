@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HttpProviderBase } from './http-provider.base';
+import { HttpProviderBase } from '../../../shared/providers/http-provider.base';
 import { ProviderStatusResult, ProviderSubmitResult, withRetry } from './provider.types';
 
 /** Runway image-to-video / Gen-4 Image (TDD §5.1). */
@@ -24,6 +24,13 @@ export class RunwayProvider extends HttpProviderBase {
   async submitImageToVideo(params: {
     imageUrl: string;
     prompt: string;
+    /**
+     * Aceito para a chamada ser uniforme entre os providers, mas **não é
+     * enviado**: o `image_to_video` do Runway (gen4_turbo) não documenta campo
+     * de negative prompt, e mandar chave desconhecida arrisca 400. As restrições
+     * já vão embutidas no prompt positivo (TDD i2v §6.2).
+     */
+    negativePrompt?: string;
     durationS: number;
     ratio: string;
   }): Promise<ProviderSubmitResult> {

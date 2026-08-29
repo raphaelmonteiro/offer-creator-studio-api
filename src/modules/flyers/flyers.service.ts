@@ -289,9 +289,9 @@ export class FlyersService {
   async export(
     id: string,
     format: string,
-    quality: string,
+    _quality: string,
   ): Promise<{ downloadUrl: string; expiresAt: Date }> {
-    const flyer = await this.findOne(id);
+    await this.findOne(id);
     // TODO: Implement actual export logic (PDF, PNG, JPG generation)
     const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
     const downloadUrl = `${baseUrl}/exports/${id}_${Date.now()}.${format}`;

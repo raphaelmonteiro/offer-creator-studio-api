@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HttpProviderBase } from './http-provider.base';
+import { HttpProviderBase } from '../../../shared/providers/http-provider.base';
 import { ProviderStatusResult, ProviderSubmitResult, withRetry } from './provider.types';
 
 /** Kling via fal.ai — animação de mascote/personagem a partir de imagem (TDD §5.2). */
@@ -24,6 +24,8 @@ export class FalKlingProvider extends HttpProviderBase {
   async submitImageToVideo(params: {
     imageUrl: string;
     motionPrompt: string;
+    /** Modos de falha a evitar (TDD i2v §6.2). O Kling aceita este campo. */
+    negativePrompt?: string;
     durationS: number;
   }): Promise<ProviderSubmitResult> {
     const res = await withRetry(() =>
@@ -33,6 +35,7 @@ export class FalKlingProvider extends HttpProviderBase {
         body: JSON.stringify({
           image_url: params.imageUrl,
           prompt: params.motionPrompt,
+          ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
           duration: String(Math.min(10, Math.max(5, params.durationS))),
         }),
       }),

@@ -60,6 +60,96 @@ describe('DTOs — contrato dos endpoints (TDD §4.1)', () => {
       expect((await errorsOf(dto)).some((e) => e.includes('speechText'))).toBe(true);
     });
 
+    describe('mascot_motion — formulário de Animar Mascote (TDD i2v §8.4)', () => {
+      const valido = {
+        type: AnimationTaskType.MASCOT_MOTION,
+        input: {
+          mascotId: 'a2f4b6c8-1234-4abc-9def-112233445566',
+          preset: 'wave',
+          prompt: 'faça ele dar tchau com a mão direita',
+          engine: 'fal_kling',
+          durationS: 5,
+          intensity: 'medium',
+        },
+      };
+
+      it('payload do formulário passa', async () => {
+        expect(await errorsOf(plainToInstance(CreateAnimationTaskDto, valido))).toEqual([]);
+      });
+
+      it('aceita mascotId OU sourceAssetId, mas exige um dos dois', async () => {
+        const semNenhum = plainToInstance(CreateAnimationTaskDto, {
+          ...valido,
+          input: { ...valido.input, mascotId: undefined },
+        });
+        expect((await errorsOf(semNenhum)).some((e) => e.includes('mascotId'))).toBe(true);
+
+        const porAsset = plainToInstance(CreateAnimationTaskDto, {
+          ...valido,
+          input: {
+            ...valido.input,
+            mascotId: undefined,
+            sourceAssetId: 'a2f4b6c8-1234-4abc-9def-112233445566',
+          },
+        });
+        expect(await errorsOf(porAsset)).toEqual([]);
+      });
+
+      it('preset fora do catálogo é rejeitado', async () => {
+        const dto = plainToInstance(CreateAnimationTaskDto, {
+          ...valido,
+          input: { ...valido.input, preset: 'moonwalk' },
+        });
+        expect((await errorsOf(dto)).some((e) => e.includes('preset'))).toBe(true);
+      });
+
+      it('prompt livre é opcional e limitado a 600 caracteres', async () => {
+        const semPrompt = plainToInstance(CreateAnimationTaskDto, {
+          ...valido,
+          input: { ...valido.input, prompt: undefined },
+        });
+        expect(await errorsOf(semPrompt)).toEqual([]);
+
+        const longo = plainToInstance(CreateAnimationTaskDto, {
+          ...valido,
+          input: { ...valido.input, prompt: 'x'.repeat(601) },
+        });
+        expect((await errorsOf(longo)).some((e) => e.includes('prompt'))).toBe(true);
+      });
+
+      it('opções avançadas são opcionais e validadas', async () => {
+        const completo = plainToInstance(CreateAnimationTaskDto, {
+          ...valido,
+          input: {
+            ...valido.input,
+            aspectRatio: '9:16',
+            fixedCamera: true,
+            removeHandheldObjects: true,
+            backgroundMode: 'solid',
+            backgroundColor: '#1E90FF',
+          },
+        });
+        expect(await errorsOf(completo)).toEqual([]);
+      });
+
+      it('fundo transparente NÃO é aceito nesta entrega (§7.2)', async () => {
+        const dto = plainToInstance(CreateAnimationTaskDto, {
+          ...valido,
+          input: { ...valido.input, backgroundMode: 'transparent' },
+        });
+        expect((await errorsOf(dto)).some((e) => e.includes('backgroundMode'))).toBe(true);
+      });
+
+      it('imageUrl vindo do cliente é descartado pelo whitelist (anti-SSRF)', async () => {
+        const dto = plainToInstance(CreateAnimationTaskDto, {
+          ...valido,
+          input: { ...valido.input, imageUrl: 'http://169.254.169.254/latest/meta-data' },
+        });
+        await validate(dto, { whitelist: true });
+        expect('imageUrl' in (dto.input as unknown as Record<string, unknown>)).toBe(false);
+      });
+    });
+
     it('type inválido é rejeitado', async () => {
       const dto = plainToInstance(CreateAnimationTaskDto, { type: 'hack', input: {} });
       expect((await errorsOf(dto)).some((e) => e.startsWith('type.'))).toBe(true);

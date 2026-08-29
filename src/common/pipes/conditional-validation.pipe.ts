@@ -1,4 +1,4 @@
-import { PipeTransform, Injectable, ArgumentMetadata, Type } from '@nestjs/common';
+import { PipeTransform, Injectable, ArgumentMetadata } from '@nestjs/common';
 import { ValidationPipe, ValidationPipeOptions } from '@nestjs/common';
 import { Request } from 'express';
 

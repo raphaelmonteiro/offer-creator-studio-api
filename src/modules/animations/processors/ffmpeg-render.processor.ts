@@ -2,22 +2,23 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as os from 'os';
 import { RenderJob } from '../entities/render-job.entity';
-import { AnimationAsset } from '../entities/animation-asset.entity';
-import { RenderStatus } from '../domain/task-state-machine';
-import { FfmpegGraphBuilder, RenderLayer, RenderSpec } from '../domain/ffmpeg-graph-builder';
-import { TaskTransitionService } from '../services/task-transition.service';
-
-const RENDER_TIMEOUT_MS = 5 * 60 * 1000;
+import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
+import { MediaAssetsService } from '../../../shared/media-assets/media-assets.service';
+import { RenderStatus } from '../../../shared/state/task-state-machine';
+import { TaskTransitionService } from '../../../shared/state/task-transition.service';
+import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
+import { FfmpegGraphBuilder, RenderSpec } from '../domain/ffmpeg-graph-builder';
+import { AnyRenderLayer, isSyncedClip } from '../domain/synced-clip';
 
 /**
  * Consumer render.export (TDD §6.1/§6.5): resolve camadas em caminhos locais,
- * constrói o comando via FfmpegGraphBuilder e executa com timeout, nice e
- * progresso via -progress pipe:1 (throttle 1s → SSE).
+ * constrói o comando via FfmpegGraphBuilder (específico deste módulo — overlay
+ * de camadas) e executa via FfmpegRunner compartilhado (spawn com timeout,
+ * progresso via -progress pipe:1 com throttle 1s → SSE, tempdir por job,
+ * output atômico e anti-path-traversal — plano-comerciais §11).
  */
 @Injectable()
 export class FfmpegRenderProcessor {
@@ -28,6 +29,8 @@ export class FfmpegRenderProcessor {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly config: ConfigService,
     private readonly transitions: TaskTransitionService,
+    private readonly mediaAssets: MediaAssetsService,
+    private readonly runner: FfmpegRunner,
   ) {}
 
   async process({ renderId }: { renderId: string }): Promise<void> {
@@ -40,7 +43,7 @@ export class FfmpegRenderProcessor {
     );
     if (!started) return; // cancelado ou já em processamento — no-op
 
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), `render-${renderId.slice(0, 8)}-`));
+    const tmpDir = await this.runner.createTempDir(`render-${renderId.slice(0, 8)}-`);
     try {
       const spec = await this.resolveSpec(job);
       const uploadsDir = this.config.get('UPLOAD_DEST', './uploads');
@@ -59,15 +62,18 @@ export class FfmpegRenderProcessor {
         ),
       );
       for (const [i, args] of passes.entries()) {
-        await this.runFfmpeg(args, spec.durationMs, async (pct) => {
-          const overall = Math.round(((i + pct / 100) / passes.length) * 100);
-          await this.dataSource.transaction((m) =>
-            this.transitions.reportRenderProgress(m, renderId, Math.min(99, overall)),
-          );
+        await this.runner.run(args, {
+          durationMs: spec.durationMs,
+          onProgress: async (pct) => {
+            const overall = Math.round(((i + pct / 100) / passes.length) * 100);
+            await this.dataSource.transaction((m) =>
+              this.transitions.reportRenderProgress(m, renderId, Math.min(99, overall)),
+            );
+          },
         });
       }
       // output atômico via rename — retomada pós-restart nunca vê arquivo parcial
-      await fs.rename(`${outputPath}.part`, outputPath);
+      await this.runner.finalizeOutput(`${outputPath}.part`, outputPath);
 
       const stat = await fs.stat(outputPath);
       const asset = await this.dataSource.getRepository(AnimationAsset).save({
@@ -118,76 +124,57 @@ export class FfmpegRenderProcessor {
           ));
       });
     } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+      await this.runner.removeTempDir(tmpDir);
     }
   }
 
-  /** Resolve assetId/url das camadas em caminhos locais absolutos. */
+  /**
+   * Resolve assetId/url das camadas em caminhos locais absolutos.
+   * `synced_clip` (spike §3.5) tem DOIS arquivos (vídeo e áudio) e é resolvido
+   * lado a lado — a expansão em duas camadas fica com o FfmpegGraphBuilder,
+   * que é quem garante o `startMs` idêntico.
+   */
   private async resolveSpec(job: RenderJob): Promise<RenderSpec> {
+    // No spec persistido as camadas ainda referenciam assetId/url; `filePath`
+    // só passa a existir depois desta resolução.
     const raw = job.spec as unknown as RenderSpec & {
-      layers: Array<RenderLayer & { assetId?: string; url?: string }>;
+      layers: Array<AnyRenderLayer & { assetId?: string; url?: string }>;
     };
     const uploadsDir = path.resolve(this.config.get('UPLOAD_DEST', './uploads'));
-    const layers: RenderLayer[] = [];
+    const layers: AnyRenderLayer[] = [];
     for (const layer of raw.layers) {
-      let urlPath = layer.url ?? null;
-      let hasAlpha = false;
-      if (layer.assetId) {
-        const asset = await this.dataSource
-          .getRepository(AnimationAsset)
-          .findOneByOrFail({ id: layer.assetId });
-        // mascote com mezanino alpha usa alphaUrl (TDD §5.2)
-        urlPath = (layer.type === 'mascot' && asset.alphaUrl) || asset.fileUrl;
-        hasAlpha = asset.hasAlpha;
+      if (isSyncedClip(layer)) {
+        const video = await this.resolveSource(uploadsDir, layer.video, 'mascot');
+        const audio = await this.resolveSource(uploadsDir, layer.audio, 'audio');
+        if (!video || !audio) continue;
+        layers.push({
+          ...layer,
+          video: { ...layer.video, filePath: video.filePath, hasAlpha: video.hasAlpha },
+          audio: { ...layer.audio, filePath: audio.filePath },
+        });
+        continue;
       }
-      if (!urlPath) continue;
-      const relative = urlPath.replace(/^\/uploads\//, '');
-      const filePath = path.resolve(uploadsDir, relative);
-      if (!filePath.startsWith(uploadsDir + path.sep)) {
-        throw new Error(`Caminho fora do diretório de uploads: ${urlPath}`);
-      }
-      layers.push({ ...layer, filePath, hasAlpha });
+      const resolved = await this.resolveSource(uploadsDir, layer, layer.type);
+      if (!resolved) continue;
+      layers.push({ ...layer, filePath: resolved.filePath, hasAlpha: resolved.hasAlpha });
     }
     return { ...raw, layers };
   }
 
-  private runFfmpeg(
-    args: string[],
-    durationMs: number,
-    onProgress: (pct: number) => Promise<void>,
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const ffmpeg = this.config.get('FFMPEG_PATH', 'ffmpeg');
-      const child = spawn(ffmpeg, ['-nostdin', '-progress', 'pipe:1', ...args], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      const timer = setTimeout(() => {
-        child.kill('SIGKILL');
-        reject(new Error(`ffmpeg excedeu ${RENDER_TIMEOUT_MS / 1000}s`));
-      }, RENDER_TIMEOUT_MS);
-
-      let stderr = '';
-      let lastReport = 0;
-      child.stderr.on('data', (d: Buffer) => {
-        stderr = (stderr + d.toString()).slice(-4000);
-      });
-      child.stdout.on('data', (d: Buffer) => {
-        const match = /out_time_ms=(\d+)/.exec(d.toString());
-        if (match && Date.now() - lastReport > 1000) {
-          lastReport = Date.now();
-          const pct = Math.min(100, Math.round((Number(match[1]) / 1000 / durationMs) * 100));
-          void onProgress(pct).catch(() => undefined);
-        }
-      });
-      child.on('error', (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else reject(new Error(`ffmpeg saiu com código ${code}: ${stderr.slice(-500)}`));
-      });
-    });
+  private async resolveSource(
+    uploadsDir: string,
+    source: { assetId?: string; url?: string },
+    type: string,
+  ): Promise<{ filePath: string; hasAlpha: boolean } | null> {
+    let urlPath = source.url ?? null;
+    let hasAlpha = false;
+    if (source.assetId) {
+      const asset = await this.mediaAssets.findByIdOrFail(source.assetId);
+      // mascote com mezanino alpha usa alphaUrl (TDD §5.2)
+      urlPath = (type === 'mascot' && asset.alphaUrl) || asset.fileUrl;
+      hasAlpha = asset.hasAlpha;
+    }
+    if (!urlPath) return null;
+    return { filePath: this.runner.resolveUploadPath(uploadsDir, urlPath), hasAlpha };
   }
 }

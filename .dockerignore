@@ -1,0 +1,16 @@
+# Sem este arquivo, o `COPY . .` do Dockerfile sobrescreve o node_modules que o
+# `npm ci` instalou DENTRO da imagem (Linux) pelo node_modules do host (macOS).
+# O resultado é "Exec format error" ao carregar binários nativos (bcrypt, sharp).
+node_modules
+
+# Artefatos de build e execução — a imagem compila o seu próprio.
+dist
+coverage
+*.log
+
+# Uploads são bind-mount em runtime; não pertencem à imagem.
+uploads
+
+.git
+.gitignore
+.DS_Store

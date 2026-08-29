@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsNumber, Min } from 'class-validator';
+import { IsOptional, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryDashboardDto {

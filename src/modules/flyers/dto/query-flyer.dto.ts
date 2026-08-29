@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString, IsNumber, Min, IsUUID, IsDateString, IsIn } from 'class-validator';
+import { IsOptional, IsString, Min, IsUUID, IsDateString, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryFlyerDto {

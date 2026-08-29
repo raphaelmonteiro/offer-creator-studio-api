@@ -1,0 +1,44 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Construtor de prompt do mascote (TDD i2v §6) determinismo e guardas snapshot do prompt de "dar tchau sem objetos nas mãos" 1`] = `
+{
+  "negativePrompt": "different character, character redesign, identity change, face change, different clothing, incorrect colors, distorted logo, unreadable logo, extra fingers, missing fingers, extra arms, extra legs, duplicated limbs, deformed hands, deformed face, flickering, frame inconsistency, morphing, random objects, random text, subtitles, watermark, camera shake, sudden zoom, cropped body, cut off head, low resolution, blur, compression artifacts",
+  "prompt": "Animate the mascot from the supplied reference image.
+
+Primary action:
+The mascot raises one free hand and waves it side to side in a natural, friendly motion, smiling and looking towards the camera. The body may sway slightly with the gesture. faça ele dar tchau com a mão direita
+
+Character preservation requirements (highest priority, never override):
+- Preserve the exact identity and visual design of the mascot in the reference image.
+- Preserve the face, facial features, hairstyle, clothing, colours and body proportions.
+- Preserve every logo, symbol, badge and uniform detail exactly as drawn, undistorted and readable.
+- Preserve the original illustration style and line work.
+- Preserve worn accessories such as caps, hats, bags, backpacks, glasses and shoes.
+- The character must stay recognisable as the same character in every single frame.
+- Do not redesign, restyle, replace or substitute the character.
+
+Motion requirements:
+- Motion intensity: moderate and natural — clearly visible but never exaggerated.
+- Duration: about 5 seconds.
+- Camera: completely static, locked off, no pan, no zoom, no handheld movement.
+- Keep body movement physically coherent and anatomically plausible.
+- Use smooth transitions and stable temporal consistency between frames.
+
+Hands and props (authorised exception to the preservation rules above):
+- Remove all objects currently held in the hands of the mascot.
+- Reconstruct both hands naturally and keep them empty for the entire animation.
+- The removed objects must not reappear in any frame.
+- This exception applies ONLY to handheld objects and to the hands that held them.
+- Worn accessories (cap, hat, bag, backpack, glasses, clothing) must still be preserved.
+
+Background:
+- Keep the original background of the reference image unchanged.
+
+Output requirements:
+- Clean animation with stable character appearance across all frames.
+- Temporal consistency: no flickering, no morphing, no popping details.
+- Keep the whole character inside the frame; never crop the head, hands or feet.
+- No extra characters, no random objects, no text, no captions, no watermark.
+- No sudden camera cuts and no abrupt zoom.",
+}
+`;

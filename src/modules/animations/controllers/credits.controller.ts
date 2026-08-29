@@ -4,8 +4,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/user.decorator';
-import { CreditsService, creditsEnabled } from '../services/credits.service';
-import { AiCreditLedgerEntry } from '../entities/ai-credit-ledger.entity';
+import { CreditsService, creditsEnabled } from '../../../shared/credits/credits.service';
+import { AiCreditLedgerEntry } from '../../../shared/credits/ai-credit-ledger.entity';
 
 @ApiTags('animations')
 @ApiBearerAuth()

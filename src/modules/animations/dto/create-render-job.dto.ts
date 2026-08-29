@@ -13,11 +13,57 @@ import {
   Matches,
   Max,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
+/** Vídeo de um clipe sincronizado (spike §3.5). */
+export class SyncedClipVideoDto {
+  @IsOptional()
+  @IsUUID()
+  assetId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\/uploads\//, { message: 'url deve apontar para /uploads/*' })
+  url?: string;
+
+  @IsNumber() @Min(0) @Max(1) x: number;
+  @IsNumber() @Min(0) @Max(1) y: number;
+  @IsNumber() @Min(0) @Max(1) w: number;
+  @IsNumber() @Min(0) @Max(1) h: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  durationMs?: number;
+}
+
+/** Áudio de um clipe sincronizado — sempre no mesmo `startMs` do vídeo. */
+export class SyncedClipAudioDto {
+  @IsOptional()
+  @IsUUID()
+  assetId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\/uploads\//, { message: 'url deve apontar para /uploads/*' })
+  url?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  volume?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  durationMs?: number;
+}
+
 export class RenderLayerDto {
-  @IsIn(['video', 'image_overlay', 'mascot', 'audio'])
+  @IsIn(['video', 'image_overlay', 'mascot', 'audio', 'synced_clip'])
   type: string;
 
   @IsOptional()
@@ -33,10 +79,28 @@ export class RenderLayerDto {
   @Matches(/^\/uploads\//, { message: 'url deve apontar para /uploads/*' })
   url?: string;
 
-  @IsNumber() @Min(0) @Max(1) x: number;
-  @IsNumber() @Min(0) @Max(1) y: number;
-  @IsNumber() @Min(0) @Max(1) w: number;
-  @IsNumber() @Min(0) @Max(1) h: number;
+  // Em `synced_clip` a geometria vive dentro de `video` — o clipe é o objeto
+  // que a UI move, e ele tem um tempo só.
+  @ValidateIf((o: RenderLayerDto) => o.type !== 'synced_clip')
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  x: number;
+  @ValidateIf((o: RenderLayerDto) => o.type !== 'synced_clip')
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  y: number;
+  @ValidateIf((o: RenderLayerDto) => o.type !== 'synced_clip')
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  w: number;
+  @ValidateIf((o: RenderLayerDto) => o.type !== 'synced_clip')
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  h: number;
 
   @IsInt()
   @Min(0)
@@ -47,6 +111,7 @@ export class RenderLayerDto {
   @Min(0)
   endMs?: number;
 
+  @ValidateIf((o: RenderLayerDto) => o.type !== 'synced_clip')
   @IsBoolean()
   loop: boolean;
 
@@ -58,6 +123,16 @@ export class RenderLayerDto {
   @Min(0)
   @Max(1)
   volume?: number;
+
+  @ValidateIf((o: RenderLayerDto) => o.type === 'synced_clip')
+  @ValidateNested()
+  @Type(() => SyncedClipVideoDto)
+  video?: SyncedClipVideoDto;
+
+  @ValidateIf((o: RenderLayerDto) => o.type === 'synced_clip')
+  @ValidateNested()
+  @Type(() => SyncedClipAudioDto)
+  audio?: SyncedClipAudioDto;
 }
 
 export class RenderSpecDto {

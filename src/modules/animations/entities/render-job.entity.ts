@@ -1,5 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
-import { RenderStatus } from '../domain/task-state-machine';
+import { RenderStatus } from '../../../shared/state/task-state-machine';
 
 @Entity('render_jobs')
 @Index(['userId', 'status', 'createdAt'])

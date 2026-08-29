@@ -1,0 +1,55 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Animação de presença do mascote (spike §3.6) determinismo (defesa contra divergência preview × export, §3.3) snapshot numérico dos frames de referência (a 24 fps) 1`] = `
+[
+  [
+    -1.2,
+    -0.01,
+    1,
+    0,
+    0,
+  ],
+  [
+    -0.7714,
+    -0.01,
+    1.0043,
+    5,
+    1,
+  ],
+  [
+    -0.3428,
+    -0.01,
+    1.0086,
+    2,
+    1,
+  ],
+  [
+    0,
+    -0.01,
+    1.0129,
+    -4,
+    1,
+  ],
+  [
+    0,
+    -0.01,
+    0.9957,
+    -4,
+    1,
+  ],
+  [
+    0,
+    -0.01,
+    0.9914,
+    0,
+    1,
+  ],
+  [
+    -1.2,
+    -0.01,
+    1,
+    0,
+    0,
+  ],
+]
+`;

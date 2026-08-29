@@ -5,15 +5,17 @@ import { DataSource, EntityManager } from 'typeorm';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { AnimationTask } from '../entities/animation-task.entity';
-import { AnimationAsset } from '../entities/animation-asset.entity';
-import { TaskStatus } from '../domain/task-state-machine';
-import { TaskTransitionService } from '../services/task-transition.service';
+import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
+import { MediaAssetsService } from '../../../shared/media-assets/media-assets.service';
+import { TaskStatus } from '../../../shared/state/task-state-machine';
+import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { AnimationTasksService } from '../services/animation-tasks.service';
-import { AnimationQueueService, QUEUES } from '../services/animation-queue.service';
+import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { RunwayProvider } from '../providers/runway.provider';
 import { FalKlingProvider } from '../providers/fal-kling.provider';
-import { ElevenLabsProvider } from '../providers/elevenlabs.provider';
+import { ElevenLabsProvider } from '../../../shared/providers/elevenlabs.provider';
 import { HeyGenProvider } from '../providers/heygen.provider';
+import { MockVideoProvider } from '../providers/mock-video.provider';
 import { TerminalProviderError } from '../providers/provider.types';
 import { OpenAiImageService } from '../../ai/openai-image.service';
 import { OpenAiImageSize } from '../../ai/utils/ai-image.util';
@@ -64,13 +66,27 @@ export class AiGenerationProcessor {
     private readonly config: ConfigService,
     private readonly transitions: TaskTransitionService,
     private readonly tasksService: AnimationTasksService,
+    private readonly mediaAssets: MediaAssetsService,
     private readonly queue: AnimationQueueService,
     private readonly runway: RunwayProvider,
     private readonly falKling: FalKlingProvider,
     private readonly elevenLabs: ElevenLabsProvider,
     private readonly heyGen: HeyGenProvider,
+    private readonly mockVideo: MockVideoProvider,
     private readonly openAiImage: OpenAiImageService,
   ) {}
+
+  /**
+   * Provider efetivo da etapa de vídeo. `IMAGE_TO_VIDEO_PROVIDER=mock` desvia
+   * fal_kling/runway para o mock — é como se roda o pipeline inteiro sem gastar
+   * API (TDD i2v §9, fatia 1). ElevenLabs e HeyGen não são desviados: são outra
+   * modalidade e o desvio só faria confusão.
+   */
+  private effectiveProvider(stepProvider: string): string {
+    const configured = this.config.get('IMAGE_TO_VIDEO_PROVIDER', '');
+    const isImageToVideo = stepProvider === 'fal_kling' || stepProvider === 'runway';
+    return configured === 'mock' && isImageToVideo ? 'mock' : stepProvider;
+  }
 
   /** ai.generate: pega a task em queued e executa a próxima etapa pendente. */
   async generate({ taskId }: { taskId: string }): Promise<void> {
@@ -105,7 +121,11 @@ export class AiGenerationProcessor {
 
     const step = task.pipeline[task.currentStepIndex];
     try {
-      const status = await this.providerFor(step.provider).getStatus(task.providerJobId as string);
+      // o provider persistido na task é o efetivo (pode ser o mock); usar o do
+      // step aqui mandaria o poll para o provider real que nunca foi chamado
+      const status = await this.providerFor(task.provider ?? step.provider).getStatus(
+        task.providerJobId as string,
+      );
       if (status.state === 'processing') {
         const delay = POLL_BACKOFF_S[Math.min(attempt, POLL_BACKOFF_S.length - 1)];
         // a chave inclui a tentativa: sem isso o singletonKey colide com ESTE
@@ -142,6 +162,11 @@ export class AiGenerationProcessor {
       if (!won) return;
       await this.ingestAndAdvance(taskId, status.outputUrl as string, status.costUsd);
     } catch (err) {
+      this.logger.error(
+        `Poll da task ${taskId} (provider "${task.provider ?? step.provider}") falhou: ` +
+          `${(err as Error).message}`,
+        (err as Error).stack,
+      );
       if (err instanceof TerminalProviderError) {
         await this.dataSource.transaction((m) =>
           this.tasksService.failTask(
@@ -186,14 +211,14 @@ export class AiGenerationProcessor {
         await this.runNextStep(taskId); // geração de imagem é síncrona, igual ao TTS
         return;
       }
-      const { providerJobId } = await this.submitVideoStep(task, stepIndex);
+      const { providerJobId, provider } = await this.submitVideoStep(task, stepIndex);
       const submitted = await this.dataSource.transaction(async (m) => {
         const a = await this.transitions.transitionTask(
           m,
           taskId,
           TaskStatus.PREPARING,
           TaskStatus.SUBMITTED,
-          { provider: step.provider, providerJobId },
+          { provider, providerJobId },
         );
         const b =
           a &&
@@ -294,42 +319,71 @@ export class AiGenerationProcessor {
   private async submitVideoStep(
     task: AnimationTask,
     stepIndex: number,
-  ): Promise<{ providerJobId: string }> {
+  ): Promise<{ providerJobId: string; provider: string }> {
     const step = task.pipeline[stepIndex];
+    const provider = this.effectiveProvider(step.provider);
     const input = task.input as Record<string, unknown>;
+    this.logger.log(
+      `Task ${task.id} etapa "${step.key}": provider efetivo "${provider}" ` +
+        `(pipeline declara "${step.provider}", IMAGE_TO_VIDEO_PROVIDER=` +
+        `"${this.config.get('IMAGE_TO_VIDEO_PROVIDER', '')}")`,
+    );
     // BASE_URL inclui o prefixo /v1; os estáticos são servidos na raiz (/uploads/*).
-    const baseUrl = this.config
-      .get('BASE_URL', 'http://localhost:3001')
-      .replace(/\/v1\/?$/, '');
+    const baseUrl = this.config.get('BASE_URL', 'http://localhost:3001').replace(/\/v1\/?$/, '');
     const imageUrl = await this.resolveImageUrl(task);
-    if (step.provider === 'fal_kling') {
-      return this.falKling.submitImageToVideo({
+
+    // `generatedPrompt` é montado na criação da task pelo construtor de prompt
+    // (TDD i2v §6). O fallback existe para tasks antigas, criadas antes dele.
+    const motionPrompt = String(
+      input.generatedPrompt ?? input.motion ?? input.prompt ?? 'subtle idle animation',
+    );
+    const negativePrompt =
+      typeof input.negativePrompt === 'string' ? input.negativePrompt : undefined;
+    const aspectRatio = typeof input.aspectRatio === 'string' ? input.aspectRatio : undefined;
+
+    if (provider === 'mock') {
+      const result = await this.mockVideo.submitImageToVideo({
         imageUrl,
-        motionPrompt: String(input.motion ?? input.prompt ?? 'subtle idle animation'),
+        motionPrompt,
+        negativePrompt,
+        durationS: Number(input.durationS ?? 5),
+        aspectRatio,
+      });
+      return { ...result, provider };
+    }
+    if (provider === 'fal_kling') {
+      const result = await this.falKling.submitImageToVideo({
+        imageUrl,
+        motionPrompt,
+        negativePrompt,
         durationS: Number(input.durationS ?? 5),
       });
+      return { ...result, provider };
     }
-    if (step.provider === 'heygen') {
+    if (provider === 'heygen') {
       const ttsAsset = await this.findStepAsset(task, 'tts');
-      return this.heyGen.submitTalkingPhoto({
+      const result = await this.heyGen.submitTalkingPhoto({
         photoUrl: imageUrl,
         audioUrl: `${baseUrl}${ttsAsset?.fileUrl ?? ''}`,
       });
+      return { ...result, provider };
     }
-    const aspectRatio = String(input.aspectRatio ?? '9:16');
-    const ratio = RUNWAY_RATIO_BY_ASPECT[aspectRatio];
+    const runwayAspect = aspectRatio ?? '9:16';
+    const ratio = RUNWAY_RATIO_BY_ASPECT[runwayAspect];
     if (!ratio) {
       throw new TerminalProviderError(
-        `Aspecto sem equivalente no Runway: ${aspectRatio}`,
+        `Aspecto sem equivalente no Runway: ${runwayAspect}`,
         'unsupported_aspect_ratio',
       );
     }
-    return this.runway.submitImageToVideo({
+    const result = await this.runway.submitImageToVideo({
       imageUrl,
-      prompt: String(input.prompt ?? ''),
+      prompt: motionPrompt,
+      negativePrompt,
       durationS: Number(input.durationS ?? 5),
       ratio,
     });
+    return { ...result, provider };
   }
 
   /** Ingest (TDD §5.1 etapa 3): download do provider → uploads → asset ready → avança pipeline. */
@@ -440,7 +494,7 @@ export class AiGenerationProcessor {
   private async findStepAsset(task: AnimationTask, key: string): Promise<AnimationAsset | null> {
     const assetId = task.pipeline.find((s) => s.key === key)?.resultAssetId;
     if (!assetId) return null;
-    return this.dataSource.getRepository(AnimationAsset).findOneBy({ id: assetId });
+    return this.mediaAssets.findById(assetId);
   }
 
   /**
@@ -466,9 +520,7 @@ export class AiGenerationProcessor {
       }
       return raw.startsWith('/uploads/') ? this.toDataUri(raw) : raw;
     }
-    const asset = await this.dataSource
-      .getRepository(AnimationAsset)
-      .findOneByOrFail({ id: assetId });
+    const asset = await this.mediaAssets.findByIdOrFail(assetId);
     return this.toDataUri(asset.fileUrl);
   }
 
@@ -477,7 +529,10 @@ export class AiGenerationProcessor {
     const uploadsDir = path.resolve(this.config.get('UPLOAD_DEST', './uploads'));
     const abs = path.resolve(uploadsDir, fileUrl.replace(/^\/uploads\//, ''));
     if (!abs.startsWith(uploadsDir + path.sep)) {
-      throw new TerminalProviderError(`Caminho de asset inválido: ${fileUrl}`, 'invalid_asset_path');
+      throw new TerminalProviderError(
+        `Caminho de asset inválido: ${fileUrl}`,
+        'invalid_asset_path',
+      );
     }
     const buffer = await fs.readFile(abs).catch(() => {
       throw new TerminalProviderError(`Asset não encontrado no disco: ${fileUrl}`, 'asset_missing');
@@ -505,7 +560,9 @@ export class AiGenerationProcessor {
     return `/uploads/animations/${userId}/${taskId}/${name}`;
   }
 
-  private providerFor(name: string): RunwayProvider | FalKlingProvider | HeyGenProvider {
+  private providerFor(
+    name: string,
+  ): RunwayProvider | FalKlingProvider | HeyGenProvider | MockVideoProvider {
     switch (name) {
       case 'runway':
       case 'openai':
@@ -514,6 +571,8 @@ export class AiGenerationProcessor {
         return this.falKling;
       case 'heygen':
         return this.heyGen;
+      case 'mock':
+        return this.mockVideo;
       default:
         throw new Error(`Provider sem poll: ${name}`);
     }

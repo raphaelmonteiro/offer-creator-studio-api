@@ -7,12 +7,14 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, In, IsNull } from 'typeorm';
 import { RenderJob } from '../entities/render-job.entity';
-import { AnimationAsset } from '../entities/animation-asset.entity';
-import { RenderStatus } from '../domain/task-state-machine';
-import { CreateRenderJobDto } from '../dto/create-render-job.dto';
-import { AnimationQueueService, QUEUES } from './animation-queue.service';
-import { ResourceGuardService } from './resource-guard.service';
-import { TaskTransitionService } from './task-transition.service';
+import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
+import { RenderStatus } from '../../../shared/state/task-state-machine';
+import { RenderFormat } from '../domain/ffmpeg-graph-builder';
+import { AnyRenderLayer, computeFinalDurationMs } from '../domain/synced-clip';
+import { CreateRenderJobDto, RenderLayerDto } from '../dto/create-render-job.dto';
+import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
+import { ResourceGuardService } from '../../../shared/resource-guard/resource-guard.service';
+import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 
 const MAX_VIDEO_LAYERS = 4;
 
@@ -43,6 +45,14 @@ export class RenderJobsService {
         audioDropped = layers.length !== dto.spec.layers.length;
         spec.layers = layers;
       }
+      // Regra de duração final (spike §3.5): normalizada AQUI, na criação, para
+      // que o preview do editor leia do spec persistido exatamente a mesma
+      // duração que o arquivo exportado vai ter.
+      spec.durationMs = computeFinalDurationMs(
+        (spec.layers ?? dto.spec.layers) as AnyRenderLayer[],
+        dto.spec.format as RenderFormat,
+        dto.spec.durationMs,
+      );
       const job = manager.create(RenderJob, {
         userId,
         flyerId: dto.flyerId ?? null,
@@ -105,18 +115,30 @@ export class RenderJobsService {
 
   /** Ownership + estado dos assets + limites de camadas (TDD §4.1). */
   private async validateSpec(userId: string, dto: CreateRenderJobDto): Promise<void> {
-    const videoLayers = dto.spec.layers.filter((l) => l.type === 'video' || l.type === 'mascot');
+    // um synced_clip conta como 1 camada de vídeo (o áudio não pesa no limite)
+    const videoLayers = dto.spec.layers.filter(
+      (l) => l.type === 'video' || l.type === 'mascot' || l.type === 'synced_clip',
+    );
     if (videoLayers.length > MAX_VIDEO_LAYERS) {
       throw new BadRequestException(`Máximo de ${MAX_VIDEO_LAYERS} camadas de vídeo por render`);
     }
-    for (const layer of dto.spec.layers) {
-      const hasAsset = Boolean(layer.assetId);
-      const hasUrl = Boolean(layer.url);
-      if (hasAsset === hasUrl) {
-        throw new BadRequestException('Cada camada deve ter exatamente um de assetId ou url');
+    const requireExactlyOneSource = (source: { assetId?: string; url?: string }, label: string) => {
+      if (Boolean(source?.assetId) === Boolean(source?.url)) {
+        throw new BadRequestException(`${label} deve ter exatamente um de assetId ou url`);
       }
+    };
+    for (const layer of dto.spec.layers) {
+      if (layer.type === 'synced_clip') {
+        if (!layer.video || !layer.audio) {
+          throw new BadRequestException('Clipe sincronizado exige vídeo e áudio');
+        }
+        requireExactlyOneSource(layer.video, 'O vídeo do clipe sincronizado');
+        requireExactlyOneSource(layer.audio, 'O áudio do clipe sincronizado');
+        continue;
+      }
+      requireExactlyOneSource(layer, 'Cada camada');
     }
-    const assetIds = dto.spec.layers.map((l) => l.assetId).filter(Boolean) as string[];
+    const assetIds = this.collectAssetIds(dto.spec.layers);
     if (assetIds.length > 0) {
       const assets = await this.dataSource.getRepository(AnimationAsset).find({
         where: { id: In(assetIds), deletedAt: IsNull() },
@@ -131,5 +153,19 @@ export class RenderJobsService {
         }
       }
     }
+  }
+
+  /** assetIds de camadas simples e dos dois lados de cada clipe sincronizado. */
+  private collectAssetIds(layers: RenderLayerDto[]): string[] {
+    const ids: string[] = [];
+    for (const layer of layers) {
+      if (layer.type === 'synced_clip') {
+        if (layer.video?.assetId) ids.push(layer.video.assetId);
+        if (layer.audio?.assetId) ids.push(layer.audio.assetId);
+        continue;
+      }
+      if (layer.assetId) ids.push(layer.assetId);
+    }
+    return ids;
   }
 }

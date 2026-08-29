@@ -1,5 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
-import { TaskStatus } from '../domain/task-state-machine';
+import { TaskStatus } from '../../../shared/state/task-state-machine';
 
 @Entity('animation_tasks')
 @Index(['userId', 'status', 'createdAt'])

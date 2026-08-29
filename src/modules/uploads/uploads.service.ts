@@ -2,7 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { generateFileName, getFileMimeType, isValidImageFile } from '../../common/utils/file.util';
+import { generateFileName, getFileMimeType } from '../../common/utils/file.util';
 import * as fs from 'fs/promises';
 
 @Injectable()

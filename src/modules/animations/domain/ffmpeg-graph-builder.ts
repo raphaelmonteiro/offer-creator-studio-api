@@ -11,6 +11,8 @@
  * - Limites (validados ANTES de spawnar): ≤4 vídeos, ≤3 áudios, filtro ≤8KB.
  */
 
+import { AnyRenderLayer, expandSyncedClips } from './synced-clip';
+
 export type RenderFormat = 'mp4' | 'webm' | 'gif';
 
 export interface RenderLayer {
@@ -41,7 +43,11 @@ export interface RenderSpec {
   quality: 'draft' | 'standard' | 'high';
   /** Cor de fundo quando não há camada `video` de base (hex sem #). */
   backgroundColor?: string;
-  layers: RenderLayer[];
+  /**
+   * Camadas do render. Aceita `synced_clip` (spike §3.5), que o próprio
+   * builder expande em vídeo + áudio com o mesmo `startMs`.
+   */
+  layers: AnyRenderLayer[];
 }
 
 export interface BuiltCommand {
@@ -68,10 +74,13 @@ const CRF_BY_QUALITY: Record<RenderSpec['quality'], number> = {
 export class FfmpegGraphBuilder {
   build(spec: RenderSpec, outputPath: string, tmpDir = '/tmp'): BuiltCommand {
     const durationS = spec.durationMs / 1000;
-    const visual = spec.layers
+    // synced_clip vira duas camadas com o MESMO startMs antes de qualquer
+    // ordenação — a partir daqui o grafo não sabe que clipes existem.
+    const layers = expandSyncedClips(spec.layers, spec.durationMs);
+    const visual = layers
       .filter((l) => l.type !== 'audio')
       .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    const audio = spec.format === 'gif' ? [] : spec.layers.filter((l) => l.type === 'audio');
+    const audio = spec.format === 'gif' ? [] : layers.filter((l) => l.type === 'audio');
 
     const videoCount = visual.filter((l) => l.type === 'video' || l.type === 'mascot').length;
     if (videoCount > GRAPH_LIMITS.maxVideoLayers) {

@@ -37,7 +37,15 @@ export class BackgroundRemovalService {
     return this.replicate !== null;
   }
 
-  async removeBackground(file: Express.Multer.File): Promise<{ url: string }> {
+  /**
+   * @param folder pasta do bucket onde salvar o recorte. Default `general`
+   *   (comportamento histórico de `/ai/remove-background`); o módulo de
+   *   mascotes passa `mascots` para manter os derivados junto do original.
+   */
+  async removeBackground(
+    file: Express.Multer.File,
+    folder: string = 'general',
+  ): Promise<{ url: string }> {
     if (!this.replicate) {
       throw new BadRequestException({
         code: 'REPLICATE_NOT_CONFIGURED',
@@ -100,7 +108,7 @@ export class BackgroundRemovalService {
       encoding: '7bit',
     } as Express.Multer.File;
 
-    const result = await this.uploadsService.uploadFile(fakeFile, 'general');
+    const result = await this.uploadsService.uploadFile(fakeFile, folder);
     return { url: result.url };
   }
 

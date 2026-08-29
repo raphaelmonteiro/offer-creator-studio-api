@@ -4,10 +4,10 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/user.decorator';
-import { AnimationEventsService } from '../services/animation-events.service';
+import { AnimationEventsService } from '../../../shared/events/animation-events.service';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, MoreThan } from 'typeorm';
-import { AnimationTaskEvent } from '../entities/animation-task-event.entity';
+import { AnimationTaskEvent } from '../../../shared/state/animation-task-event.entity';
 
 const KEEPALIVE_MS = 25_000;
 const REPLAY_WINDOW_MS = 5 * 60 * 1000;

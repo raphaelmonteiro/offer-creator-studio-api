@@ -1,13 +1,4 @@
-import {
-  IsString,
-  IsNotEmpty,
-  IsOptional,
-  IsArray,
-  IsObject,
-  ArrayMaxSize,
-  ValidateNested,
-  IsEnum,
-} from 'class-validator';
+import { IsOptional, IsArray, IsObject, ValidateNested, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { FormatDto, ChatMessageDto } from './template-generate-request.dto';

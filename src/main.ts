@@ -1,5 +1,4 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
@@ -13,6 +12,7 @@ async function bootstrap() {
   });
 
   // Register body parsers manually with conditional logic
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const bodyParser = require('body-parser');
 
   // JSON body parser - skip for multipart requests

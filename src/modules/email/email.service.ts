@@ -125,4 +125,79 @@ export class EmailService {
 
     return this.transporter.sendMail(mailOptions);
   }
+
+  /**
+   * Conclusão de um comercial do mascote (docs/plano-comerciais-mascote.md §10,
+   * v1: "e-mail de conclusão"): avisa que o vídeo ficou pronto (`succeeded`) ou
+   * que alguma cena precisa de atenção (`needs_attention`), com link direto
+   * para o projeto.
+   *
+   * Quem chama trata a falha (o pipeline NUNCA quebra por SMTP) — aqui só se
+   * monta e envia.
+   */
+  async sendCommercialFinished(params: {
+    email: string;
+    name: string;
+    projectId: string;
+    title: string;
+    status: string;
+  }) {
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:8080');
+    const projectUrl = `${frontendUrl}/commercials/projects/${params.projectId}`;
+    const ok = params.status === 'succeeded';
+    const subject = ok
+      ? `Seu comercial "${params.title}" está pronto`
+      : `Seu comercial "${params.title}" precisa de atenção`;
+    const headline = ok ? 'Seu vídeo ficou pronto!' : 'Uma cena precisa da sua atenção';
+    const body = ok
+      ? 'A montagem terminou e o comercial já está disponível na sua biblioteca.'
+      : 'A produção parou em uma cena que não ficou boa. Abra o projeto para ver o que ' +
+        'aconteceu e fazer uma nova tentativa.';
+    const cta = ok ? 'Ver o comercial' : 'Abrir o projeto';
+
+    const mailOptions = {
+      from: this.configService.get<string>('MAIL_FROM', '"Encartes" <no-reply@encartes.local>'),
+      to: params.email,
+      subject,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #dc2626; color: white; padding: 20px; text-align: center; }
+            .content { background-color: #f9fafb; padding: 30px; }
+            .button { display: inline-block; padding: 12px 30px; background-color: #dc2626; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+            .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Sistema de Encartes</h1>
+            </div>
+            <div class="content">
+              <h2>${headline}</h2>
+              <p>Olá${params.name ? `, ${params.name}` : ''}!</p>
+              <p>${body}</p>
+              <p><strong>Comercial:</strong> ${params.title}</p>
+              <div style="text-align: center;">
+                <a href="${projectUrl}" class="button">${cta}</a>
+              </div>
+              <p>Ou copie e cole o link abaixo no seu navegador:</p>
+              <p style="word-break: break-all; color: #666;">${projectUrl}</p>
+            </div>
+            <div class="footer">
+              <p>&copy; ${new Date().getFullYear()} Sistema de Encartes. Todos os direitos reservados.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    return this.transporter.sendMail(mailOptions);
+  }
 }

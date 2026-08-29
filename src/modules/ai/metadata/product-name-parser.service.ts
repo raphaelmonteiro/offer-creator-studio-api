@@ -78,9 +78,7 @@ export class ProductNameParserService {
       // bit more but guarantees we don't lose a whole 8-item batch.
       const everyNull = parsedBatch.every((p) => p === null);
       if (everyNull && slice.length > 1) {
-        this.logger.warn(
-          `Batch de ${slice.length} retornou tudo null; tentando item a item.`,
-        );
+        this.logger.warn(`Batch de ${slice.length} retornou tudo null; tentando item a item.`);
         parsedBatch = [];
         for (const item of slice) {
           const [single] = await this.callLlm([item.payload]);

@@ -1,0 +1,391 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Motor de pose do rig — cada peça gira na própria articulação determinismo (preview no browser == vídeo no worker) snapshot numérico dos frames de referência a 24 fps 1`] = `
+[
+  {
+    "gesture": "idle",
+    "poses": [
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -0,
+          "arm_right": 0,
+          "head": 0,
+        },
+        "scale": 1,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -0.7143,
+          "arm_right": 0.7143,
+          "head": 0.2679,
+        },
+        "scale": 1.0043,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -1.4286,
+          "arm_right": 1.4286,
+          "head": 0.5357,
+        },
+        "scale": 1.0086,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -2.8571,
+          "arm_right": 2.8571,
+          "head": 1.0714,
+        },
+        "scale": 1.0129,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -0.2857,
+          "arm_right": 0.2857,
+          "head": 0.8571,
+        },
+        "scale": 0.9957,
+      },
+    ],
+  },
+  {
+    "gesture": "wave",
+    "poses": [
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -0,
+          "arm_right": -58.125,
+          "head": 0,
+        },
+        "scale": 1,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -1.3333,
+          "arm_right": -62.4896,
+          "head": 1.8667,
+        },
+        "scale": 1.0043,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -2.6667,
+          "arm_right": -75,
+          "head": -3.7333,
+        },
+        "scale": 1.0086,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -2.6667,
+          "arm_right": -69.0833,
+          "head": -3.7333,
+        },
+        "scale": 1.0129,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": 2.6667,
+          "arm_right": -41.5417,
+          "head": 3.7333,
+        },
+        "scale": 0.9957,
+      },
+    ],
+  },
+  {
+    "gesture": "dance",
+    "poses": [
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": -0,
+        "rotate": {
+          "arm_left": 0,
+          "arm_right": -0,
+          "head": -0,
+          "leg_left": 0,
+          "leg_right": -0,
+          "torso": 0,
+        },
+        "scale": 1,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0.01,
+        "offsetY": -0.01,
+        "rotate": {
+          "arm_left": 34.375,
+          "arm_right": -34.375,
+          "head": -5.8333,
+          "leg_left": 15,
+          "leg_right": -15,
+          "torso": 5,
+        },
+        "scale": 1.0043,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0.004,
+        "offsetY": -0.004,
+        "rotate": {
+          "arm_left": 13.75,
+          "arm_right": -13.75,
+          "head": -2.3333,
+          "leg_left": 6,
+          "leg_right": -6,
+          "torso": 2,
+        },
+        "scale": 1.0086,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": -0.008,
+        "offsetY": -0.008,
+        "rotate": {
+          "arm_left": -27.5,
+          "arm_right": 27.5,
+          "head": 4.6667,
+          "leg_left": -12,
+          "leg_right": 12,
+          "torso": -4,
+        },
+        "scale": 1.0129,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": -0.008,
+        "offsetY": -0.008,
+        "rotate": {
+          "arm_left": -27.5,
+          "arm_right": 27.5,
+          "head": 4.6667,
+          "leg_left": -12,
+          "leg_right": 12,
+          "torso": -4,
+        },
+        "scale": 0.9957,
+      },
+    ],
+  },
+  {
+    "gesture": "point",
+    "poses": [
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_right": -0,
+          "head": 0,
+          "torso": 0,
+        },
+        "scale": 1,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_right": -39.8437,
+          "head": 3.0625,
+          "torso": 1.875,
+        },
+        "scale": 1.0043,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_right": -63.75,
+          "head": 4.9,
+          "torso": 3,
+        },
+        "scale": 1.0086,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_right": -63.75,
+          "head": 4.9,
+          "torso": 3,
+        },
+        "scale": 1.0129,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_right": -63.75,
+          "head": 4.9,
+          "torso": 3,
+        },
+        "scale": 0.9957,
+      },
+    ],
+  },
+  {
+    "gesture": "jump",
+    "poses": [
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": -0,
+        "rotate": {
+          "arm_left": -0,
+          "arm_right": 0,
+          "leg_left": -0,
+          "leg_right": 0,
+        },
+        "scale": 0.94,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": -0.0444,
+        "rotate": {
+          "arm_left": -16.6667,
+          "arm_right": 16.6667,
+          "leg_left": -6,
+          "leg_right": 6,
+        },
+        "scale": 1.011,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": -0.0711,
+        "rotate": {
+          "arm_left": -26.6667,
+          "arm_right": 26.6667,
+          "leg_left": -9.6,
+          "leg_right": 9.6,
+        },
+        "scale": 1.0556,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": -0.0178,
+        "rotate": {
+          "arm_left": -6.6667,
+          "arm_right": 6.6667,
+          "leg_left": -2.4,
+          "leg_right": 2.4,
+        },
+        "scale": 0.9791,
+      },
+      {
+        "mouthOpen": 0,
+        "offsetX": 0,
+        "offsetY": -0.0356,
+        "rotate": {
+          "arm_left": -13.3333,
+          "arm_right": 13.3333,
+          "leg_left": -4.8,
+          "leg_right": 4.8,
+        },
+        "scale": 0.9891,
+      },
+    ],
+  },
+  {
+    "gesture": "talk",
+    "poses": [
+      {
+        "mouthOpen": 0.5,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -5,
+          "arm_right": 5,
+          "head": 0,
+          "torso": 0,
+        },
+        "scale": 1,
+      },
+      {
+        "mouthOpen": 0.4231,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -8.3333,
+          "arm_right": 8.8462,
+          "head": 6.2222,
+          "torso": 0.6923,
+        },
+        "scale": 1.0043,
+      },
+      {
+        "mouthOpen": 0.3462,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -8.3333,
+          "arm_right": 7.3077,
+          "head": -1.5556,
+          "torso": 1.3846,
+        },
+        "scale": 1.0086,
+      },
+      {
+        "mouthOpen": 0.1923,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -1.6667,
+          "arm_right": 0.3846,
+          "head": 3.1111,
+          "torso": 0.8308,
+        },
+        "scale": 1.0129,
+      },
+      {
+        "mouthOpen": 0.1154,
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotate": {
+          "arm_left": -8.3333,
+          "arm_right": 4.2308,
+          "head": 6.2222,
+          "torso": -1.6615,
+        },
+        "scale": 0.9957,
+      },
+    ],
+  },
+]
+`;

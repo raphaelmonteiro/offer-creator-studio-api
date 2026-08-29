@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager, IsNull } from 'typeorm';
-import { AnimationAsset } from '../entities/animation-asset.entity';
+import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { ttsCacheKey } from '../domain/tts-cache-key';
 
 /**
