@@ -5,11 +5,36 @@
 # Este script: atualiza o código (git), instala deps (INCL. devDeps, necessárias p/ buildar),
 # builda (nest build → dist/) e reinicia o pm2.
 #
+# RODA NA VM. Fora dela (no Mac) ele delega automaticamente para o deploy.sh da
+# raiz do monorepo, que faz SSH na VM — o pm2 do backend não existe na sua máquina.
+#
 # Uso na VM:   ./deploy.sh            (roda como o dono do repo via sudo -u; é quem tem a chave SSH do GitHub)
 # Forçar:      FORCE=1 ./deploy.sh    (descarta mudanças locais do repo na VM)
 # Variáveis:   PM2_APP (default flyer-api), BRANCH (default main)
 #
 set -euo pipefail
+
+# ─── guarda: este script só faz sentido DENTRO da VM ──────────────────────
+# Na VM o repo vive em /opt/encarte/backend. Fora dela (no Mac, por exemplo) o
+# `pm2 restart flyer-api` falha com "Process or Namespace not found", porque o
+# pm2 do backend roda na VM, não aqui. Como o deploy.sh da raiz do monorepo tem
+# o mesmo nome, é fácil rodar o errado — então delegamos pra ele.
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+case "$SELF_DIR" in
+  /opt/encarte/*) ;;                       # estamos na VM: segue o fluxo normal
+  *)
+    ROOT_DEPLOY="$(cd "$SELF_DIR/.." && pwd)/deploy.sh"
+    if [ -x "$ROOT_DEPLOY" ]; then
+      echo "ℹ️  Este deploy.sh é o que roda DENTRO da VM ($SELF_DIR não é /opt/encarte/backend)."
+      echo "   Delegando para: $ROOT_DEPLOY --only=backend"
+      echo ""
+      exec "$ROOT_DEPLOY" --only=backend "$@"
+    fi
+    echo "❌ Este deploy.sh só roda dentro da VM (/opt/encarte/backend)."
+    echo "   Do seu Mac, use o deploy.sh da raiz do monorepo:"
+    echo "     cd ~/Sites/chroma && ./deploy.sh --only=backend"
+    exit 1 ;;
+esac
 
 # Roda como o DONO do repo (tem a chave SSH do GitHub e é quem roda o pm2).
 # Rodar como root quebraria o git (root não tem a chave SSH do GitHub).

@@ -15,10 +15,16 @@ npm run test:watch       # Watch mode
 npm run test:cov         # Coverage
 npm run test:e2e         # E2E tests
 
-# Database migrations
+# Database migrations (DataSource do CLI: src/data-source.ts)
 npm run migration:generate -- src/migrations/MigrationName
-npm run migration:run
+npm run migration:run        # dev, via ts-node
 npm run migration:revert
+npm run migration:show       # quais já rodaram
+
+# Prod (VM): rodam contra dist/, sem ts-node. O deploy.sh da raiz do monorepo
+# chama migration:run:prod entre o build e o pm2 restart.
+npm run migration:run:prod
+npm run migration:show:prod
 ```
 
 ## Environment
