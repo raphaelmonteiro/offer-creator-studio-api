@@ -826,6 +826,69 @@ resolveria ~350 das 10.495 imagens consultáveis. O `review` caiu para 1 — qua
 `NO_MATCH` e segue para o Cosmos, que é o comportamento projetado, mas confirma que **a OFF é
 hoje uma contribuinte pequena e precisa, não uma fonte principal.**
 
+### EXECUTADO EM PRODUÇÃO (2026-08-31) — resultado e o que ele revelou
+
+Deploy `7ec4610`. Dump da OFF ingerido em `encarte_db` (33.287 produtos, 13.284 consultáveis).
+
+| | |
+|---|---|
+| Imagens varridas | 10.495 |
+| **EANs gravados (fonte `off`)** | **253** |
+| `review` (sem EAN) | 108 |
+| `unresolved` → seguem para o Cosmos | 10.134 |
+| Rejeitados pela unicidade de GTIN (camada 5b) | 14 |
+| EANs pré-existentes da visão (`eanSource: null`) | 98 |
+| **Total de imagens com EAN** | **351** |
+
+**A taxa de aceite se confirmou**: dry-run em produção deu 2,7%, base local 3,3%, resultado
+final 3,01%. Essa previsão funcionou.
+
+#### ⚠️ A PRECISÃO não se confirmou — e a causa é instrutiva
+
+A auditoria local deu 20/20. Em produção, **63 dos 316 aceites iniciais (20%) estavam em
+grupos de GTIN disputado** — erro certo, porque no máximo uma imagem de cada grupo pode estar
+certa:
+
+```
+Bonafont COM GÁS 500ml    + Bonafont SEM GÁS 500ml       → mesmo EAN
+Ninho +1 fases LATA 800g  + Ninho +1 fases SACHÊ 800g    → mesmo EAN
+Melitta extraforte VÁCUO  + Melitta extra forte ALMOFADA → mesmo EAN
+```
+
+**Causa raiz:** a base local tem 609 imagens de arroz, feijão e chocolate. Produção tem 12.815
+cobrindo laticínios, bebidas, congelados, café e água — categorias em que os grupos
+discriminantes curados têm **cobertura zero**:
+
+| dimensão ausente | exemplos que passaram |
+|---|---|
+| embalagem | lata / sachê / vácuo / almofada / tetra pak |
+| carbonatação | com gás / sem gás |
+| lactose | zero lactose / sem lactose |
+| teor de gordura | desnatado / semidesnatado |
+| açúcar | zero / light / diet / tradicional |
+
+Os 63 foram rebaixados para `review` por SQL; restam **253 aceites e zero GTIN disputado**.
+
+**A precisão dos 253 restantes é desconhecida.** A checagem de disputa só enxerga erro que se
+manifesta como colisão; erro isolado continua invisível (ex.: `Paulista semi zero lactose` →
+"Leite UHT Semidesnatado", que sobreviveu por não colidir). Estimativa não verificada: 85–92%.
+
+#### Correções pendentes (todas grátis)
+
+1. **Estender os grupos discriminantes** com as cinco dimensões acima.
+2. **Fortalecer a assinatura da camada 5b** — hoje ela só compara grupos curados, por isso
+   deixou passar o que o SQL teve que limpar depois. Deveria ter pego em código.
+3. **Validar por checksum GS1 os 98 EANs herdados da visão** (`eanSource: null`, procedência
+   desconhecida, nunca passaram por nenhum portão).
+4. Só então re-rodar e auditar ~300 aceites para uma afirmação estatística.
+
+#### Lição
+
+Eu havia registrado "sempre medir em produção antes de extrapolar" depois da Fase 0, e
+**mesmo assim extrapolei precisão de uma base local não representativa**. A taxa de aceite
+extrapolou bem; a precisão não. Cobertura é propriedade do volume, precisão é propriedade da
+**diversidade** — e uma base de arroz e chocolate não representa um sortimento de supermercado.
+
 ### Ordem de implementação
 
 1. Mapa prefixo→marcas a partir do dump (camada 3) — zero custo, maior rejeição isolada
