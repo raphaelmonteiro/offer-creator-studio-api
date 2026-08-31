@@ -25,6 +25,7 @@ import { GalleryEmbeddingService } from './gallery-embedding.service';
 import { ImageMetadataService } from './metadata/image-metadata.service';
 import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.service';
 import { FilenameMetadataRecoveryService } from './metadata/filename-metadata-recovery.service';
+import { OffResolutionService } from './ean/off-resolution.service';
 import { SocialSectionLayoutService } from './social-section-layout.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { SpellCheckRequestDto } from './dto/spell-check-request.dto';
@@ -59,6 +60,7 @@ export class AiController {
     private readonly imageMetadataService: ImageMetadataService,
     private readonly productImageMatchV2: ProductImageMatchV2Service,
     private readonly filenameRecovery: FilenameMetadataRecoveryService,
+    private readonly offResolution: OffResolutionService,
     private readonly configService: ConfigService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
@@ -223,6 +225,54 @@ export class AiController {
     const offset = Math.max(Number(offsetQuery) || 0, 0);
     const items = await this.galleryEmbeddingService.listFailedMetadataImages(limit, offset);
     return { limit, offset, count: items.length, items };
+  }
+
+  @Public()
+  @Get('gallery/ean-stats')
+  @ApiOperation({ summary: '[Admin] Feature 14 — cobertura de EAN da galeria' })
+  async galleryEanStats(@Headers('x-admin-token') adminToken: string | undefined) {
+    this.assertAdminToken(adminToken);
+    const [row] = await this.dataSource.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE metadata->>'ean' IS NOT NULL)::int AS "comEan",
+         COUNT(*) FILTER (WHERE metadata->>'eanStatus' = 'resolved')::int AS resolved,
+         COUNT(*) FILTER (WHERE metadata->>'eanStatus' = 'review')::int AS review,
+         COUNT(*) FILTER (WHERE metadata->>'eanStatus' = 'unresolved')::int AS unresolved,
+         COUNT(*) FILTER (WHERE metadata->>'eanStatus' IS NULL)::int AS untouched
+       FROM gallery_images
+       WHERE metadata IS NOT NULL`,
+    );
+    const porFonte = await this.dataSource.query(
+      `SELECT metadata->>'eanSource' AS fonte, COUNT(*)::int AS n
+         FROM gallery_images
+        WHERE metadata->>'ean' IS NOT NULL
+        GROUP BY 1 ORDER BY 2 DESC`,
+    );
+    return { ...row, porFonte, offDumpPronto: await this.offResolution.isReady() };
+  }
+
+  @Public()
+  @Post('gallery/resolve-ean-off')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Admin] Feature 14 Fase 2 — resolve EAN contra o dump local da Open Food Facts',
+  })
+  async galleryResolveEanOff(
+    @Headers('x-admin-token') adminToken: string | undefined,
+    @Body() body: { batchSize?: number; maxBatches?: number; dryRun?: boolean } = {},
+  ) {
+    this.assertAdminToken(adminToken);
+    if (!(await this.offResolution.isReady())) {
+      throw new ForbiddenException(
+        'Tabela off_products vazia ou ausente. Rode a ingestão do dump da OFF antes.',
+      );
+    }
+    return this.offResolution.resolve({
+      batchSize: body.batchSize,
+      maxBatches: body.maxBatches,
+      dryRun: body.dryRun,
+    });
   }
 
   @Public()

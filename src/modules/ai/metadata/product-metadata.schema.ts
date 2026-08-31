@@ -47,6 +47,48 @@ export const FieldConfidenceSchema = z.record(z.string(), z.number().min(0).max(
 export const SourceSchema = z.enum(['vision', 'name-parse']);
 export type MetadataSource = z.infer<typeof SourceSchema>;
 
+/**
+ * Feature 14 — proveniência do EAN.
+ *
+ * O EAN nunca é gravado como string solta: sem saber de onde veio e com que
+ * confiança, em três meses não se sabe em quais valores confiar. Todos os
+ * campos são OPCIONAIS de propósito — os 12.815 registros que já existem em
+ * produção não têm esse bloco e não podem ser invalidados por ele.
+ */
+export const EanSourceSchema = z.enum(['barcode-scan', 'off', 'cosmos', 'manual', 'erp']);
+export type EanSource = z.infer<typeof EanSourceSchema>;
+
+export const EanStatusSchema = z.enum(['resolved', 'review', 'unresolved']);
+export type EanStatus = z.infer<typeof EanStatusSchema>;
+
+export const EanCandidateSchema = z.object({
+  ean: z.string(),
+  source: EanSourceSchema,
+  score: z.number().min(0).max(1),
+  description: z.string().nullable().optional(),
+});
+export type EanCandidate = z.infer<typeof EanCandidateSchema>;
+
+/**
+ * Precedência entre fontes: uma fonte de menor confiança NUNCA sobrescreve
+ * uma de maior. Revisão humana é sempre a palavra final.
+ */
+export const EAN_SOURCE_PRECEDENCE: Record<EanSource, number> = {
+  manual: 100,
+  erp: 80,
+  'barcode-scan': 60,
+  cosmos: 40,
+  off: 20,
+};
+
+export function canOverwriteEan(
+  current: EanSource | null | undefined,
+  incoming: EanSource,
+): boolean {
+  if (!current) return true;
+  return EAN_SOURCE_PRECEDENCE[incoming] >= EAN_SOURCE_PRECEDENCE[current];
+}
+
 export const ProductMetadataSchema = z.object({
   title: z.string().min(1),
   category: CategorySchema.nullable(),
@@ -66,6 +108,12 @@ export const ProductMetadataSchema = z.object({
   source: SourceSchema,
   modelVersion: z.string().min(1),
   warnings: z.array(z.string().min(1)),
+  // Bloco de proveniência do EAN (Feature 14). Opcional — ver acima.
+  eanSource: EanSourceSchema.nullable().optional(),
+  eanConfidence: z.number().min(0).max(1).nullable().optional(),
+  eanVerifiedAt: z.string().nullable().optional(),
+  eanStatus: EanStatusSchema.nullable().optional(),
+  eanCandidates: z.array(EanCandidateSchema).optional(),
 });
 export type ProductMetadata = z.infer<typeof ProductMetadataSchema>;
 

@@ -20,6 +20,7 @@ import { TaxonomyService } from './metadata/taxonomy/taxonomy.service';
 import { ImageMetadataService } from './metadata/image-metadata.service';
 import { ProductNameParserService } from './metadata/product-name-parser.service';
 import { FilenameMetadataRecoveryService } from './metadata/filename-metadata-recovery.service';
+import { OffResolutionService } from './ean/off-resolution.service';
 import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.service';
 
 @Module({
@@ -44,6 +45,7 @@ import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.se
     ImageMetadataService,
     ProductNameParserService,
     FilenameMetadataRecoveryService,
+    OffResolutionService,
     ProductImageMatchV2Service,
     { provide: 'GalleryEmbeddingService', useExisting: GalleryEmbeddingService },
     { provide: 'ImageMetadataService', useExisting: ImageMetadataService },
