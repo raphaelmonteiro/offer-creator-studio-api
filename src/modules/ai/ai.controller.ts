@@ -26,6 +26,7 @@ import { ImageMetadataService } from './metadata/image-metadata.service';
 import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.service';
 import { FilenameMetadataRecoveryService } from './metadata/filename-metadata-recovery.service';
 import { OffResolutionService } from './ean/off-resolution.service';
+import { SpreadsheetEanMatchService } from './ean/spreadsheet-ean-match.service';
 import { SocialSectionLayoutService } from './social-section-layout.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { SpellCheckRequestDto } from './dto/spell-check-request.dto';
@@ -61,6 +62,7 @@ export class AiController {
     private readonly productImageMatchV2: ProductImageMatchV2Service,
     private readonly filenameRecovery: FilenameMetadataRecoveryService,
     private readonly offResolution: OffResolutionService,
+    private readonly spreadsheetEanMatch: SpreadsheetEanMatchService,
     private readonly configService: ConfigService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
@@ -225,6 +227,38 @@ export class AiController {
     const offset = Math.max(Number(offsetQuery) || 0, 0);
     const items = await this.galleryEmbeddingService.listFailedMetadataImages(limit, offset);
     return { limit, offset, count: items.length, items };
+  }
+
+  @Public()
+  @Post('gallery/match-ean-from-spreadsheet')
+  @HttpCode(HttpStatus.OK)
+  @SkipValidation()
+  @UseInterceptors(createFileInterceptor('file'))
+  @ApiOperation({
+    summary:
+      '[Admin] Feature 14 — sobe CSV/XLSX do cliente, casa cada linha com EAN contra a galeria e vincula o EAN no metadata',
+  })
+  async galleryMatchEanFromSpreadsheet(
+    @Headers('x-admin-token') adminToken: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+    @Query('dryRun') dryRunQuery?: string,
+    @Query('detalhes') detalhesQuery?: string,
+  ) {
+    this.assertAdminToken(adminToken);
+    if (!file?.buffer?.length) {
+      throw new ForbiddenException('Envie o arquivo no campo "file" (CSV ou XLSX).');
+    }
+
+    const dryRun = dryRunQuery !== 'false';
+    const resultado = await this.spreadsheetEanMatch.processar(file.buffer, { dryRun });
+
+    // Por padrão devolve só o resumo — uma planilha grande gera milhares de
+    // linhas de detalhe que não cabem numa resposta legível.
+    if (detalhesQuery !== 'true') {
+      const { resultados, ...resumo } = resultado;
+      return { ...resumo, totalResultados: resultados.length };
+    }
+    return resultado;
   }
 
   @Public()
