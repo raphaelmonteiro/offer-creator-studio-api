@@ -275,10 +275,13 @@ export function buildDirectorSystemPromptV2(opts: {
       `(a soma das durações precisa ficar entre ${bounds.min} e ${bounds.max} segundos).`,
     '',
     'Cada cena tem um TIPO que define como será produzida:',
-    '- "presenter": o mascote fala olhando para a câmera, com gestos simples (boca sincronizada).',
+    '- "presenter": o mascote FALA EM CENA com a boca sincronizada, de frente para a câmera, ' +
+      'e pode fazer UMA ação simples enquanto fala (pegar o produto da prateleira, mostrar o pacote, ' +
+      'apontar, dar um joinha). É o tipo padrão sempre que o mascote fala olhando para a câmera.',
     '- "action": UMA ação física simples, sem locução (dialogue = null).',
-    '- "action_voiceover": UMA ação física com narração sobreposta — o personagem NÃO deve ' +
-      'aparecer falando visivelmente; a voz é narração.',
+    '- "action_voiceover": use SOMENTE quando o mascote NÃO é o narrador visível — close no ' +
+      'produto, mascote de costas ou andando pelo corredor, plano sem o rosto. A voz é narração ' +
+      'em off; o personagem não deve aparecer falando.',
     '',
     'Regras obrigatórias:',
     `- Cada cena dura de ${MC_SCENE_MIN_S} a ${MC_SCENE_MAX_S} segundos.`,

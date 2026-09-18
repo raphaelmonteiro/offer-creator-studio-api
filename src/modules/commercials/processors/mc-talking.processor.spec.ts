@@ -197,6 +197,31 @@ describe('McTalkingProcessor — submit do Kling AI Avatar v2 (plano §5.3/§6.4
       expect.objectContaining({ stepId: 'st-1', attempt: 1 }),
       expect.objectContaining({ startAfterSeconds: 15, singletonKey: 'poll:st-1:1' }),
     );
+    // legado (sem snapshot v2): NUNCA manda prompt — executor antigo preservado
+    expect(fal.submit.mock.calls[0][1]).not.toHaveProperty('prompt');
+  });
+
+  it('v2: o MOVIMENTO do snapshot vai como prompt do Avatar (ação simples + boca sincronizada), com preservação de identidade', async () => {
+    pipeline.claimStep.mockResolvedValue({
+      ...step,
+      phase: 'production',
+      projectRevision: 1,
+      inputSnapshot: {
+        keyframeAssetId: 'a-kf',
+        audioAssetId: 'a-audio',
+        motion: 'The mascot grabs the rice bag from the shelf and shows it to the camera',
+        lang: 'en',
+        sceneType: 'presenter',
+      },
+    });
+    await processor.process({ stepId: 'st-1' });
+    const [model, input] = fal.submit.mock.calls[0] as [string, Record<string, unknown>];
+    expect(model).toBe(KLING_AVATAR_MODEL);
+    expect(input.prompt).toContain('grabs the rice bag from the shelf');
+    expect(input.prompt).toContain('mouth moving in sync with the speech');
+    expect(input.prompt).toContain('Keep exactly the same character design');
+    expect(input.image_url).toMatch(/^data:image\//);
+    expect(input.audio_url).toMatch(/^data:audio\/mpeg/);
   });
 
   it('áudio acima do teto de 3,3MB → validação terminal SEM chamar o provider', async () => {

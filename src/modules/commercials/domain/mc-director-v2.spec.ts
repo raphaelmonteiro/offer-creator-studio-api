@@ -27,7 +27,11 @@ describe('diretor v2 (ADR §3.1/§3.2) — schema, normalização e mock', () =>
     expect(prompt).toMatch(/action_voiceover/);
     expect(prompt).toMatch(/productIndex/);
     expect(prompt).toMatch(/\[0\] Arroz \(R\$ 24,90 \/ pct\)/);
-    expect(prompt).toMatch(/NÃO deve aparecer falando/);
+    // adendo 18/09: presenter carrega a ação simples com boca sincronizada;
+    // voiceover só quando o mascote não é o narrador visível
+    expect(prompt).toMatch(/pode fazer UMA ação simples enquanto fala/);
+    expect(prompt).toMatch(/SOMENTE quando o mascote NÃO é o narrador visível/);
+    expect(prompt).toMatch(/não deve aparecer falando/);
     const schema = buildDirectorJsonSchemaV2() as {
       schema: { properties: { scenes: { items: { required: string[] } } } };
     };

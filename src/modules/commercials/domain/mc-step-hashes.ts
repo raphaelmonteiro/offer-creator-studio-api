@@ -199,6 +199,9 @@ export interface LipsyncHashInputV2 {
   audioAssetId: string;
   attempt: number;
   model?: string;
+  /** Movimento (EN efetivo) enviado como prompt ao Avatar — mudar a ação regenera. */
+  motionPrompt?: string | null;
+  promptLang?: McPromptLang | null;
 }
 
 export function computeLipsyncHashV2(input: LipsyncHashInputV2): string {
@@ -206,6 +209,8 @@ export function computeLipsyncHashV2(input: LipsyncHashInputV2): string {
     keyframeAssetId: input.keyframeAssetId,
     audioAssetId: input.audioAssetId,
     model: input.model ?? KLING_AVATAR_MODEL,
+    motionPrompt: input.motionPrompt ?? null,
+    promptLang: input.promptLang ?? null,
     attempt: input.attempt,
   });
 }

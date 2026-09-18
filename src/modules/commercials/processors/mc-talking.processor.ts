@@ -22,7 +22,7 @@ import {
   MC_FIRST_POLL_DELAY_S,
   mcExpireForQueue,
 } from '../domain/mc-pipeline.config';
-import { buildActionVideoPrompt } from '../domain/mc-scene-prompts';
+import { buildActionVideoPrompt, buildAvatarVideoPrompt } from '../domain/mc-scene-prompts';
 import { assertStepTransition, McStepStatus } from '../domain/mc-state-machines';
 import { McStepType, sceneActionPromptEn } from '../domain/mc-types';
 import { McProject } from '../entities/mc-project.entity';
@@ -206,6 +206,7 @@ export class McTalkingProcessor {
     const snapshot = (step?.inputSnapshot ?? null) as {
       keyframeAssetId?: string;
       audioAssetId?: string;
+      motion?: string;
     } | null;
     const image = await this.loadAssetBuffer(
       snapshot?.keyframeAssetId ?? scene.keyframeAssetId,
@@ -219,9 +220,14 @@ export class McTalkingProcessor {
       );
     }
     const safeImage = await ensureImageUnderCap(image);
+    // v2: o MOVIMENTO da cena vai como prompt do Avatar (ação simples + boca
+    // sincronizada — validado em uso real 18/09). Legado (sem snapshot) segue
+    // sem prompt, preservando o executor antigo.
+    const motion = snapshot?.motion?.trim();
     const result = await this.fal.submit(KLING_AVATAR_MODEL, {
       image_url: toDataUri(safeImage, sniffImageMime(safeImage)),
       audio_url: toDataUri(audio, 'audio/mpeg'),
+      ...(motion ? { prompt: buildAvatarVideoPrompt(motion) } : {}),
     });
     return {
       provider: KLING_AVATAR_MODEL,

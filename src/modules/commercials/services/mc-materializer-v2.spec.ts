@@ -396,6 +396,12 @@ describe('McMaterializerService — pipeline v2 (ADR §3.3/§4.2)', () => {
       false,
     );
     expect(steps.every((s) => s.phase === 'production' && s.projectRevision === 1)).toBe(true);
+    // presenter: o movimento (EN efetivo) viaja no snapshot do lipsync → prompt do Avatar
+    const lipsync = steps.find((s) => s.type === McStepType.LIPSYNC)!;
+    expect(lipsync.inputSnapshot).toMatchObject({
+      motion: expect.any(String),
+      lang: expect.stringMatching(/^(en|pt)$/),
+    });
     // estimativa/reserva sem Avatar no voiceover: 56 + 89 + 0 + 89
     expect(items.reduce((sum, i) => sum + i.credits, 0)).toBe(56 + 89 + 89);
     // snapshot de vídeo carrega o keyframe selecionado e o movimento efetivo

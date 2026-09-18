@@ -204,6 +204,22 @@ describe('hashes v2 — requisição efetiva (ADR §4.2)', () => {
     expect(computeLipsyncHashV2({ keyframeAssetId: 'a', audioAssetId: 'b', attempt: 1 })).not.toBe(
       computeLipsyncHashV2({ keyframeAssetId: 'a', audioAssetId: 'c', attempt: 1 }),
     );
+    // Avatar com prompt de movimento: mudar a AÇÃO da cena falada regenera o vídeo
+    expect(
+      computeLipsyncHashV2({
+        keyframeAssetId: 'a',
+        audioAssetId: 'b',
+        attempt: 1,
+        motionPrompt: 'waves',
+      }),
+    ).not.toBe(
+      computeLipsyncHashV2({
+        keyframeAssetId: 'a',
+        audioAssetId: 'b',
+        attempt: 1,
+        motionPrompt: 'holds the bag',
+      }),
+    );
     expect(computeTtsHashV2({ dialogue: 'oi', voiceId: 'v', attempt: 1 })).not.toBe(
       computeTtsHashV2({ dialogue: 'oi', voiceId: 'v', attempt: 2 }),
     );

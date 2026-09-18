@@ -611,14 +611,20 @@ export class McMaterializerService {
             sceneType: scriptScene.sceneType,
           };
         } else if (type === McStepType.LIPSYNC) {
+          // Avatar com prompt de movimento (ADR §3.1, adendo 18/09): a ação
+          // simples da cena falada vai ao Kling Avatar — entra no hash e no snapshot.
           inputHash = computeLipsyncHashV2({
             keyframeAssetId: scene.keyframeAssetId,
             audioAssetId: scene.audioAssetId as string,
+            motionPrompt: prompts.motion,
+            promptLang: prompts.lang,
             attempt,
           });
           snapshot = {
             keyframeAssetId: scene.keyframeAssetId,
             audioAssetId: scene.audioAssetId,
+            motion: prompts.motion,
+            lang: prompts.lang,
             sceneType: scriptScene.sceneType,
           };
         } else if (type === McStepType.SCENE_COMPOSE) {

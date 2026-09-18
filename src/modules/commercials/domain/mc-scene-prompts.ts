@@ -62,6 +62,28 @@ export const ACTION_PRESERVATION_SUFFIX =
   'One continuous, smooth, natural action. Static camera, no text or logos on screen.';
 
 /**
+ * Sufixo do AVATAR (cena falada): o Kling Avatar v2 aceita um `prompt` de
+ * movimento — testado em 18/09 com o keyframe + voz reais da cena 2: o mascote
+ * pegou o pacote da prateleira, mostrou à câmera e falou com a boca
+ * sincronizada. Sem prompt ele fica parado (era o comportamento anterior).
+ * Os lipsyncs sobre vídeo (Kling LipSync, sync-lipsync) NÃO detectam o rosto
+ * de desenho — por isso a ação falada vai pelo Avatar, não por pós-processo.
+ */
+export const AVATAR_PRESERVATION_SUFFIX =
+  'The character speaks to the camera with the mouth moving in sync with the speech, ' +
+  'natural friendly gestures, face visible and facing the camera. ' +
+  'Keep exactly the same character design, colors, proportions and outfit unchanged throughout. ' +
+  'Static camera, no text or logos on screen.';
+
+/** Prompt do AVATAR (cena falada com ação simples): movimento em INGLÊS + sufixo do Avatar. */
+export function buildAvatarVideoPrompt(actionPromptEn: string): string {
+  const action = actionPromptEn.trim().replace(/\s+/g, ' ');
+  if (!action) return AVATAR_PRESERVATION_SUFFIX;
+  const withStop = /[.!?]$/.test(action) ? action : `${action}.`;
+  return `${withStop} ${AVATAR_PRESERVATION_SUFFIX}`;
+}
+
+/**
  * Prompt do motor de AÇÃO (cena sem fala, plano §5.2): ação em INGLÊS +
  * sufixo de preservação. O prompt vai junto com o keyframe da cena como
  * `image_url` — a identidade vem da imagem; o texto rege o movimento.
