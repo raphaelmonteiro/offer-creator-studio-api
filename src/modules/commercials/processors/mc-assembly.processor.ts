@@ -23,13 +23,19 @@ import {
   buildMockMusicArgs,
   buildNormalizeArgs,
   buildPosterArgs,
+  buildRenderedTimeline,
   buildSealCues,
+  buildSealCuesV2,
   ENDCARD_DURATION_S,
+  SceneSealV2,
   SceneWindow,
+  SceneWindowV2,
 } from '../domain/mc-assembly-graph';
+import { isPipelineV2, resolveQuality } from '../domain/mc-quality';
+import { sceneSeal } from '../domain/mc-script-v2';
 import { buildCaptionCues, ElevenLabsAlignment, TextCue } from '../domain/mc-captions';
 import { McProjectStatus, McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
-import { McStepType, resolveProjectOptions, sealProducts } from '../domain/mc-types';
+import { McScript, McStepType, resolveProjectOptions, sealProducts } from '../domain/mc-types';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
@@ -223,8 +229,38 @@ export class McAssemblyProcessor {
       });
 
       // 4) camadas determinísticas + trilha + loudness
-      const sealCues = buildSealCues(windows, sealProducts(project.script?.seal));
-      const captionCues = options.captionsEnabled ? await this.buildCaptions(scenes, windows) : [];
+      const v2 = isPipelineV2(project);
+      const script = (project.script ?? null) as McScript | null;
+      // v2 (ADR §3.6): selo por associação EXPLÍCITA cena → produto (sem rotação);
+      // legado: rotativo por posição.
+      const sealsV2: SceneSealV2[] =
+        v2 && script
+          ? scenes
+              .map((scene) => {
+                const scriptScene = script.scenes.find((x) => x.sceneId === scene.scriptSceneId);
+                const seal = scriptScene ? sceneSeal(script, scriptScene) : null;
+                return seal
+                  ? { sceneId: scene.scriptSceneId as string, product: seal.product, cue: seal.cue }
+                  : null;
+              })
+              .filter((x): x is SceneSealV2 => x !== null)
+          : [];
+      const windowsV2: SceneWindowV2[] = windows.map((w, i) => ({
+        ...w,
+        sceneId: scenes[i].scriptSceneId ?? scenes[i].id,
+        finalAssetId: scenes[i].finalAssetId as string,
+        captionsMissing: false,
+      }));
+      const sealCues = v2
+        ? buildSealCuesV2(windowsV2, sealsV2)
+        : buildSealCues(windows, sealProducts(project.script?.seal));
+      const captionResult = options.captionsEnabled
+        ? await this.buildCaptions(scenes, windows)
+        : { cues: [], missingPositions: [] };
+      const captionCues = captionResult.cues;
+      for (const position of captionResult.missingPositions) {
+        if (windowsV2[position]) windowsV2[position].captionsMissing = true;
+      }
       const musicPath = options.musicEnabled
         ? await this.resolveSoundtrack(project, concatDurationMs / 1000, tempDir)
         : null;
@@ -276,7 +312,7 @@ export class McAssemblyProcessor {
       const version = priorFinals + 1;
       const relDir = this.storage.finalRelDir(project.userId, project.id, version);
       const target = await this.storage.prepareStreamTarget(relDir, 'final.mp4');
-      await fs.copyFile(finalTmp, target.partPath);
+      await this.storage.copyFile(finalTmp, target.partPath);
       await this.ffmpeg.finalizeOutput(target.partPath, target.finalPath);
       const posterUrl = await this.storage.saveFile(relDir, 'poster.jpg', posterBuffer);
       const thumbUrl = await this.storage.saveFile(relDir, 'thumb.jpg', thumbBuffer);
@@ -315,7 +351,25 @@ export class McAssemblyProcessor {
           consumeOnSuccess: true, // custo de tabela do assembly: 0 (plano §8)
         });
         if (completed) {
-          delivered = await this.pipeline.succeedProject(manager, project.id, asset.id);
+          if (v2) {
+            // Timeline EFETIVAMENTE renderizada (ADR §3.6): janelas medidas,
+            // cartela, selos absolutos e legendas ausentes visíveis.
+            const quality = resolveQuality(project.quality);
+            const timeline = buildRenderedTimeline({
+              revision: project.revision,
+              version,
+              windows: windowsV2,
+              endcardDurationS: hasEndcard ? ENDCARD_DURATION_S : null,
+              captionsRequested: options.captionsEnabled,
+              seals: sealsV2,
+              sealCues,
+            });
+            delivered = await this.pipeline.succeedProject(manager, project.id, asset.id, {
+              quality: { ...quality, timeline },
+            });
+          } else {
+            delivered = await this.pipeline.succeedProject(manager, project.id, asset.id);
+          }
         }
       });
     } catch (err) {
@@ -343,20 +397,28 @@ export class McAssemblyProcessor {
    * janela da cena no vídeo final. Cena sem áudio/alinhamento simplesmente não
    * gera legenda (degradação silenciosa — o comercial sai igual).
    */
-  private async buildCaptions(scenes: McScene[], windows: SceneWindow[]): Promise<TextCue[]> {
+  private async buildCaptions(
+    scenes: McScene[],
+    windows: SceneWindow[],
+  ): Promise<{ cues: TextCue[]; missingPositions: number[] }> {
     const audioIds = scenes
       .map((s) => s.audioAssetId)
       .filter((id): id is string => typeof id === 'string');
-    if (audioIds.length === 0) return [];
+    if (audioIds.length === 0) return { cues: [], missingPositions: [] };
     const assets = await this.dataSource
       .getRepository(AnimationAsset)
       .find({ where: { id: In(audioIds) } });
     const cues: TextCue[] = [];
+    const missingPositions: number[] = [];
     for (const [position, scene] of scenes.entries()) {
       if (!scene.audioAssetId) continue;
       const asset = assets.find((a) => a.id === scene.audioAssetId);
       const alignment = asset?.metadata?.alignment as ElevenLabsAlignment | undefined;
-      if (!alignment) continue;
+      if (!alignment) {
+        // v2: a ausência fica VISÍVEL na timeline (ADR §3.6) — nunca degradação silenciosa.
+        missingPositions.push(position);
+        continue;
+      }
       const window = windows[position];
       if (!window) continue;
       cues.push(
@@ -366,7 +428,7 @@ export class McAssemblyProcessor {
         }),
       );
     }
-    return cues;
+    return { cues, missingPositions };
   }
 
   /**

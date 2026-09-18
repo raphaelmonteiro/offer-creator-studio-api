@@ -1,4 +1,5 @@
 import { Type } from 'class-transformer';
+import { VoiceDeliveryDto } from './voice-preview.dto';
 import {
   ArrayMaxSize,
   IsArray,
@@ -22,6 +23,12 @@ export class ApproveKitDto {
   @IsString()
   @MaxLength(100)
   voiceId?: string;
+
+  /** Velocidade/expressividade da voz do mascote — gravado no kit, usado em toda cena. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => VoiceDeliveryDto)
+  delivery?: VoiceDeliveryDto;
 }
 
 /** Regeneração de UMA referência do grid (plano §4: "regeneração por célula"). */

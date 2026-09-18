@@ -25,6 +25,8 @@ export enum McProjectStatus {
   DRAFT = 'draft',
   SCRIPTING = 'scripting',
   STORYBOARD_REVIEW = 'storyboard_review',
+  PREPARING = 'preparing',
+  VISUAL_REVIEW = 'visual_review',
   GENERATING = 'generating',
   NEEDS_ATTENTION = 'needs_attention',
   ASSEMBLING = 'assembling',
@@ -88,8 +90,26 @@ export const MC_PROJECT_TRANSITIONS: Record<McProjectStatus, McProjectStatus[]> 
     McProjectStatus.CANCELED,
   ],
   [McProjectStatus.STORYBOARD_REVIEW]: [
-    McProjectStatus.GENERATING, // aprovação do storyboard (GATE)
+    McProjectStatus.GENERATING, // aprovação do storyboard legado (GATE)
+    McProjectStatus.PREPARING, // pipeline v2: preparar antes de autorizar vídeo
     McProjectStatus.SCRIPTING, // refazer roteiro
+    McProjectStatus.CANCELED,
+  ],
+  // Pipeline v2 (ADR-001 §4.1): preparação de prévias (imagem/TTS) antes de
+  // qualquer vídeo. Editar conteúdo DURANTE a preparação não é transição:
+  // cancela-se/conclui-se a tentativa e abre-se nova revisão.
+  [McProjectStatus.PREPARING]: [
+    McProjectStatus.VISUAL_REVIEW, // prévias prontas (sucesso ou cache integral)
+    McProjectStatus.NEEDS_ATTENTION, // falha recuperável (resumePhase = preparation)
+    McProjectStatus.FAILED,
+    McProjectStatus.CANCELED,
+  ],
+  // Revisão visual/sonora: nenhum vídeo é agendado aqui (ADR §3.3).
+  [McProjectStatus.VISUAL_REVIEW]: [
+    McProjectStatus.GENERATING, // aprovação de produção (revisão + manifesto)
+    McProjectStatus.ASSEMBLING, // aprovação editorial `assembly_only` (só montagem)
+    McProjectStatus.PREPARING, // regenerar prévia / ajustar fala
+    McProjectStatus.STORYBOARD_REVIEW, // revisar a estrutura do roteiro (nova revisão)
     McProjectStatus.CANCELED,
   ],
   [McProjectStatus.GENERATING]: [
@@ -99,7 +119,11 @@ export const MC_PROJECT_TRANSITIONS: Record<McProjectStatus, McProjectStatus[]> 
     McProjectStatus.CANCELED,
   ],
   [McProjectStatus.NEEDS_ATTENTION]: [
-    McProjectStatus.GENERATING,
+    McProjectStatus.GENERATING, // legado: re-roll; v2: retomada da produção
+    McProjectStatus.PREPARING, // v2: retomada da preparação (resumePhase)
+    McProjectStatus.VISUAL_REVIEW, // v2: prévias completas após corrigir a cena falhada
+    McProjectStatus.ASSEMBLING, // v2: retomada da montagem
+    McProjectStatus.STORYBOARD_REVIEW, // v2: usuário reabre o roteiro (nova revisão)
     McProjectStatus.FAILED,
     McProjectStatus.CANCELED,
   ],
@@ -108,7 +132,11 @@ export const MC_PROJECT_TRANSITIONS: Record<McProjectStatus, McProjectStatus[]> 
     McProjectStatus.FAILED,
     McProjectStatus.CANCELED,
   ],
-  [McProjectStatus.SUCCEEDED]: [McProjectStatus.GENERATING], // re-roll pós-entrega (B1b)
+  [McProjectStatus.SUCCEEDED]: [
+    McProjectStatus.GENERATING, // re-roll pós-entrega (legado e v2: refazer vídeo com prévias aprovadas)
+    McProjectStatus.STORYBOARD_REVIEW, // v2: edição de conteúdo abre nova revisão (entrega anterior preservada)
+    McProjectStatus.VISUAL_REVIEW, // v2: correção só de composição (`assembly_only`)
+  ],
   [McProjectStatus.FAILED]: [],
   [McProjectStatus.CANCELED]: [],
 };

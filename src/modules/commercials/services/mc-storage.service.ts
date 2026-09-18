@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createReadStream, createWriteStream } from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { pipeline } from 'stream/promises';
 
 /**
  * Layout de storage do pipeline (plano-comerciais §6.6):
@@ -81,6 +83,16 @@ export class McStorageService {
     const filePath = path.resolve(uploadsDir, uploadsPath.replace(/^\/uploads\//, ''));
     if (!filePath.startsWith(uploadsDir + path.sep)) return null;
     return filePath;
+  }
+
+  /**
+   * Cópia por STREAM (read → write), não `fs.copyFile`: o `copy_file_range`
+   * que o Node usa no Linux pendura indefinidamente em bind mounts FUSE
+   * (Docker Desktop/grpcfuse) — o ingest travava em "publicando asset" sem
+   * erro. Em ext4 o custo é o mesmo.
+   */
+  async copyFile(src: string, dest: string): Promise<void> {
+    await pipeline(createReadStream(src), createWriteStream(dest));
   }
 
   /** Lê um arquivo do bucket local pela URL persistida; null se fora do bucket/ausente. */

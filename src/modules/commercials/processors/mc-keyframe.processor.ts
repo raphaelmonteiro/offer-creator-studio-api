@@ -6,9 +6,10 @@ import { AnimationAsset } from '../../../shared/media-assets/animation-asset.ent
 import { GeminiImageProvider } from '../../../shared/providers/gemini-image.provider';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { KitCanonicalDesc, parseCanonicalDesc } from '../domain/kit-prompts';
-import { buildKeyframePrompt } from '../domain/mc-scene-prompts';
+import { McSelectedReference } from '../domain/mc-quality';
+import { buildKeyframePrompt, buildKeyframePromptV2 } from '../domain/mc-scene-prompts';
+import { McScript, McStepType } from '../domain/mc-types';
 import { McStepStatus } from '../domain/mc-state-machines';
-import { McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
@@ -17,6 +18,20 @@ import { McStorageService } from '../services/mc-storage.service';
 
 /** Máximo de referências do kit anexadas ao prompt (plano B1b: 2–3 — custo × fidelidade). */
 export const KEYFRAME_MAX_REFERENCES = 3;
+
+/** Snapshot gravado pelo materializer v2 no step de keyframe (inputs imutáveis da tentativa). */
+export interface KeyframeSnapshot {
+  baseHash: string;
+  prompt: string;
+  motion: string;
+  lang: 'en' | 'pt';
+  references: McSelectedReference[];
+  environment: { id: string; version: number; assetId: string | null } | null;
+  aspectRatio: string;
+  kitVersion: number;
+  safeArea: 'lower_third' | 'left' | 'right' | null;
+  productName?: string | null;
+}
 
 /** Tamanho do PNG por aspecto (Gemini decide o real; o mock usa isto). */
 const SIZE_BY_ASPECT: Record<string, { w: number; h: number }> = {
@@ -66,10 +81,17 @@ export class McKeyframeProcessor {
       const kit = await this.dataSource
         .getRepository(McCharacterKit)
         .findOneByOrFail({ id: project.kitId });
+      const v2 = step.phase != null && !!step.inputSnapshot;
       const image =
         this.provider() === 'mock'
           ? await this.mockKeyframe(project.aspectRatio, scene.idx)
-          : await this.generateKeyframe(project, scene, kit);
+          : v2
+            ? await this.generateKeyframeV2(
+                project,
+                step.inputSnapshot as unknown as KeyframeSnapshot,
+                kit,
+              )
+            : await this.generateKeyframe(project, scene, kit);
 
       const relDir = this.storage.sceneRelDir(
         project.userId,
@@ -95,6 +117,16 @@ export class McKeyframeProcessor {
             sceneId: scene.id,
             generation: scene.generation,
             provider: this.provider(),
+            ...(v2
+              ? {
+                  scriptSceneId: scene.scriptSceneId,
+                  attempt: step.attempt,
+                  projectRevision: step.projectRevision,
+                  // rastreio das referências realmente enviadas (ADR §3.4)
+                  references: (step.inputSnapshot as unknown as KeyframeSnapshot).references ?? [],
+                  promptLang: (step.inputSnapshot as unknown as KeyframeSnapshot).lang ?? null,
+                }
+              : {}),
           },
         });
         await this.pipeline.completeStepAndAdvance(manager, step, {
@@ -135,6 +167,67 @@ export class McKeyframeProcessor {
       referenceImages: references,
       aspectRatio: project.aspectRatio, // v0: projetos nascem 9:16 (default da entity)
     });
+  }
+
+  /**
+   * PIPELINE V2 (ADR §3.2/§3.4): o prompt vem do ESTADO INICIAL efetivo
+   * (idioma registrado) e as referências são as SELECIONADAS por função no
+   * snapshot do step — não a ordem dos slots. Cenário aprovado entra como
+   * referência quando tem asset.
+   */
+  private async generateKeyframeV2(
+    project: McProject,
+    snapshot: KeyframeSnapshot,
+    kit: McCharacterKit,
+  ): Promise<Buffer> {
+    const references = await this.loadReferencesInOrder(snapshot.references ?? []);
+    if (references.length === 0) {
+      throw new TerminalProviderError(
+        'Nenhuma referência selecionada está disponível no disco — regenere o kit',
+        'kit_references_missing',
+      );
+    }
+    const environment = (project.script as McScript | null)?.environments?.find(
+      (e) => e.id === snapshot.environment?.id,
+    );
+    const prompt = buildKeyframePromptV2({
+      initialFrame: snapshot.prompt,
+      lang: snapshot.lang ?? 'en',
+      canonicalDesc: this.parseCanonicalDesc(kit.canonicalDesc),
+      aspectRatio: project.aspectRatio,
+      safeArea: snapshot.safeArea ?? null,
+      environmentDescription: environment?.description ?? null,
+      productName: snapshot.productName ?? null,
+    });
+    return this.gemini.generateImage({
+      prompt,
+      referenceImages: references,
+      aspectRatio: project.aspectRatio,
+    });
+  }
+
+  /**
+   * Buffers das referências na ORDEM selecionada (a ordem é semântica):
+   * assets do kit/cenário por id; foto real do produto pela URL em /uploads
+   * (catálogo/galeria não são AnimationAssets). Referência ilegível é pulada.
+   */
+  private async loadReferencesInOrder(refs: McSelectedReference[]): Promise<Buffer[]> {
+    const ids = refs.filter((r) => !r.fileUrl).map((r) => r.assetId);
+    const assets =
+      ids.length > 0
+        ? await this.dataSource.getRepository(AnimationAsset).find({ where: { id: In(ids) } })
+        : [];
+    const buffers: Buffer[] = [];
+    for (const ref of refs) {
+      const url = ref.fileUrl ?? assets.find((a) => a.id === ref.assetId)?.fileUrl ?? null;
+      if (!url) continue;
+      const buffer = await this.storage.readUploadsFile(url);
+      if (buffer) buffers.push(buffer);
+      else if (ref.role === 'product') {
+        this.logger.warn(`Foto do produto ilegível no bucket (${url}) — keyframe segue sem ela.`);
+      }
+    }
+    return buffers;
   }
 
   /** 2–3 referências do kit lidas do bucket, priorizando os slots do grid (0..3). */

@@ -80,6 +80,7 @@ describe('McAssemblyProcessor — montagem multi-cena (plano §5.1 etapa 6)', ()
     finalRelDir: jest.Mock;
     prepareStreamTarget: jest.Mock;
     saveFile: jest.Mock;
+    copyFile: jest.Mock;
   };
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let processor: McAssemblyProcessor;
@@ -171,6 +172,7 @@ describe('McAssemblyProcessor — montagem multi-cena (plano §5.1 etapa 6)', ()
       uploadsDir: jest.fn(() => uploadsDir),
       musicCacheRelDir: jest.fn().mockReturnValue('commercials/music-cache'),
       finalRelDir: jest.fn().mockReturnValue('commercials/u1/p1/final/v1'),
+      copyFile: jest.fn(async (src: string, dest: string) => fs.copyFile(src, dest)),
       prepareStreamTarget: jest.fn(async () => {
         const finalPath = path.join(uploadsDir, 'final.mp4');
         return { partPath: `${finalPath}.part`, finalPath, url: '/uploads/final.mp4' };

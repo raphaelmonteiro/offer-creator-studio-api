@@ -16,17 +16,27 @@ import {
   mcShouldRetry,
 } from '../domain/mc-error-classes';
 import { mcExpireForQueue, mcQueueForStep } from '../domain/mc-pipeline.config';
-import { readySteps, sceneFinalStepType } from '../domain/mc-scheduler';
 import {
+  approvalAuthorizes,
+  isPipelineV2,
+  McPhase,
+  McQualityState,
+  resolveQuality,
+} from '../domain/mc-quality';
+import { preparationComplete, readySteps, sceneFinalStepType } from '../domain/mc-scheduler';
+import {
+  assertProjectTransition,
   assertStepTransition,
   McProjectStatus,
   McSceneStatus,
   McStepStatus,
 } from '../domain/mc-state-machines';
-import { McStepType } from '../domain/mc-types';
+import { McScript, McStepType } from '../domain/mc-types';
+import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
+import { McMaterializerService } from './mc-materializer.service';
 
 /**
  * Motor de execução do pipeline (plano-comerciais §6.2/§6.4) — o par do
@@ -60,6 +70,7 @@ export class McPipelineService {
     private readonly credits: CreditsService,
     private readonly commercials: CommercialsService,
     private readonly email: EmailService,
+    private readonly materializer: McMaterializerService,
   ) {}
 
   // ────────────────────────────── enqueue ──────────────────────────────
@@ -97,7 +108,9 @@ export class McPipelineService {
       const queueName = mcQueueForStep(ref.type);
       await this.queue.publish(
         queueName,
-        { stepId: ref.id, projectId },
+        // `type` viaja no payload para o dispatcher da fila mc.ffmpeg
+        // (assembly × scene_compose); consumidores antigos ignoram o campo.
+        { stepId: ref.id, projectId, type: ref.type },
         { expireInSeconds: mcExpireForQueue(queueName) },
       );
       enqueued.push(ref.id);
@@ -153,6 +166,33 @@ export class McPipelineService {
             McStepStatus.CANCELED,
             { finishedAt: new Date(), errorCode: 'superseded_generation' },
           );
+          return null;
+        }
+      }
+      // Pipeline v2 (ADR §4.1): o job só executa se a REVISÃO e a FASE do step
+      // ainda forem as do projeto — e produção só com aprovação válida. Jobs
+      // atrasados de revisões anteriores morrem aqui, antes de qualquer gasto.
+      if (step.projectRevision != null) {
+        const projectRow = await manager.findOneByOrFail(McProject, { id: step.projectId });
+        const denial = this.v2DenialReason(step, projectRow);
+        if (denial) {
+          await this.transitions.casTransition(
+            manager,
+            McStep,
+            stepId,
+            McStepStatus.QUEUED,
+            McStepStatus.CANCELED,
+            { finishedAt: new Date(), errorCode: denial },
+          );
+          await this.commercials.appendEvent(manager, {
+            userId: projectRow.userId,
+            refKind: 'step',
+            refId: stepId,
+            kind: 'transition',
+            fromStatus: McStepStatus.QUEUED,
+            toStatus: McStepStatus.CANCELED,
+            detail: { type: step.type, reason: denial, projectRevision: step.projectRevision },
+          });
           return null;
         }
       }
@@ -282,7 +322,10 @@ export class McPipelineService {
       const scene = await manager.findOneByOrFail(McScene, { id: step.sceneId });
       if (step.sceneGeneration === scene.generation) {
         await this.applySceneShortcut(manager, scene, step.type, opts.outputAssetId ?? null);
-        if (sceneFinalStepType(scene) === step.type) {
+        // v2: steps de PREPARAÇÃO nunca tornam a cena pronta (ADR §4.1: prévia
+        // pronta ≠ vídeo final pronto); só o `final` do plano marca ready.
+        const isPreparation = step.phase === 'preparation';
+        if (!isPreparation && sceneFinalStepType(scene) === step.type) {
           await this.markSceneReady(manager, project.userId, scene, opts.outputAssetId ?? null);
         }
       }
@@ -290,7 +333,186 @@ export class McPipelineService {
 
     // Avanço do scheduler NA TRANSAÇÃO da conclusão (plano §6.2).
     await this.enqueueReadySteps(manager, step.projectId);
+
+    // v2: preparação concluída (sucesso ou cache) ⇒ visual_review + manifesto.
+    if (isPipelineV2(project) && project.status === McProjectStatus.PREPARING) {
+      await this.completePreparationIfReady(manager, project);
+    }
     return true;
+  }
+
+  /**
+   * Pipeline v2 (ADR §4.1): quando TODAS as cenas vivas têm as prévias do
+   * plano concluídas na revisão corrente, CAS preparing → visual_review e o
+   * manifesto de preparação é fechado (assets selecionados, hashes, durações
+   * medidas). Chamado na transação de conclusão de cada step de preparação e
+   * pelo `prepare` quando o cache cobre tudo (nenhum job para esperar).
+   */
+  async completePreparationIfReady(
+    manager: EntityManager,
+    project: McProject,
+    kitInput?: McCharacterKit,
+  ): Promise<boolean> {
+    const fresh = await manager.findOneByOrFail(McProject, { id: project.id });
+    if (fresh.status !== McProjectStatus.PREPARING) return false;
+    const scenes = await manager.find(McScene, {
+      where: { projectId: project.id },
+      order: { idx: 'ASC' },
+    });
+    const steps = await manager.find(McStep, { where: { projectId: project.id } });
+    if (!preparationComplete(fresh, scenes, steps)) return false;
+    const kit = kitInput ?? (await manager.findOneByOrFail(McCharacterKit, { id: fresh.kitId }));
+    const quality = resolveQuality(fresh.quality);
+    const live = scenes.filter((s) => s.status !== McSceneStatus.CANCELED);
+    const manifest = await this.materializer.buildPreparationManifest(
+      manager,
+      fresh,
+      kit,
+      fresh.script as McScript,
+      live,
+      { completed: true, startedAt: quality.preparation?.startedAt },
+    );
+    const settled = await this.settlePhase(manager, fresh, quality, 'preparation', steps);
+    assertProjectTransition(McProjectStatus.PREPARING, McProjectStatus.VISUAL_REVIEW);
+    const won = await this.transitions.casTransition(
+      manager,
+      McProject,
+      fresh.id,
+      McProjectStatus.PREPARING,
+      McProjectStatus.VISUAL_REVIEW,
+      { quality: { ...settled, preparation: manifest, resumePhase: null } },
+    );
+    if (!won) return false;
+    await this.appendProjectTransition(
+      manager,
+      fresh.userId,
+      fresh.id,
+      McProjectStatus.PREPARING,
+      McProjectStatus.VISUAL_REVIEW,
+      { revision: fresh.revision, manifestHash: manifest.hash, sceneCount: live.length },
+    );
+    return true;
+  }
+
+  /**
+   * Fecha o orçamento de uma fase (v2, ADR §4.3): consumo = o que os steps da
+   * fase/revisão efetivamente consumiram; sobra da reserva volta ao usuário
+   * pela chave da fase (idempotente). Nunca toca reservas de outras fases.
+   */
+  async settlePhase(
+    manager: EntityManager,
+    project: McProject,
+    quality: McQualityState,
+    phase: McPhase,
+    steps: McStep[],
+  ): Promise<McQualityState> {
+    const budget = quality.budgets.find(
+      (b) => b.phase === phase && b.revision === project.revision,
+    );
+    if (!budget || budget.settledAt) return quality;
+    const consumed = steps
+      .filter((s) => s.phase === phase && s.projectRevision === project.revision)
+      .reduce((sum, s) => sum + this.stepConsumedCreditsFinal(s), 0);
+    const bounded = Math.min(consumed, budget.reservedCredits);
+    const refunded = await this.credits.refundUnconsumed(
+      manager,
+      project.userId,
+      budget.ledgerKey,
+      budget.reservedCredits,
+      bounded,
+    );
+    const others = quality.budgets.filter((b) => b !== budget);
+    return {
+      ...quality,
+      budgets: [
+        ...others,
+        {
+          ...budget,
+          consumedCredits: bounded,
+          refundedCredits: budget.refundedCredits + refunded,
+          settledAt: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
+  /** Créditos que um step consumiu ao longo da vida (síncrono: sucesso; submit: providerJobId). */
+  private stepConsumedCreditsFinal(step: McStep): number {
+    if (step.status === McStepStatus.SKIPPED_CACHED || step.status === McStepStatus.CANCELED)
+      return 0;
+    if (step.type === McStepType.VIDEO || step.type === McStepType.LIPSYNC) {
+      return step.providerJobId && step.status !== McStepStatus.FAILED ? step.costCredits : 0;
+    }
+    return step.status === McStepStatus.SUCCEEDED ? step.costCredits : 0;
+  }
+
+  /**
+   * Motivo para NÃO executar um step v2 (null = autorizado). Mesma regra no
+   * claim e imediatamente antes do submit pago (ADR §4.1: "mesmo um job já
+   * enfileirado revalida a autorização da revisão antes da submissão paga").
+   */
+  v2DenialReason(step: McStep, project: McProject): string | null {
+    if (step.projectRevision == null) return null;
+    if (project.revision !== step.projectRevision) return 'superseded_revision';
+    const quality = resolveQuality(project.quality);
+    switch (step.phase) {
+      case 'preparation':
+        return project.status === McProjectStatus.PREPARING ? null : 'phase_mismatch';
+      case 'production':
+        if (project.status !== McProjectStatus.GENERATING) return 'phase_mismatch';
+        return approvalAuthorizes(quality, step.projectRevision, 'production')
+          ? null
+          : 'approval_missing';
+      case 'assembly':
+        if (
+          project.status !== McProjectStatus.ASSEMBLING &&
+          project.status !== McProjectStatus.GENERATING
+        ) {
+          return 'phase_mismatch';
+        }
+        return quality.approval && quality.approval.revision === step.projectRevision
+          ? null
+          : 'approval_missing';
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Revalidação imediatamente antes de um submit PAGO (vídeo/lipsync). Se a
+   * autorização caiu entre o claim e o submit, o step é cancelado e nada é
+   * enviado ao provider. @returns true = pode submeter.
+   */
+  async assertSubmitAllowed(step: McStep): Promise<boolean> {
+    if (step.projectRevision == null) return true;
+    const project = await this.dataSource
+      .getRepository(McProject)
+      .findOneBy({ id: step.projectId });
+    if (!project) return false;
+    const denial = this.v2DenialReason(step, project);
+    if (!denial) return true;
+    await this.dataSource.transaction(async (manager) => {
+      const won = await this.transitions.casTransition(
+        manager,
+        McStep,
+        step.id,
+        McStepStatus.RUNNING,
+        McStepStatus.CANCELED,
+        { finishedAt: new Date(), errorCode: denial },
+      );
+      if (!won) return;
+      await this.commercials.appendEvent(manager, {
+        userId: project.userId,
+        refKind: 'step',
+        refId: step.id,
+        kind: 'submit_denied',
+        fromStatus: McStepStatus.RUNNING,
+        toStatus: McStepStatus.CANCELED,
+        detail: { type: step.type, reason: denial, projectRevision: step.projectRevision },
+      });
+    });
+    this.logger.warn(`Submit do step ${step.id} negado (${denial}) — nenhum gasto realizado.`);
+    return false;
   }
 
   /** Consumo contábil do custo do step (uma vez por step — chamado só por quem vence o CAS). */
@@ -395,6 +617,35 @@ export class McPipelineService {
         );
       }
 
+      if (step.type === McStepType.ASSEMBLY && isPipelineV2(project)) {
+        // v2 (ADR §4.1): falha recuperável da montagem pausa em needs_attention
+        // com fase de retomada persistida — clipes aprovados e reservas ficam.
+        const wonProject = await this.transitions.casTransition(
+          manager,
+          McProject,
+          project.id,
+          McProjectStatus.ASSEMBLING,
+          McProjectStatus.NEEDS_ATTENTION,
+          {
+            errorCode: code,
+            errorMessage: message.slice(0, 300),
+            quality: { ...resolveQuality(project.quality), resumePhase: 'assembly' },
+          },
+        );
+        if (wonProject) {
+          wonNeedsAttention = true;
+          await this.appendProjectTransition(
+            manager,
+            project.userId,
+            project.id,
+            McProjectStatus.ASSEMBLING,
+            McProjectStatus.NEEDS_ATTENTION,
+            { errorCode: code, stepId: step.id, resumePhase: 'assembly' },
+          );
+        }
+        return;
+      }
+
       if (step.type === McStepType.ASSEMBLY) {
         // Assembly não tem cena: a falha terminal dele derruba o projeto
         // (assembling → failed, matriz §6.1) com estorno do NÃO consumido —
@@ -472,13 +723,25 @@ export class McPipelineService {
           }
         }
       }
+      // v2: a fase em que a falha ocorreu fica persistida para a retomada
+      // (preparação volta à preparação; produção à produção — ADR §4.1).
+      const fromStatus =
+        isPipelineV2(project) && project.status === McProjectStatus.PREPARING
+          ? McProjectStatus.PREPARING
+          : McProjectStatus.GENERATING;
+      const resumePhase: McPhase =
+        fromStatus === McProjectStatus.PREPARING ? 'preparation' : 'production';
+      const patch: Record<string, unknown> = { errorCode: code };
+      if (isPipelineV2(project)) {
+        patch.quality = { ...resolveQuality(project.quality), resumePhase };
+      }
       const wonProject = await this.transitions.casTransition(
         manager,
         McProject,
         project.id,
-        McProjectStatus.GENERATING,
+        fromStatus,
         McProjectStatus.NEEDS_ATTENTION,
-        { errorCode: code },
+        patch,
       );
       if (wonProject) {
         wonNeedsAttention = true;
@@ -486,9 +749,9 @@ export class McPipelineService {
           manager,
           project.userId,
           project.id,
-          McProjectStatus.GENERATING,
+          fromStatus,
           McProjectStatus.NEEDS_ATTENTION,
-          { errorCode: code, stepId: step.id },
+          { errorCode: code, stepId: step.id, ...(isPipelineV2(project) ? { resumePhase } : {}) },
         );
       }
     });
@@ -589,6 +852,25 @@ export class McPipelineService {
     scene: McScene,
     finalAssetId: string | null,
   ): Promise<void> {
+    // Defesa: cena deixada em `failed` (falha antiga da MESMA geração) cujo
+    // step final acabou de suceder — o sucesso do final é a prova de que ela
+    // está pronta; re-arma (failed → pending, transição de correção) em vez
+    // de deixá-la presa e a montagem cancelar por `composition_changed`.
+    if (scene.status === McSceneStatus.FAILED) {
+      const rearmed = await this.transitions.casTransition(
+        manager,
+        McScene,
+        scene.id,
+        McSceneStatus.FAILED,
+        McSceneStatus.PENDING,
+        { errorCode: null, errorMessage: null },
+      );
+      if (rearmed) {
+        this.logger.warn(
+          `Cena ${scene.id} estava 'failed' com o step final concluído — re-armada para ficar pronta.`,
+        );
+      }
+    }
     await this.transitions.casTransition(
       manager,
       McScene,
@@ -627,30 +909,46 @@ export class McPipelineService {
     );
   }
 
-  /** Projeto entregue: assembling → succeeded + consumo integral da reserva. */
+  /**
+   * Projeto entregue: assembling → succeeded.
+   * - LEGADO: consumo integral da reserva (preço fechado por cena, plano §8).
+   * - V2 (ADR §4.3): preço fechado POR FASE — cada fase é liquidada pela sua
+   *   chave; a entrega nunca "consome de novo" reservas históricas nem cobra
+   *   por itens reaproveitados do cache. `extra.quality` traz timeline/entrega.
+   */
   async succeedProject(
     manager: EntityManager,
     projectId: string,
     finalAssetId: string,
+    extra: { quality?: McQualityState } = {},
   ): Promise<boolean> {
     const project = await manager.findOneByOrFail(McProject, { id: projectId });
+    const patch: Record<string, unknown> = {
+      finalAssetId,
+      finishedAt: new Date(),
+      errorCode: null,
+      errorMessage: null,
+    };
+    if (isPipelineV2(project)) {
+      const steps = await manager.find(McStep, { where: { projectId } });
+      let quality = extra.quality ?? resolveQuality(project.quality);
+      quality = await this.settlePhase(manager, project, quality, 'production', steps);
+      quality = await this.settlePhase(manager, project, quality, 'assembly', steps);
+      patch.quality = { ...quality, resumePhase: null, pendingScope: null };
+    } else {
+      // ENTREGA CONSOME A RESERVA INTEGRAL (preço fechado por cena, plano
+      // §8): garante que um re-roll pós-entrega seguido de cancel não
+      // "devolva" créditos de um comercial já entregue. Antes da entrega,
+      // cancel/falha estornam o não-consumido normalmente.
+      patch.consumedCredits = Math.max(project.reservedCredits, project.consumedCredits);
+    }
     const won = await this.transitions.casTransition(
       manager,
       McProject,
       projectId,
       McProjectStatus.ASSEMBLING,
       McProjectStatus.SUCCEEDED,
-      {
-        finalAssetId,
-        finishedAt: new Date(),
-        errorCode: null,
-        errorMessage: null,
-        // ENTREGA CONSOME A RESERVA INTEGRAL (preço fechado por cena, plano
-        // §8): garante que um re-roll pós-entrega seguido de cancel não
-        // "devolva" créditos de um comercial já entregue. Antes da entrega,
-        // cancel/falha estornam o não-consumido normalmente.
-        consumedCredits: Math.max(project.reservedCredits, project.consumedCredits),
-      },
+      patch,
     );
     if (!won) return false;
     await this.appendProjectTransition(

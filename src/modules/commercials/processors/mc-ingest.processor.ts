@@ -66,6 +66,7 @@ export class McIngestProcessor {
       .findOneBy({ id: step.projectId });
     if (!scene || !project) return;
     const tempDir = await this.ffmpeg.createTempDir('mc-ingest-');
+    this.logger.log(`Ingest ${stepId}: início (provider=${step.provider})`);
     try {
       const videoPath = path.join(tempDir, 'video.mp4');
       if (step.provider === 'mock') {
@@ -78,6 +79,7 @@ export class McIngestProcessor {
         await this.downloadStream(videoUrl, videoPath);
       }
 
+      this.logger.log(`Ingest ${stepId}: vídeo no disco, probe`);
       // ffprobe ANTES de aceitar (plano §6.8): sem stream de vídeo = lixo.
       const probe = await this.ffmpeg.probe(videoPath).catch((err: Error) => {
         throw new TerminalProviderError(
@@ -90,16 +92,19 @@ export class McIngestProcessor {
       }
 
       // poster (frame 0) + thumb 320px
+      this.logger.log(`Ingest ${stepId}: probe ok, poster`);
       const posterPath = path.join(tempDir, 'poster.jpg');
       await this.ffmpeg.run(buildPosterArgs(videoPath, posterPath), {
         durationMs: 1000,
         timeoutMs: 60_000,
       });
       const posterBuffer = await fs.readFile(posterPath);
+      this.logger.log(`Ingest ${stepId}: poster ok, thumb`);
       const thumbBuffer = await sharp(posterBuffer)
         .resize({ width: 320 })
         .jpeg({ quality: 80 })
         .toBuffer();
+      this.logger.log(`Ingest ${stepId}: thumb ok, publicando asset`);
 
       const relDir = this.storage.sceneRelDir(
         project.userId,
@@ -109,7 +114,7 @@ export class McIngestProcessor {
       );
       const stamp = Date.now();
       const target = await this.storage.prepareStreamTarget(relDir, `synced-${stamp}.mp4`);
-      await fs.copyFile(videoPath, target.partPath);
+      await this.storage.copyFile(videoPath, target.partPath);
       await this.ffmpeg.finalizeOutput(target.partPath, target.finalPath);
       const videoFileUrl = target.url;
       const posterUrl = await this.storage.saveFile(
@@ -131,6 +136,7 @@ export class McIngestProcessor {
           ? 0
           : (probe.durationMs / 1000) * mcUsdPerSecond(step.type);
 
+      this.logger.log(`Ingest ${stepId}: arquivos gravados, transação`);
       await this.dataSource.transaction(async (manager) => {
         const asset = await manager.getRepository(AnimationAsset).save({
           userId: project.userId,
@@ -237,7 +243,7 @@ export class McIngestProcessor {
   private async copyMockClip(jobId: string, destPath: string): Promise<void> {
     const mockPath = this.storage.mockJobAbsPath(jobId);
     try {
-      await fs.copyFile(mockPath, destPath);
+      await this.storage.copyFile(mockPath, destPath);
     } catch {
       throw new TerminalProviderError('Clipe mock ausente no disco', 'mock_job_missing');
     }

@@ -24,6 +24,7 @@ import { TaskTransitionService } from '../../../shared/state/task-transition.ser
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import { McVoicesService } from './mc-voices.service';
+import { sanitizeVoiceDeliveryOverride } from '../domain/mc-voice-delivery';
 import {
   hasPtMirror,
   isKitReferenceSlot,
@@ -216,6 +217,11 @@ export class McKitsService {
     // ElevenLabs — é ele que o TTS do pipeline usa direto (mesma correção do
     // preview: a UI envia o id da linha do catálogo).
     const voiceId = await this.voices.resolveProviderVoiceId(voiceInput);
+    // Ajuste de entrega: o que veio no body vence; sem body mantém o do kit.
+    const voiceDelivery =
+      dto.delivery !== undefined
+        ? sanitizeVoiceDeliveryOverride(dto.delivery as Record<string, unknown>)
+        : (kit.voiceDelivery ?? null);
 
     assertKitTransition(McKitStatus.REVIEW, McKitStatus.APPROVED);
     await this.dataSource.transaction(async (manager) => {
@@ -225,7 +231,7 @@ export class McKitsService {
         kit.id,
         McKitStatus.REVIEW,
         McKitStatus.APPROVED,
-        { approvedAt: new Date(), voiceId },
+        { approvedAt: new Date(), voiceId, voiceDelivery },
       );
       if (!won) {
         throw new UnprocessableEntityException({
@@ -240,7 +246,7 @@ export class McKitsService {
         kind: 'transition',
         fromStatus: McKitStatus.REVIEW,
         toStatus: McKitStatus.APPROVED,
-        detail: { voiceId },
+        detail: { voiceId, voiceDelivery },
       });
       await this.transitions.notify(
         manager,

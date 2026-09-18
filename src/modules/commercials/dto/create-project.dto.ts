@@ -12,6 +12,9 @@ import {
   Max,
   Min,
   ValidateNested,
+  Matches,
+  MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { MC_ASPECT_RATIOS, McAspectRatio, MC_MAX_SEAL_PRODUCTS } from '../domain/mc-types';
 
@@ -30,6 +33,21 @@ export class ProjectProductDto {
   @IsString()
   @Length(1, 20)
   price: string;
+
+  /** Unidade de venda exibida no selo (kg, un, pct…) — opcional. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Length(1, 20)
+  unit?: string | null;
+
+  /** Foto real do produto (URL em /uploads/*, do catálogo ou da galeria) — referência do keyframe (v2). */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Matches(/\/uploads\//, { message: 'imageUrl precisa apontar para um arquivo em /uploads/' })
+  @MaxLength(500)
+  imageUrl?: string | null;
 }
 
 export class CreateProjectDto {

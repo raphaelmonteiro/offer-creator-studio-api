@@ -48,6 +48,7 @@ export const MC_STEP_QUEUE: Record<McStepType, QueueName> = {
   [McStepType.VIDEO]: QUEUES.MC_SUBMIT,
   [McStepType.LIPSYNC]: QUEUES.MC_SUBMIT,
   [McStepType.ASSEMBLY]: QUEUES.MC_FFMPEG,
+  [McStepType.SCENE_COMPOSE]: QUEUES.MC_FFMPEG,
 };
 
 /**

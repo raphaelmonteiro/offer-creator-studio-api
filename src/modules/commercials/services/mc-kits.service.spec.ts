@@ -225,6 +225,44 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       );
     });
 
+    it('ajuste de entrega (velocidade/expressividade) do body é gravado no kit, já clampado', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+      await service.approveKit('u1', 'kit-r', {
+        voiceId: 'voice-3',
+        delivery: { speed: 1.9, style: 0.8 },
+      });
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-r',
+        McKitStatus.REVIEW,
+        McKitStatus.APPROVED,
+        expect.objectContaining({ voiceDelivery: { speed: 1.2, style: 0.8 } }),
+      );
+    });
+
+    it('sem ajuste no body mantém o do kit; ajuste vazio vira null (usa o global)', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...reviewKit, voiceDelivery: { speed: 1.0 } });
+      await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+      expect(transitions.casTransition).toHaveBeenLastCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-r',
+        McKitStatus.REVIEW,
+        McKitStatus.APPROVED,
+        expect.objectContaining({ voiceDelivery: { speed: 1.0 } }),
+      );
+      await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3', delivery: {} });
+      expect(transitions.casTransition).toHaveBeenLastCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-r',
+        McKitStatus.REVIEW,
+        McKitStatus.APPROVED,
+        expect.objectContaining({ voiceDelivery: null }),
+      );
+    });
+
     it('kit de outro usuário → 403', async () => {
       kitRepo.findOneBy.mockResolvedValue({ ...reviewKit, userId: 'u2' });
       await expect(service.approveKit('u1', 'kit-r', {})).rejects.toMatchObject({ status: 403 });

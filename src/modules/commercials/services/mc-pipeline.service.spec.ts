@@ -13,6 +13,7 @@ import { McStepType } from '../domain/mc-types';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
+import { McMaterializerService } from './mc-materializer.service';
 import { McPipelineService } from './mc-pipeline.service';
 
 type Row = Record<string, unknown> & { id: string };
@@ -69,6 +70,7 @@ describe('McPipelineService — avanço do scheduler e política de falha (plano
       credits as unknown as CreditsService,
       commercials as unknown as CommercialsService,
       email as unknown as EmailService,
+      { buildPreparationManifest: jest.fn() } as unknown as McMaterializerService,
     );
   }
 

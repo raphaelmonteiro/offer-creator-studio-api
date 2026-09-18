@@ -10,33 +10,67 @@ import { TerminalProviderError } from '../../../shared/providers/provider-errors
 import { SystemSettingsService } from '../../../shared/settings/system-settings.service';
 import { VoiceCatalogEntry } from '../../../shared/voice/voice-catalog.entity';
 import { VoicePreviewDto } from '../dto/voice-preview.dto';
+import {
+  elevenLabsVoiceSettings,
+  mergeVoiceDelivery,
+  resolveVoiceDelivery,
+  voiceDeliveryKey,
+} from '../domain/mc-voice-delivery';
 
 /** Modelo preferido do preview (melhor pt-BR + tags de emoção, plano §5.3) e fallback. */
-export const VOICE_PREVIEW_MODEL = 'eleven_v3';
-export const VOICE_PREVIEW_FALLBACK_MODEL = 'eleven_multilingual_v2';
+// multilingual_v2 primeiro: é o modelo que OBEDECE velocidade/expressividade
+// (o eleven_v3 ignora `speed`/`style` — medido em 17/09). Mesma cadeia do TTS.
+export const VOICE_PREVIEW_MODEL = 'eleven_multilingual_v2';
+export const VOICE_PREVIEW_FALLBACK_MODEL = 'eleven_v3';
 
-/** Teto diário de previews por usuário — preview é degustação, não produção. */
-export const VOICE_PREVIEW_DAILY_LIMIT = 5;
+/** Teto diário de previews por usuário — preview é degustação, não produção (21 vozes cabem num dia). */
+export const VOICE_PREVIEW_DAILY_LIMIT = 40;
 
 /**
- * Curadoria: 6 vozes PREMADE da ElevenLabs adequadas a pt-BR de varejo
- * (multilingual/v3 falam pt-BR com qualquer voz premade; a curadoria é de
- * TIMBRE). `match` casa com o nome oficial no GET /v1/voices — os voice_ids
- * reais vêm da API na hora do seed, nunca hardcoded.
+ * Curadoria: TODAS as vozes premade da conta ElevenLabs com nome pt-BR
+ * amigável, gênero e estilo (multilingual/v3 falam pt-BR com qualquer voz
+ * premade; a curadoria é de TIMBRE). A ORDEM é a da UI: as mais animadas e
+ * enérgicas primeiro (pedido do usuário: varejo quer energia). `match` casa
+ * com o nome oficial no GET /v1/voices — os voice_ids reais vêm da API no
+ * sync, nunca hardcoded. Vozes da conta fora desta lista (Voice Library,
+ * clonadas) entram DEPOIS, com o nome original.
  */
-const CURATED_VOICES: ReadonlyArray<{
+export const CURATED_VOICES: ReadonlyArray<{
   match: string;
   name: string;
   gender: string;
   style: string;
 }> = [
+  { match: 'liam', name: 'Liam — Jovem e Energético', gender: 'male', style: 'energético' },
   { match: 'laura', name: 'Laura — Animada', gender: 'female', style: 'animada' },
+  { match: 'jessica', name: 'Jessica — Alegre e Calorosa', gender: 'female', style: 'alegre' },
+  { match: 'charlie', name: 'Charlie — Enérgico e Confiante', gender: 'male', style: 'enérgico' },
+  { match: 'bill', name: 'Bill — Locutor de Ofertas', gender: 'male', style: 'propaganda' },
+  { match: 'daniel', name: 'Daniel — Locutor de Rádio', gender: 'male', style: 'locutor' },
   { match: 'sarah', name: 'Sarah — Apresentadora', gender: 'female', style: 'institucional' },
-  { match: 'george', name: 'George — Locutor Grave', gender: 'male', style: 'locutor' },
-  { match: 'charlie', name: 'Charlie — Descontraído', gender: 'male', style: 'descontraído' },
+  {
+    match: 'bella',
+    name: 'Bella — Profissional e Calorosa',
+    gender: 'female',
+    style: 'profissional',
+  },
+  { match: 'eric', name: 'Eric — Suave e Confiável', gender: 'male', style: 'confiável' },
+  { match: 'chris', name: 'Chris — Simpático e Próximo', gender: 'male', style: 'simpático' },
   { match: 'alice', name: 'Alice — Clara e Confiante', gender: 'female', style: 'confiante' },
+  { match: 'matilda', name: 'Matilda — Profissional', gender: 'female', style: 'profissional' },
   { match: 'brian', name: 'Brian — Institucional', gender: 'male', style: 'institucional' },
+  { match: 'george', name: 'George — Locutor Grave', gender: 'male', style: 'locutor' },
+  { match: 'roger', name: 'Roger — Descontraído', gender: 'male', style: 'descontraído' },
+  { match: 'will', name: 'Will — Otimista', gender: 'male', style: 'otimista' },
+  { match: 'adam', name: 'Adam — Firme e Marcante', gender: 'male', style: 'firme' },
+  { match: 'river', name: 'River — Neutro e Informativo', gender: 'neutral', style: 'informativo' },
+  { match: 'lily', name: 'Lily — Aveludada', gender: 'female', style: 'aveludada' },
+  { match: 'callum', name: 'Callum — Personagem Malandro', gender: 'male', style: 'personagem' },
+  { match: 'harry', name: 'Harry — Personagem Guerreiro', gender: 'male', style: 'personagem' },
 ];
+
+/** Ordem das vozes fora da curadoria (depois de todas as curadas). */
+const UNCURATED_SORT_BASE = 100;
 
 /**
  * Voz do módulo de comerciais (plano §4/§5.3): catálogo curado (voice_catalog,
@@ -67,28 +101,58 @@ export class McVoicesService {
   ) {}
 
   /**
-   * Seed idempotente do voice_catalog: SÓ roda com a tabela vazia; resolve os
-   * voice_ids reais no GET /v1/voices da ElevenLabs. Falha de API não derruba
-   * o boot — loga e tenta na próxima subida (a tabela segue vazia).
+   * Sincroniza o voice_catalog com a conta ElevenLabs (GET /v1/voices) no boot
+   * da API — idempotente e aditivo: insere vozes que faltam, aplica nome/
+   * estilo/ordem da curadoria às curadas, NUNCA apaga linhas nem mexe em
+   * `enabled` (é a chave do admin para tirar uma voz do ar). Kits apontam
+   * para o `id` da linha, que é preservado. Falha de API não derruba o boot —
+   * loga e tenta na próxima subida.
    */
-  async seedIfEmpty(): Promise<void> {
+  async syncCatalog(): Promise<void> {
     const repo = this.dataSource.getRepository(VoiceCatalogEntry);
     try {
-      if ((await repo.count()) > 0) return;
       const voices = await this.elevenLabs.listVoices();
       if (voices.length === 0) {
-        this.logger.warn('Seed do voice_catalog: API não retornou vozes — nada inserido.');
+        this.logger.warn('Sync do voice_catalog: API não retornou vozes — nada alterado.');
         return;
       }
-      const rows = this.pickCuratedVoices(voices);
-      if (rows.length === 0) {
-        this.logger.warn('Seed do voice_catalog: nenhuma voz premade utilizável — nada inserido.');
-        return;
+      const existing = await repo.find();
+      const byProvider = new Map(existing.map((e) => [e.providerVoiceId, e]));
+      const toSave: Array<Partial<VoiceCatalogEntry>> = [];
+      let inserted = 0;
+      let updated = 0;
+      for (const { curated, ...row } of this.catalogRows(voices)) {
+        const current = byProvider.get(row.providerVoiceId as string);
+        if (!current) {
+          toSave.push(row);
+          inserted += 1;
+          continue;
+        }
+        if (
+          curated &&
+          (current.name !== row.name ||
+            current.style !== row.style ||
+            current.gender !== row.gender ||
+            current.sort !== row.sort)
+        ) {
+          toSave.push({
+            ...current,
+            name: row.name,
+            style: row.style,
+            gender: row.gender,
+            sort: row.sort,
+          });
+          updated += 1;
+        }
       }
-      await repo.save(rows);
-      this.logger.log(`voice_catalog populado com ${rows.length} vozes ElevenLabs premade.`);
+      if (toSave.length > 0) await repo.save(toSave);
+      this.logger.log(
+        `voice_catalog sincronizado com a ElevenLabs: ${voices.length} na conta, ${inserted} inseridas, ${updated} atualizadas.`,
+      );
     } catch (err) {
-      this.logger.warn(`Seed do voice_catalog falhou (segue vazio): ${(err as Error).message}`);
+      this.logger.warn(
+        `Sync do voice_catalog falhou (catálogo inalterado): ${(err as Error).message}`,
+      );
     }
   }
 
@@ -139,13 +203,17 @@ export class McVoicesService {
   }
 
   /**
-   * Preview de TTS: eleven_v3 com fallback multilingual_v2 (plano §5.3),
+   * Preview de TTS: multilingual_v2 com fallback eleven_v3 (plano §5.3),
    * cache por hash, teto de 5/usuário/dia (cache hit não conta).
    */
   async preview(userId: string, dto: VoicePreviewDto): Promise<{ url: string; cached: boolean }> {
     const text = dto.text.trim();
     const providerVoiceId = await this.resolveProviderVoiceId(dto.voiceId);
-    const hash = createHash('sha256').update(`${providerVoiceId}|${text}`).digest('hex');
+    // O perfil de entrega entra no cache: mudar velocidade/expressividade gera amostra nova.
+    const delivery = mergeVoiceDelivery(resolveVoiceDelivery(process.env), dto.delivery);
+    const hash = createHash('sha256')
+      .update(`${providerVoiceId}|${voiceDeliveryKey(delivery)}|${text}`)
+      .digest('hex');
     const relative = `/uploads/commercials/voice-previews/${hash}.mp3`;
     const absolute = this.uploadsAbsolute(relative);
 
@@ -161,6 +229,7 @@ export class McVoicesService {
         text,
         voiceId: providerVoiceId,
         modelId: VOICE_PREVIEW_MODEL,
+        settings: elevenLabsVoiceSettings(delivery, VOICE_PREVIEW_MODEL),
       });
     } catch (err) {
       // Terminal no v3 (modelo indisponível na conta, voz incompatível…) →
@@ -171,6 +240,7 @@ export class McVoicesService {
         text,
         voiceId: providerVoiceId,
         modelId: VOICE_PREVIEW_FALLBACK_MODEL,
+        settings: elevenLabsVoiceSettings(delivery, VOICE_PREVIEW_FALLBACK_MODEL),
       });
     }
 
@@ -182,43 +252,44 @@ export class McVoicesService {
 
   // ─────────────────────────────── internos ───────────────────────────────
 
-  /** Casa a curadoria com as vozes reais; completa com premade restantes até 6. */
-  private pickCuratedVoices(voices: ElevenLabsVoice[]): Array<Partial<VoiceCatalogEntry>> {
-    const premade = voices.filter((v) => !v.category || v.category === 'premade');
-    const pool = premade.length > 0 ? premade : voices;
+  /** Linhas do catálogo: curadas na ordem da curadoria, depois o resto da conta por nome. */
+  private catalogRows(
+    voices: ElevenLabsVoice[],
+  ): Array<Partial<VoiceCatalogEntry> & { curated: boolean }> {
     const used = new Set<string>();
-    const rows: Array<Partial<VoiceCatalogEntry>> = [];
+    const rows: Array<Partial<VoiceCatalogEntry> & { curated: boolean }> = [];
 
-    for (const curated of CURATED_VOICES) {
-      const found = pool.find(
+    for (const [index, curated] of CURATED_VOICES.entries()) {
+      const found = voices.find(
         (v) => v.name?.toLowerCase().startsWith(curated.match) && !used.has(v.voice_id),
       );
       if (!found) continue;
       used.add(found.voice_id);
       rows.push({
+        curated: true,
         providerVoiceId: found.voice_id,
         name: curated.name,
         language: 'pt-BR',
         gender: curated.gender,
         style: curated.style,
         enabled: true,
-        sort: rows.length,
+        sort: index,
       });
     }
-    // Conta sem alguma voz da curadoria? Completa com outras premade até 6,
-    // com o nome original — melhor um catálogo cheio do que um buraco na UI.
-    for (const voice of pool) {
-      if (rows.length >= CURATED_VOICES.length) break;
-      if (used.has(voice.voice_id)) continue;
+    const rest = voices
+      .filter((v) => !used.has(v.voice_id))
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+    for (const [index, voice] of rest.entries()) {
       used.add(voice.voice_id);
       rows.push({
+        curated: false,
         providerVoiceId: voice.voice_id,
         name: voice.name,
         language: 'pt-BR',
         gender: voice.labels?.gender ?? null,
         style: voice.labels?.use_case ?? null,
         enabled: true,
-        sort: rows.length,
+        sort: UNCURATED_SORT_BASE + index,
       });
     }
     return rows;

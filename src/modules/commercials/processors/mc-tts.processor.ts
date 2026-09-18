@@ -19,17 +19,37 @@ import { McScene } from '../entities/mc-scene.entity';
 import { McPipelineService } from '../services/mc-pipeline.service';
 import { McStorageService } from '../services/mc-storage.service';
 import { McVoicesService } from '../services/mc-voices.service';
+import {
+  elevenLabsVoiceSettings,
+  kitVoiceDelivery,
+  McVoiceDelivery,
+} from '../domain/mc-voice-delivery';
 
-/** Cadeia de modelos do TTS do módulo (plano §5.3): v3 primeiro, multilingual_v2 de resgate. */
-export const MC_TTS_PRIMARY_MODEL = 'eleven_v3';
-export const MC_TTS_FALLBACK_MODEL = 'eleven_multilingual_v2';
+/**
+ * Cadeia de modelos do TTS do módulo (plano §5.3). multilingual_v2 PRIMEIRO:
+ * medido em 17/09 que o eleven_v3 IGNORA `speed`/`style` (0,7× → 3,6 s e
+ * 1,2× → 4,4 s na mesma frase; no v2: 4,9 s → 2,6 s). Como a velocidade e a
+ * expressividade são escolhidas pelo usuário no kit, o modelo que as obedece
+ * tem de ser o principal; o v3 fica de resgate.
+ */
+export const MC_TTS_PRIMARY_MODEL = 'eleven_multilingual_v2';
+export const MC_TTS_FALLBACK_MODEL = 'eleven_v3';
 
-/** Duração do mp3 de silêncio do provider mock (segundos). */
+/** Duração do mp3 de silêncio do provider mock (segundos) — legado. */
 const MOCK_TTS_DURATION_S = 2;
 
 /**
+ * Mock v2: a duração acompanha o texto (15 chars/s, mesma taxa do diretor),
+ * para que a validação "locução cabe no clipe" e o manifesto exercitem
+ * números realistas sem gastar API. Faixa 1–20s.
+ */
+export function estimateSpeechSeconds(text: string): number {
+  return Math.min(20, Math.max(1, Math.round((text.trim().length / 15) * 10) / 10));
+}
+
+/**
  * Consumer da fila mc.tts (conc. 4, plano §6.4): sintetiza a fala da cena com
- * a VOZ DO KIT (eleven_v3 → fallback multilingual_v2, plano §5.3), salva o
+ * a VOZ DO KIT (multilingual_v2 → fallback eleven_v3, plano §5.3), salva o
  * asset kind `audio` (contentHash = input_hash do step) e consome o custo no
  * sucesso. O CACHE por hash é resolvido ANTES, na materialização
  * (skipped_cached) — este processor só roda quando não houve hit.
@@ -82,10 +102,21 @@ export class McTtsProcessor {
         this.provider() === 'mock'
           ? null
           : await this.voices.resolveProviderVoiceId(kit.voiceId as string);
+      const v2 = step.phase != null;
       const { audio, alignment } =
         this.provider() === 'mock'
-          ? await this.mockVoice(scene.dialogue)
-          : await this.synthesizeWithFallback(scene.dialogue, providerVoiceId as string);
+          ? await this.mockVoice(
+              scene.dialogue,
+              v2 ? estimateSpeechSeconds(scene.dialogue) : MOCK_TTS_DURATION_S,
+            )
+          : await this.synthesizeWithFallback(
+              scene.dialogue,
+              providerVoiceId as string,
+              kitVoiceDelivery(kit),
+            );
+      // Duração MEDIDA (probe) — base do planejamento de voiceover e do
+      // manifesto de preparação (ADR §3.6: usar a duração medida do TTS).
+      const durationMs = await this.measureDurationMs(audio);
 
       const relDir = this.storage.sceneRelDir(
         project.userId,
@@ -105,6 +136,7 @@ export class McTtsProcessor {
           fileUrl,
           mimeType: 'audio/mpeg',
           fileSize: String(audio.length),
+          durationMs,
           contentHash: step.inputHash, // lookup de cache §6.3 (materialização)
           metadata: {
             projectId: project.id,
@@ -112,6 +144,13 @@ export class McTtsProcessor {
             generation: scene.generation,
             voiceId: kit.voiceId,
             provider: this.provider(),
+            ...(v2
+              ? {
+                  scriptSceneId: scene.scriptSceneId,
+                  attempt: step.attempt,
+                  projectRevision: step.projectRevision,
+                }
+              : {}),
             // Alinhamento por caractere: fonte das LEGENDAS queimadas da
             // montagem (plano §5.4 — sem ASR). Viaja no asset porque o cache
             // por hash reaproveita o áudio ENTRE projetos: quem reusa o áudio
@@ -133,7 +172,7 @@ export class McTtsProcessor {
   }
 
   /**
-   * eleven_v3 → terminal? tenta multilingual_v2 (transiente já re-tentou no
+   * multilingual_v2 → terminal? tenta eleven_v3 (transiente já re-tentou no
    * provider). Os dois usam o endpoint `with-timestamps`: mesmo custo de TTS e
    * o alinhamento por caractere sai de graça, que é o que alimenta as legendas
    * queimadas (plano §5.4). Alinhamento ausente na resposta não é erro — o
@@ -142,12 +181,16 @@ export class McTtsProcessor {
   private async synthesizeWithFallback(
     text: string,
     voiceId: string,
+    delivery: McVoiceDelivery,
   ): Promise<{ audio: Buffer; alignment: ElevenLabsCharacterAlignment | null }> {
+    // Mesmo perfil de entrega do preview (velocidade/expressividade do KIT):
+    // o que o usuário aprovou na amostra é o que a cena fala.
     try {
       return await this.elevenLabs.synthesizeWithTimestamps({
         text,
         voiceId,
         modelId: MC_TTS_PRIMARY_MODEL,
+        settings: elevenLabsVoiceSettings(delivery, MC_TTS_PRIMARY_MODEL),
       });
     } catch (err) {
       if (!(err instanceof TerminalProviderError)) throw err;
@@ -156,6 +199,7 @@ export class McTtsProcessor {
         text,
         voiceId,
         modelId: MC_TTS_FALLBACK_MODEL,
+        settings: elevenLabsVoiceSettings(delivery, MC_TTS_FALLBACK_MODEL),
       });
     }
   }
@@ -163,11 +207,28 @@ export class McTtsProcessor {
   /** Voz mock: tom baixo + alinhamento SINTÉTICO uniforme (legendas rodam no e2e de custo zero). */
   private async mockVoice(
     dialogue: string,
+    durationS: number = MOCK_TTS_DURATION_S,
   ): Promise<{ audio: Buffer; alignment: ElevenLabsCharacterAlignment }> {
     return {
-      audio: await this.mockSilentMp3(),
-      alignment: syntheticAlignment(dialogue, MOCK_TTS_DURATION_S),
+      audio: await this.mockSilentMp3(durationS),
+      alignment: syntheticAlignment(dialogue, durationS),
     };
+  }
+
+  /** Duração medida por ffprobe (null quando o probe falha — nunca derruba o TTS). */
+  private async measureDurationMs(audio: Buffer): Promise<number | null> {
+    const dir = await this.ffmpeg.createTempDir('mc-tts-probe-');
+    const file = path.join(dir, 'voice.mp3');
+    try {
+      await fs.writeFile(file, audio);
+      const probe = await this.ffmpeg.probe(file);
+      return probe.durationMs ?? null;
+    } catch (err) {
+      this.logger.warn(`Probe do áudio falhou (${(err as Error).message}) — duração desconhecida.`);
+      return null;
+    } finally {
+      await this.ffmpeg.removeTempDir(dir);
+    }
   }
 
   /**
@@ -175,7 +236,7 @@ export class McTtsProcessor {
    * de silêncio absoluto: o loudnorm da montagem produz ganho NaN sobre
    * silêncio digital puro e derruba o encoder AAC ("Input contains NaN/Inf").
    */
-  private async mockSilentMp3(): Promise<Buffer> {
+  private async mockSilentMp3(durationS: number = MOCK_TTS_DURATION_S): Promise<Buffer> {
     const dir = await this.ffmpeg.createTempDir('mc-tts-mock-');
     const out = path.join(dir, 'silence.mp3');
     try {
@@ -192,14 +253,14 @@ export class McTtsProcessor {
           '-af',
           'volume=0.05',
           '-t',
-          String(MOCK_TTS_DURATION_S),
+          String(durationS),
           '-codec:a',
           'libmp3lame',
           '-q:a',
           '9',
           out,
         ],
-        { durationMs: MOCK_TTS_DURATION_S * 1000, timeoutMs: 60_000 },
+        { durationMs: durationS * 1000, timeoutMs: 60_000 },
       );
       return await fs.readFile(out);
     } finally {

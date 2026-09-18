@@ -38,12 +38,22 @@ export class HttpExceptionFilter implements ExceptionFilter {
         };
       } else if (typeof exceptionResponse === 'object') {
         const exResponse = exceptionResponse as any;
+        // Campos ESTRUTURADOS além de code/message/details (ex.: `issues[]` por
+        // cena, `revision`, `manifestHash`, `sceneIds`, `quotedCredits` do
+        // pipeline v2 de comerciais) seguem para o cliente, que precisa deles
+        // para oferecer uma ação útil por cena — sem isso o front só vê a
+        // primeira mensagem.
+        const { code, message, details, error, statusCode, ...extra } = exResponse as Record<
+          string,
+          unknown
+        >;
         errorResponse = {
           success: false,
           error: {
-            code: exResponse.code || this.getErrorCode(status),
-            message: exResponse.message || exResponse.error || 'Erro na requisição',
-            details: exResponse.details || exResponse.message,
+            code: code || this.getErrorCode(status),
+            message: message || error || 'Erro na requisição',
+            details: details || message,
+            ...(statusCode !== undefined && Object.keys(extra).length === 0 ? {} : extra),
           },
         };
       }

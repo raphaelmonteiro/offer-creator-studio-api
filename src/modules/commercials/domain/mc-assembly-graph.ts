@@ -1,5 +1,6 @@
 import { TextCue } from './mc-captions';
-import { McSealProduct } from './mc-types';
+import { McRenderedTimeline, McTimelineEntry } from './mc-quality';
+import { McSealCue, McSealProduct } from './mc-types';
 
 /**
  * Grafo de montagem final (plano-comerciais §5.1 etapa 6) — funções PURAS que
@@ -88,6 +89,92 @@ export function buildSealCues(scenes: SceneWindow[], products: McSealProduct[]):
       return { text: formatSealText(product), startS, endS: scene.endS };
     })
     .filter((cue) => cue.endS > cue.startS);
+}
+
+/** Janela de cena identificada pela IDENTIDADE (v2) — base dos selos e da timeline. */
+export interface SceneWindowV2 extends SceneWindow {
+  sceneId: string;
+  finalAssetId: string;
+  captionsMissing: boolean;
+}
+
+export interface SceneSealV2 {
+  sceneId: string;
+  product: McSealProduct;
+  /** Intervalo relativo ao início da cena (default = 2ª metade, definido no roteiro). */
+  cue: McSealCue;
+}
+
+/**
+ * Selos do pipeline v2 (ADR §3.6): associação EXPLÍCITA cena → produto, sem
+ * rotação; cena sem `productRef` não recebe selo. O intervalo é relativo à
+ * cena e clampado à janela real dela no vídeo final.
+ */
+export function buildSealCuesV2(windows: SceneWindowV2[], seals: SceneSealV2[]): TextCue[] {
+  const cues: TextCue[] = [];
+  for (const seal of seals) {
+    const window = windows.find((w) => w.sceneId === seal.sceneId);
+    if (!window) continue;
+    const length = window.endS - window.startS;
+    const startS = window.startS + Math.max(0, Math.min(seal.cue.startS, length));
+    const endS = window.startS + Math.max(0, Math.min(seal.cue.endS, length));
+    if (endS > startS) cues.push({ text: formatSealText(seal.product), startS, endS });
+  }
+  return cues;
+}
+
+/**
+ * Timeline efetivamente renderizada (ADR §3.6): janelas medidas por probe,
+ * cartela e selos absolutos — o que player, filmstrip e legendas passam a
+ * usar após a entrega.
+ */
+export function buildRenderedTimeline(input: {
+  revision: number;
+  version: number;
+  windows: SceneWindowV2[];
+  endcardDurationS: number | null;
+  captionsRequested: boolean;
+  seals: SceneSealV2[];
+  sealCues: TextCue[];
+  renderedAt?: string;
+}): McRenderedTimeline {
+  const scenes: McTimelineEntry[] = input.windows.map((w) => ({
+    sceneId: w.sceneId,
+    idx: w.idx,
+    startS: Number(w.startS.toFixed(3)),
+    endS: Number(w.endS.toFixed(3)),
+    finalAssetId: w.finalAssetId,
+    captionsMissing: w.captionsMissing,
+  }));
+  const lastEnd = scenes.length > 0 ? scenes[scenes.length - 1].endS : 0;
+  const endcard =
+    input.endcardDurationS != null && input.endcardDurationS > 0
+      ? { startS: lastEnd, endS: Number((lastEnd + input.endcardDurationS).toFixed(3)) }
+      : null;
+  const seals = input.seals
+    .map((seal, i) => {
+      const cue = input.sealCues[i];
+      return cue
+        ? {
+            sceneId: seal.sceneId,
+            productId: seal.product.id ?? '',
+            startS: cue.startS,
+            endS: cue.endS,
+          }
+        : null;
+    })
+    .filter((s): s is NonNullable<typeof s> => s !== null);
+  return {
+    revision: input.revision,
+    version: input.version,
+    totalS: endcard ? endcard.endS : lastEnd,
+    scenes,
+    endcard,
+    captionsRequested: input.captionsRequested,
+    captionsMissingSceneIds: input.windows.filter((w) => w.captionsMissing).map((w) => w.sceneId),
+    seals,
+    renderedAt: input.renderedAt ?? new Date().toISOString(),
+  };
 }
 
 export interface NormalizeClipOptions {

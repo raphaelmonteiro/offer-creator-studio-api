@@ -7,6 +7,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import type { McPhase } from '../domain/mc-quality';
 import { McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
 import { McProject } from './mc-project.entity';
@@ -43,6 +44,22 @@ export class McStep {
   /** Geração da cena a que o step pertence — o scheduler ignora gerações antigas. */
   @Column({ type: 'int', nullable: true })
   sceneGeneration: number | null;
+
+  /** Gate de revisão (v2): o worker só submete se a aprovação cobrir esta revisão. NULL no legado. */
+  @Column({ type: 'int', nullable: true })
+  projectRevision: number | null;
+
+  /** Fase cotada a que o step pertence (v2): preparation | production | assembly. NULL no legado. */
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  phase: McPhase | null;
+
+  /** Tentativa lógica (v2): regenerar prévia/vídeo = attempt+1 (hash novo); retry de transporte não incrementa. */
+  @Column({ type: 'int', default: 1 })
+  attempt: number;
+
+  /** Inputs imutáveis da tentativa (prompt efetivo, idioma, assets, modelo); auditoria e revalidação no worker. */
+  @Column({ type: 'jsonb', nullable: true })
+  inputSnapshot: Record<string, unknown> | null;
 
   @Column({ type: 'varchar', length: 20 })
   type: McStepType;

@@ -1,10 +1,12 @@
+import { planSteps, scenePlan } from './mc-execution-plan';
+import { isPipelineV2 } from './mc-quality';
 import {
   DONE_STEP_STATUSES,
   McProjectStatus,
   McSceneStatus,
   McStepStatus,
 } from './mc-state-machines';
-import { McStepType } from './mc-types';
+import { McSceneType, McStepType } from './mc-types';
 
 /**
  * Scheduler do grafo de dependências (plano-comerciais §6.2) — FUNÇÃO PURA:
@@ -12,7 +14,7 @@ import { McStepType } from './mc-types';
  * conclui cada step; o chamador enfileira os retornados na MESMA transação
  * (pg-boss é Postgres — atomicidade real) e faz o CAS pending → queued.
  *
- * Topologia FIXA, parametrizada pelo nº de cenas:
+ * LEGADO (pipelineVersion 1) — topologia FIXA, parametrizada pelo nº de cenas:
  *
  *   script (LLM) ─► [GATE humano: storyboard_review] ─► por cena i:
  *                       keyframe(i) ─► video(i) ──┐
@@ -20,22 +22,29 @@ import { McStepType } from './mc-types';
  *                                                 └─► final da cena
  *   todas as cenas com final pronto ─► assembly (ffmpeg) ─► final
  *
- * Regras:
- * - `script` roda com o projeto em `scripting`; steps de cena só em
- *   `generating` (precisam do GATE aprovado); `assembly` em
- *   `generating`/`assembling` (robusto à ordem transição × agendamento).
- * - Cena muda (dialogue null) não tem tts/lipsync — o `video` é o final dela.
- * - `skipped_cached` conta como succeeded para dependências (§6.3): no re-roll
- *   (generation++) o planner recria keyframe/tts como skipped_cached e só o
- *   video (+lipsync) roda de novo.
+ * PIPELINE V2 (ADR-001 §4.1/§4.2) — grafo por TIPO DE CENA (mc-execution-plan):
+ *
+ *   script ─► storyboard_review ─► [preparar] ─► preparing: keyframe/tts
+ *           ─► visual_review (nada agenda vídeo) ─► [aprovar] ─► generating:
+ *           produção do plano (video | lipsync | video→scene_compose)
+ *           ─► assembling: assembly quando todos os finais estão prontos.
+ *
+ * Regras comuns:
+ * - `skipped_cached` conta como succeeded para dependências (§6.3).
  * - Steps de gerações antigas (sceneGeneration ≠ scene.generation) são
  *   ignorados por completo — nem candidatos, nem dependências.
- * - `needs_attention` não agenda nada novo (pausa para ação humana, §6.4);
- *   o re-roll da cena devolve o projeto a `generating`.
+ * - `needs_attention` não agenda nada novo (pausa para ação humana, §6.4).
+ * Regras só do v2:
+ * - Steps de outra REVISÃO (projectRevision ≠ project.revision) são ignorados:
+ *   aprovação antiga nunca autoriza gasto novo (ADR §4.1).
+ * - Várias TENTATIVAS do mesmo tipo convivem na geração corrente (regenerar
+ *   prévia): a mais recente (maior `attempt`) representa o tipo.
  */
 
 export interface SchedulerProject {
   status: McProjectStatus;
+  pipelineVersion?: number | null;
+  revision?: number | null;
 }
 
 export interface SchedulerScene {
@@ -44,6 +53,7 @@ export interface SchedulerScene {
   generation: number;
   status: McSceneStatus;
   dialogue: string | null;
+  sceneType?: McSceneType | null;
 }
 
 export interface SchedulerStep {
@@ -52,6 +62,8 @@ export interface SchedulerStep {
   sceneGeneration: number | null;
   type: McStepType;
   status: McStepStatus;
+  projectRevision?: number | null;
+  attempt?: number | null;
 }
 
 export interface StepRef {
@@ -68,22 +80,33 @@ function toRef(step: SchedulerStep): StepRef {
   return { id: step.id, type: step.type, sceneId: step.sceneId };
 }
 
-/** Steps da geração corrente de uma cena, indexados por tipo. */
-function currentGenerationSteps(
+/** Steps da geração corrente de uma cena, indexados por tipo (v2: tentativa mais recente vence). */
+export function currentGenerationSteps(
   scene: SchedulerScene,
   steps: SchedulerStep[],
+  revision?: number | null,
 ): Partial<Record<McStepType, SchedulerStep>> {
   const byType: Partial<Record<McStepType, SchedulerStep>> = {};
   for (const step of steps) {
-    if (step.sceneId === scene.id && step.sceneGeneration === scene.generation) {
-      byType[step.type] = step;
+    if (step.sceneId !== scene.id || step.sceneGeneration !== scene.generation) continue;
+    if (revision != null && step.projectRevision != null && step.projectRevision !== revision) {
+      continue;
     }
+    const current = byType[step.type];
+    if (!current || (step.attempt ?? 1) >= (current.attempt ?? 1)) byType[step.type] = step;
   }
   return byType;
 }
 
-/** Tipo do step que finaliza a cena: falada termina no lipsync, muda no video. */
-export function sceneFinalStepType(scene: Pick<SchedulerScene, 'dialogue'>): McStepType {
+/**
+ * Tipo do step que finaliza a cena: legado — falada termina no lipsync, muda
+ * no video; v2 — o `final` do plano do tipo de cena (voiceover termina no
+ * scene_compose, nunca no video).
+ */
+export function sceneFinalStepType(
+  scene: Pick<SchedulerScene, 'dialogue'> & { sceneType?: McSceneType | null },
+): McStepType {
+  if (scene.sceneType) return scenePlan(scene.sceneType).final;
   const spoken = scene.dialogue !== null && scene.dialogue !== undefined && scene.dialogue !== '';
   return spoken ? McStepType.LIPSYNC : McStepType.VIDEO;
 }
@@ -93,21 +116,28 @@ export function readySteps(
   scenes: SchedulerScene[],
   steps: SchedulerStep[],
 ): StepRef[] {
+  if (isPipelineV2(project)) return readyStepsV2(project, scenes, steps);
+  return readyStepsLegacy(project, scenes, steps);
+}
+
+function scriptStepRefs(steps: SchedulerStep[]): StepRef[] {
+  return steps
+    .filter(
+      (s) =>
+        s.type === McStepType.SCRIPT && s.sceneId === null && s.status === McStepStatus.PENDING,
+    )
+    .map(toRef);
+}
+
+function readyStepsLegacy(
+  project: SchedulerProject,
+  scenes: SchedulerScene[],
+  steps: SchedulerStep[],
+): StepRef[] {
   const ready: StepRef[] = [];
 
   // Fase de roteiro: só o step 'script' (nível de projeto) roda.
-  if (project.status === McProjectStatus.SCRIPTING) {
-    for (const step of steps) {
-      if (
-        step.type === McStepType.SCRIPT &&
-        step.sceneId === null &&
-        step.status === McStepStatus.PENDING
-      ) {
-        ready.push(toRef(step));
-      }
-    }
-    return ready;
-  }
+  if (project.status === McProjectStatus.SCRIPTING) return scriptStepRefs(steps);
 
   const generating = project.status === McProjectStatus.GENERATING;
   const assembling = project.status === McProjectStatus.ASSEMBLING;
@@ -167,4 +197,99 @@ export function readySteps(
   }
 
   return ready;
+}
+
+function sceneTypeOf(scene: SchedulerScene): McSceneType {
+  if (scene.sceneType) return scene.sceneType;
+  const spoken = scene.dialogue !== null && scene.dialogue !== undefined && scene.dialogue !== '';
+  return spoken ? 'presenter' : 'action';
+}
+
+function readyStepsV2(
+  project: SchedulerProject,
+  scenes: SchedulerScene[],
+  steps: SchedulerStep[],
+): StepRef[] {
+  const ready: StepRef[] = [];
+  if (project.status === McProjectStatus.SCRIPTING) return scriptStepRefs(steps);
+
+  const preparing = project.status === McProjectStatus.PREPARING;
+  const generating = project.status === McProjectStatus.GENERATING;
+  const assembling = project.status === McProjectStatus.ASSEMBLING;
+  if (!preparing && !generating && !assembling) return ready;
+  const revision = project.revision ?? null;
+
+  for (const scene of scenes) {
+    if (scene.status === McSceneStatus.CANCELED) continue;
+    const plan = scenePlan(sceneTypeOf(scene));
+    // CANDIDATOS: só steps da revisão corrente (aprovação antiga não roda).
+    const byType = currentGenerationSteps(scene, steps, revision);
+    // DEPENDÊNCIAS: a tentativa mais recente da geração, de QUALQUER revisão —
+    // prévias/vídeos aprovados em revisões anteriores continuam válidos (a
+    // seleção vive na cena) e são a base de re-rolls e revisões `assembly_only`.
+    // Uma prévia refeita na revisão nova entra como tentativa mais recente e,
+    // enquanto pendente, bloqueia os dependentes.
+    const depsByType = currentGenerationSteps(scene, steps);
+    // preparing: só imagem/TTS; generating: só produção; assembling: nada por cena.
+    const candidates = preparing ? plan.preparation : generating ? plan.production : [];
+    for (const type of candidates) {
+      const step = byType[type];
+      if (!step || step.status !== McStepStatus.PENDING) continue;
+      if (step.projectRevision != null && revision != null && step.projectRevision !== revision) {
+        continue;
+      }
+      const deps = plan.deps[type] ?? [];
+      if (deps.every((dep) => isDone(depsByType[dep]))) ready.push(toRef(step));
+    }
+  }
+
+  if (generating || assembling) {
+    const assembly = steps.find(
+      (s) =>
+        s.type === McStepType.ASSEMBLY &&
+        s.sceneId === null &&
+        s.status === McStepStatus.PENDING &&
+        (s.projectRevision == null || revision == null || s.projectRevision === revision),
+    );
+    if (assembly) {
+      const liveScenes = scenes.filter((s) => s.status !== McSceneStatus.CANCELED);
+      // Cena `ready` já tem o clipe final (finalAssetId) — inclusive de uma
+      // revisão ANTERIOR: a remontagem `assembly_only` reutiliza os clipes
+      // aprovados sem novos steps de produção (ADR §4.1), então a prontidão
+      // não pode depender de steps da revisão corrente.
+      const allFinalsDone =
+        liveScenes.length > 0 &&
+        liveScenes.every((scene) => {
+          if (scene.status === McSceneStatus.READY) return true;
+          const plan = scenePlan(sceneTypeOf(scene));
+          return isDone(currentGenerationSteps(scene, steps, revision)[plan.final]);
+        });
+      if (allFinalsDone) ready.push(toRef(assembly));
+    }
+  }
+  return ready;
+}
+
+/**
+ * Preparação concluída (ADR §4.1): TODAS as cenas vivas têm os steps de
+ * preparação do seu plano concluídos (sucesso OU cache) na geração e revisão
+ * correntes. Cache integral ⇒ true imediatamente, sem esperar callback.
+ */
+export function preparationComplete(
+  project: Pick<SchedulerProject, 'revision'>,
+  scenes: SchedulerScene[],
+  steps: SchedulerStep[],
+): boolean {
+  const live = scenes.filter((s) => s.status !== McSceneStatus.CANCELED);
+  if (live.length === 0) return false;
+  return live.every((scene) => {
+    const plan = scenePlan(sceneTypeOf(scene));
+    const byType = currentGenerationSteps(scene, steps, project.revision ?? null);
+    return plan.preparation.every((type) => isDone(byType[type]));
+  });
+}
+
+/** Steps de preparação PENDENTES/em curso de uma cena (para a UI e o watchdog). */
+export function scenePlanSteps(scene: SchedulerScene): McStepType[] {
+  return planSteps(scenePlan(sceneTypeOf(scene)));
 }

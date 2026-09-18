@@ -1,3 +1,4 @@
+import * as fs from 'fs/promises';
 import { DataSource } from 'typeorm';
 import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
 import { FalQueueClient } from '../../../shared/providers/fal-queue.client';
@@ -78,6 +79,7 @@ describe('McIngestProcessor — anti-SSRF do download (plano §6.8)', () => {
       ffmpeg as unknown as FfmpegRunner,
       {
         sceneRelDir: jest.fn().mockReturnValue('commercials/u1/p1/scenes/0/g1'),
+        copyFile: jest.fn(async (src: string, dest: string) => fs.copyFile(src, dest)),
         prepareStreamTarget: jest.fn(),
         saveFile: jest.fn(),
         mockJobAbsPath: jest.fn(),

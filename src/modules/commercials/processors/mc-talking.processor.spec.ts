@@ -109,6 +109,7 @@ describe('McTalkingProcessor — submit do Kling AI Avatar v2 (plano §5.3/§6.4
     failStep: jest.Mock;
     consumeStepCredits: jest.Mock;
     notifyStep: jest.Mock;
+    assertSubmitAllowed: jest.Mock;
   };
   let transitions: { casTransition: jest.Mock };
   let commercials: { appendEvent: jest.Mock };
@@ -125,6 +126,8 @@ describe('McTalkingProcessor — submit do Kling AI Avatar v2 (plano §5.3/§6.4
       failStep: jest.fn().mockResolvedValue(undefined),
       consumeStepCredits: jest.fn().mockResolvedValue(undefined),
       notifyStep: jest.fn().mockResolvedValue(undefined),
+      // gate v2: legado (projectRevision null) é sempre autorizado
+      assertSubmitAllowed: jest.fn().mockResolvedValue(true),
     };
     transitions = { casTransition: jest.fn().mockResolvedValue(true) };
     commercials = { appendEvent: jest.fn().mockResolvedValue(undefined) };

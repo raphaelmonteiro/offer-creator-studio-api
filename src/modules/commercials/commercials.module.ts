@@ -1,5 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { InjectDataSource, TypeOrmModule } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queue.service';
 import { ResourceGuardService } from '../../shared/resource-guard/resource-guard.service';
 import { SharedModule } from '../../shared/shared.module';
@@ -13,6 +14,7 @@ import { McEvent } from './entities/mc-event.entity';
 import { McProject } from './entities/mc-project.entity';
 import { McScene } from './entities/mc-scene.entity';
 import { McStep } from './entities/mc-step.entity';
+import { McStepType } from './domain/mc-types';
 import { McEnabledGuard } from './mc-enabled.guard';
 import { McEventsController } from './mc-events.controller';
 import { McAssemblyProcessor } from './processors/mc-assembly.processor';
@@ -20,6 +22,7 @@ import { McIngestProcessor } from './processors/mc-ingest.processor';
 import { McKeyframeProcessor } from './processors/mc-keyframe.processor';
 import { McKitProcessor } from './processors/mc-kit.processor';
 import { McPollProcessor } from './processors/mc-poll.processor';
+import { McSceneComposeProcessor } from './processors/mc-scene-compose.processor';
 import { McScriptProcessor } from './processors/mc-script.processor';
 import { McTalkingProcessor } from './processors/mc-talking.processor';
 import { McTtsProcessor } from './processors/mc-tts.processor';
@@ -27,8 +30,10 @@ import { McKitsService } from './services/mc-kits.service';
 import { McMaterializerService } from './services/mc-materializer.service';
 import { McPipelineService } from './services/mc-pipeline.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
+import { McQualityService } from './services/mc-quality.service';
 import { McReconcilerService } from './services/mc-reconciler.service';
 import { McStorageService } from './services/mc-storage.service';
+import { McTranslationService } from './services/mc-translation.service';
 import { McVoicesService } from './services/mc-voices.service';
 
 /**
@@ -68,6 +73,8 @@ import { McVoicesService } from './services/mc-voices.service';
     McMaterializerService,
     McPipelineService,
     McProjectActionsService,
+    McTranslationService,
+    McQualityService,
     McScriptProcessor,
     McKitProcessor,
     McKeyframeProcessor,
@@ -76,12 +83,14 @@ import { McVoicesService } from './services/mc-voices.service';
     McPollProcessor,
     McIngestProcessor,
     McAssemblyProcessor,
+    McSceneComposeProcessor,
     McReconcilerService,
     McEnabledGuard,
   ],
 })
 export class CommercialsModule implements OnModuleInit {
   constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly queue: AnimationQueueService,
     private readonly resourceGuard: ResourceGuardService,
     private readonly scriptProcessor: McScriptProcessor,
@@ -92,6 +101,7 @@ export class CommercialsModule implements OnModuleInit {
     private readonly pollProcessor: McPollProcessor,
     private readonly ingestProcessor: McIngestProcessor,
     private readonly assemblyProcessor: McAssemblyProcessor,
+    private readonly sceneComposeProcessor: McSceneComposeProcessor,
     private readonly reconciler: McReconcilerService,
     private readonly voices: McVoicesService,
   ) {}
@@ -138,10 +148,12 @@ export class CommercialsModule implements OnModuleInit {
         (d: { stepId: string; responseUrl?: string }) => this.ingestProcessor.process(d),
         () => this.resourceGuard.admitHeavyJob(),
       );
+      // mc.ffmpeg transporta assembly E scene_compose (v2): o dispatcher usa o
+      // `type` do payload e, na falta dele (watchdog/jobs antigos), consulta o step.
       await this.queue.subscribe(
         QUEUES.MC_FFMPEG,
         MC_QUEUE_CONCURRENCY[QUEUES.MC_FFMPEG] ?? 1,
-        (d: { stepId: string }) => this.assemblyProcessor.process(d),
+        (d: { stepId: string; type?: string }) => this.dispatchFfmpeg(d),
         () => this.resourceGuard.admitHeavyJob(),
       );
       // Watchdog de steps órfãos (domain/mc-watchdog.ts): repõe jobs de steps
@@ -149,7 +161,24 @@ export class CommercialsModule implements OnModuleInit {
       this.reconciler.start();
       return;
     }
-    // Processo API: seed idempotente do catálogo de vozes (plano §5.3).
-    await this.voices.seedIfEmpty();
+    // Processo API: sincroniza o catálogo de vozes com a conta ElevenLabs (plano §5.3).
+    await this.voices.syncCatalog();
+  }
+
+  private async dispatchFfmpeg(d: { stepId: string; type?: string }): Promise<void> {
+    let type = d.type;
+    if (!type) {
+      const step = await this.stepType(d.stepId);
+      type = step ?? McStepType.ASSEMBLY;
+    }
+    if (type === McStepType.SCENE_COMPOSE) return this.sceneComposeProcessor.process(d);
+    return this.assemblyProcessor.process(d);
+  }
+
+  private async stepType(stepId: string): Promise<string | null> {
+    const row = await this.dataSource
+      .getRepository(McStep)
+      .findOne({ where: { id: stepId }, select: ['id', 'type'] });
+    return row?.type ?? null;
   }
 }

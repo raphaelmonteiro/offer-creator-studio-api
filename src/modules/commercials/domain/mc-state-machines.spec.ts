@@ -77,8 +77,25 @@ describe('McStateMachines (plano-comerciais §6.1)', () => {
   });
 
   it('estados terminais não têm saída (exceto retry/re-roll documentados)', () => {
-    // succeeded reabre APENAS para generating: re-roll/regravação pós-entrega (B1b)
-    expect(MC_PROJECT_TRANSITIONS[McProjectStatus.SUCCEEDED]).toEqual([McProjectStatus.GENERATING]);
+    // succeeded reabre para generating (re-roll pós-entrega, B1b) e, no pipeline
+    // v2 (ADR-001 §4.1), para nova revisão editorial ou correção só de composição.
+    expect(MC_PROJECT_TRANSITIONS[McProjectStatus.SUCCEEDED]).toEqual([
+      McProjectStatus.GENERATING,
+      McProjectStatus.STORYBOARD_REVIEW,
+      McProjectStatus.VISUAL_REVIEW,
+    ]);
+    // v2: preparação não volta ao roteiro sem passar por revisão/cancelamento
+    expect(MC_PROJECT_TRANSITIONS[McProjectStatus.PREPARING]).not.toContain(
+      McProjectStatus.STORYBOARD_REVIEW,
+    );
+    expect(MC_PROJECT_TRANSITIONS[McProjectStatus.PREPARING]).not.toContain(
+      McProjectStatus.GENERATING,
+    );
+    // v2: da revisão visual nunca se vai direto para assembling sem aprovação editorial — a
+    // transição existe, mas quem a dispara é o approve-assembly (testado no service)
+    expect(MC_PROJECT_TRANSITIONS[McProjectStatus.VISUAL_REVIEW]).toContain(
+      McProjectStatus.GENERATING,
+    );
     expect(MC_PROJECT_TRANSITIONS[McProjectStatus.FAILED]).toHaveLength(0);
     expect(MC_PROJECT_TRANSITIONS[McProjectStatus.CANCELED]).toHaveLength(0);
     // cena: ready/failed voltam a pending no re-roll (generation++)

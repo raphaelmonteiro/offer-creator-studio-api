@@ -23,6 +23,8 @@ import {
   McStepStatus,
 } from './domain/mc-state-machines';
 import { McStepType, resolveProjectOptions } from './domain/mc-types';
+import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
+import { randomUUID } from 'crypto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { McCharacterKit, McKitStatus } from './entities/mc-character-kit.entity';
 import { McEvent } from './entities/mc-event.entity';
@@ -32,6 +34,29 @@ import { McStep } from './entities/mc-step.entity';
 
 /** Jobs de LLM são curtos — expiração de 120s por publish (plano §6.4: expireInSeconds POR FILA). */
 const MC_LLM_EXPIRE_S = 120;
+
+/**
+ * Ativação do pipeline v2 por configuração/coorte (ADR-001 §5):
+ * - MC_PIPELINE_V2=all      → todo projeto novo nasce no v2;
+ * - MC_PIPELINE_V2=cohort   → só usuários listados em MC_PIPELINE_V2_USERS;
+ * - qualquer outro valor    → legado (default).
+ * A escolha é persistida no projeto; mudar a flag não altera projetos existentes.
+ */
+export function pipelineVersionForNewProject(
+  userId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const mode = (env.MC_PIPELINE_V2 ?? 'off').toLowerCase();
+  if (mode === 'all') return MC_PIPELINE_V2;
+  if (mode === 'cohort') {
+    const cohort = (env.MC_PIPELINE_V2_USERS ?? '')
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    return cohort.includes(userId) ? MC_PIPELINE_V2 : MC_PIPELINE_LEGACY;
+  }
+  return MC_PIPELINE_LEGACY;
+}
 
 /**
  * Kill-switch em banco (plano §6.7): 'mc_paused' = true pausa a criação de
@@ -90,10 +115,17 @@ export class CommercialsService {
       // produtos (máx. 6) chegam prontos do front (name+price) e viram os
       // selos determinísticos do roteiro/montagem (plano §5.4).
       const aspectRatio = dto.aspectRatio ?? '9:16';
+      // Executor congelado na criação (ADR-001 §5): configuração/coorte decide;
+      // desligar a flag depois NÃO muda projetos em andamento.
+      const pipelineVersion = pipelineVersionForNewProject(userId);
       const options = resolveProjectOptions({
         musicEnabled: dto.musicEnabled,
         captionsEnabled: dto.captionsEnabled,
-        products: dto.products,
+        // v2: chave estável por produto desde a criação (snapshot do roteiro)
+        products:
+          pipelineVersion === MC_PIPELINE_V2
+            ? (dto.products ?? []).map((p) => ({ ...p, id: randomUUID() }))
+            : dto.products,
       });
 
       const project = manager.create(McProject, {
@@ -106,6 +138,9 @@ export class CommercialsService {
         options,
         status: McProjectStatus.DRAFT,
         reservedCredits,
+        pipelineVersion,
+        revision: 0,
+        quality: pipelineVersion === MC_PIPELINE_V2 ? { ...MC_EMPTY_QUALITY } : null,
       });
       await manager.save(project);
 
@@ -219,7 +254,13 @@ export class CommercialsService {
     }));
   }
 
-  /** Projeto + cenas + steps (visão completa para a UI de acompanhamento). */
+  /**
+   * Projeto + cenas + steps (visão completa para a UI de acompanhamento).
+   * Pipeline v2: cada cena expõe também `audioUrl`/`videoUrl` (assets
+   * selecionados) e cada step `outputUrl` (alternativas de prévia por
+   * tentativa), além de `revision`, `pipelineVersion` e `quality` (manifestos,
+   * aprovação, orçamentos e timeline renderizada) que já vêm da entidade.
+   */
   async findOneProject(
     userId: string,
     id: string,
@@ -227,8 +268,17 @@ export class CommercialsService {
     McProject & {
       finalUrl: string | null;
       posterUrl: string | null;
-      scenes: Array<McScene & { keyframeUrl: string | null; finalUrl: string | null }>;
-      steps: McStep[];
+      /** v2: URL da última entrega válida preservada em `quality.lastDelivery` (revisão anterior). */
+      lastDeliveryUrl: string | null;
+      scenes: Array<
+        McScene & {
+          keyframeUrl: string | null;
+          finalUrl: string | null;
+          audioUrl: string | null;
+          videoUrl: string | null;
+        }
+      >;
+      steps: Array<McStep & { outputUrl: string | null; outputPosterUrl: string | null }>;
     }
   > {
     const project = await this.dataSource.getRepository(McProject).findOneBy({ id });
@@ -246,20 +296,32 @@ export class CommercialsService {
     ]);
     // URLs denormalizadas — a UI consome finalUrl/posterUrl no projeto e
     // keyframeUrl/finalUrl por cena sem precisar de um endpoint de assets.
+    const lastDeliveryAssetId = project.quality?.lastDelivery?.finalAssetId ?? null;
     const urls = await this.resolveAssetUrls([
       project.finalAssetId,
-      ...scenes.flatMap((s) => [s.keyframeAssetId, s.finalAssetId]),
+      lastDeliveryAssetId,
+      ...scenes.flatMap((s) => [s.keyframeAssetId, s.finalAssetId, s.audioAssetId, s.videoAssetId]),
+      ...steps.map((s) => s.outputAssetId),
     ]);
+    const url = (assetId: string | null | undefined) =>
+      (assetId && urls.get(assetId)?.fileUrl) || null;
     return {
       ...project,
-      finalUrl: (project.finalAssetId && urls.get(project.finalAssetId)?.fileUrl) || null,
+      finalUrl: url(project.finalAssetId),
       posterUrl: (project.finalAssetId && urls.get(project.finalAssetId)?.posterUrl) || null,
+      lastDeliveryUrl: url(lastDeliveryAssetId),
       scenes: scenes.map((s) => ({
         ...s,
-        keyframeUrl: (s.keyframeAssetId && urls.get(s.keyframeAssetId)?.fileUrl) || null,
-        finalUrl: (s.finalAssetId && urls.get(s.finalAssetId)?.fileUrl) || null,
+        keyframeUrl: url(s.keyframeAssetId),
+        finalUrl: url(s.finalAssetId),
+        audioUrl: url(s.audioAssetId),
+        videoUrl: url(s.videoAssetId),
       })),
-      steps,
+      steps: steps.map((s) => ({
+        ...s,
+        outputUrl: url(s.outputAssetId),
+        outputPosterUrl: (s.outputAssetId && urls.get(s.outputAssetId)?.posterUrl) || null,
+      })),
     };
   }
 

@@ -5,15 +5,23 @@ import { CreditsService } from '../../../shared/credits/credits.service';
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { CommercialsService } from '../commercials.service';
+import { randomUUID } from 'crypto';
 import {
   buildDirectorJsonSchema,
+  buildDirectorJsonSchemaV2,
   buildDirectorSystemPrompt,
+  buildDirectorSystemPromptV2,
   buildEndcard,
   buildMockScript,
+  buildMockScriptV2,
+  buildProductsSnapshot,
   buildScriptSeal,
   normalizeDirectorScenes,
+  normalizeDirectorScenesV2,
   RawDirectorScene,
+  RawDirectorSceneV2,
 } from '../domain/mc-director';
+import { isPipelineV2, MC_SCRIPT_SCHEMA_V2 } from '../domain/mc-quality';
 import {
   assertProjectTransition,
   assertStepTransition,
@@ -196,14 +204,19 @@ export class McScriptProcessor {
     const provider = this.provider();
     const options = resolveProjectOptions(project.options);
     const storeName = await this.storeNameOf(project.userId);
+    const v2 = isPipelineV2(project);
     if (provider === 'mock') {
-      // Roteiro MOCK multi-cena (3 cenas: 2 faladas + 1 muda) — atravessa o
-      // pipeline inteiro, incluindo o motor de ação da cena muda, sem chamar
-      // LLM nem gastar um centavo (domain/mc-director.buildMockScript).
-      return buildMockScript({ products: options.products, storeName });
+      // Roteiro MOCK multi-cena — atravessa o pipeline inteiro sem chamar LLM
+      // nem gastar um centavo. Legado: 2 faladas + 1 muda; v2: presenter +
+      // action_voiceover + action (os três grafos do ADR).
+      return v2
+        ? buildMockScriptV2({ products: options.products, storeName }, () => randomUUID())
+        : buildMockScript({ products: options.products, storeName });
     }
     if (provider === 'openai') {
-      return this.generateScriptOpenAi(project, options.products, storeName);
+      return v2
+        ? this.generateScriptOpenAiV2(project, options.products, storeName)
+        : this.generateScriptOpenAi(project, options.products, storeName);
     }
     throw new Error(`not_implemented: MC_SCRIPT_PROVIDER desconhecido '${provider}'`);
   }
@@ -240,6 +253,61 @@ export class McScriptProcessor {
    * a normalização da resposta vivem em domain/mc-director.ts — puras e
    * testadas; aqui só acontece a chamada de rede.
    */
+  /**
+   * Diretor V2 (ADR-001 §3.1/§3.2): tipo de cena explícito, estado inicial
+   * separado do movimento, produto por cena e derivação EN no próprio roteiro.
+   */
+  private async generateScriptOpenAiV2(
+    project: McProject,
+    optionProducts: McSealProduct[],
+    storeName: string | null,
+  ): Promise<McScript> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('script_failed: OPENAI_API_KEY ausente');
+    const model = process.env.MC_DIRECTOR_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o';
+    const targetDurationS = Math.min(60, Math.max(8, project.targetDurationS || 10));
+    const products = buildProductsSnapshot(optionProducts, () => randomUUID());
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.7,
+        response_format: { type: 'json_schema', json_schema: buildDirectorJsonSchemaV2() },
+        messages: [
+          { role: 'system', content: buildDirectorSystemPromptV2({ targetDurationS, products }) },
+          { role: 'user', content: `Briefing: ${project.briefing}` },
+        ],
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      throw new Error(`script_failed: OpenAI HTTP ${res.status}: ${body?.error?.message ?? ''}`);
+    }
+    const content = body.choices?.[0]?.message?.content;
+    if (!content) throw new Error('script_failed: resposta do OpenAI sem conteúdo');
+    const parsed = JSON.parse(content) as { scenes?: RawDirectorSceneV2[] };
+    const scenes = normalizeDirectorScenesV2(
+      parsed.scenes ?? [],
+      products,
+      () => randomUUID(),
+      `director:${model}`,
+    );
+    const endcard = buildEndcard(storeName);
+    return {
+      version: 1,
+      schemaVersion: MC_SCRIPT_SCHEMA_V2,
+      products,
+      environments: [],
+      scenes,
+      seal: null,
+      endcard: endcard ?? null,
+    };
+  }
+
   private async generateScriptOpenAi(
     project: McProject,
     products: McSealProduct[],

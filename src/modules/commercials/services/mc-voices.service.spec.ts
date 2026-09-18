@@ -8,6 +8,12 @@ import { ElevenLabsProvider } from '../../../shared/providers/elevenlabs.provide
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { SystemSettingsService } from '../../../shared/settings/system-settings.service';
 import {
+  MC_VOICE_DELIVERY_DEFAULT,
+  elevenLabsVoiceSettings,
+  voiceDeliveryKey,
+} from '../domain/mc-voice-delivery';
+import {
+  CURATED_VOICES,
   McVoicesService,
   VOICE_PREVIEW_DAILY_LIMIT,
   VOICE_PREVIEW_FALLBACK_MODEL,
@@ -62,58 +68,108 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
     );
   });
 
-  describe('seedIfEmpty (idempotente)', () => {
-    it('tabela já populada → não consulta a API nem insere', async () => {
-      voiceRepo.count.mockResolvedValue(6);
-      await service.seedIfEmpty();
-      expect(elevenLabs.listVoices).not.toHaveBeenCalled();
+  describe('syncCatalog (aditivo e idempotente)', () => {
+    const account = [
+      { voice_id: 'v-laura', name: 'Laura - Enthusiast', category: 'premade' },
+      { voice_id: 'v-sarah', name: 'Sarah - Mature', category: 'premade' },
+      { voice_id: 'v-liam', name: 'Liam - Energetic', category: 'premade' },
+      {
+        voice_id: 'v-cloned',
+        name: 'Locutor da Rede',
+        category: 'cloned',
+        labels: { gender: 'male' },
+      },
+    ];
+
+    it('tabela vazia: insere TODAS as vozes da conta — curadas primeiro (nome pt-BR, ordem da curadoria), depois as demais com o nome original', async () => {
+      elevenLabs.listVoices.mockResolvedValue(account);
+      await service.syncCatalog();
+      expect(voiceRepo.save).toHaveBeenCalledTimes(1);
+      const rows = voiceRepo.save.mock.calls[0][0] as Array<Record<string, unknown>>;
+      expect(rows.map((r) => r.providerVoiceId)).toEqual([
+        'v-liam',
+        'v-laura',
+        'v-sarah',
+        'v-cloned',
+      ]);
+      expect(rows[0]).toMatchObject({ name: 'Liam — Jovem e Energético', gender: 'male', sort: 0 });
+      expect(rows[1]).toMatchObject({ name: 'Laura — Animada', language: 'pt-BR' });
+      // fora da curadoria: nome original, ordenada depois de todas as curadas
+      expect(rows[3]).toMatchObject({ name: 'Locutor da Rede', gender: 'male', enabled: true });
+      expect(rows[3].sort as number).toBeGreaterThan(CURATED_VOICES.length);
+      // o flag interno de curadoria não vai para o banco
+      expect(rows[0]).not.toHaveProperty('curated');
+    });
+
+    it('tabela já populada: só insere o que falta, aplica nome/ordem da curadoria e PRESERVA id/enabled', async () => {
+      elevenLabs.listVoices.mockResolvedValue(account);
+      voiceRepo.find.mockResolvedValue([
+        {
+          id: 'row-laura',
+          providerVoiceId: 'v-laura',
+          name: 'Laura — Animada',
+          gender: 'female',
+          style: 'animada',
+          enabled: false, // admin tirou do ar
+          sort: 1,
+        },
+        {
+          id: 'row-sarah',
+          providerVoiceId: 'v-sarah',
+          name: 'Sarah — Apresentadora',
+          gender: 'female',
+          style: 'institucional',
+          enabled: true,
+          sort: 1, // ordem antiga (era a 2ª de 6)
+        },
+      ]);
+      await service.syncCatalog();
+      const rows = voiceRepo.save.mock.calls[0][0] as Array<Record<string, unknown>>;
+      // Laura: nada mudou → não é reescrita; Sarah: só a ordem → atualizada mantendo id/enabled
+      expect(rows.map((r) => r.providerVoiceId)).toEqual(['v-liam', 'v-sarah', 'v-cloned']);
+      const sarah = rows.find((r) => r.providerVoiceId === 'v-sarah');
+      expect(sarah).toMatchObject({ id: 'row-sarah', enabled: true, sort: 6 });
+      expect(rows.find((r) => r.providerVoiceId === 'v-laura')).toBeUndefined();
+    });
+
+    it('tudo sincronizado ⇒ não grava nada (idempotente)', async () => {
+      elevenLabs.listVoices.mockResolvedValue([account[0]]);
+      voiceRepo.find.mockResolvedValue([
+        {
+          id: 'row-laura',
+          providerVoiceId: 'v-laura',
+          name: 'Laura — Animada',
+          gender: 'female',
+          style: 'animada',
+          enabled: true,
+          sort: 1,
+        },
+      ]);
+      await service.syncCatalog();
       expect(voiceRepo.save).not.toHaveBeenCalled();
     });
 
-    it('resolve os voice_ids REAIS via GET /v1/voices e insere 6 vozes com nomes pt-BR amigáveis', async () => {
-      elevenLabs.listVoices.mockResolvedValue([
-        { voice_id: 'v-laura', name: 'Laura', category: 'premade' },
-        { voice_id: 'v-sarah', name: 'Sarah', category: 'premade' },
-        { voice_id: 'v-george', name: 'George', category: 'premade' },
-        { voice_id: 'v-charlie', name: 'Charlie', category: 'premade' },
-        { voice_id: 'v-alice', name: 'Alice', category: 'premade' },
-        { voice_id: 'v-brian', name: 'Brian', category: 'premade' },
-        { voice_id: 'v-cloned', name: 'Meu Clone', category: 'cloned' },
+    it('a curadoria cobre as 21 vozes premade padrão da ElevenLabs, as mais animadas primeiro', () => {
+      expect(CURATED_VOICES).toHaveLength(21);
+      expect(new Set(CURATED_VOICES.map((v) => v.match)).size).toBe(21);
+      expect(CURATED_VOICES.slice(0, 4).map((v) => v.match)).toEqual([
+        'liam',
+        'laura',
+        'jessica',
+        'charlie',
       ]);
-      await service.seedIfEmpty();
-
-      expect(voiceRepo.save).toHaveBeenCalledTimes(1);
-      const rows = voiceRepo.save.mock.calls[0][0] as Array<Record<string, unknown>>;
-      expect(rows).toHaveLength(6);
-      expect(rows.map((r) => r.providerVoiceId)).toEqual([
-        'v-laura',
-        'v-sarah',
-        'v-george',
-        'v-charlie',
-        'v-alice',
-        'v-brian',
-      ]);
-      expect(rows[0]).toMatchObject({ name: 'Laura — Animada', language: 'pt-BR' });
-      // vozes clonadas do usuário nunca entram no catálogo curado
-      expect(rows.some((r) => r.providerVoiceId === 'v-cloned')).toBe(false);
     });
 
-    it('curadoria incompleta → completa com outras premade até 6', async () => {
-      elevenLabs.listVoices.mockResolvedValue([
-        { voice_id: 'v-laura', name: 'Laura', category: 'premade' },
-        { voice_id: 'v-x1', name: 'Aria', category: 'premade' },
-        { voice_id: 'v-x2', name: 'Roger', category: 'premade' },
-      ]);
-      await service.seedIfEmpty();
-      const rows = voiceRepo.save.mock.calls[0][0] as Array<Record<string, unknown>>;
-      expect(rows).toHaveLength(3);
-      expect(rows[0]).toMatchObject({ providerVoiceId: 'v-laura', name: 'Laura — Animada' });
-      expect(rows[1]).toMatchObject({ providerVoiceId: 'v-x1', name: 'Aria' });
-    });
-
-    it('falha da API não derruba o boot e não insere nada (tenta na próxima subida)', async () => {
+    it('falha da API não derruba o boot e não altera nada (tenta na próxima subida)', async () => {
       elevenLabs.listVoices.mockRejectedValue(new Error('rede fora'));
-      await expect(service.seedIfEmpty()).resolves.toBeUndefined();
+      await expect(service.syncCatalog()).resolves.toBeUndefined();
+      expect(voiceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('API sem vozes ⇒ nada apagado, nada inserido', async () => {
+      elevenLabs.listVoices.mockResolvedValue([]);
+      await service.syncCatalog();
+      expect(voiceRepo.find).not.toHaveBeenCalled();
       expect(voiceRepo.save).not.toHaveBeenCalled();
     });
   });
@@ -144,11 +200,16 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
   describe('preview', () => {
     const dto = { voiceId: 'voice-1', text: 'Ofertas imperdíveis!' };
 
-    it('gera com eleven_v3, salva o mp3 e conta no teto diário', async () => {
+    it('gera com o modelo principal (multilingual_v2 — obedece speed/style), salva o mp3 e conta no teto diário', async () => {
       const result = await service.preview('u1', dto);
 
       expect(elevenLabs.synthesize).toHaveBeenCalledWith(
-        expect.objectContaining({ modelId: VOICE_PREVIEW_MODEL, voiceId: 'voice-1' }),
+        expect.objectContaining({
+          modelId: VOICE_PREVIEW_MODEL,
+          voiceId: 'voice-1',
+          // perfil de entrega (velocidade/expressividade) — o mesmo do TTS das cenas
+          settings: elevenLabsVoiceSettings(MC_VOICE_DELIVERY_DEFAULT, VOICE_PREVIEW_MODEL),
+        }),
       );
       expect(result.cached).toBe(false);
       expect(result.url).toMatch(/^\/uploads\/commercials\/voice-previews\/[a-f0-9]{64}\.mp3$/);
@@ -160,7 +221,22 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
       });
     });
 
-    it('erro terminal no v3 → fallback multilingual_v2 (plano §5.3)', async () => {
+    it('ajuste do usuário (velocidade/expressividade) vai ao provider e muda o cache', async () => {
+      const result = await service.preview('u1', {
+        ...dto,
+        text: 'com ajuste',
+        delivery: { speed: 1.2, style: 0.9 },
+      });
+      expect(elevenLabs.synthesize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: expect.objectContaining({ speed: 1.2, style: 0.9 }),
+        }),
+      );
+      const plain = await service.preview('u1', { ...dto, text: 'com ajuste' });
+      expect(plain.url).not.toBe(result.url);
+    });
+
+    it('erro terminal no principal → fallback (plano §5.3)', async () => {
       elevenLabs.synthesize
         .mockRejectedValueOnce(new TerminalProviderError('modelo indisponível'))
         .mockResolvedValueOnce(Buffer.from('mp3-v2'));
@@ -179,7 +255,9 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
 
     it('cache hit por hash: devolve a URL sem chamar TTS e SEM contar no teto', async () => {
       const text = 'texto cacheado';
-      const hash = createHash('sha256').update(`voice-1|${text}`).digest('hex');
+      const hash = createHash('sha256')
+        .update(`voice-1|${voiceDeliveryKey(MC_VOICE_DELIVERY_DEFAULT)}|${text}`)
+        .digest('hex');
       const dir = path.join(tmpDir, 'commercials', 'voice-previews');
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(path.join(dir, `${hash}.mp3`), Buffer.from('cached'));

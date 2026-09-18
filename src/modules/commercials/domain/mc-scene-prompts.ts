@@ -71,3 +71,79 @@ export function buildActionVideoPrompt(actionPromptEn: string): string {
   const withStop = /[.!?]$/.test(action) ? action : `${action}.`;
   return `${withStop} ${ACTION_PRESERVATION_SUFFIX}`;
 }
+
+/**
+ * Prompt do keyframe no PIPELINE V2 (ADR-001 §3.2/§3.4): descreve o ESTADO
+ * INICIAL (não a sequência), respeita a área livre reservada aos elementos
+ * gráficos e distingue traços permanentes de adereços removíveis. Emblemas
+ * integrantes do personagem (traits/doNots da ficha) prevalecem sobre a
+ * proibição genérica de logos — a regra proíbe TEXTO PROMOCIONAL, não a
+ * identidade aprovada. Idioma do prompt efetivo é registrado pelo chamador.
+ */
+export function buildKeyframePromptV2(input: {
+  initialFrame: string;
+  lang: 'en' | 'pt';
+  canonicalDesc: KitCanonicalDesc | null;
+  aspectRatio: string;
+  safeArea?: 'lower_third' | 'left' | 'right' | null;
+  environmentDescription?: string | null;
+  /** Nome do produto cuja FOTO REAL está entre as referências (embalagem fiel). */
+  productName?: string | null;
+}): string {
+  const orientation =
+    input.aspectRatio === '9:16'
+      ? 'Vertical 9:16 composition (portrait, full-height framing)'
+      : input.aspectRatio === '16:9'
+        ? 'Horizontal 16:9 composition'
+        : 'Square 1:1 composition';
+  const safeArea =
+    input.safeArea === 'left'
+      ? 'Keep the LEFT third of the frame free of the character and important objects (graphics overlay).'
+      : input.safeArea === 'right'
+        ? 'Keep the RIGHT third of the frame free of the character and important objects (graphics overlay).'
+        : "Keep the LOWER third of the frame free of the character's face and important objects (price/caption overlay).";
+  const setting = input.environmentDescription?.trim()
+    ? `Setting (shared across scenes, keep consistent): ${input.environmentDescription.trim()}.`
+    : 'Clean supermarket/retail setting, vivid commercial lighting.';
+  const langNote =
+    input.lang === 'pt'
+      ? 'The scene description below is in Brazilian Portuguese; follow it literally.'
+      : null;
+  const lines: string[] = [
+    'Commercial keyframe: the exact same mascot character from the reference images.',
+    'This is the STARTING frame of a short motion — show the initial state only, not a sequence.',
+    ...(langNote ? [langNote] : []),
+    `Starting frame: ${input.initialFrame}`,
+    `${orientation}. ${setting}`,
+    safeArea,
+    ...(input.productName
+      ? [
+          `Product reference: one of the reference images is the REAL package of "${input.productName}". ` +
+            'If the character holds or presents a product, it must be EXACTLY this package: same shape, ' +
+            'colors, label art and proportions, held naturally and clearly visible. Do not invent a ' +
+            'different package and do not alter the label.',
+        ]
+      : []),
+    'No ADDED promotional text, numbers, price tags or watermarks anywhere in the image (the text ' +
+      'printed on the real product package stays as it is). Emblems or marks that are part of the ' +
+      'approved character design stay as in the references.',
+  ];
+  const desc = input.canonicalDesc;
+  if (desc) {
+    lines.push('', 'Character sheet (keep the character EXACTLY like this):');
+    if (desc.traits.length > 0) lines.push(`- Permanent traits: ${desc.traits.join('; ')}`);
+    if (desc.colors.length > 0) lines.push(`- Colors: ${desc.colors.join(', ')}`);
+    if (desc.style) lines.push(`- Style: ${desc.style}`);
+    if (desc.doNots.length > 0) lines.push(`- Never: ${desc.doNots.join('; ')}`);
+    if ((desc.accessories?.length ?? 0) > 0) {
+      lines.push(
+        `- Removable props — include ONLY if the starting frame above explicitly asks for them, ` +
+          `otherwise the character's hands are empty: ${desc.accessories!.join(', ')}.`,
+      );
+    }
+    if (desc.adjustments) {
+      lines.push(`- User adjustments (highest priority, follow strictly): ${desc.adjustments}`);
+    }
+  }
+  return lines.join('\n');
+}

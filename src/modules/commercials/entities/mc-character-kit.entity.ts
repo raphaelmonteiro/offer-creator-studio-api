@@ -1,3 +1,4 @@
+import { McVoiceDeliveryOverride } from '../domain/mc-voice-delivery';
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { McKitStatus } from '../domain/mc-state-machines';
 
@@ -40,6 +41,10 @@ export class McCharacterKit {
   /** Voz fixa do mascote no provider de TTS (a voz é o ativo, §5.3). */
   @Column({ type: 'text', nullable: true })
   voiceId: string | null;
+
+  /** Ajuste de entrega da voz (velocidade/expressividade) escolhido na aprovação; null = global. */
+  @Column({ type: 'jsonb', nullable: true })
+  voiceDelivery: McVoiceDeliveryOverride | null;
 
   /** Assets de referência (kind `kit_reference` na animation_assets, §6.1). */
   @Column({ type: 'uuid', array: true, default: () => "'{}'" })

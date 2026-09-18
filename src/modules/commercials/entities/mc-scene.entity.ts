@@ -2,12 +2,14 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
   Unique,
 } from 'typeorm';
 import { McSceneStatus } from '../domain/mc-state-machines';
+import { McSceneType } from '../domain/mc-types';
 import { McProject } from './mc-project.entity';
 
 /**
@@ -18,6 +20,7 @@ import { McProject } from './mc-project.entity';
  */
 @Entity('mc_scenes')
 @Unique(['projectId', 'idx'])
+@Index(['projectId', 'scriptSceneId'])
 export class McScene {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -32,6 +35,17 @@ export class McScene {
   /** Posição da cena no comercial (0-based, ordem de montagem). */
   @Column({ type: 'int' })
   idx: number;
+
+  /**
+   * Identidade editorial da cena no roteiro v2 (`script.scenes[].sceneId`) —
+   * estável entre reordenações/revisões; `idx` é só a ordem. NULL no legado.
+   */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  scriptSceneId: string | null;
+
+  /** NULL preserva o executor por diálogo dos registros legados. */
+  @Column({ type: 'varchar', length: 24, nullable: true })
+  sceneType: McSceneType | null;
 
   /** Geração corrente — re-roll incrementa (plano §6.3). */
   @Column({ type: 'int', default: 1 })

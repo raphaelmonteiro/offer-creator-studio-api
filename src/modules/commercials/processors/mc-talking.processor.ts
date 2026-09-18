@@ -128,12 +128,16 @@ export class McTalkingProcessor {
     if (!scene || !project) return;
 
     try {
+      // Pipeline v2 (ADR §4.1): revalida a autorização da revisão IMEDIATAMENTE
+      // antes do submit pago — aprovação caída entre o claim e aqui cancela o
+      // step sem enviar nada ao provider.
+      if (!(await this.pipeline.assertSubmitAllowed(step))) return;
       const submit =
         this.provider() === 'mock'
           ? await this.mockSubmit(step, scene)
           : step.type === McStepType.LIPSYNC
-            ? await this.submitKlingAvatar(scene)
-            : await this.submitKlingAction(scene, project);
+            ? await this.submitKlingAvatar(scene, step)
+            : await this.submitKlingAction(scene, project, step);
 
       await this.dataSource.transaction(async (manager) => {
         assertStepTransition(McStepStatus.RUNNING, McStepStatus.PROVIDER_WAIT);
@@ -188,14 +192,26 @@ export class McTalkingProcessor {
 
   // ─────────────────────────────── submits ───────────────────────────────
 
-  private async submitKlingAvatar(scene: McScene): Promise<{
+  private async submitKlingAvatar(
+    scene: McScene,
+    step?: McStep,
+  ): Promise<{
     provider: string;
     providerJobId: string;
     statusUrl: string;
     responseUrl: string;
   }> {
-    const image = await this.loadAssetBuffer(scene.keyframeAssetId, 'keyframe');
-    const audio = await this.loadAssetBuffer(scene.audioAssetId, 'áudio');
+    // v2: os assets vêm do SNAPSHOT imutável do step (o que a aprovação assinou),
+    // não do atalho corrente da cena.
+    const snapshot = (step?.inputSnapshot ?? null) as {
+      keyframeAssetId?: string;
+      audioAssetId?: string;
+    } | null;
+    const image = await this.loadAssetBuffer(
+      snapshot?.keyframeAssetId ?? scene.keyframeAssetId,
+      'keyframe',
+    );
+    const audio = await this.loadAssetBuffer(snapshot?.audioAssetId ?? scene.audioAssetId, 'áudio');
     if (audio.length > MC_DATA_URI_MAX_BYTES) {
       throw new TerminalProviderError(
         'Áudio da fala excede o teto de 3,3MB do data URI',
@@ -230,25 +246,43 @@ export class McTalkingProcessor {
   private async submitKlingAction(
     scene: McScene,
     project: McProject,
+    step?: McStep,
   ): Promise<{
     provider: string;
     providerJobId: string;
     statusUrl: string;
     responseUrl: string;
   }> {
-    const image = await this.loadAssetBuffer(scene.keyframeAssetId, 'keyframe');
+    const snapshot = (step?.inputSnapshot ?? null) as {
+      keyframeAssetId?: string;
+      motion?: string;
+      providerDuration?: string;
+    } | null;
+    const image = await this.loadAssetBuffer(
+      snapshot?.keyframeAssetId ?? scene.keyframeAssetId,
+      'keyframe',
+    );
     const safeImage = await ensureImageUnderCap(image);
-    const scriptScene = project.script?.scenes?.find((s) => s.idx === scene.idx);
-    // O roteiro carrega a versão EN da ação (McScript v2); a cena guarda só a
-    // pt (é o que a UI edita) — sem o roteiro, cai no prompt da cena.
-    const actionEn = scriptScene
-      ? sceneActionPromptEn(scriptScene)
-      : sceneActionPromptEn({ actionPrompt: scene.actionPrompt });
+    let actionEn: string;
+    if (snapshot?.motion) {
+      // v2 (ADR §3.2): o MOVIMENTO efetivo (derivação válida da intenção pt
+      // corrente) vem do snapshot do step — nunca uma EN antiga por posição.
+      actionEn = snapshot.motion;
+    } else {
+      const scriptScene = project.script?.scenes?.find((s) => s.idx === scene.idx);
+      // O roteiro carrega a versão EN da ação (McScript v2); a cena guarda só a
+      // pt (é o que a UI edita) — sem o roteiro, cai no prompt da cena.
+      actionEn = scriptScene
+        ? sceneActionPromptEn(scriptScene)
+        : sceneActionPromptEn({ actionPrompt: scene.actionPrompt });
+    }
     const result = await this.fal.submit(KLING_ACTION_MODEL, {
       prompt: buildActionVideoPrompt(actionEn),
       negative_prompt: KLING_ACTION_NEGATIVE_PROMPT,
       image_url: toDataUri(safeImage, sniffImageMime(safeImage)),
-      duration: klingActionDuration(scene.durationS),
+      duration:
+        (snapshot?.providerDuration as '5' | '10' | undefined) ??
+        klingActionDuration(scene.durationS),
     });
     return {
       provider: KLING_ACTION_MODEL,
@@ -265,10 +299,20 @@ export class McTalkingProcessor {
   ): Promise<{ provider: string; providerJobId: string; statusUrl: string; responseUrl: string }> {
     const jobId = randomUUID();
     const spoken = step.type === McStepType.LIPSYNC;
+    const snapshot = (step.inputSnapshot ?? null) as {
+      audioAssetId?: string;
+      providerDuration?: string;
+    } | null;
     let audioPath: string | null = null;
     let durationS = Math.min(15, Math.max(2, scene.durationS || 5));
+    // v2: o clipe de ação mock tem a duração que o PROVIDER entregaria (5/10s),
+    // para que scene_compose e a validação de locução vejam números reais.
+    if (!spoken && snapshot?.providerDuration) durationS = Number(snapshot.providerDuration);
     if (spoken) {
-      const audio = await this.loadAssetBuffer(scene.audioAssetId, 'áudio');
+      const audio = await this.loadAssetBuffer(
+        snapshot?.audioAssetId ?? scene.audioAssetId,
+        'áudio',
+      );
       const dir = await this.ffmpeg.createTempDir('mc-talking-mock-');
       audioPath = path.join(dir, 'voice.mp3');
       await fs.writeFile(audioPath, audio);

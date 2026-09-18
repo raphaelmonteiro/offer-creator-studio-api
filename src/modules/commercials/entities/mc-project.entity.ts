@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { McProjectStatus } from '../domain/mc-state-machines';
 import { McAspectRatio, McProjectOptions, McScript } from '../domain/mc-types';
+import type { McQualityState } from '../domain/mc-quality';
 import { McCharacterKit } from './mc-character-kit.entity';
 
 /**
@@ -38,6 +39,18 @@ export class McProject {
 
   @Column({ type: 'varchar', length: 20, default: McProjectStatus.DRAFT })
   status: McProjectStatus;
+
+  /** Executor congelado por projeto (ADR-001 §5): 1 = legado, 2 = pipeline v2. Nunca muda em andamento. */
+  @Column({ type: 'int', default: 1 })
+  pipelineVersion: number;
+
+  /** Revisão editorial (v2): controle otimista + vínculo da aprovação. Incrementa a cada edição. */
+  @Column({ type: 'int', default: 0 })
+  revision: number;
+
+  /** Estado do pipeline v2 (manifestos, aprovação, orçamentos, timeline) — NULL no legado. */
+  @Column({ type: 'jsonb', nullable: true })
+  quality: McQualityState | null;
 
   @Column({ type: 'text' })
   briefing: string;
