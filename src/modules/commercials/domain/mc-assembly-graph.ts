@@ -103,22 +103,62 @@ export interface SceneSealV2 {
   product: McSealProduct;
   /** Intervalo relativo ao início da cena (default = 2ª metade, definido no roteiro). */
   cue: McSealCue;
+  /** Duração PLANEJADA da cena no roteiro (s) — base em que a deixa foi escrita. */
+  plannedDurationS?: number | null;
+}
+
+/** Um selo precisa ficar legível: mínimo de exibição (s), limitado ao tamanho da cena. */
+export const MC_SEAL_MIN_VISIBLE_S = 1.5;
+
+/**
+ * Janela do selo DENTRO da cena (s relativos), a partir da deixa do roteiro e
+ * da duração MEDIDA do clipe. A deixa é escrita para a duração planejada; o
+ * clipe real pode ser mais curto (Avatar entrega o tamanho da fala — pego em
+ * uso real 24/09: cena de 7 s planejados virou 3,7 s e o selo apareceu por
+ * 0,2 s). Regras: clipe menor que o planejado → deixa escalada
+ * proporcionalmente; sempre pelo menos MC_SEAL_MIN_VISIBLE_S (ou a cena
+ * inteira, se for menor), puxando o início para trás quando preciso.
+ */
+export function resolveSealWindow(
+  cue: McSealCue,
+  measuredS: number,
+  plannedS?: number | null,
+): { startS: number; endS: number } | null {
+  if (!(measuredS > 0)) return null;
+  const planned = plannedS && plannedS > 0 ? plannedS : measuredS;
+  const k = measuredS < planned ? measuredS / planned : 1;
+  let startS = Math.max(0, cue.startS * k);
+  let endS = Math.min(measuredS, Math.max(startS, cue.endS * k));
+  const minVisible = Math.min(MC_SEAL_MIN_VISIBLE_S, measuredS);
+  if (endS - startS < minVisible) {
+    startS = Math.max(0, Math.min(startS, measuredS - minVisible));
+    endS = Math.min(measuredS, startS + minVisible);
+  }
+  if (!(endS > startS)) return null;
+  return { startS: Number(startS.toFixed(3)), endS: Number(endS.toFixed(3)) };
 }
 
 /**
  * Selos do pipeline v2 (ADR §3.6): associação EXPLÍCITA cena → produto, sem
  * rotação; cena sem `productRef` não recebe selo. O intervalo é relativo à
- * cena e clampado à janela real dela no vídeo final.
+ * cena e resolvido contra a janela REAL dela no vídeo final (resolveSealWindow).
  */
 export function buildSealCuesV2(windows: SceneWindowV2[], seals: SceneSealV2[]): TextCue[] {
   const cues: TextCue[] = [];
   for (const seal of seals) {
     const window = windows.find((w) => w.sceneId === seal.sceneId);
     if (!window) continue;
-    const length = window.endS - window.startS;
-    const startS = window.startS + Math.max(0, Math.min(seal.cue.startS, length));
-    const endS = window.startS + Math.max(0, Math.min(seal.cue.endS, length));
-    if (endS > startS) cues.push({ text: formatSealText(seal.product), startS, endS });
+    const resolved = resolveSealWindow(
+      seal.cue,
+      window.endS - window.startS,
+      seal.plannedDurationS,
+    );
+    if (!resolved) continue;
+    cues.push({
+      text: formatSealText(seal.product),
+      startS: window.startS + resolved.startS,
+      endS: window.startS + resolved.endS,
+    });
   }
   return cues;
 }
@@ -350,11 +390,13 @@ export interface DrawTextStyle {
  * largura). Sem isso, "ARROZ TIO JOÃO 5KG — R$ 24,90" a `width/16` estourava a
  * tela e o preço saía cortado — defeito pego no primeiro vídeo multi-cena
  * montado, invisível em teste unitário porque só aparece no pixel.
- * Aproximação de largura: a fonte default do ffmpeg tem avanço médio ≈ 0,52×
- * o corpo; usamos 0,55 para folga.
+ * Aproximação de largura: o selo é MAIÚSCULO, e em DejaVu Sans as caixas-altas
+ * e dígitos avançam ≈ 0,65–0,70× o corpo (não 0,52 das minúsculas). Com 0,55 o
+ * texto "FEIJÃO CARIOCA TIPO 1 — R$ 8,99" estourava a largura e saía cortado
+ * nas bordas (visto em uso real 24/09). 0,68 com 90% de largura útil.
  */
 export const SEAL_SAFE_WIDTH_RATIO = 0.9;
-const AVG_GLYPH_RATIO = 0.55;
+const AVG_GLYPH_RATIO = 0.68;
 
 export function sealStyle(width: number, text?: string): DrawTextStyle {
   const base = Math.round(width / 16);

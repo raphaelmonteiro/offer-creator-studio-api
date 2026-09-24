@@ -236,11 +236,17 @@ export class McAssemblyProcessor {
       const sealsV2: SceneSealV2[] =
         v2 && script
           ? scenes
-              .map((scene) => {
+              .map((scene): SceneSealV2 | null => {
                 const scriptScene = script.scenes.find((x) => x.sceneId === scene.scriptSceneId);
                 const seal = scriptScene ? sceneSeal(script, scriptScene) : null;
                 return seal
-                  ? { sceneId: scene.scriptSceneId as string, product: seal.product, cue: seal.cue }
+                  ? {
+                      sceneId: scene.scriptSceneId as string,
+                      product: seal.product,
+                      cue: seal.cue,
+                      // deixa escrita para a duração do roteiro; o clipe real pode ser menor
+                      plannedDurationS: scriptScene?.durationS ?? scene.durationS,
+                    }
                   : null;
               })
               .filter((x): x is SceneSealV2 => x !== null)

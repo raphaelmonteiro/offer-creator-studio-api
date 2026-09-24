@@ -73,7 +73,8 @@ export const AVATAR_PRESERVATION_SUFFIX =
   'The character speaks to the camera with the mouth moving in sync with the speech, ' +
   'natural friendly gestures, face visible and facing the camera. ' +
   'Keep exactly the same character design, colors, proportions and outfit unchanged throughout. ' +
-  'Static camera, no text or logos on screen.';
+  'Static camera. Absolutely no text anywhere in the frame: no captions, no subtitles, no signs, ' +
+  'no banners, no price tags, no logos (the real product package is the only allowed print).';
 
 /** Prompt do AVATAR (cena falada com ação simples): movimento em INGLÊS + sufixo do Avatar. */
 export function buildAvatarVideoPrompt(actionPromptEn: string): string {

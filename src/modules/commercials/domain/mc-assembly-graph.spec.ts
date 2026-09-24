@@ -15,6 +15,9 @@ import {
   LOUDNORM_FILTER,
   MUSIC_DUCKING_FILTER,
   sealStyle,
+  resolveSealWindow,
+  buildSealCuesV2,
+  MC_SEAL_MIN_VISIBLE_S,
 } from './mc-assembly-graph';
 
 describe('mc-assembly-graph — grafo puro da montagem (plano §5.1 etapa 6 / §5.4)', () => {
@@ -324,5 +327,73 @@ describe('sealStyle — auto-ajuste de fonte (regressão do 1º vídeo multi-cen
 
   it('sem texto (compat) devolve o corpo base', () => {
     expect(style(720).fontSize).toBe(45);
+  });
+});
+
+describe('selos v2 — deixa do roteiro × duração MEDIDA do clipe (bug real 24/09)', () => {
+  it('clipe do tamanho planejado: deixa entra como está', () => {
+    expect(resolveSealWindow({ startS: 3.5, endS: 7 }, 7, 7)).toEqual({ startS: 3.5, endS: 7 });
+  });
+
+  it('clipe mais curto (Avatar = tamanho da fala): deixa escalada e com exibição mínima', () => {
+    // 7 s planejados → 3,7 s medidos: 3,5–7 escalaria para 1,85–3,7 (1,85 s ≥ mínimo)
+    expect(resolveSealWindow({ startS: 3.5, endS: 7 }, 3.7, 7)).toEqual({
+      startS: 1.85,
+      endS: 3.7,
+    });
+    // 6 s planejados → 3,2 s medidos: 3–6 escala para 1,6–3,2 (1,6 s ≥ mínimo)
+    expect(resolveSealWindow({ startS: 3, endS: 6 }, 3.2, 6)).toEqual({ startS: 1.6, endS: 3.2 });
+    // deixa curta demais depois da escala → puxa o início para garantir o mínimo
+    const r = resolveSealWindow({ startS: 5, endS: 6 }, 3, 6)!;
+    expect(r.endS - r.startS).toBeCloseTo(MC_SEAL_MIN_VISIBLE_S, 3);
+    expect(r.endS).toBeLessThanOrEqual(3);
+  });
+
+  it('sem duração planejada: clampa à cena; cena menor que o mínimo mostra a cena inteira', () => {
+    expect(resolveSealWindow({ startS: 3.5, endS: 7 }, 3.7, null)).toEqual({
+      startS: 2.2,
+      endS: 3.7,
+    });
+    expect(resolveSealWindow({ startS: 0.5, endS: 1 }, 1, 1)).toEqual({ startS: 0, endS: 1 });
+    expect(resolveSealWindow({ startS: 1, endS: 2 }, 0, 5)).toBeNull();
+  });
+
+  it('buildSealCuesV2 posiciona no tempo absoluto da cena', () => {
+    const cues = buildSealCuesV2(
+      [
+        {
+          startS: 3.2,
+          endS: 6.9,
+          idx: 1,
+          sceneId: 's2',
+          finalAssetId: 'a',
+          captionsMissing: false,
+        },
+      ],
+      [
+        {
+          sceneId: 's2',
+          product: { name: 'Arroz', price: 'R$ 24,90' },
+          cue: { startS: 3.5, endS: 7 },
+          plannedDurationS: 7,
+        },
+      ],
+    );
+    expect(cues).toHaveLength(1);
+    expect(cues[0].startS).toBeCloseTo(3.2 + 1.85, 2);
+    expect(cues[0].endS).toBeCloseTo(6.9, 2);
+  });
+});
+
+describe('sealStyle — o selo maiúsculo precisa CABER na largura (bug real 24/09)', () => {
+  it('texto longo em 720 px: fonte reduzida até a largura estimada caber em 90% do quadro', () => {
+    const text = 'FEIJÃO CARIOCA TIPO 1 — R$ 8,99';
+    const style = sealStyle(720, text);
+    expect(style.fontSize * text.length * 0.68).toBeLessThanOrEqual(720 * 0.9 + 1);
+    expect(style.fontSize).toBeGreaterThanOrEqual(22);
+  });
+
+  it('texto curto mantém o corpo base (w/16)', () => {
+    expect(sealStyle(720, 'CAFÉ — R$ 9,90').fontSize).toBe(45);
   });
 });
