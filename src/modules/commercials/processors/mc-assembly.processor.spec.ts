@@ -224,7 +224,7 @@ describe('McAssemblyProcessor — montagem multi-cena (plano §5.1 etapa 6)', ()
     expect(runWith(ffmpeg, 'norm-0.mp4')).toBeDefined();
     expect(runWith(ffmpeg, 'norm-1.mp4')).toBeDefined();
     const endcard = runWith(ffmpeg, 'endcard.mp4');
-    expect(endcard?.join(' ')).toContain("drawtext=text='Mercado do Zé'");
+    expect(endcard?.join(' ')).toContain("drawtext=text='Mercado do Zé\u00a0'");
     expect(runWith(ffmpeg, '-f concat')).toBeDefined();
   });
 
@@ -232,7 +232,7 @@ describe('McAssemblyProcessor — montagem multi-cena (plano §5.1 etapa 6)', ()
     await processor.process({ stepId: 'asm-1' });
     const final = runWith(ffmpeg, 'final.mp4')?.join(' ') ?? '';
 
-    expect(final).toContain("text='CAFÉ — R$ 12,90'"); // selo do produto
+    expect(final).toContain("text='CAFÉ — R$ 12,90\u00a0\u00a0\u00a0'"); // selo do produto (NBSP: contorno do drawtext)
     expect(final).toContain('Bem-vindo'); // legenda da cena falada
     expect(final).toContain('sidechaincompress'); // ducking sob a fala
     expect(final).toContain('loudnorm=I=-14');

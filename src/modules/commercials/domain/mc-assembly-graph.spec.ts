@@ -11,6 +11,7 @@ import {
   buildTimedDrawtext,
   ENDCARD_DURATION_S,
   escapeDrawtextText,
+  utf8ExtraBytes,
   formatSealText,
   LOUDNORM_FILTER,
   MUSIC_DUCKING_FILTER,
@@ -24,7 +25,8 @@ describe('mc-assembly-graph — grafo puro da montagem (plano §5.1 etapa 6 / §
   describe('escapeDrawtextText', () => {
     it('escapa os metacaracteres do parser de filtro', () => {
       expect(escapeDrawtextText('Oferta: R$ 9,90')).toBe('Oferta\\: R$ 9,90');
-      expect(escapeDrawtextText("D'Água")).toBe("D\\'Água");
+      // 'Á' = +1 byte UTF-8 → 1 NBSP no fim (contorno do corte do drawtext)
+      expect(escapeDrawtextText("D'Água")).toBe("D\\'Água\u00a0");
       expect(escapeDrawtextText('100%')).toBe('100\\%');
       expect(escapeDrawtextText('a\\b')).toBe('a\\\\b');
     });
@@ -112,7 +114,7 @@ describe('mc-assembly-graph — grafo puro da montagem (plano §5.1 etapa 6 / §
       const joined = args.join(' ');
       expect(joined).toContain(`d=${ENDCARD_DURATION_S}`);
       expect(joined).toContain('color=c=0x1F2430:s=720x1280');
-      expect(joined).toContain("drawtext=text='Mercado do Zé'");
+      expect(joined).toContain("drawtext=text='Mercado do Zé\u00a0'"); // é = +1 byte → 1 NBSP
       expect(joined).toContain('x=(w-text_w)/2:y=(h-text_h)/2');
       expect(joined).toContain('anullsrc=r=48000:cl=stereo');
       // mesmos parâmetros de encode dos clipes normalizados (o concat exige)
@@ -127,7 +129,7 @@ describe('mc-assembly-graph — grafo puro da montagem (plano §5.1 etapa 6 / §
         storeName: "Empório D'Água: o melhor",
         ...assemblyDimensions('16:9'),
       }).join(' ');
-      expect(joined).toContain("text='Empório D\\'Água\\: o melhor'");
+      expect(joined).toContain("text='Empório D\\'Água\\: o melhor\u00a0\u00a0'");
       expect(joined).toContain('s=1280x720');
     });
 
@@ -229,7 +231,7 @@ describe('mc-assembly-graph — grafo puro da montagem (plano §5.1 etapa 6 / §
         sealText: 'selo velho',
         sealCues: [{ text: 'CAFÉ — R$ 12,90', startS: 3, endS: 6 }],
       }).join(' ');
-      expect(joined).toContain("text='CAFÉ — R$ 12,90'");
+      expect(joined).toContain("text='CAFÉ — R$ 12,90\u00a0\u00a0\u00a0'"); // É (+1) e — (+2)
       expect(joined).not.toContain('selo velho');
     });
 
@@ -395,5 +397,20 @@ describe('sealStyle — o selo maiúsculo precisa CABER na largura (bug real 24/
 
   it('texto curto mantém o corpo base (w/16)', () => {
     expect(sealStyle(720, 'CAFÉ — R$ 9,90').fontSize).toBe(45);
+  });
+});
+
+describe('drawtext × UTF-8 (bug real 24/09: glifos cortados no fim)', () => {
+  it('conta bytes extras por caractere não-ASCII', () => {
+    expect(utf8ExtraBytes('R$ 8,99')).toBe(0);
+    expect(utf8ExtraBytes('FEIJÃO CARIOCA TIPO 1 — R$ 8,99')).toBe(3); // Ã (+1) e — (+2)
+    expect(utf8ExtraBytes('só oito e noventa')).toBe(1);
+  });
+
+  it('escape acrescenta um NBSP por byte extra; ASCII puro fica intacto', () => {
+    expect(escapeDrawtextText('FEIJÃO CARIOCA TIPO 1 — R$ 8,99')).toBe(
+      'FEIJÃO CARIOCA TIPO 1 — R$ 8,99\u00a0\u00a0\u00a0',
+    );
+    expect(escapeDrawtextText('e nove o quilo!')).toBe('e nove o quilo!');
   });
 });

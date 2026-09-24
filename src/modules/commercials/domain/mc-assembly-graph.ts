@@ -51,13 +51,27 @@ export function assemblyDimensions(aspectRatio: string | null | undefined): Asse
  * metacaracteres do parser de filtro do ffmpeg: \ : ' % e quebras de linha —
  * um selo "Oferta: R$ 9,90" chega intacto ao vídeo.
  */
+/**
+ * Contorno de bug do drawtext (ffmpeg 6.1.x, medido em 24/09): o filtro corta
+ * do FIM do texto tantos glifos quantos forem os bytes extras de UTF-8
+ * ("—" = +2, "Ã"/"ó" = +1). "FEIJÃO … — R$ 8,99" virava "R$ 8" e a legenda
+ * "só oito e noventa" virava "noven". Espaços comuns no fim são aparados pelo
+ * parser; espaços NÃO separáveis (U+00A0) não são, ficam invisíveis dentro da
+ * caixa e absorvem o corte. Em versões sem o bug o efeito é uma folga mínima
+ * à direita, dentro da caixa.
+ */
+export function utf8ExtraBytes(text: string): number {
+  return Buffer.byteLength(text, 'utf8') - [...text].length;
+}
+
 export function escapeDrawtextText(text: string): string {
-  return text
+  const escaped = text
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
     .replace(/:/g, '\\:')
     .replace(/%/g, '\\%')
     .replace(/\r?\n/g, ' ');
+  return escaped + '\u00a0'.repeat(utf8ExtraBytes(text));
 }
 
 /** Texto do selo determinístico de um produto: "NOME — R$ preço" (plano §5.4). */
