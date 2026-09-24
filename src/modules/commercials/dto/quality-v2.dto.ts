@@ -297,4 +297,8 @@ export class UpdateCompositionDto extends RevisionDto {
   @IsOptional()
   @IsBoolean()
   captionsEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  lowerThirdBlur?: boolean;
 }

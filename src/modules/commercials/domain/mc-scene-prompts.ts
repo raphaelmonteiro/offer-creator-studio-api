@@ -150,6 +150,9 @@ export function buildKeyframePromptV2(input: {
     'No ADDED promotional text, numbers, price tags or watermarks anywhere in the image (the text ' +
       'printed on the real product package stays as it is). Emblems or marks that are part of the ' +
       'approved character design stay as in the references.',
+    'No store signs, posters, banners, hanging boards, shelf price tags or written labels anywhere ' +
+      'in the setting; keep shelf packaging plain and simple (busy text in the background makes the ' +
+      'video generator hallucinate captions).',
   ];
   const desc = input.canonicalDesc;
   if (desc) {

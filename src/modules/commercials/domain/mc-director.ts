@@ -288,6 +288,10 @@ export function buildDirectorSystemPromptV2(opts: {
     '- "initialFrame": o ESTADO INICIAL da imagem em pt-BR (onde está o mascote, objetos, ' +
       'enquadramento) — NUNCA a sequência inteira. Ex.: "Caixa de arroz na prateleira, mão do mascote próxima".',
     '- "actionPrompt": o MOVIMENTO em pt-BR — uma ação contínua e simples. Ex.: "Pega a caixa e apresenta para a câmera".',
+    '- CENA DE PRODUTO: o quadro inicial tem o produto NA PRATELEIRA e o mascote de MÃOS LIVRES; ' +
+      'o movimento é pegar o produto e mostrar para a câmera. Nunca comece com o produto já na mão.',
+    '- FUNDO LIMPO: corredor com prateleiras de embalagens simples, SEM placas, cartazes, banners, ' +
+      'etiquetas de preço ou qualquer texto no cenário (o gerador de vídeo inventa letreiros a partir disso).',
     '- "initialFrameEn" e "actionPromptEn": EXATAMENTE os mesmos textos em inglês, no estilo ' +
       'descritivo usado por geradores de imagem/vídeo.',
     '- CONTINUIDADE: todas as cenas no MESMO cenário, com a mesma iluminação; descreva o cenário no initialFrame.',

@@ -32,6 +32,9 @@ describe('diretor v2 (ADR §3.1/§3.2) — schema, normalização e mock', () =>
     expect(prompt).toMatch(/pode fazer UMA ação simples enquanto fala/);
     expect(prompt).toMatch(/SOMENTE quando o mascote NÃO é o narrador visível/);
     expect(prompt).toMatch(/não deve aparecer falando/);
+    // regra A (24/09): produto começa na prateleira, mãos livres; fundo sem placas/etiquetas
+    expect(prompt).toMatch(/produto NA PRATELEIRA e o mascote de MÃOS LIVRES/);
+    expect(prompt).toMatch(/SEM placas, cartazes, banners/);
     const schema = buildDirectorJsonSchemaV2() as {
       schema: { properties: { scenes: { items: { required: string[] } } } };
     };
@@ -159,6 +162,7 @@ describe('buildKeyframePromptV2 — estado inicial, área livre e identidade (AD
     expect(prompt).toMatch(/LEFT third/);
     expect(prompt).toMatch(/Setting \(shared across scenes/);
     expect(prompt).toMatch(/Emblems or marks that are part of the approved character design stay/);
+    expect(prompt).toMatch(/No store signs, posters, banners/);
     expect(prompt).toMatch(/Permanent traits: round body; store emblem on the chest/);
     expect(prompt).toMatch(/Removable props — include ONLY if/);
     expect(prompt).not.toMatch(/no logos/);

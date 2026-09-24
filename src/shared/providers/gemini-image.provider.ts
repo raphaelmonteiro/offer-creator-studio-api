@@ -6,6 +6,8 @@ import { TerminalProviderError, TransientProviderError, withRetry } from './prov
 /** Modelo primário validado (Nano Banana Pro) e fallback documentado do plano §4. */
 export const GEMINI_IMAGE_MODEL = 'nano-banana-pro-preview';
 export const GEMINI_IMAGE_FALLBACK_MODEL = 'gemini-3-pro-image-preview';
+/** Modelo de VISÃO (imagens → texto) usado na inspeção de clipes. */
+export const GEMINI_VISION_MODEL = 'gemini-3.8-flash';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 /** Geração de imagem com referências leva dezenas de segundos — folga sobre o default de 30s. */
@@ -142,6 +144,70 @@ export class GeminiImageProvider {
   }
 
   /** Parse de candidates[].content.parts[].inlineData — primeira imagem encontrada. */
+  /**
+   * Imagens → TEXTO (inspeção/QA): manda as imagens como inlineData e devolve
+   * o texto concatenado da resposta. Mesma classificação de erro do
+   * generateImage; sem fallback de modelo.
+   */
+  async describeImages(params: {
+    prompt: string;
+    images: Buffer[];
+    model?: string;
+    mimeType?: string;
+  }): Promise<string> {
+    const apiKey = this.config.get<string>('GEMINI_API_KEY');
+    if (!apiKey) {
+      throw new TerminalProviderError('GEMINI_API_KEY não configurada', 'missing_api_key');
+    }
+    const model = params.model ?? GEMINI_VISION_MODEL;
+    const parts: GeminiPart[] = [
+      { text: params.prompt },
+      ...params.images.map((img) => ({
+        inlineData: { mimeType: params.mimeType ?? 'image/jpeg', data: img.toString('base64') },
+      })),
+    ];
+    return withRetry(async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch(`${BASE_URL}/${model}:generateContent`, {
+          method: 'POST',
+          headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts }],
+            generationConfig: { responseModalities: ['TEXT'], temperature: 0 },
+          }),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        throw new TransientProviderError(`Falha de rede: ${(err as Error).message}`);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (response.status === 429 || response.status >= 500) {
+        throw new TransientProviderError(`HTTP ${response.status}`);
+      }
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new TerminalProviderError(
+          `HTTP ${response.status}: ${text.slice(0, 300)}`,
+          response.status === 402 || response.status === 403 ? 'quota' : 'provider_rejected',
+        );
+      }
+      const payload = (await response.json()) as GeminiGenerateContentResponse;
+      const text = (payload.candidates ?? [])
+        .flatMap((c) => c.content?.parts ?? [])
+        .map((p) => p.text ?? '')
+        .join('')
+        .trim();
+      if (!text) {
+        throw new TerminalProviderError('Resposta sem texto', 'invalid_provider_output');
+      }
+      return text;
+    });
+  }
+
   private extractImage(payload: GeminiGenerateContentResponse, model: string): Buffer {
     for (const candidate of payload.candidates ?? []) {
       for (const part of candidate.content?.parts ?? []) {

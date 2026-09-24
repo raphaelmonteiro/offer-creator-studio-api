@@ -91,4 +91,9 @@ export class CreateProjectDto {
   @IsOptional()
   @IsBoolean()
   captionsEnabled?: boolean;
+
+  /** Faixa desfocada no terço inferior (esconde letreiros inventados pelo gerador). */
+  @IsOptional()
+  @IsBoolean()
+  lowerThirdBlur?: boolean;
 }

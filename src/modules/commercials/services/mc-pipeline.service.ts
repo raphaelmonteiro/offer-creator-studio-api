@@ -786,6 +786,9 @@ export class McPipelineService {
           errorClass,
           errorCode: code,
           errorMessage: message,
+          // qualidade (texto inventado): o job antigo do provider é DESCARTADO —
+          // sem isto o submit re-entrante viraria poll do mesmo vídeo reprovado.
+          ...(errorClass === 'quality' ? { providerJobId: null, provider: null } : {}),
         },
       );
       if (!won) return;

@@ -163,6 +163,12 @@ export interface McProjectOptions {
   musicEnabled: boolean;
   /** Legendas queimadas a partir dos timestamps do TTS (plano §5.4). */
   captionsEnabled: boolean;
+  /**
+   * Faixa DESFOCADA no terço inferior, atrás de selo e legendas (24/09): esconde
+   * letreiros que o gerador de vídeo inventa nessa região. Opcional — desfoca
+   * também pernas/pés do mascote nesse trecho.
+   */
+  lowerThirdBlur?: boolean;
   /** Produtos do catálogo que viram selos determinísticos (máx. 6). */
   products: McSealProduct[];
 }
@@ -170,6 +176,7 @@ export interface McProjectOptions {
 export const MC_DEFAULT_PROJECT_OPTIONS: McProjectOptions = {
   musicEnabled: true,
   captionsEnabled: true,
+  lowerThirdBlur: false,
   products: [],
 };
 
@@ -181,6 +188,7 @@ export function resolveProjectOptions(options: Partial<McProjectOptions> | null)
   return {
     musicEnabled: options?.musicEnabled ?? MC_DEFAULT_PROJECT_OPTIONS.musicEnabled,
     captionsEnabled: options?.captionsEnabled ?? MC_DEFAULT_PROJECT_OPTIONS.captionsEnabled,
+    lowerThirdBlur: options?.lowerThirdBlur ?? false,
     products: (options?.products ?? []).slice(0, MC_MAX_SEAL_PRODUCTS),
   };
 }

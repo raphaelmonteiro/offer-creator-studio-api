@@ -1180,7 +1180,8 @@ export class McQualityService {
           (previous.endcard?.storeName ?? null) !== (script.endcard?.storeName ?? null),
       }) &&
       dto.musicEnabled === undefined &&
-      dto.captionsEnabled === undefined
+      dto.captionsEnabled === undefined &&
+      dto.lowerThirdBlur === undefined
     ) {
       throw new UnprocessableEntityException({
         code: 'NO_COMPOSITION_CHANGE',
@@ -1192,6 +1193,7 @@ export class McQualityService {
       ...options,
       musicEnabled: dto.musicEnabled ?? options.musicEnabled,
       captionsEnabled: dto.captionsEnabled ?? options.captionsEnabled,
+      lowerThirdBlur: dto.lowerThirdBlur ?? options.lowerThirdBlur,
     };
     const nextRevision = project.revision + 1;
     await this.dataSource.transaction(async (manager) => {

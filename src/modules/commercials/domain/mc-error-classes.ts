@@ -16,6 +16,9 @@ import {
  * | provider_timeout  | terminal (teto duro do poll); estorno                               |
  * | quota             | terminal + evento admin_alert (NÃO liga mc_paused automático)       |
  * | internal          | retry 1×; depois terminal SEM estorno automático (reconciliação)    |
+ * | quality           | clipe reprovado na inspeção (texto inventado): NOVA geração no      |
+ * |                   | provider até 3 execuções; esgotou → o ingest ACEITA o clipe (nunca  |
+ * |                   | vira terminal — é qualidade, não falha)                             |
  */
 export type McErrorClass =
   | 'transient'
@@ -23,7 +26,8 @@ export type McErrorClass =
   | 'validation'
   | 'provider_timeout'
   | 'quota'
-  | 'internal';
+  | 'internal'
+  | 'quality';
 
 /** Nº MÁXIMO de execuções (1ª tentativa inclusa) antes do failed terminal. */
 export const MC_MAX_EXECUTIONS: Record<McErrorClass, number> = {
@@ -33,7 +37,11 @@ export const MC_MAX_EXECUTIONS: Record<McErrorClass, number> = {
   validation: 1,
   provider_timeout: 1,
   quota: 1,
+  quality: 3, // 1ª geração + 2 regerações automáticas por texto inventado
 };
+
+/** Código do erro que o ingest lança quando a inspeção reprova o clipe. */
+export const MC_CLIP_TEXT_ERROR_CODE = 'clip_text_detected';
 
 /** Backoff dos retries via fila (startAfterSeconds), indexado por nº de execuções já feitas. */
 export const MC_RETRY_BACKOFF_S = [15, 30, 60] as const;
@@ -52,6 +60,7 @@ export function classifyMcError(err: unknown): McErrorClass {
   if (err instanceof TerminalProviderError) {
     if (err.code === 'content_policy') return 'content_policy';
     if (err.code === 'quota') return 'quota';
+    if (err.code === MC_CLIP_TEXT_ERROR_CODE) return 'quality';
     return 'validation';
   }
   return 'internal';

@@ -24,6 +24,8 @@ import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McPipelineService } from '../services/mc-pipeline.service';
 import { McStorageService } from '../services/mc-storage.service';
+import { ClipInspection, McClipInspectorService } from '../services/mc-clip-inspector.service';
+import { MC_CLIP_TEXT_ERROR_CODE } from '../domain/mc-error-classes';
 
 /**
  * Consumer da fila mc.ingest (conc. 2, gate ResourceGuard — plano §6.4):
@@ -50,6 +52,7 @@ export class McIngestProcessor {
     private readonly fal: FalQueueClient,
     private readonly ffmpeg: FfmpegRunner,
     private readonly storage: McStorageService,
+    private readonly inspector: McClipInspectorService,
   ) {}
 
   async process({ stepId, responseUrl }: { stepId: string; responseUrl?: string }): Promise<void> {
@@ -92,6 +95,25 @@ export class McIngestProcessor {
       }
 
       // poster (frame 0) + thumb 320px
+      // Inspeção de qualidade (opção B, 24/09): texto inventado pelo gerador de
+      // vídeo → reprova (classe `quality` = nova geração) até o teto; depois
+      // aceita e registra. Só clipes reais do pipeline v2 (steps com fase).
+      let inspection: ClipInspection | null = null;
+      if (step.provider !== 'mock' && step.phase != null) {
+        inspection = await this.inspector.inspect(videoPath, probe.durationMs ?? 0, tempDir);
+        const decision = McClipInspectorService.decision(inspection, step.attempts);
+        if (decision === 'retry') {
+          throw new TerminalProviderError(
+            `Texto indesejado no clipe (${inspection?.where ?? '?'}): ${inspection?.description}`,
+            MC_CLIP_TEXT_ERROR_CODE,
+          );
+        }
+        if (decision === 'accept') {
+          this.logger.warn(
+            `Ingest ${stepId}: clipe com texto indesejado após ${step.attempts} gerações — aceito: ${inspection?.description}`,
+          );
+        }
+      }
       this.logger.log(`Ingest ${stepId}: probe ok, poster`);
       const posterPath = path.join(tempDir, 'poster.jpg');
       await this.ffmpeg.run(buildPosterArgs(videoPath, posterPath), {
@@ -160,6 +182,15 @@ export class McIngestProcessor {
             generation: scene.generation,
             provider: step.provider,
             providerJobId: step.providerJobId,
+            ...(inspection
+              ? {
+                  inspection: {
+                    ...inspection,
+                    accepted: inspection.flagged,
+                    executions: step.attempts,
+                  },
+                }
+              : {}),
           },
         });
         // Conclui + cena ready (este é o step final da cena falada/muda) +

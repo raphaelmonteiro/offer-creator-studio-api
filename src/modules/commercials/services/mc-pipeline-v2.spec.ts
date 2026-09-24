@@ -7,6 +7,8 @@ import { CommercialsService } from '../commercials.service';
 import { MC_PIPELINE_V2, McQualityState, resolveQuality } from '../domain/mc-quality';
 import { McProjectStatus, McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
+import { MC_CLIP_TEXT_ERROR_CODE } from '../domain/mc-error-classes';
+import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
@@ -37,6 +39,7 @@ describe('McPipelineService — pipeline v2 (gate do worker, retomada, liquidaç
   let manager: Record<string, jest.Mock>;
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
+  let queue: { publish: jest.Mock };
   let credits: { refundUnconsumed: jest.Mock };
   let commercials: { appendEvent: jest.Mock };
   let materializer: { buildPreparationManifest: jest.Mock };
@@ -106,6 +109,7 @@ describe('McPipelineService — pipeline v2 (gate do worker, retomada, liquidaç
     };
     credits = { refundUnconsumed: jest.fn().mockResolvedValue(0) };
     commercials = { appendEvent: jest.fn().mockResolvedValue(undefined) };
+    queue = { publish: jest.fn().mockResolvedValue(undefined) };
     materializer = {
       buildPreparationManifest: jest
         .fn()
@@ -114,7 +118,7 @@ describe('McPipelineService — pipeline v2 (gate do worker, retomada, liquidaç
     service = new McPipelineService(
       dataSource as unknown as DataSource,
       transitions as unknown as TaskTransitionService,
-      { publish: jest.fn().mockResolvedValue(undefined) } as unknown as AnimationQueueService,
+      queue as unknown as AnimationQueueService,
       credits as unknown as CreditsService,
       commercials as unknown as CommercialsService,
       { sendCommercialFinished: jest.fn() } as unknown as EmailService,
@@ -452,6 +456,51 @@ describe('McPipelineService — pipeline v2 (gate do worker, retomada, liquidaç
   });
 
   describe('failStep — retomada por fase (ADR §4.1)', () => {
+    it('reprovação por QUALIDADE (texto inventado) ⇒ failed → queued SEM o job antigo do provider, republicado no submit', async () => {
+      project.status = McProjectStatus.GENERATING;
+      const video = prodStep({
+        status: McStepStatus.INGESTING,
+        attempts: 1,
+        providerJobId: 'job-antigo',
+        provider: 'fal-ai/kling-video/ai-avatar/v2/standard',
+      });
+      steps = [video];
+      await service.failStep(
+        video as unknown as McStep,
+        McStepStatus.INGESTING,
+        new TerminalProviderError('legenda embaralhada', MC_CLIP_TEXT_ERROR_CODE),
+      );
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        expect.anything(),
+        McStep,
+        'st-video',
+        McStepStatus.INGESTING,
+        McStepStatus.FAILED,
+        expect.objectContaining({ errorClass: 'quality', providerJobId: null, provider: null }),
+      );
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        expect.anything(),
+        McStep,
+        'st-video',
+        McStepStatus.FAILED,
+        McStepStatus.QUEUED,
+      );
+      expect(queue.publish).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ stepId: 'st-video' }),
+        expect.objectContaining({ startAfterSeconds: expect.any(Number) }),
+      );
+      // a cena NÃO cai em failed nem o projeto em needs_attention: é retry, não falha terminal
+      expect(transitions.casTransition).not.toHaveBeenCalledWith(
+        expect.anything(),
+        McProject,
+        'p1',
+        McProjectStatus.GENERATING,
+        McProjectStatus.NEEDS_ATTENTION,
+        expect.anything(),
+      );
+    });
+
     it('falha terminal em preparing ⇒ needs_attention com resumePhase=preparation', async () => {
       project.status = McProjectStatus.PREPARING;
       const kf = prodStep({

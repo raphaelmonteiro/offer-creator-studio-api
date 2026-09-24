@@ -282,6 +282,7 @@ export class McAssemblyProcessor {
           sealCues,
           captionCues,
           musicPath,
+          lowerThirdBlur: options.lowerThirdBlur === true,
         }),
         {
           durationMs: concatDurationMs,

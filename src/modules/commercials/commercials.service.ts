@@ -121,6 +121,7 @@ export class CommercialsService {
       const options = resolveProjectOptions({
         musicEnabled: dto.musicEnabled,
         captionsEnabled: dto.captionsEnabled,
+        lowerThirdBlur: dto.lowerThirdBlur,
         // v2: chave estável por produto desde a criação (snapshot do roteiro)
         products:
           pipelineVersion === MC_PIPELINE_V2

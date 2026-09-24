@@ -11,6 +11,7 @@ import { McStep } from '../entities/mc-step.entity';
 import { McPipelineService } from '../services/mc-pipeline.service';
 import { McStorageService } from '../services/mc-storage.service';
 import { McIngestProcessor } from './mc-ingest.processor';
+import { McClipInspectorService } from '../services/mc-clip-inspector.service';
 
 /**
  * A allowlist em si (hosts válidos/inválidos/http) é testada exaustivamente em
@@ -44,6 +45,7 @@ describe('McIngestProcessor — anti-SSRF do download (plano §6.8)', () => {
     finalizeOutput: jest.Mock;
   };
   let fetchSpy: jest.SpyInstance;
+  let inspector: { inspect: jest.Mock };
   let processor: McIngestProcessor;
 
   beforeEach(() => {
@@ -53,6 +55,7 @@ describe('McIngestProcessor — anti-SSRF do download (plano §6.8)', () => {
       completeStepAndAdvance: jest.fn().mockResolvedValue(true),
     };
     fal = { resultVideoUrl: jest.fn() };
+    inspector = { inspect: jest.fn().mockResolvedValue(null) };
     ffmpeg = {
       createTempDir: jest.fn().mockResolvedValue('/tmp/mc-ingest-fake'),
       removeTempDir: jest.fn().mockResolvedValue(undefined),
@@ -84,6 +87,7 @@ describe('McIngestProcessor — anti-SSRF do download (plano §6.8)', () => {
         saveFile: jest.fn(),
         mockJobAbsPath: jest.fn(),
       } as unknown as McStorageService,
+      inspector as unknown as McClipInspectorService,
     );
   });
 

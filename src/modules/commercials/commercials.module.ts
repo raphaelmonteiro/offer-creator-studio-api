@@ -19,6 +19,7 @@ import { McEnabledGuard } from './mc-enabled.guard';
 import { McEventsController } from './mc-events.controller';
 import { McAssemblyProcessor } from './processors/mc-assembly.processor';
 import { McIngestProcessor } from './processors/mc-ingest.processor';
+import { McClipInspectorService } from './services/mc-clip-inspector.service';
 import { McKeyframeProcessor } from './processors/mc-keyframe.processor';
 import { McKitProcessor } from './processors/mc-kit.processor';
 import { McPollProcessor } from './processors/mc-poll.processor';
@@ -85,6 +86,7 @@ import { McVoicesService } from './services/mc-voices.service';
     McAssemblyProcessor,
     McSceneComposeProcessor,
     McReconcilerService,
+    McClipInspectorService,
     McEnabledGuard,
   ],
 })

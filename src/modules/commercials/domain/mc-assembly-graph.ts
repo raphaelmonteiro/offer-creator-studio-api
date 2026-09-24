@@ -466,6 +466,26 @@ export interface FinalizeOptions {
   captionCues?: TextCue[];
   /** Trilha instrumental já baixada; null = sem música (ou music_skipped). */
   musicPath?: string | null;
+  /** Faixa desfocada no terço inferior (opção do projeto, 24/09). */
+  lowerThirdBlur?: boolean;
+}
+
+/** Altura da faixa desfocada (fração da altura), medida no terço onde o gerador inventa letreiros. */
+export const LOWER_THIRD_BLUR_RATIO = 0.3;
+
+/**
+ * Cadeia com rótulos (exige -filter_complex): divide o vídeo, desfoca a faixa
+ * inferior, sobrepõe e escurece de leve — selos/legendas continuam nítidos por
+ * cima. Verificado em 24/09: esconde de fato o texto inventado; escurecer só
+ * não bastava.
+ */
+export function buildLowerThirdBlurChain(): string {
+  const r = LOWER_THIRD_BLUR_RATIO;
+  const top = (1 - r).toFixed(2);
+  return (
+    `split[base][b];[b]crop=iw:ih*${r}:0:ih*${top},boxblur=14:2[bl];` +
+    `[base][bl]overlay=0:H*${top},drawbox=x=0:y=ih*${top}:w=iw:h=ih*${r}:color=black@0.25:t=fill`
+  );
 }
 
 /**
@@ -482,10 +502,13 @@ export function buildFinalizeArgs(opts: FinalizeOptions): string[] {
   const height = opts.height ?? ASSEMBLY_HEIGHT;
   const drawFilters = buildOverlayFilters(opts, width, height);
   const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', opts.input];
+  const blur = opts.lowerThirdBlur ? buildLowerThirdBlurChain() : null;
+  const videoFilters = blur ? [blur, ...drawFilters] : drawFilters;
 
   if (opts.musicPath) {
     args.push('-i', opts.musicPath);
-    const videoChain = drawFilters.length > 0 ? `[0:v]${drawFilters.join(',')}[v]` : '[0:v]null[v]';
+    const videoChain =
+      videoFilters.length > 0 ? `[0:v]${videoFilters.join(',')}[v]` : '[0:v]null[v]';
     const filterComplex = [
       videoChain,
       `[1:a]volume=${MUSIC_BASE_VOLUME},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[music]`,
@@ -507,6 +530,17 @@ export function buildFinalizeArgs(opts: FinalizeOptions): string[] {
       '-crf',
       '20',
     );
+  } else if (blur) {
+    // rótulos ([base]/[bl]) exigem -filter_complex mesmo sem música; áudio segue no -af
+    args.push(
+      '-filter_complex',
+      `[0:v]${videoFilters.join(',')}[v]`,
+      '-map',
+      '[v]',
+      '-map',
+      '0:a:0',
+    );
+    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-af', LOUDNORM_FILTER);
   } else if (drawFilters.length > 0) {
     args.push('-vf', drawFilters.join(','), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
     args.push('-af', LOUDNORM_FILTER);

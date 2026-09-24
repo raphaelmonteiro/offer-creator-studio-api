@@ -18,6 +18,8 @@ import {
   sealStyle,
   resolveSealWindow,
   buildSealCuesV2,
+  buildLowerThirdBlurChain,
+  buildFinalizeArgs as buildFinalizeArgsForBlur,
   MC_SEAL_MIN_VISIBLE_S,
 } from './mc-assembly-graph';
 
@@ -412,5 +414,40 @@ describe('drawtext × UTF-8 (bug real 24/09: glifos cortados no fim)', () => {
       'FEIJÃO CARIOCA TIPO 1 — R$ 8,99\u00a0\u00a0\u00a0',
     );
     expect(escapeDrawtextText('e nove o quilo!')).toBe('e nove o quilo!');
+  });
+});
+
+describe('faixa desfocada no terço inferior (opção D, 24/09)', () => {
+  it('sem música: vai por -filter_complex com o desfoque ANTES dos textos e mapeia o áudio original', () => {
+    const args = buildFinalizeArgsForBlur({
+      input: '/c.mp4',
+      output: '/f.mp4',
+      lowerThirdBlur: true,
+      captionCues: [{ text: 'oi', startS: 0, endS: 1 }],
+    });
+    const joined = args.join(' ');
+    expect(joined).toContain('-filter_complex [0:v]' + buildLowerThirdBlurChain());
+    expect(joined).toMatch(
+      /boxblur=14:2\[bl\];\[base\]\[bl\]overlay=0:H\*0\.70,drawbox=.*,drawtext=text='oi'/,
+    );
+    expect(joined).toContain('-map [v] -map 0:a:0');
+    expect(joined).not.toContain('-vf ');
+  });
+
+  it('com música: o desfoque entra na mesma cadeia de vídeo do filter_complex', () => {
+    const joined = buildFinalizeArgsForBlur({
+      input: '/c.mp4',
+      output: '/f.mp4',
+      lowerThirdBlur: true,
+      musicPath: '/m.mp3',
+    }).join(' ');
+    expect(joined).toContain('[0:v]split[base][b];');
+    expect(joined).toContain('sidechaincompress');
+  });
+
+  it('desligado: nada muda (caminho -vf/copy de sempre)', () => {
+    expect(buildFinalizeArgsForBlur({ input: '/c.mp4', output: '/f.mp4' }).join(' ')).toContain(
+      '-c:v copy',
+    );
   });
 });
