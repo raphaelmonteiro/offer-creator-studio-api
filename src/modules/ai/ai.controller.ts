@@ -27,6 +27,7 @@ import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.se
 import { FilenameMetadataRecoveryService } from './metadata/filename-metadata-recovery.service';
 import { OffResolutionService } from './ean/off-resolution.service';
 import { SpreadsheetEanMatchService } from './ean/spreadsheet-ean-match.service';
+import { EanMatchJobService } from './ean/ean-match-job.service';
 import { SocialSectionLayoutService } from './social-section-layout.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { SpellCheckRequestDto } from './dto/spell-check-request.dto';
@@ -63,6 +64,7 @@ export class AiController {
     private readonly filenameRecovery: FilenameMetadataRecoveryService,
     private readonly offResolution: OffResolutionService,
     private readonly spreadsheetEanMatch: SpreadsheetEanMatchService,
+    private readonly eanMatchJobs: EanMatchJobService,
     private readonly configService: ConfigService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
@@ -236,7 +238,7 @@ export class AiController {
   @UseInterceptors(createFileInterceptor('file'))
   @ApiOperation({
     summary:
-      '[Admin] Feature 14 — sobe CSV/XLSX do cliente, casa cada linha com EAN contra a galeria e vincula o EAN no metadata',
+      '[Admin] Feature 14 — mede CSV/XLSX do cliente contra a galeria (dryRun); com dryRun=false cria um job de vínculo EAN',
   })
   async galleryMatchEanFromSpreadsheet(
     @Headers('x-admin-token') adminToken: string | undefined,
@@ -250,6 +252,14 @@ export class AiController {
     }
 
     const dryRun = dryRunQuery !== 'false';
+    // Sem dry-run, o casamento por descrição não grava mais direto (precisão
+    // medida de ~75-80%): vira um job de adjudicação, processado em 2º plano.
+    if (!dryRun) {
+      const job = await this.eanMatchJobs.criarJob(file.buffer, {
+        fileName: file.originalname ?? null,
+      });
+      return { ...job, mensagem: 'Job criado; acompanhe em GET /v1/ai/ean/jobs/:id' };
+    }
     const resultado = await this.spreadsheetEanMatch.processar(file.buffer, { dryRun });
 
     // Por padrão devolve só o resumo — uma planilha grande gera milhares de

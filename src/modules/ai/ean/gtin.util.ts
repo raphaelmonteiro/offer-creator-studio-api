@@ -133,7 +133,7 @@ export function parseFreeTextQuantity(
   if (!text) return null;
 
   const multipack = text.match(
-    /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(kg|g|l|ml|cl|un|und|unidades?|m)\b/,
+    /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(kgr?|grs?|g|lt|l|ml|cl|un|und|unidades?|m)\b/,
   );
   if (multipack) {
     const count = Number(multipack[1]);
@@ -144,7 +144,8 @@ export function parseFreeTextQuantity(
     }
   }
 
-  const single = text.match(/(\d+(?:\.\d+)?)\s*(kg|g|l|ml|cl|un|und|unidades?|m)\b/);
+  // `gr`, `kgr` e `lt` são grafias de ERP ("REQUEIJAO 180GR", "LEITE 1LT").
+  const single = text.match(/(\d+(?:\.\d+)?)\s*(kgr?|grs?|g|lt|l|ml|cl|un|und|unidades?|m)\b/);
   if (single) {
     return scaleUnit(Number(single[1]), single[2]);
   }
@@ -156,10 +157,14 @@ function scaleUnit(value: number, unit: string): { value: number; unit: Canonica
   if (!Number.isFinite(value) || value <= 0) return null;
   switch (unit) {
     case 'kg':
+    case 'kgr':
       return { value: value * 1000, unit: 'g' };
     case 'g':
+    case 'gr':
+    case 'grs':
       return { value, unit: 'g' };
     case 'l':
+    case 'lt':
       return { value: value * 1000, unit: 'ml' };
     case 'cl':
       return { value: value * 10, unit: 'ml' };

@@ -61,6 +61,14 @@ export type EanSource = z.infer<typeof EanSourceSchema>;
 export const EanStatusSchema = z.enum(['resolved', 'review', 'unresolved']);
 export type EanStatus = z.infer<typeof EanStatusSchema>;
 
+/**
+ * Quem confirmou o vínculo EAN↔imagem vindo de planilha de cliente:
+ * `exact` (a imagem já tinha o EAN), `ai-consensus` (juízes concordaram e a
+ * calibração liberou o auto-aceite) ou `human` (fila de revisão).
+ */
+export const EanVerifiedBySchema = z.enum(['exact', 'ai-consensus', 'human']);
+export type EanVerifiedBy = z.infer<typeof EanVerifiedBySchema>;
+
 export const EanCandidateSchema = z.object({
   ean: z.string(),
   source: EanSourceSchema,
@@ -114,6 +122,8 @@ export const ProductMetadataSchema = z.object({
   eanVerifiedAt: z.string().nullable().optional(),
   eanStatus: EanStatusSchema.nullable().optional(),
   eanCandidates: z.array(EanCandidateSchema).optional(),
+  eanVerifiedBy: EanVerifiedBySchema.nullable().optional(),
+  eanJobId: z.string().nullable().optional(),
 });
 export type ProductMetadata = z.infer<typeof ProductMetadataSchema>;
 

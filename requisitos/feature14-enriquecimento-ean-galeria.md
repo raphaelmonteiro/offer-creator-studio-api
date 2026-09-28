@@ -889,6 +889,112 @@ Eu havia registrado "sempre medir em produção antes de extrapolar" depois da F
 extrapolou bem; a precisão não. Cobertura é propriedade do volume, precisão é propriedade da
 **diversidade** — e uma base de arroz e chocolate não representa um sortimento de supermercado.
 
+### Fase 5 medida em produção: planilha do cliente Arcos (2026-09-28)
+
+Dry-run do `Cadastro ativo arcos.csv` (3.105 linhas com EAN válido) contra a galeria de
+produção, reproduzido localmente com o metadata real:
+
+| resultado | linhas |
+|---|---|
+| EAN exato | 63 |
+| casadas por descrição | 425 |
+| ambíguas por margem < 0.2 | 771 |
+| ambíguas por colisão (imagem já tomada por outra linha) | 237 |
+| sem candidata na galeria | 1.609 |
+
+As 425 linhas casadas **não são confiáveis**. Conferência visual de 15 por faixa de score:
+
+| score | linhas | acerto na amostra |
+|---|---|---|
+| ≥ 0.8 | 169 | 15/15 |
+| 0.5–0.8 | 175 | ~12/15 (`RENATA BRIGADEIRO` → "Renata - coco"; `FETTUCCINE` → "parafuso") |
+| < 0.5 | 81 | maioria errada (`BISCOITO TEENS` → "Montevergine - ovo luna") |
+
+A precisão estimada fica em ~75–80%, parecida com a da OFF. Mas esses vínculos entrariam com
+`eanSource: 'erp'`, precedência 80, e sobrescreveriam a OFF. Os 13 "conflitos com a OFF"
+usados para medir os 82,7% de precisão da OFF também dependem dessas casadas. Por isso esse
+número está contaminado pelos erros delas.
+
+**Mudança (openspec `vinculo-ean-planilha-alta-confianca`):** o endpoint
+`match-ean-from-spreadsheet` deixou de gravar casamentos por descrição, mesmo com
+`dryRun=false`. Só o EAN exato é considerado verdade sem verificação. Todo o resto passa a ser
+candidata para adjudicação por juiz multimodal com consenso, calibrada contra um conjunto
+rotulado por humano, com fila de revisão para o resíduo.
+
+### Operação: vínculo EAN por planilha com adjudicação (2026-09-28)
+
+Código em `src/modules/ai/ean/` (`ean-match-*.ts`, `ean-judge`, `ean-reference`,
+`ean-calibration`, `ean-review`). Tela de revisão em `/gallery/ean-review`, visível para
+usuários com `role = 'admin'`.
+
+**Fluxo:**
+
+```
+1. subir planilha ──> job (processa em 2º plano, retomável, teto de custo)
+2. job termina    ──> exatos gravados; o resto em "review" (auto-aceite começa DESLIGADO)
+3. separar amostra de calibração (~200) ──> revisar na tela, às cegas
+4. medir calibração ──> aprovado se precisão ≥ 99,5% e limite inferior (Wilson) ≥ 98%
+5. aprovado? reavaliar o job ──> grava o que só esperava calibração
+6. revisar o resíduo na tela
+```
+
+**Comandos** (na VM, como `raphael`, em `/opt/encarte/backend`):
+
+```bash
+T=$(grep -m1 '^ADMIN_API_TOKEN=' .env | cut -d= -f2- | tr -d '[:space:]')
+API=http://127.0.0.1:3001/v1/ai/ean
+
+# 1. cria o job (costCapUsd = teto de gasto de IA; padrão EAN_JOB_COST_CAP_USD=50)
+curl -s -X POST -H "x-admin-token: $T" -F "file=@/tmp/cadastro.csv" "$API/jobs?costCapUsd=60"
+
+# progresso, itens, pausa/retomada
+curl -s -H "x-admin-token: $T" "$API/jobs/<jobId>"
+curl -s -H "x-admin-token: $T" "$API/jobs/<jobId>/items?status=review&limit=50"
+curl -s -X POST -H "x-admin-token: $T" "$API/jobs/<jobId>/pause"
+curl -s -X POST -H "x-admin-token: $T" "$API/jobs/<jobId>/resume?costCapUsd=80"
+
+# 3-5. calibração
+curl -s -X POST -H "x-admin-token: $T" "$API/jobs/<jobId>/calibration-sample?size=200"
+curl -s -X POST -H "x-admin-token: $T" "$API/calibration/evaluate"
+curl -s -H "x-admin-token: $T" "$API/calibration"
+curl -s -X POST -H "x-admin-token: $T" "$API/jobs/<jobId>/reevaluate"
+
+# desfazer tudo que o job gravou
+curl -s -X POST -H "x-admin-token: $T" "$API/jobs/<jobId>/revert"
+```
+
+A tela `/gallery/ean-review` faz os mesmos passos 1, 3, 4 e 5, com JWT de admin.
+
+**Variáveis** (todas opcionais):
+
+| variável | padrão | efeito |
+|---|---|---|
+| `EAN_JOB_RUNNER_ENABLED` | `true` | liga o processamento em 2º plano |
+| `EAN_JOB_CONCURRENCY` | `4` | itens em paralelo por job |
+| `EAN_JOB_COST_CAP_USD` | `50` | teto padrão de gasto por job (pausa ao atingir) |
+| `EAN_JUDGE_MODEL_A` / `_B` | `OPENAI_TEXT_MODEL` | modelos dos dois juízes |
+| `EAN_JUDGE_MAX_RETRIES` | `1` | novas tentativas quando a saída é inválida |
+| `EAN_WEB_REFERENCE_ENABLED` | `true` | busca web da descrição oficial do EAN |
+| `EAN_WEB_REFERENCE_MODEL` | `OPENAI_FAST_TEXT_MODEL` | modelo da busca web |
+| `COSMOS_API_TOKEN` / `COSMOS_DAILY_QUOTA` | — / `200` | liga o Cosmos como fonte de referência |
+
+**Regras que protegem a galeria:** só EAN exato grava sem adjudicação. Auto-aceite exige
+consenso entre os dois juízes, referência oficial, rótulo lido compatível e calibração
+aprovada para a versão atual do juiz (trocar modelo ou prompt desliga). Uma imagem nunca
+recebe dois EANs no mesmo job: a IA perde a disputa para o EAN exato e para o humano. EAN
+`manual` ou de outro ERP diferente vai para revisão. Toda gravação guarda o metadata
+anterior e pode ser revertida por job.
+
+**Piloto local (30 linhas: ambíguas + casadas de score baixo + controle):**
+
+- os dois juízes concordaram em 26 de 29 itens;
+- custo médio de US$0,018 por item, com busca web no gpt-4o-mini;
+- o juiz custa ~US$0,011 por item;
+- a busca web com gpt-4o custava US$0,075 por consulta.
+
+O gargalo é a **referência oficial**: só 8 de 29 EANs foram confirmados na web (sem
+`off_products` local). Sem referência não há auto-aceite, e o item vai para revisão.
+
 ### Ordem de implementação
 
 1. Mapa prefixo→marcas a partir do dump (camada 3) — zero custo, maior rejeição isolada

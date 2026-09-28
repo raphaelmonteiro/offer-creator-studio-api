@@ -1,40 +1,5 @@
-import * as XLSX from 'xlsx';
 import { SpreadsheetEanMatchService } from './spreadsheet-ean-match.service';
-
-/**
- * Fixture com as linhas REAIS do arquivo que o cliente enviou
- * ("OFERTA 17 a 20 SETEMBRO FLV"), incluindo o cabeçalho original — que não
- * contém a palavra "descrição" em lugar nenhum. A coluna de produto se chama
- * "FLV 17 A 20 SETEMBRO", e é por isso que a detecção é por conteúdo.
- */
-const LINHAS_REAIS = [
-  ['PLU', 'EAN', 'FLV 17 A 20 SETEMBRO', 'Novo Preço'],
-  ['1', '8372', 'BATATA LAVADA KG TOCANTINS', 'R$ 3,97'],
-  ['5', '01073-3', 'ABOBORA MORANGA interno', 'R$ 3,47'],
-  ['17', '84761-2', '0789894991208-8', 'TOMATE GRAPE RIVELO BDJ'],
-  ['18', '847568', '0789894991201-9', 'MORANGO RIVELO interno BDJ'],
-];
-
-/** Mesmo arquivo, já normalizado em 4 colunas (como virá do ERP). */
-const LINHAS_LIMPAS = [
-  ['PLU', 'EAN', 'FLV 17 A 20 SETEMBRO', 'Novo Preço'],
-  ['1', '8372', 'BATATA LAVADA KG TOCANTINS', 'R$ 3,97'],
-  ['5', '01073-3', 'ABOBORA MORANGA interno', 'R$ 3,47'],
-  ['17', '0789894991208-8', 'TOMATE GRAPE RIVELO BDJ', 'R$ 3,97'],
-  ['18', '0789894991201-9', 'MORANGO RIVELO interno BDJ', 'R$ 10,97'],
-  ['19', '0789666122001-6', 'OVOS JOVANIL 20UN EXTRA BRANCO BDJ', 'R$ 9,97'],
-  ['21', '0789614820048-7', 'ACELGA JAN TEM UN', 'R$ 2,97'],
-  ['25', '0789614820017-3', 'COUVE MANTEIGA JAN TEM', 'R$ 2,97'],
-  ['30', '0789821741061-2', 'MAÇA PCT 850G PCT', 'R$ 5,97'],
-  ['38', '0619151430019-0', 'TAMARA PCT 200 GR', 'R$ 4,97'],
-];
-
-function comoBuffer(linhas: unknown[][]): Buffer {
-  const ws = XLSX.utils.aoa_to_sheet(linhas);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Plan1');
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
-}
+import { comoBuffer, LINHAS_LIMPAS, LINHAS_REAIS } from './ean-test-fixtures';
 
 describe('SpreadsheetEanMatchService', () => {
   const service = new SpreadsheetEanMatchService({} as never, {} as never);
@@ -100,5 +65,37 @@ describe('SpreadsheetEanMatchService', () => {
       const r = service.lerPlanilha(Buffer.from(csv, 'utf8'));
       expect(r.linhas.length).toBe(7);
     });
+  });
+});
+
+describe('SpreadsheetEanMatchService.processar — gravação', () => {
+  const galeria = [
+    {
+      id: 'img-club',
+      filename: 'Club Social - queijo 141g.png',
+      url: '/uploads/club.png',
+      metadata: {
+        title: 'Biscoito Club Social Queijo',
+        quantity: null,
+        alternatives: [{ brand: 'Club Social', variant: 'queijo' }],
+        ean: null,
+        warnings: [],
+      },
+    },
+  ];
+
+  it('casamento por descrição não grava, mesmo com dryRun=false', async () => {
+    const dataSource = { query: jest.fn().mockResolvedValue(galeria) };
+    const embedding = { saveImageMetadata: jest.fn() };
+    const service = new SpreadsheetEanMatchService(dataSource as never, embedding as never);
+
+    const buffer = comoBuffer([
+      ['codigo', 'produto'],
+      ['7622300991333', 'BISCOITO CLUB SOCIAL 141G QUEIJO'],
+    ]);
+    const r = await service.processar(buffer, { dryRun: false });
+
+    expect(r.casadaPorDescricao).toBe(1);
+    expect(embedding.saveImageMetadata).not.toHaveBeenCalled();
   });
 });

@@ -23,10 +23,22 @@ import { FilenameMetadataRecoveryService } from './metadata/filename-metadata-re
 import { OffResolutionService } from './ean/off-resolution.service';
 import { SpreadsheetEanMatchService } from './ean/spreadsheet-ean-match.service';
 import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.service';
+import { SharedModule } from '../../shared/shared.module';
+import { EanMatchAdminController, EanReviewController } from './ean/ean-match.controller';
+import { EanMatchJobService } from './ean/ean-match-job.service';
+import { EanMatchStore } from './ean/ean-match.store';
+import { EAN_ITEM_PROCESSOR, EanMatchRunnerService } from './ean/ean-match-runner.service';
+import { EanItemPipelineService } from './ean/ean-item-pipeline.service';
+import { EanCandidateService } from './ean/ean-candidate.service';
+import { EanReferenceService } from './ean/ean-reference.service';
+import { EanJudgeService } from './ean/ean-judge.service';
+import { EanCalibrationService } from './ean/ean-calibration.service';
+import { EanMatchCommitService } from './ean/ean-match-commit.service';
+import { EanReviewService } from './ean/ean-review.service';
 
 @Module({
-  imports: [UploadsModule, GalleryModule],
-  controllers: [AiController],
+  imports: [UploadsModule, GalleryModule, SharedModule],
+  controllers: [AiController, EanMatchAdminController, EanReviewController],
   providers: [
     AiService,
     OpenAiImageService,
@@ -49,6 +61,18 @@ import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.se
     OffResolutionService,
     SpreadsheetEanMatchService,
     ProductImageMatchV2Service,
+    // Vínculo EAN planilha→galeria (openspec vinculo-ean-planilha-alta-confianca)
+    EanMatchJobService,
+    EanMatchStore,
+    EanMatchRunnerService,
+    EanItemPipelineService,
+    { provide: EAN_ITEM_PROCESSOR, useExisting: EanItemPipelineService },
+    EanCandidateService,
+    EanReferenceService,
+    EanJudgeService,
+    EanCalibrationService,
+    EanMatchCommitService,
+    EanReviewService,
     { provide: 'GalleryEmbeddingService', useExisting: GalleryEmbeddingService },
     { provide: 'ImageMetadataService', useExisting: ImageMetadataService },
   ],

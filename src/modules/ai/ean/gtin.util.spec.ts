@@ -123,6 +123,10 @@ describe('gtin.util', () => {
       ['1,5 L', { value: 1500, unit: 'ml' }],
       ['33 cl', { value: 330, unit: 'ml' }],
       ['12 un', { value: 12, unit: 'un' }],
+      // grafias de ERP (cadastro Arcos)
+      ['REQUEIJAO CREMOSO AVIACAO 180GR COPO', { value: 180, unit: 'g' }],
+      ['LINGUICA TOSCANA 1KGR', { value: 1000, unit: 'g' }],
+      ['LEITE UHT 1LT INTEGRAL', { value: 1000, unit: 'ml' }],
     ])('interpreta "%s"', (raw, expected) => {
       expect(parseFreeTextQuantity(raw)).toEqual(expected);
     });

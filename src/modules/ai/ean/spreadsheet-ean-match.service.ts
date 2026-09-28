@@ -18,8 +18,9 @@ import { normalizeText, overlapScore, variantGate } from './variant-token.util';
  * Feature 14 — Fase 5: casar planilha do cliente com a galeria e VINCULAR o EAN.
  *
  * Entrada: CSV/XLSX do ERP ou do encarte do cliente. Para cada linha que traz
- * um EAN válido, procura na galeria a imagem daquele produto e grava o EAN no
- * `metadata` dela com `eanSource: 'erp'`.
+ * um EAN válido, procura na galeria a imagem daquele produto. Este serviço
+ * MEDE e gera candidatas; a gravação com `eanSource: 'erp'` acontece só depois
+ * da adjudicação (juiz multimodal + consenso ou revisão humana).
  *
  * Precedência: `erp` (80) está acima de `off` (20), então o EAN do cliente
  * sobrescreve o que a Open Food Facts inferiu — e a divergência entre os dois
@@ -31,7 +32,6 @@ import { normalizeText, overlapScore, variantGate } from './variant-token.util';
 
 const MARGIN_MIN = 0.2;
 const CONFIDENCE_EAN_EXACT = 1;
-const CONFIDENCE_DESCRIPTION = 0.85;
 const MIN_OVERLAP = 0.15;
 
 export interface PlanilhaLinha {
@@ -293,7 +293,9 @@ export class SpreadsheetEanMatchService {
   }
 
   /**
-   * Processa a planilha inteira. Com `dryRun`, mede sem gravar.
+   * Mede a planilha inteira contra a galeria. Não grava nada: EAN exato já
+   * está gravado, e casamento por descrição só é gravado via job de
+   * adjudicação. `dryRun` fica na assinatura por compatibilidade do endpoint.
    */
   async processar(
     buffer: Buffer,
@@ -355,21 +357,10 @@ export class SpreadsheetEanMatchService {
       jaVinculada.add(r.imagemId);
       vinculadas += 1;
 
-      if (dryRun) continue;
-
-      const proximo: ProductMetadata = {
-        ...img.metadata,
-        ean: linha.ean,
-        eanSource: 'erp',
-        eanConfidence: CONFIDENCE_DESCRIPTION,
-        eanVerifiedAt: new Date().toISOString(),
-        eanStatus: 'resolved',
-        warnings: [
-          ...(img.metadata.warnings ?? []),
-          `erp-match: linha ${linha.linha} "${linha.descricao.slice(0, 60)}"`,
-        ],
-      };
-      await this.embedding.saveImageMetadata(img.id, proximo);
+      // Casamento por descrição NUNCA grava direto: medido em produção, ~20-25%
+      // das "casadas" apontavam para o produto errado. Elas só contam como
+      // vinculáveis; a gravação passa pela adjudicação
+      // (openspec/changes/vinculo-ean-planilha-alta-confianca).
     }
 
     const conta = (s: LinhaResultado['status']) => resultados.filter((r) => r.status === s).length;
