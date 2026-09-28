@@ -80,8 +80,15 @@ export function decidir(input: {
         a.labelReadout.some((l) => l.imageId === id) &&
         b.labelReadout.some((l) => l.imageId === id),
     );
+    const leiturasConcordam = a.imageIds.every((id) =>
+      leiturasEquivalentes(
+        a.labelReadout.find((l) => l.imageId === id),
+        b.labelReadout.find((l) => l.imageId === id),
+      ),
+    );
     if (
       !todasCobertas ||
+      !leiturasConcordam ||
       !leituras.every((l) => rotuloCompativel(l, input.reference!, input.descricao))
     ) {
       failed.push('label-mismatch');
@@ -123,7 +130,7 @@ export function rotuloCompativel(
     .filter(Boolean);
   if (marcasOficiais.length > 0) {
     if (!marcasOficiais.some((m) => brandsCompatible(m, marcaLida))) return false;
-  } else if (!` ${normalizeBrand(referencia.name)} `.includes(` ${marcaLida} `)) {
+  } else if (!marcaNoTexto(marcaLida, referencia.name ?? '')) {
     return false;
   }
 
@@ -141,6 +148,58 @@ export function rotuloCompativel(
     if (!qtdLida || !quantityMatches(qtdOficial, qtdLida)) return false;
   }
   return true;
+}
+
+/**
+ * Os dois juízes leram a MESMA coisa no rótulo da mesma foto? Concordar na
+ * foto não basta: no piloto, o juiz A "leu" a variante do cadastro ("AÇÃO
+ * TOTAL") num frasco que diz "MULTI INSETICIDA ORIGINAL", e o B leu certo.
+ * Marca compatível, quantidade igual quando os dois leem, e variante com
+ * tokens em comum (ou ausente nas duas leituras).
+ */
+export function leiturasEquivalentes(a?: LabelReadout, b?: LabelReadout): boolean {
+  if (!a || !b) return false;
+  const ma = normalizeBrand(a.brand);
+  const mb = normalizeBrand(b.brand);
+  if (!ma || !mb || !(brandsCompatible(ma, mb) || marcaNoTexto(ma, mb) || marcaNoTexto(mb, ma))) {
+    return false;
+  }
+
+  const qa = parseFreeTextQuantity(a.quantity);
+  const qb = parseFreeTextQuantity(b.quantity);
+  if (qa && qb && !quantityMatches(qa, qb)) return false;
+
+  const va = tokensVariante(a.variant);
+  const vb = tokensVariante(b.variant);
+  if (va.size === 0 && vb.size === 0) return true;
+  if (va.size === 0 || vb.size === 0) return false;
+  let comum = 0;
+  for (const t of va) if (vb.has(t)) comum += 1;
+  // Pelo menos metade dos tokens da leitura mais curta aparece na outra.
+  return comum / Math.min(va.size, vb.size) >= 0.5;
+}
+
+function tokensVariante(v: string | null): Set<string> {
+  return new Set(
+    normalizeBrand(v)
+      .split(' ')
+      .filter((t) => t.length >= 3),
+  );
+}
+
+/**
+ * A marca lida aparece no texto da referência? Referência do cadastro do
+ * cliente não tem campo de marca e às vezes traz só a submarca ("LEITE PO
+ * NINHO" × rótulo "Nestlé Ninho"): basta um token significativo da marca
+ * lida (4+ letras) aparecer como token do texto, ou a marca inteira.
+ */
+export function marcaNoTexto(marcaLida: string, texto: string): boolean {
+  const alvo = ` ${normalizeBrand(texto)} `;
+  if (alvo.includes(` ${marcaLida} `)) return true;
+  return marcaLida
+    .split(' ')
+    .filter((t) => t.length >= 4)
+    .some((t) => alvo.includes(` ${t} `));
 }
 
 function mesmoConjunto(a: string[], b: string[]): boolean {

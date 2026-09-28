@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as sharp from 'sharp';
+import { EAN_JUDGE_PROMPT_VERSION } from '../prompts/ean-judge.prompts';
 import type { EanCandidateRecord } from './ean-match.types';
 import {
   custoDe,
@@ -171,7 +172,7 @@ describe('EanJudgeService', () => {
     const v1 = criar([]).service.version();
     const v2 = criar([], { EAN_JUDGE_MODEL_B: 'gpt-4.1' }).service.version();
     expect(v1).not.toBe(v2);
-    expect(v1).toMatch(/^ean-judge-v1:/);
+    expect(v1.startsWith(`${EAN_JUDGE_PROMPT_VERSION}:`)).toBe(true);
   });
 
   it('interpretar rejeita letra que não foi apresentada', () => {

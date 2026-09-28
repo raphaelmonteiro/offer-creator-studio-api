@@ -974,12 +974,14 @@ A tela `/gallery/ean-review` faz os mesmos passos 1, 3, 4 e 5, com JWT de admin.
 | `EAN_JOB_COST_CAP_USD` | `50` | teto padrão de gasto por job (pausa ao atingir) |
 | `EAN_JUDGE_MODEL_A` / `_B` | `OPENAI_TEXT_MODEL` | modelos dos dois juízes |
 | `EAN_JUDGE_MAX_RETRIES` | `1` | novas tentativas quando a saída é inválida |
-| `EAN_WEB_REFERENCE_ENABLED` | `true` | busca web da descrição oficial do EAN |
-| `EAN_WEB_REFERENCE_MODEL` | `OPENAI_FAST_TEXT_MODEL` | modelo da busca web |
-| `COSMOS_API_TOKEN` / `COSMOS_DAILY_QUOTA` | — / `200` | liga o Cosmos como fonte de referência |
+
+**Referência do EAN, sem API externa (decisão de 2026-09-28):** a referência é a descrição do
+próprio cadastro do cliente. Quando `off_products` (local) conhece o EAN, entram também o nome
+completo, a marca, a quantidade e a foto. Não há consulta ao Cosmos nem busca web: a versão
+anterior buscava na web, e isso foi removido.
 
 **Regras que protegem a galeria:** só EAN exato grava sem adjudicação. Auto-aceite exige
-consenso entre os dois juízes, referência oficial, rótulo lido compatível e calibração
+consenso entre os dois juízes, rótulo lido compatível com a referência e calibração
 aprovada para a versão atual do juiz (trocar modelo ou prompt desliga). Uma imagem nunca
 recebe dois EANs no mesmo job: a IA perde a disputa para o EAN exato e para o humano. EAN
 `manual` ou de outro ERP diferente vai para revisão. Toda gravação guarda o metadata
@@ -992,8 +994,9 @@ anterior e pode ser revertida por job.
 - o juiz custa ~US$0,011 por item;
 - a busca web com gpt-4o custava US$0,075 por consulta.
 
-O gargalo é a **referência oficial**: só 8 de 29 EANs foram confirmados na web (sem
-`off_products` local). Sem referência não há auto-aceite, e o item vai para revisão.
+Nessa primeira versão, o gargalo era a referência: a busca web só confirmava 8 de 29 EANs, e
+os outros ficavam inelegíveis. Por decisão do usuário, a referência passou a ser o próprio
+cadastro do cliente, e a busca web e o Cosmos saíram.
 
 ### Ordem de implementação
 

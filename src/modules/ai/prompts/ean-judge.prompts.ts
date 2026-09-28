@@ -12,7 +12,7 @@ import { z } from 'zod';
  * Mudar qualquer texto aqui muda a versão e DESLIGA o auto-aceite até nova
  * calibração. Suba o número ao editar.
  */
-export const EAN_JUDGE_PROMPT_VERSION = 'ean-judge-v1';
+export const EAN_JUDGE_PROMPT_VERSION = 'ean-judge-v3';
 
 export type JudgeVariant = 'A' | 'B';
 
@@ -54,10 +54,10 @@ export const JudgeOutputSchema = z
 export type JudgeOutput = z.infer<typeof JudgeOutputSchema>;
 
 const REGRAS_COMUNS = [
-  'Você confere cadastros de supermercado brasileiro. Uma linha do ERP do cliente traz um',
-  'código EAN e uma descrição abreviada. Você recebe a descrição OFICIAL do produto daquele',
-  'EAN (quando existe), às vezes uma FOTO DE REFERÊNCIA, e fotos candidatas da galeria,',
-  'cada uma identificada por uma letra.',
+  'Você confere cadastros de supermercado brasileiro. Uma linha do cadastro do cliente traz',
+  'um código EAN e a descrição do produto (em geral abreviada, em maiúsculas, como no PDV).',
+  'Às vezes vem também o nome completo do produto numa base pública e uma FOTO DE REFERÊNCIA.',
+  'Você recebe fotos candidatas da galeria, cada uma identificada por uma letra.',
   '',
   'Sua tarefa: dizer qual candidata mostra EXATAMENTE o produto daquele EAN.',
   '',
@@ -75,8 +75,11 @@ const REGRAS_COMUNS = [
   '- "none": nenhuma candidata é o produto. É uma resposta normal e esperada — a galeria',
   '  não tem foto de tudo. Na dúvida entre duas variantes, responda "none".',
   '',
-  'Para cada candidata escolhida, transcreva em "labels" o que está ESCRITO no rótulo:',
-  'marca, variante e quantidade (null se não estiver visível). Não copie da descrição.',
+  'Para cada candidata escolhida, transcreva em "labels" o que está IMPRESSO no rótulo da foto:',
+  'marca, variante e quantidade, com as palavras do rótulo (null se não estiver visível).',
+  'NUNCA copie palavras da descrição do cadastro para "labels": se o rótulo diz "Multi',
+  'Inseticida Original" e o cadastro diz "Ação Total", escreva o que o rótulo diz — e, sendo',
+  'variantes diferentes, a candidata não é o produto.',
   '',
   'Responda SOMENTE com JSON:',
   '{"decision": "match"|"same-sku-multiple"|"none", "images": ["A"], "labels":',
@@ -88,12 +91,12 @@ export function buildEanJudgeSystemPrompt(variant: JudgeVariant): string {
     variant === 'A'
       ? [
           '',
-          'Método: compare cada candidata com a referência e escolha a que coincide nos três',
+          'Método: compare cada candidata com a descrição e escolha a que coincide nos três',
           'critérios.',
         ]
       : [
           '',
-          'Método: PRIMEIRO elimine toda candidata que diverge da referência em marca, variante',
+          'Método: PRIMEIRO elimine toda candidata que diverge da descrição em marca, variante',
           'ou quantidade, citando o motivo em "reason". SÓ DEPOIS decida entre as que sobraram;',
           'se nenhuma sobrou, a resposta é "none".',
         ];
@@ -103,21 +106,28 @@ export function buildEanJudgeSystemPrompt(variant: JudgeVariant): string {
 export function buildEanJudgeUserText(input: {
   ean: string;
   descricaoErp: string;
-  referencia: { name: string | null; brand: string | null; quantity: string | null } | null;
+  referencia: {
+    source: string;
+    name: string | null;
+    brand: string | null;
+    quantity: string | null;
+  } | null;
   temFotoReferencia: boolean;
   letras: string[];
 }): string {
-  const ref = input.referencia?.name
-    ? [
-        `Descrição oficial do EAN: ${input.referencia.name}`,
-        input.referencia.brand ? `Marca oficial: ${input.referencia.brand}` : null,
-        input.referencia.quantity ? `Quantidade oficial: ${input.referencia.quantity}` : null,
-      ]
-    : ['Descrição oficial do EAN: (não encontrada — use só a descrição do ERP)'];
+  // Referência do cadastro do cliente = a própria descrição: não repete.
+  const ref =
+    input.referencia?.name && input.referencia.source !== 'erp'
+      ? [
+          `Nome completo na base pública: ${input.referencia.name}`,
+          input.referencia.brand ? `Marca: ${input.referencia.brand}` : null,
+          input.referencia.quantity ? `Quantidade: ${input.referencia.quantity}` : null,
+        ]
+      : [];
 
   return [
     `EAN: ${input.ean}`,
-    `Descrição no ERP do cliente: ${input.descricaoErp}`,
+    `Descrição no cadastro do cliente: ${input.descricaoErp}`,
     ...ref,
     input.temFotoReferencia
       ? 'A primeira imagem é a FOTO DE REFERÊNCIA oficial (não é candidata).'

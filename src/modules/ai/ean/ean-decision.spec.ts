@@ -1,4 +1,4 @@
-import { decidir, rotuloCompativel } from './ean-decision';
+import { decidir, leiturasEquivalentes, rotuloCompativel } from './ean-decision';
 import type { EanReferenceRecord, JudgmentRecord } from './ean-match.types';
 
 const REF: EanReferenceRecord = {
@@ -126,5 +126,121 @@ describe('rotuloCompativel', () => {
         'KETCHUP HEINZ 397G',
       ),
     ).toBe(true);
+  });
+});
+
+describe('referência pelo cadastro do cliente (sem API externa)', () => {
+  const erp = (descricao: string): EanReferenceRecord => ({
+    ean: '7890000000000',
+    source: 'erp',
+    name: descricao,
+    brand: null,
+    quantity: null,
+    imageUrl: null,
+  });
+  const leitura = (brand: string, variant: string | null, quantity: string | null) => ({
+    imageId: 'x',
+    brand,
+    variant,
+    quantity,
+  });
+
+  it.each([
+    // [descrição do cadastro Arcos, marca/variante/quantidade lidas no rótulo, esperado]
+    ['ACUCAR CRISTALCUCAR UNIÃO 1KG', leitura('União', 'Cristal', '1kg'), true],
+    ['BISCOITO CLUB SOCIAL 141G QUEIJO', leitura('Club Social', 'Queijo', '141g'), true],
+    ['LEITE PO NINHO 380G INTEGRAL', leitura('Nestlé Ninho', 'Integral', '380g'), true],
+    ['AMACIANTE CONC YPE 500ML BLUE', leitura('Ypê', 'Blue', '500ml'), true],
+    ['REQUEIJAO CREMOSO AVIACAO 180GR COPO', leitura('Aviação', 'Cremoso', '200g'), false], // gramatura
+    ['REQUEIJAO CREMOSO AVIACAO 180GR COPO', leitura('Aviação', 'Cremoso', null), false], // sem quantidade no rótulo
+    ['KETCHUP HEINZ 397G', leitura('Quero', 'Ketchup', '397g'), false], // outra marca
+    ['BACON AURORA 1KG CUBOS', leitura('Aurora', 'Cubos', '1kg'), true],
+  ])('%s × %o → %s', (descricao, l, esperado) => {
+    expect(rotuloCompativel(l, erp(descricao), descricao)).toBe(esperado);
+  });
+
+  it('referência do cadastro não cai em "sem referência": auto-aceita com consenso', () => {
+    const desc = 'ACUCAR CRISTALCUCAR UNIÃO 1KG';
+    const d = decidir({
+      reference: erp(desc),
+      descricao: desc,
+      calibracaoLiberada: true,
+      judgments: [j('A'), j('B')],
+    });
+    expect(d.status).toBe('auto-accepted');
+  });
+
+  it('"nenhuma" unânime com referência do cadastro → sem imagem', () => {
+    const none = { decision: 'none' as const, imageIds: [], labelReadout: [] };
+    const desc = 'KETCHUP HEINZ 397G';
+    const d = decidir({
+      reference: erp(desc),
+      descricao: desc,
+      calibracaoLiberada: true,
+      judgments: [j('A', none), j('B', none)],
+    });
+    expect(d.status).toBe('no-image');
+  });
+});
+
+describe('leituras dos dois juízes precisam concordar', () => {
+  const desc = 'INSETICIDA AEROSOL MAT INSET 270ML ACAO TOTAL';
+  const ref: EanReferenceRecord = {
+    ean: '7891035000000',
+    source: 'erp',
+    name: desc,
+    brand: null,
+    quantity: null,
+    imageUrl: null,
+  };
+  const ler = (judge: 'A' | 'B', variant: string) =>
+    j(judge, {
+      imageIds: ['mat'],
+      labelReadout: [{ imageId: 'mat', brand: 'MAT INSET', variant, quantity: '270ML' }],
+    });
+
+  it('caso real do piloto: A copiou "ACAO TOTAL" do cadastro, B leu "MULTI INSETICIDA ORIGINAL" → revisão', () => {
+    const d = decidir({
+      reference: ref,
+      descricao: desc,
+      calibracaoLiberada: true,
+      judgments: [ler('A', 'ACAO TOTAL'), ler('B', 'MULTI INSETICIDA ORIGINAL')],
+    });
+    expect(d).toMatchObject({ status: 'review', reviewReason: 'label-mismatch' });
+  });
+
+  it('mesma leitura com grafia diferente → aceita', () => {
+    const d = decidir({
+      reference: ref,
+      descricao: desc,
+      calibracaoLiberada: true,
+      judgments: [ler('A', 'Ação Total'), ler('B', 'ACAO TOTAL')],
+    });
+    expect(d.status).toBe('auto-accepted');
+  });
+
+  it.each([
+    [
+      { brand: 'UAU', variant: 'CLORO ATIVO', quantity: '500ml' },
+      { brand: 'Uau', variant: 'Cloro Ativo', quantity: '500 ml' },
+      true,
+    ],
+    [
+      { brand: 'Nestlé Ninho', variant: 'Integral', quantity: '380g' },
+      { brand: 'Ninho', variant: 'integral', quantity: '380 g' },
+      true,
+    ],
+    [
+      { brand: 'Aviação', variant: null, quantity: '200g' },
+      { brand: 'Aviação', variant: null, quantity: '180g' },
+      false,
+    ],
+    [
+      { brand: 'Aviação', variant: 'com sal', quantity: '200g' },
+      { brand: 'Aviação', variant: null, quantity: '200g' },
+      false,
+    ],
+  ])('%o × %o → %s', (x, y, esperado) => {
+    expect(leiturasEquivalentes({ imageId: 'i', ...x }, { imageId: 'i', ...y })).toBe(esperado);
   });
 });

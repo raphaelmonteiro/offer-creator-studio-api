@@ -98,7 +98,7 @@ export class EanItemPipelineService implements EanItemProcessor {
 
     if (!anterior) {
       // 4) Referência oficial.
-      const ref = await this.referencias.resolver(item.ean);
+      const ref = await this.referencias.resolver(item.ean, item.description);
       reference = ref.reference;
       custo += ref.costUsd;
 
@@ -180,8 +180,8 @@ export class EanItemPipelineService implements EanItemProcessor {
       );
     for (const r of rows) {
       if (r.judgments.some((j) => j.error)) continue;
-      // Julgado sem referência: vale julgar de novo, a referência pode ter
-      // aparecido (cache "none" expirou, Cosmos ligado, busca melhorada).
+      // Julgado sem referência (itens de antes da referência pelo cadastro):
+      // julga de novo.
       if (!r.reference || r.reference.source === 'none') continue;
       const anteriores = r.candidates
         .filter((c) => c.vetoes.length === 0)

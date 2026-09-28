@@ -52,7 +52,11 @@ export interface EanCandidateRecord {
   vetoes: Array<{ reason: VetoReason; detail: string }>;
 }
 
-export type ReferenceSource = 'off' | 'cosmos' | 'web' | 'none';
+/**
+ * `off` = base local `off_products`; `erp` = descrição do cadastro do cliente.
+ * `none` só existe em itens antigos (antes de 2026-09-28 havia Cosmos/busca web).
+ */
+export type ReferenceSource = 'off' | 'erp' | 'none';
 
 export interface EanReferenceRecord {
   ean: string;
