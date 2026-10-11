@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DataSource } from 'typeorm';
 import { toSql } from 'pgvector/utils';
+import { mergeEanBlock, MergeEanOptions } from './metadata/ean-block';
 import { buildEmbeddingText, ProductMetadata } from './metadata/product-metadata.schema';
 
 const EMBEDDING_DIMENSIONS = 1536;
@@ -366,15 +367,33 @@ export class GalleryEmbeddingService implements OnModuleInit {
     );
   }
 
-  async saveImageMetadata(imageId: string, metadata: ProductMetadata): Promise<void> {
-    await this.dataSource.query(
-      `UPDATE gallery_images
-          SET metadata = $1::jsonb,
-              metadata_status = 'ready',
-              metadata_error = NULL
-        WHERE id = $2`,
-      [JSON.stringify(metadata), imageId],
-    );
+  /**
+   * Ponto único de gravação do metadata de uma imagem. O bloco EAN já gravado
+   * é preservado conforme `mergeEanBlock` (precedência de fontes): quem
+   * reescreve o metadata sem trazer EAN próprio nunca apaga o que já existe.
+   * Devolve o metadata efetivamente gravado.
+   */
+  async saveImageMetadata(
+    imageId: string,
+    metadata: ProductMetadata,
+    options: MergeEanOptions = {},
+  ): Promise<ProductMetadata> {
+    return this.dataSource.transaction(async (manager) => {
+      const rows: Array<{ metadata: ProductMetadata | null }> = await manager.query(
+        `SELECT metadata FROM gallery_images WHERE id = $1 FOR UPDATE`,
+        [imageId],
+      );
+      const merged = mergeEanBlock(rows[0]?.metadata ?? null, metadata, options);
+      await manager.query(
+        `UPDATE gallery_images
+            SET metadata = $1::jsonb,
+                metadata_status = 'ready',
+                metadata_error = NULL
+          WHERE id = $2`,
+        [JSON.stringify(merged), imageId],
+      );
+      return merged;
+    });
   }
 
   async updateMetadataEmbedding(imageId: string, embedding: number[]): Promise<void> {

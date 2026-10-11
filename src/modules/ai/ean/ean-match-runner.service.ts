@@ -51,7 +51,10 @@ export class EanMatchRunnerService implements OnModuleInit, OnModuleDestroy {
   ) {
     const c = Number.parseInt(configService.get<string>('EAN_JOB_CONCURRENCY', '4'), 10);
     this.concurrency = Number.isFinite(c) && c > 0 ? Math.min(c, 16) : 4;
-    this.enabled = configService.get<string>('EAN_JOB_RUNNER_ENABLED', 'true') !== 'false';
+    // Desligado por padrão desde 10/10/2026: o pipeline foi substituído pela change
+    // `catalogo-dotcompany-ean` (EAN vem da DotCompany). O código fica para religar
+    // com EAN_JOB_RUNNER_ENABLED=true se for preciso retomar um job antigo.
+    this.enabled = configService.get<string>('EAN_JOB_RUNNER_ENABLED', 'false') === 'true';
   }
 
   onModuleInit(): void {

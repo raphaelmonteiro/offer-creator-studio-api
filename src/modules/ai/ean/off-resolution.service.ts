@@ -401,7 +401,8 @@ export class OffResolutionService {
             `ean-uniqueness: ${ean} disputado por ${group.length} imagens distintas`,
           ],
         };
-        await this.embedding.saveImageMetadata(row.id, next);
+        // Só apaga o EAN se ele ainda for da OFF (nunca um de fonte melhor).
+        await this.embedding.saveImageMetadata(row.id, next, { clearEanSource: 'off' });
         imagesRejected += 1;
       }
 

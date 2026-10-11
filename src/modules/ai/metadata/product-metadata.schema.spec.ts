@@ -1,4 +1,4 @@
-import { ProductMetadataSchema } from './product-metadata.schema';
+import { canOverwriteEan, ProductMetadataSchema } from './product-metadata.schema';
 
 /** Metadata no formato dos 12.815 registros de produção, sem bloco de EAN. */
 const METADATA_ANTIGO = {
@@ -39,5 +39,30 @@ describe('ProductMetadataSchema — proveniência do vínculo de planilha', () =
   it('rejeita um verificador desconhecido', () => {
     const r = ProductMetadataSchema.safeParse({ ...METADATA_ANTIGO, eanVerifiedBy: 'palpite' });
     expect(r.success).toBe(false);
+  });
+});
+
+describe('ProductMetadataSchema — fonte DotCompany', () => {
+  it('aceita EAN vindo da DotCompany, exato ou por âncora', () => {
+    for (const eanVerifiedBy of ['exact', 'anchor'] as const) {
+      const r = ProductMetadataSchema.safeParse({
+        ...METADATA_ANTIGO,
+        ean: '7891000100103',
+        eanSource: 'dotcompany',
+        eanVerifiedBy,
+        eanConfidence: 1,
+      });
+      expect(r.success).toBe(true);
+    }
+  });
+
+  it('dotcompany só perde para revisão manual', () => {
+    expect(canOverwriteEan('dotcompany', 'manual')).toBe(true);
+    expect(canOverwriteEan('dotcompany', 'dotcompany')).toBe(true);
+    for (const menor of ['erp', 'barcode-scan', 'cosmos', 'off'] as const) {
+      expect(canOverwriteEan('dotcompany', menor)).toBe(false);
+      expect(canOverwriteEan(menor, 'dotcompany')).toBe(true);
+    }
+    expect(canOverwriteEan('manual', 'dotcompany')).toBe(false);
   });
 });

@@ -55,18 +55,27 @@ export type MetadataSource = z.infer<typeof SourceSchema>;
  * campos são OPCIONAIS de propósito — os 12.815 registros que já existem em
  * produção não têm esse bloco e não podem ser invalidados por ele.
  */
-export const EanSourceSchema = z.enum(['barcode-scan', 'off', 'cosmos', 'manual', 'erp']);
+export const EanSourceSchema = z.enum([
+  'barcode-scan',
+  'off',
+  'cosmos',
+  'manual',
+  'erp',
+  'dotcompany',
+]);
 export type EanSource = z.infer<typeof EanSourceSchema>;
 
 export const EanStatusSchema = z.enum(['resolved', 'review', 'unresolved']);
 export type EanStatus = z.infer<typeof EanStatusSchema>;
 
 /**
- * Quem confirmou o vínculo EAN↔imagem vindo de planilha de cliente:
- * `exact` (a imagem já tinha o EAN), `ai-consensus` (juízes concordaram e a
- * calibração liberou o auto-aceite) ou `human` (fila de revisão).
+ * Quem confirmou o vínculo EAN↔imagem:
+ * `exact` (a imagem já tinha o EAN, ou veio do catálogo DotCompany por aquele
+ * EAN), `ai-consensus` (juízes concordaram e a calibração liberou o
+ * auto-aceite), `human` (fila de revisão) ou `anchor` (foto da galeria ligada
+ * à foto DotCompany do EAN por imagem + marca + quantidade).
  */
-export const EanVerifiedBySchema = z.enum(['exact', 'ai-consensus', 'human']);
+export const EanVerifiedBySchema = z.enum(['exact', 'ai-consensus', 'human', 'anchor']);
 export type EanVerifiedBy = z.infer<typeof EanVerifiedBySchema>;
 
 export const EanCandidateSchema = z.object({
@@ -83,6 +92,8 @@ export type EanCandidate = z.infer<typeof EanCandidateSchema>;
  */
 export const EAN_SOURCE_PRECEDENCE: Record<EanSource, number> = {
   manual: 100,
+  // Catálogo DotCompany consultado pelo próprio EAN: só a revisão humana vence.
+  dotcompany: 90,
   erp: 80,
   'barcode-scan': 60,
   cosmos: 40,

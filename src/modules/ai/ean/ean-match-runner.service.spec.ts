@@ -177,4 +177,25 @@ describe('EanMatchRunnerService', () => {
     expect(item.reviewReason).toBe('processing-error');
     expect(processor.processar).toHaveBeenCalledTimes(MAX_ATTEMPTS);
   });
+
+  it('vem desligado por padrão (pipeline substituído pela DotCompany)', () => {
+    jest.useFakeTimers();
+    try {
+      const store = new FakeStore();
+      const processor: EanItemProcessor = {
+        processar: jest.fn(),
+        finalizarJob: jest.fn(),
+      };
+      const runner = new EanMatchRunnerService(store as never, processor, {
+        get: (_k: string, def: string) => def,
+      } as never);
+      const tick = jest.spyOn(runner, 'tick');
+      runner.onModuleInit();
+      jest.advanceTimersByTime(60_000);
+      expect(tick).not.toHaveBeenCalled();
+      runner.onModuleDestroy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
