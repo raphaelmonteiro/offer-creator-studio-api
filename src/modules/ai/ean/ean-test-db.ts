@@ -2,6 +2,13 @@ import { DataSource } from 'typeorm';
 import { EanMatchItem } from './entities/ean-match-item.entity';
 import { EanMatchJob } from './entities/ean-match-job.entity';
 import { EanReference } from './entities/ean-reference.entity';
+import { DotcompanyBalance } from './dotcompany/entities/dotcompany-balance.entity';
+import { DotcompanyLookup } from './dotcompany/entities/dotcompany-lookup.entity';
+import { DotcompanyUsageHourly } from './dotcompany/entities/dotcompany-usage-hourly.entity';
+import { EanImportItem } from './dotcompany/entities/ean-import-item.entity';
+import { EanImportJob } from './dotcompany/entities/ean-import-job.entity';
+import { GalleryFolder } from '../../gallery/entities/gallery-folder.entity';
+import { GalleryImage } from '../../gallery/entities/gallery-image.entity';
 
 /**
  * Banco para os testes de integração do vínculo EAN. Só roda com
@@ -19,7 +26,18 @@ export function criarDataSourceDeTeste(): DataSource {
     username: process.env.DB_USERNAME ?? 'stepup_user',
     password: process.env.DB_PASSWORD ?? 'secret123',
     database: process.env.EAN_IT_DB_NAME,
-    entities: [EanMatchJob, EanMatchItem, EanReference],
+    entities: [
+      EanMatchJob,
+      EanMatchItem,
+      EanReference,
+      DotcompanyLookup,
+      EanImportJob,
+      EanImportItem,
+      DotcompanyUsageHourly,
+      DotcompanyBalance,
+      GalleryImage,
+      GalleryFolder,
+    ],
     synchronize: false,
   });
 }

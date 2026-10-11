@@ -52,6 +52,19 @@ ADMIN_API_TOKEN               # gates /ai/gallery/* admin routes (x-admin-token 
 AI_GALLERY_EMBEDDING_ENABLED  # toggles pgvector setup/backfill on boot
 AI_CLIENT_IMAGE_PREF_BOOST    # Feature 12: cosine-distance bonus for a client's
                               # preferred images in product-image matching (default 0.15)
+
+# DotCompany — catálogo de produtos por EAN (src/modules/ai/ean/dotcompany/README.md)
+DOTCOMPANY_API_TOKEN          # dc_live_/dc_test_ (sem token: nada é consultado)
+DOTCOMPANY_BASE_URL           # default https://erp.dotcompany.com.br/api/v1
+DOTCOMPANY_RPM                # janela/min do plano (Free 30, Starter 120, Pro 600)
+DOTCOMPANY_MAX_REQUESTS_HOUR / _DAY, DOTCOMPANY_MAX_CREDITS_HOUR / _DAY
+                              # limites NOSSOS (a DotCompany não limita por hora/dia)
+DOTCOMPANY_RESERVE_CREDITS    # abaixo disso os jobs em lote param; o encarte continua
+DOTCOMPANY_ALERT_CREDITS / DOTCOMPANY_ALERT_EMAIL / DOTCOMPANY_BALANCE_REFRESH_MIN
+EAN_IMPORT_RUNNER_ENABLED / EAN_IMPORT_DEFAULT_CAP_CREDITS
+EAN_FLYER_RESOLVE_ENABLED / EAN_FLYER_RESOLVE_TIMEOUT_MS
+EAN_ANCHOR_LINKER_MODE        # fase 2 (off | measure | write), default off
+EAN_JOB_RUNNER_ENABLED        # pipeline antigo de vínculo EAN por juízes — default false
 ```
 
 ## Architecture
@@ -498,6 +511,10 @@ frontend resends the full conversation history on every call.
 | POST | `/template-layers-generate` | JWT | Generate a layered template |
 | GET | `/gallery/embedding-stats` | `x-admin-token` | Count images with/without embedding |
 | POST | `/gallery/backfill-embeddings` | `x-admin-token` | Backfill missing gallery embeddings |
+| POST | `/product-image-match-v2` | JWT | Busca de imagens do encarte; produto com `ean` é resolvido pelo EAN (galeria → DotCompany) antes do nome |
+| GET/POST | `/dotcompany/usage`, `/dotcompany/usage/refresh` | `x-admin-token` | Saldo e consumo DotCompany (hora/dia/mês), limites e bloqueios |
+| GET | `/dotcompany/lookup/:ean` | `x-admin-token` | Consulta avulsa de 1 EAN (cache primeiro) |
+| POST/GET | `/dotcompany/import-jobs[/:id[/items]]`, `/:id/pause`, `/:id/resume` | `x-admin-token` | Importação do cadastro de um cliente (CSV/XLSX com EAN) para a galeria |
 
 **Services** (`src/modules/ai/`)
 
@@ -531,4 +548,5 @@ frontend resends the full conversation history on every call.
 | OpenAI | spell-check, categorization, assembly plan, template/vision generation, image gen/edit, embeddings | `OPENAI_API_KEY`, `OPENAI_*` |
 | Pixabay | product image search | `PIXABAY_API_KEY` |
 | Replicate | SAM image segmentation | `REPLICATE_API_TOKEN` |
-| SMTP (nodemailer) | email verification / password reset (via `email` module) | `MAIL_*` |
+| SMTP (nodemailer) | email verification / password reset (via `email` module); alertas de consumo DotCompany | `MAIL_*` |
+| DotCompany | produto por EAN (nome, marca, foto) → fotos na galeria com EAN exato; créditos pré-pagos (R$ 0,04 por EAN encontrado) | `DOTCOMPANY_*` |

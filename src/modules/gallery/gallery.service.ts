@@ -28,7 +28,8 @@ interface EmbeddingTrigger {
     folderName?: string | null,
   ) => Promise<boolean>;
   setMetadataStatus?: (imageId: string, status: 'pending' | 'ready' | 'failed') => Promise<void>;
-  saveImageMetadata?: (imageId: string, metadata: unknown) => Promise<void>;
+  /** Devolve o metadata efetivamente gravado (com o bloco EAN preservado). */
+  saveImageMetadata?: (imageId: string, metadata: unknown) => Promise<unknown>;
   embedAndStoreMetadataForImage?: (imageId: string, metadata: unknown) => Promise<boolean>;
 }
 
@@ -149,8 +150,8 @@ export class GalleryService implements OnModuleInit {
           await embedder?.setMetadataStatus?.(image.id, 'failed');
           return;
         }
-        await embedder?.saveImageMetadata?.(image.id, metadata);
-        await embedder?.embedAndStoreMetadataForImage?.(image.id, metadata);
+        const saved = (await embedder?.saveImageMetadata?.(image.id, metadata)) ?? metadata;
+        await embedder?.embedAndStoreMetadataForImage?.(image.id, saved);
       } catch (error) {
         this.logger.warn(
           `Falha ao extrair metadata da imagem ${image.id}: ${(error as Error).message}`,
@@ -301,6 +302,113 @@ export class GalleryService implements OnModuleInit {
     this.triggerEmbedding(saved);
     this.triggerMetadata(saved);
     return saved;
+  }
+
+  /**
+   * Registra uma imagem que já chega com metadata pronto (ex.: foto do
+   * catálogo DotCompany, montada a partir dos dados do catálogo). Diferente de
+   * `registerImage`, NÃO dispara a extração de metadata por visão — só os
+   * embeddings de texto e de metadata que o casamento card→imagem usa.
+   *
+   * Uma foto DotCompany "exata" por EAN é garantida pelo índice único parcial
+   * `UQ_gallery_images_dotcompany_ean`: se já existir, devolve a existente com
+   * `created: false`.
+   */
+  async registerImportedImage(params: {
+    filename: string;
+    url: string;
+    mimeType: string;
+    size: number;
+    metadata: Record<string, unknown> & { ean?: string | null };
+    folderName?: string | null;
+    clientIds?: string[];
+  }): Promise<{ image: GalleryImage; created: boolean }> {
+    const folderId = params.folderName ? await this.ensureFolder(params.folderName) : null;
+
+    const inserted: Array<{ id: string }> = await this.dataSource.query(
+      `INSERT INTO gallery_images
+         (filename, url, "thumbnailUrl", "mimeType", size, "folderId", metadata, metadata_status)
+       VALUES ($1, $2, $2, $3, $4, $5, $6::jsonb, 'ready')
+       ON CONFLICT ((metadata->>'ean'))
+         WHERE metadata->>'eanSource' = 'dotcompany' AND metadata->>'eanVerifiedBy' = 'exact'
+         DO NOTHING
+       RETURNING id`,
+      [
+        params.filename,
+        params.url,
+        params.mimeType,
+        params.size,
+        folderId,
+        JSON.stringify(params.metadata),
+      ],
+    );
+
+    let id = inserted[0]?.id ?? null;
+    const created = Boolean(id);
+    if (!id) {
+      const [existing]: Array<{ id: string }> = await this.dataSource.query(
+        `SELECT id FROM gallery_images
+          WHERE metadata->>'ean' = $1
+            AND metadata->>'eanSource' = 'dotcompany' AND metadata->>'eanVerifiedBy' = 'exact'
+          LIMIT 1`,
+        [params.metadata.ean ?? null],
+      );
+      id = existing?.id ?? null;
+    }
+    if (!id) throw new Error('Falha ao registrar imagem importada na galeria.');
+
+    const image = await this.imagesRepository.findOneOrFail({ where: { id } });
+    if (params.clientIds?.length) {
+      await this.clientPreferredImages.bulkAssign([id], params.clientIds, 'add');
+    }
+    if (created) {
+      this.triggerEmbedding(image);
+      this.triggerMetadataEmbedding(image.id, params.metadata);
+    }
+    return { image, created };
+  }
+
+  /** Marca a imagem como preferida dos clientes (sem tirar marcações existentes). */
+  async ensureClientPreferred(imageId: string, clientIds: string[]): Promise<void> {
+    if (clientIds.length === 0) return;
+    await this.clientPreferredImages.bulkAssign([imageId], clientIds, 'add');
+  }
+
+  private folderLocks = new Map<string, Promise<string>>();
+
+  /** Id da pasta com esse nome, criada se não existir (sem duplicar em chamadas paralelas). */
+  async ensureFolder(name: string): Promise<string> {
+    const pending = this.folderLocks.get(name);
+    if (pending) return pending;
+    const work = (async () => {
+      const found = await this.foldersRepository.findOne({ where: { name } });
+      if (found) return found.id;
+      const saved = await this.foldersRepository.save(
+        this.foldersRepository.create({ name, color: null }),
+      );
+      return saved.id;
+    })();
+    this.folderLocks.set(name, work);
+    try {
+      return await work;
+    } finally {
+      this.folderLocks.delete(name);
+    }
+  }
+
+  private triggerMetadataEmbedding(imageId: string, metadata: unknown): void {
+    void (async () => {
+      try {
+        const embedder = this.moduleRef.get<EmbeddingTrigger>('GalleryEmbeddingService', {
+          strict: false,
+        });
+        await embedder?.embedAndStoreMetadataForImage?.(imageId, metadata);
+      } catch (error) {
+        this.logger.warn(
+          `Falha ao gerar embedding de metadata da imagem ${imageId}: ${(error as Error).message}`,
+        );
+      }
+    })();
   }
 
   async uploadImages(

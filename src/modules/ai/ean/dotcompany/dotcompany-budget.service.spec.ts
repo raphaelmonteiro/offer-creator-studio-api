@@ -1,0 +1,191 @@
+import { DataSource } from 'typeorm';
+import { criarDataSourceDeTeste, EAN_IT_ENABLED } from '../ean-test-db';
+import { DotcompanyBudgetService, spDayStart, spHourStart } from './dotcompany-budget.service';
+
+describe('fuso de consumo (America/Sao_Paulo, UTC-3)', () => {
+  it('hora e dia locais', () => {
+    // 2099-01-02 02:30 UTC = 2099-01-01 23:30 em SP
+    const d = new Date('2099-01-02T02:30:00Z');
+    expect(spHourStart(d).toISOString()).toBe('2099-01-02T02:00:00.000Z');
+    expect(spDayStart(d).toISOString()).toBe('2099-01-01T03:00:00.000Z');
+  });
+});
+
+/**
+ * Controlador de consumo contra Postgres real (contadores por hora e saldo
+ * persistidos). Usa datas em 2099 para não colidir com outros testes:
+ *
+ *   EAN_IT_DB_PORT=5433 EAN_IT_DB_NAME=ean_mig_test npx jest dotcompany-budget
+ */
+const d = EAN_IT_ENABLED ? describe : describe.skip;
+
+d('DotcompanyBudgetService (Postgres real)', () => {
+  let ds: DataSource;
+  const T0 = new Date('2099-03-10T13:05:00Z'); // 10:05 em SP
+
+  beforeAll(async () => {
+    ds = criarDataSourceDeTeste();
+    await ds.initialize();
+  });
+
+  beforeEach(async () => {
+    await ds.query(`DELETE FROM dotcompany_usage_hourly WHERE hour >= '2099-01-01'`);
+    await ds.query(`DELETE FROM dotcompany_balance`);
+  });
+
+  afterAll(async () => {
+    await ds.query(`DELETE FROM dotcompany_usage_hourly WHERE hour >= '2099-01-01'`);
+    await ds.query(`DELETE FROM dotcompany_balance`);
+    await ds.destroy();
+  });
+
+  function criar(env: Record<string, string> = {}, opts: { saldo?: number; token?: boolean } = {}) {
+    const config = { get: (k: string) => env[k] };
+    const client = {
+      isConfigured: () => opts.token ?? true,
+      usage: jest.fn(async () => ({ available: opts.saldo ?? 10_000, lowBalance: false })),
+    };
+    const email = { sendDotcompanyAlert: jest.fn(async (_p: { subject: string }) => undefined) };
+    const svc = new DotcompanyBudgetService(config as never, ds, client as never, email as never);
+    let agora = T0;
+    svc.now = () => agora;
+    return {
+      svc,
+      client,
+      email,
+      setNow: (dt: Date) => {
+        agora = dt;
+      },
+    };
+  }
+
+  it('sem token nega com motivo no_token', async () => {
+    const { svc } = criar({}, { token: false });
+    expect(await svc.acquire({ kind: 'interactive', estimatedCredits: 4 })).toMatchObject({
+      ok: false,
+      reason: 'no_token',
+    });
+  });
+
+  it('janela por minuto: a 31ª chamada no mesmo minuto é adiada para o próximo minuto', async () => {
+    const { svc } = criar({ DOTCOMPANY_MAX_REQUESTS_HOUR: '1000' });
+    for (let i = 0; i < 30; i++) {
+      expect((await svc.acquire({ kind: 'batch', estimatedCredits: 0 })).ok).toBe(true);
+    }
+    const r = await svc.acquire({ kind: 'batch', estimatedCredits: 0 });
+    expect(r).toMatchObject({ ok: false, reason: 'rate_window' });
+    if (!r.ok) expect(r.retryAt?.toISOString()).toBe('2099-03-10T13:06:00.000Z');
+  });
+
+  it('usa o menor teto entre o configurado e o anunciado pela DotCompany', async () => {
+    const { svc } = criar({ DOTCOMPANY_RPM: '600' });
+    await svc.release({ kind: 'batch', rate: { limit: 30, remaining: 29, reset: null } });
+    for (let i = 0; i < 30; i++) await svc.acquire({ kind: 'batch', estimatedCredits: 0 });
+    expect((await svc.acquire({ kind: 'batch', estimatedCredits: 0 })).ok).toBe(false);
+  });
+
+  it('janela zerada nos headers bloqueia até o reset', async () => {
+    const { svc } = criar();
+    const reset = Math.floor(new Date('2099-03-10T13:05:40Z').getTime() / 1000);
+    await svc.release({ kind: 'batch', rate: { limit: 30, remaining: 0, reset } });
+    const r = await svc.acquire({ kind: 'interactive', estimatedCredits: 4 });
+    expect(r).toMatchObject({ ok: false, reason: 'rate_window' });
+    if (!r.ok) expect(r.retryAt?.getTime()).toBe(reset * 1000);
+  });
+
+  it('429 bloqueia pelo Retry-After', async () => {
+    const { svc, setNow } = criar();
+    svc.onRateLimited(30);
+    expect((await svc.acquire({ kind: 'interactive', estimatedCredits: 4 })).ok).toBe(false);
+    setNow(new Date(T0.getTime() + 31_000));
+    expect((await svc.acquire({ kind: 'interactive', estimatedCredits: 4 })).ok).toBe(true);
+  });
+
+  it('limite de créditos por hora: nega até a próxima hora', async () => {
+    const { svc, setNow } = criar({ DOTCOMPANY_MAX_CREDITS_HOUR: '400' });
+    await svc.release({ kind: 'batch', credits: 380, found: 95 });
+    const r = await svc.acquire({ kind: 'batch', estimatedCredits: 40 });
+    expect(r).toMatchObject({ ok: false, reason: 'hour_limit' });
+    if (!r.ok) expect(r.retryAt?.toISOString()).toBe('2099-03-10T14:00:00.000Z');
+
+    setNow(new Date('2099-03-10T14:00:01Z'));
+    expect((await svc.acquire({ kind: 'batch', estimatedCredits: 40 })).ok).toBe(true);
+  });
+
+  it('limite diário de requisições: nega até a meia-noite e avisa uma vez', async () => {
+    const { svc, email } = criar({
+      DOTCOMPANY_MAX_REQUESTS_DAY: '3',
+      DOTCOMPANY_ALERT_EMAIL: 'ops@exemplo.com',
+    });
+    await svc.release({ kind: 'batch', requests: 3 });
+    const r1 = await svc.acquire({ kind: 'interactive', estimatedCredits: 4 });
+    const r2 = await svc.acquire({ kind: 'interactive', estimatedCredits: 4 });
+    expect(r1).toMatchObject({ ok: false, reason: 'day_limit' });
+    if (!r1.ok) expect(r1.retryAt?.toISOString()).toBe('2099-03-11T03:00:00.000Z');
+    expect(r2.ok).toBe(false);
+    await new Promise((res) => setImmediate(res));
+    const alertas = email.sendDotcompanyAlert.mock.calls.filter(([p]) =>
+      p.subject.includes('Limite diário'),
+    );
+    expect(alertas).toHaveLength(1);
+  });
+
+  it('contadores sobrevivem a um restart (novo serviço continua dos 80%)', async () => {
+    const a = criar({ DOTCOMPANY_MAX_CREDITS_HOUR: '1000' });
+    await a.svc.release({ kind: 'batch', credits: 800 });
+    const b = criar({ DOTCOMPANY_MAX_CREDITS_HOUR: '1000' });
+    expect((await b.svc.acquire({ kind: 'batch', estimatedCredits: 200 })).ok).toBe(true);
+    expect(await b.svc.acquire({ kind: 'batch', estimatedCredits: 204 })).toMatchObject({
+      ok: false,
+      reason: 'hour_limit',
+    });
+  });
+
+  it('reserva: o lote para, o encarte continua com o mesmo saldo', async () => {
+    const { svc } = criar({ DOTCOMPANY_RESERVE_CREDITS: '400' }, { saldo: 420 });
+    expect(await svc.acquire({ kind: 'batch', estimatedCredits: 400 })).toMatchObject({
+      ok: false,
+      reason: 'reserve',
+    });
+    expect((await svc.acquire({ kind: 'interactive', estimatedCredits: 400 })).ok).toBe(true);
+  });
+
+  it('402 zera o saldo e nega tudo até a recarga ser conferida', async () => {
+    const { svc, client, setNow } = criar({}, { saldo: 0 });
+    await svc.onNoCredit();
+    await svc.refreshBalance(); // junta-se ao refresh disparado pelo 402
+    expect(await svc.acquire({ kind: 'interactive', estimatedCredits: 4 })).toMatchObject({
+      ok: false,
+      reason: 'no_credit',
+    });
+    client.usage.mockResolvedValue({ available: 3000, lowBalance: false });
+    setNow(new Date(T0.getTime() + 16 * 60_000)); // depois do refresh de 15 min
+    expect((await svc.acquire({ kind: 'batch', estimatedCredits: 400 })).ok).toBe(true);
+  });
+
+  it('desconta o custo do saldo e avisa saldo baixo uma vez só (histerese)', async () => {
+    const { svc, email } = criar(
+      { DOTCOMPANY_ALERT_CREDITS: '1000', DOTCOMPANY_ALERT_EMAIL: 'ops@exemplo.com' },
+      { saldo: 1100 },
+    );
+    await svc.refreshBalance();
+    await svc.release({ kind: 'batch', credits: 200 }); // 900: cruza o limiar
+    await svc.release({ kind: 'batch', credits: 100 }); // 800: continua abaixo
+    const baixos = email.sendDotcompanyAlert.mock.calls.filter(([p]) =>
+      p.subject.includes('baixo'),
+    );
+    expect(baixos).toHaveLength(1);
+    expect((await svc.report()).balance.available).toBe(800);
+  });
+
+  it('relatório traz consumo da hora/dia/mês, limites e estado', async () => {
+    const { svc } = criar();
+    await svc.release({ kind: 'interactive', credits: 8, found: 2, notFound: 1 });
+    const r = await svc.report();
+    expect(r.hour).toMatchObject({ requests: 1, credits: 8, found: 2, notFound: 1 });
+    expect(r.day.credits).toBe(8);
+    expect(r.month.credits).toBe(8);
+    expect(r.state).toBe('ok');
+    expect(r.limits.rpm).toBe(30);
+  });
+});

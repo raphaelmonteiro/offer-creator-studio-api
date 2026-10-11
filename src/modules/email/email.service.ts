@@ -200,4 +200,38 @@ export class EmailService {
 
     return this.transporter.sendMail(mailOptions);
   }
+
+  /**
+   * Alerta operacional do consumo da API DotCompany (saldo baixo, saldo
+   * zerado, limite diário). Quem chama trata a falha de SMTP.
+   */
+  async sendDotcompanyAlert(params: {
+    email: string;
+    subject: string;
+    headline: string;
+    lines: string[];
+  }) {
+    const escape = (v: string) =>
+      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const mailOptions = {
+      from: this.configService.get<string>('MAIL_FROM', '"Encartes" <no-reply@encartes.local>'),
+      to: params.email,
+      subject: params.subject,
+      text: [params.headline, '', ...params.lines].join('\n'),
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"></head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2>${escape(params.headline)}</h2>
+            ${params.lines.map((l) => `<p>${escape(l)}</p>`).join('')}
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    return this.transporter.sendMail(mailOptions);
+  }
 }
