@@ -50,6 +50,8 @@ export interface ProductMatchInputV2 {
   name: string;
   category?: string | null;
   unit?: string | null;
+  /** EAN da lista do encarte (opcional); resolvido antes do nome em `FlyerEanResolutionService`. */
+  ean?: string | null;
 }
 
 export interface ScoredCandidateV2 {
@@ -102,9 +104,25 @@ export class ProductImageMatchV2Service {
     products: ProductMatchInputV2[],
     clientId?: string | null,
   ): Promise<MatchV2Result> {
+    return (await this.matchWithCandidates(products, clientId)).result;
+  }
+
+  /**
+   * Igual a `findBestMatches`, devolvendo também as candidatas pontuadas de
+   * cada produto (para oferecer fotos "parecidas" como opção sem refazer a
+   * busca).
+   */
+  async matchWithCandidates(
+    products: ProductMatchInputV2[],
+    clientId?: string | null,
+  ): Promise<{ result: MatchV2Result; candidates: Map<string, ScoredCandidateV2[]> }> {
+    const byProduct = new Map<string, ScoredCandidateV2[]>();
     const scanned = products.length;
     if (scanned === 0) {
-      return { matches: [], reviewCandidates: [], scanned: 0, matched: 0 };
+      return {
+        result: { matches: [], reviewCandidates: [], scanned: 0, matched: 0 },
+        candidates: byProduct,
+      };
     }
 
     const parsed = await this.nameParser.parseNames(
@@ -119,6 +137,7 @@ export class ProductImageMatchV2Service {
       const metadata = parsed[i];
 
       const candidates = await this.scoreCandidatesForProduct(product, metadata, clientId);
+      byProduct.set(product.id, candidates);
 
       if (this.debugEnabled) {
         this.logProductDebug(product, metadata, candidates);
@@ -164,10 +183,13 @@ export class ProductImageMatchV2Service {
     }
 
     return {
-      matches,
-      reviewCandidates,
-      scanned,
-      matched: matches.length,
+      result: {
+        matches,
+        reviewCandidates,
+        scanned,
+        matched: matches.length,
+      },
+      candidates: byProduct,
     };
   }
 
@@ -242,8 +264,11 @@ export class ProductImageMatchV2Service {
 
     if (row.isClientPreferred) reasons.unshift('preferida do cliente');
 
-    const hasEanAnywhere = Boolean(productMeta?.ean || imageMeta?.ean);
-    const weights = hasEanAnywhere ? WEIGHTS : WEIGHTS_NO_ID;
+    // O EAN só entra na nota quando os DOIS lados têm: com um lado só, o
+    // componente seria sempre zero e derrubaria a nota de toda foto com EAN
+    // (o card quase nunca tem EAN) para baixo do auto-aceite.
+    const hasEanOnBothSides = Boolean(productMeta?.ean && imageMeta?.ean);
+    const weights = hasEanOnBothSides ? WEIGHTS : WEIGHTS_NO_ID;
 
     const score =
       weights.id * idScore +
