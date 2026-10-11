@@ -24,6 +24,7 @@ import { AiService } from './ai.service';
 import { GalleryEmbeddingService } from './gallery-embedding.service';
 import { ImageMetadataService } from './metadata/image-metadata.service';
 import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.service';
+import { FlyerEanResolutionService } from './ean/dotcompany/flyer-ean-resolution.service';
 import { FilenameMetadataRecoveryService } from './metadata/filename-metadata-recovery.service';
 import { OffResolutionService } from './ean/off-resolution.service';
 import { SpreadsheetEanMatchService } from './ean/spreadsheet-ean-match.service';
@@ -67,6 +68,7 @@ export class AiController {
     private readonly eanMatchJobs: EanMatchJobService,
     private readonly configService: ConfigService,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly flyerEanResolution: FlyerEanResolutionService,
   ) {}
 
   private assertAdminToken(token: string | undefined): void {
@@ -151,7 +153,8 @@ export class AiController {
   @ApiResponse({ status: 200, description: 'Matches + reviewCandidates' })
   async productImageMatchV2Handler(@Body() dto: ProductImageMatchRequestDto) {
     try {
-      return await this.productImageMatchV2.findBestMatches(dto.products, dto.clientId);
+      // Produtos com EAN são resolvidos pelo EAN (galeria → DotCompany) antes do nome.
+      return await this.flyerEanResolution.findImages(dto.products, dto.clientId);
     } catch (error) {
       this.logger.error('Erro no matching V2', error);
       return {

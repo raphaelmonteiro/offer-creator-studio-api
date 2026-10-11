@@ -35,10 +35,26 @@ import { EanJudgeService } from './ean/ean-judge.service';
 import { EanCalibrationService } from './ean/ean-calibration.service';
 import { EanMatchCommitService } from './ean/ean-match-commit.service';
 import { EanReviewService } from './ean/ean-review.service';
+import { EmailModule } from '../email/email.module';
+import { DotcompanyAdminController } from './ean/dotcompany/dotcompany-admin.controller';
+import { DotcompanyBudgetService } from './ean/dotcompany/dotcompany-budget.service';
+import { DotcompanyClient } from './ean/dotcompany/dotcompany.client';
+import { DotcompanyLookupService } from './ean/dotcompany/dotcompany-lookup.service';
+import { DotcompanyMetadataBuilder } from './ean/dotcompany/dotcompany-metadata.builder';
+import { DotcompanyPhotoImporter } from './ean/dotcompany/dotcompany-photo.importer';
+import { EanImportJobService } from './ean/dotcompany/ean-import-job.service';
+import { EanImportStore } from './ean/dotcompany/ean-import.store';
+import { EanImportRunner } from './ean/dotcompany/ean-import.runner';
+import { FlyerEanResolutionService } from './ean/dotcompany/flyer-ean-resolution.service';
 
 @Module({
-  imports: [UploadsModule, GalleryModule, SharedModule],
-  controllers: [AiController, EanMatchAdminController, EanReviewController],
+  imports: [UploadsModule, GalleryModule, SharedModule, EmailModule],
+  controllers: [
+    AiController,
+    EanMatchAdminController,
+    EanReviewController,
+    DotcompanyAdminController,
+  ],
   providers: [
     AiService,
     OpenAiImageService,
@@ -73,6 +89,16 @@ import { EanReviewService } from './ean/ean-review.service';
     EanCalibrationService,
     EanMatchCommitService,
     EanReviewService,
+    // Catálogo DotCompany por EAN (openspec catalogo-dotcompany-ean)
+    DotcompanyClient,
+    DotcompanyBudgetService,
+    DotcompanyLookupService,
+    DotcompanyMetadataBuilder,
+    DotcompanyPhotoImporter,
+    EanImportStore,
+    EanImportJobService,
+    EanImportRunner,
+    FlyerEanResolutionService,
     { provide: 'GalleryEmbeddingService', useExisting: GalleryEmbeddingService },
     { provide: 'ImageMetadataService', useExisting: ImageMetadataService },
   ],

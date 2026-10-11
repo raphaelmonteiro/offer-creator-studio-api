@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -30,6 +31,17 @@ export class ProductImageMatchProductDto {
   @IsOptional()
   @IsString()
   unit?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: '7891000100103',
+    description:
+      'EAN/GTIN da lista do encarte. Quando válido, a foto é resolvida pelo EAN antes do nome.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  ean?: string | null;
 }
 
 export class ProductImageMatchRequestDto {

@@ -1,3 +1,6 @@
+// O controller puxa (via resolução por EAN) o importador de fotos → sharp, que não carrega no host.
+jest.mock('sharp', () => jest.fn());
+
 import { AiController } from './ai.controller';
 
 /** Endpoint legado `gallery/match-ean-from-spreadsheet` (openspec vinculo-ean-planilha-alta-confianca). */
@@ -26,6 +29,7 @@ describe('AiController.galleryMatchEanFromSpreadsheet', () => {
       planilha as never,
       jobs as never,
       config as never,
+      vazio,
       vazio,
     );
     return { controller, planilha, jobs };
