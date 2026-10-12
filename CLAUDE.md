@@ -78,6 +78,15 @@ MC_TALK_ENGINE_ECONOMICO / _PREMIUM / _LOGO
 GEMINI_IMAGE_MODEL_REFS       # modelo das referências do kit (default GEMINI_IMAGE_MODEL)
 MC_RENDER_BROWSER             # navegador do render Remotion (só offer_carousel); vazio = formato indisponível
 MC_RENDER_FONT_FILE           # dica só para o preflight (DejaVuSans.ttf fora dos caminhos usuais); o drawtext usa o fontconfig
+MC_CAROUSEL_RENDERER          # mock (default com pipeline mock) | remotion — renderizador do F2
+MC_RENDER_ASSET_BASE_URL      # base absoluta das mídias passadas ao Remotion (default http://127.0.0.1:3001)
+MC_COMPOSITION_VERSION        # versão da composição @chroma/video-templates no hash do render (default 0.1.0)
+MC_VIDEO_TEMPLATES_DIR        # checkout local do pacote de composição (dev, enquanto ele não é dependência)
+MC_KIT_CANDIDATE_COUNT / MC_KIT_STYLE_REFS_DIR
+                              # candidatos por rodada (4–6) e referências de estilo opcionais da mascotização
+MC_MOUTH_GATE_MOCK / MC_LOGO_LOCATOR_MOCK / MC_PRICE_DETECT_MOCK / MC_MOCK_TTS_MAX_S
+                              # comportamento dos mocks de visão e TTS (e2e sem chamadas pagas)
+GC_DRY_RUN                    # GC de /uploads (inclui /uploads/commercials) só loga por padrão
 FAL_API_KEY / ELEVENLABS_API_KEY / GEMINI_API_KEY
                               # pipeline real (vídeo, TTS, imagens)
 FFMPEG_PATH / FFPROBE_PATH    # binários do ffmpeg (worker); o preflight do worker reporta no /v1/health
@@ -499,6 +508,58 @@ and the social media flow on the frontend).
 the `flyers` table: a `flyers` row carries `kind` (`'flyer'` | `'social'`) to discriminate
 print flyers from social art (the `kind` column was added by the `AddKindToFlyers` migration,
 default `'flyer'` for backward compatibility).
+
+---
+
+### commercials (vídeos com personagem)
+
+Módulo de vídeos curtos com um personagem falando ofertas (openspec `video-formatos-personagem`, ADR-001).
+Liga com `MC_ENABLED=true`; consumers só no worker (`WORKER_ONLY=true`, processo PM2 `flyer-media-worker`).
+Executor v2 (`pipelineVersion = 2`) para projetos novos com `MC_PIPELINE_V2=all`; v1 legado é congelado por projeto.
+
+**Formatos** (`mc_projects.format`; os novos são admitidos por `MC_FORMATS`, 422 `FORMAT_NOT_ENABLED`):
+- `scenes` (F3): comercial de cenas geradas (keyframe Gemini → Kling Avatar/ação → montagem 720p).
+- `talking_art` (F1, "arte que fala"): arte estática do Chroma intocada + personagem falando numa janela ou no
+  rosto do logo. Steps: `tts → talk` por fala, depois `compose_ffmpeg → finalize` (1080p).
+- `offer_carousel` (F2, "ofertas em sequência"): 3–6 ofertas em cards animados sincronizados com a fala.
+  Steps: `tts → talk` por fala, depois `render_remotion → finalize`. A composição vive no pacote
+  `@chroma/video-templates` (repo próprio; ainda local em `~/Sites/chroma-video-templates`, não publicado).
+
+**Kit do personagem**: origem `mascot` ou `logo` (logo vira `mascots.kind = 'logo'`), estilo `cartoon_2d |
+3d_render | realistic`, rodadas de candidatos de mascotização (`mc_kit_candidates`), "usar o logo como está"
+(`identityMode = logo_as_is`), gate de boca (visão; `MOUTH_NOT_LEGIBLE`, `MOUTH_GATE_UNDECIDED` +
+`acceptMouthRisk`) e tile com alfa (recorte do rosto ≥ 60%, 1:1–3:4, ≥ 720 px) usado pelos motores de fala.
+
+**Motor de fala** por tier (`economico | premium`) e origem: `MC_TALK_ENGINE_*` (Kling Avatar v2 std/pro,
+OmniHuman 1.5, MiniMax H3 Max Lip Sync para `logo_as_is`), sempre audio-driven com o TTS ElevenLabs; o clipe é
+conformado ao áudio (trim / tpad ≤ 300 ms / `clip_too_short` como qualidade) e o áudio do fornecedor é descartado.
+
+**Rotas** (prefixo `/v1/commercials`, JWT + `McEnabledGuard`):
+
+| Grupo | Rotas |
+|-------|-------|
+| Config | `GET config` (formatos habilitados e render por formato) |
+| Kits | `POST/GET kits`, `GET kits/suggest?clientId=`, `GET kits/:id`, `POST kits/:id/approve`, `POST kits/:id/regenerate-reference`, `PATCH kits/:id/sheet`, `POST kits/:id/sheet/translate`, `GET/POST kits/:id/candidates`, `POST kits/:id/candidates/:cid/choose`, `POST kits/:id/use-as-is`, `POST kits/:id/mouth-variant` |
+| Vozes | `GET voices` (curadas + do próprio usuário), `POST voices/preview` |
+| Arte | `POST art` (PNG/JPEG → asset `video_art` com aspecto inferido), `GET art/:id`, `GET art-sources/:kind/:id/offers` |
+| Projetos | `POST projects`, `POST projects/from-art`, `GET projects[?sourceKind&sourceId]`, `GET projects/:id`, `POST projects/:id/duplicate`, `PATCH projects/:id/script`, `GET projects/:id/quote`, `POST projects/:id/prepare`, `POST projects/:id/approve-production`, `PATCH projects/:id/composition`, `POST projects/:id/approve-assembly`, `POST projects/:id/cancel` |
+| F1 | `POST projects/:id/logo-box/detect`, `PUT projects/:id/logo-box`, `GET projects/:id/window-warnings` |
+| F2 | `PATCH projects/:id/offers/:offerId`, `POST projects/:id/offers/:offerId/refresh` |
+| Admin (JWT + `x-admin-token`) | `POST admin/pause`, `GET admin/costs?month=YYYY-MM` |
+| SSE | `GET events` |
+
+**Convenção de erros**: forma de DTO → 400 pelo pipe global; regra de negócio → 422 `{code, message, details?}`
+(ex.: `SPEECH_SENTENCE_TOO_LONG`, `SPEECH_DURATION_OUT_OF_RANGE`, `SPEECH_OVER_LENGTH`,
+`SPEECH_ALIGNMENT_MISSING`, `RENDER_UNAVAILABLE`, `LOGO_BOX_REQUIRED`, `KIT_TILE_MISSING`); `details.actions`
+lista o que a UI pode oferecer.
+
+**Worker e preflight**: o worker publica no heartbeat o preflight de render por formato (ffmpeg, ffprobe,
+fontes DejaVu; navegador só para `offer_carousel`); `/v1/health` expõe `worker.render.formats`, e a criação de
+projetos F1/F2 recusa com `RENDER_UNAVAILABLE` quando falta requisito do formato.
+
+**e2e mock**: `docs/evidence/mascot-quality/e2e/run-e2e.sh` (raiz do monorepo) roda `e2e-v2.mjs` (cenas),
+`e2e-logo.mjs` (kit de logo), `e2e-f1.mjs` (arte que fala) e `e2e-f2.mjs` (ofertas em sequência) contra a
+stack `docker-compose.e2e.yml`, sem chamadas pagas.
 
 ---
 
