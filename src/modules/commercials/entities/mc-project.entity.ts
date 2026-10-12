@@ -8,7 +8,18 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { McProjectStatus } from '../domain/mc-state-machines';
-import { McAspectRatio, McProjectOptions, McScript } from '../domain/mc-types';
+import {
+  MC_DEFAULT_PROJECT_FORMAT,
+  MC_DEFAULT_PROJECT_TIER,
+  McAspectRatio,
+  McLogoBox,
+  McProjectChannel,
+  McProjectFormat,
+  McProjectOptions,
+  McProjectTier,
+  McScript,
+  McSourceArt,
+} from '../domain/mc-types';
 import type { McQualityState } from '../domain/mc-quality';
 import { McCharacterKit } from './mc-character-kit.entity';
 
@@ -43,6 +54,39 @@ export class McProject {
   /** Executor congelado por projeto (ADR-001 §5): 1 = legado, 2 = pipeline v2. Nunca muda em andamento. */
   @Column({ type: 'int', default: 1 })
   pipelineVersion: number;
+
+  /**
+   * Formato do comercial (change video-formatos-personagem, design D6):
+   * `scenes` (F3, o original) · `talking_art` (F1) · `offer_carousel` (F2).
+   * É o discriminador dos executores novos — `pipelineVersion` continua 2.
+   * Linhas anteriores à migration AddProjectFormat leem `scenes` pelo default.
+   */
+  @Column({ type: 'varchar', length: 20, default: MC_DEFAULT_PROJECT_FORMAT })
+  format: McProjectFormat;
+
+  /** Tier do motor de fala (D2): `economico` | `premium`. No F3 é só rótulo. */
+  @Column({ type: 'varchar', length: 10, default: MC_DEFAULT_PROJECT_TIER })
+  tier: McProjectTier;
+
+  /** Canal de entrega (D13): perfil de encode/limites. NULL = sem perfil específico. */
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  channel: McProjectChannel | null;
+
+  /** Arte de fundo congelada na ponte arte → projeto (D9) — asset da arte rasterizada. F1/F2. */
+  @Column({ type: 'uuid', nullable: true })
+  backgroundArtAssetId: string | null;
+
+  /** Preset de layout da composição (janela do personagem/cards) escolhido na ponte. F1/F2. */
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  layoutPreset: string | null;
+
+  /** Caixa do logo na arte, em frações 0..1 (D9b). NULL = logo não localizado. */
+  @Column({ type: 'jsonb', nullable: true })
+  logoBox: McLogoBox | null;
+
+  /** Origem da arte (D9): `{kind, id, pageIndex, snapshotHash}`. NULL nos projetos sem ponte. */
+  @Column({ type: 'jsonb', nullable: true })
+  sourceArt: McSourceArt | null;
 
   /** Revisão editorial (v2): controle otimista + vínculo da aprovação. Incrementa a cada edição. */
   @Column({ type: 'int', default: 0 })

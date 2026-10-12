@@ -1,4 +1,5 @@
-import { KitCanonicalDesc } from './kit-prompts';
+import { KitCanonicalDesc, userAdjustmentsLine } from './kit-prompts';
+import { McKitSource, McKitStyle, styleBlockLine } from './mc-kit-identity';
 
 /**
  * Prompt do keyframe de cena (plano-comerciais §5.1 etapa 2): ação da cena +
@@ -10,43 +11,80 @@ import { KitCanonicalDesc } from './kit-prompts';
  * A fidelidade visual vem das 2–3 imagens de referência do kit anexadas como
  * inlineData; o texto ancora enquadramento vertical e a regra de nunca
  * renderizar texto/preço (plano §5.4 — selos são camada determinística).
+ *
+ * Change video-formatos-personagem (D5): o estilo fixo do kit (`STYLE_BLOCKS`)
+ * entra nos dois builders de keyframe; `adjustments` deixa de ser alavanca de
+ * estilo; com `source = 'logo'` as marcas do logo são identidade, não "logo
+ * proibido". O estilo entra no hash do keyframe (mc-step-hashes).
  */
+
+/** Identidade do kit que muda o texto do keyframe (ausente = comportamento legado). */
+export interface KeyframeIdentityOptions {
+  style?: McKitStyle | null;
+  source?: McKitSource | null;
+}
+
+/**
+ * Bloco da ficha compartilhado pelos dois builders: com estilo fixo, o estilo
+ * livre da ficha NÃO entra (não disputa com o bloco) e os ajustes do usuário
+ * perdem a "highest priority".
+ */
+function characterSheetLines(
+  desc: KitCanonicalDesc,
+  styleFixed: boolean,
+  propsRule: string,
+  traitsLabel: string,
+): string[] {
+  const lines: string[] = ['', 'Character sheet (keep the character EXACTLY like this):'];
+  if (desc.traits.length > 0) lines.push(`- ${traitsLabel}: ${desc.traits.join('; ')}`);
+  if (desc.colors.length > 0) lines.push(`- Colors: ${desc.colors.join(', ')}`);
+  if (desc.style && !styleFixed) lines.push(`- Style: ${desc.style}`);
+  if (desc.doNots.length > 0) lines.push(`- Never: ${desc.doNots.join('; ')}`);
+  // Acessórios são props da arte original, não identidade: só entram quando
+  // a ação da cena pede, senão o mascote carrega a cesta o comercial inteiro.
+  if ((desc.accessories?.length ?? 0) > 0) {
+    lines.push(
+      `- Removable props — include ONLY if ${propsRule} explicitly asks for them, ` +
+        `otherwise the character's hands are empty: ${desc.accessories!.join(', ')}.`,
+    );
+  }
+  if (desc.adjustments) lines.push(userAdjustmentsLine(desc.adjustments, styleFixed));
+  return lines;
+}
+/**
+ * Enquadramento por aspecto. O texto dos três aspectos históricos é o MESMO de
+ * antes (sem bump de builder version); `4:5` (feed, design D12) ganha o próprio
+ * texto para o caso de um formato novo vir a pedir keyframe — o F3 nunca o recebe.
+ */
+export function orientationForAspect(aspectRatio: string): string {
+  if (aspectRatio === '9:16') return 'Vertical 9:16 composition (portrait, full-height framing)';
+  if (aspectRatio === '4:5') return 'Vertical 4:5 composition (portrait feed framing)';
+  if (aspectRatio === '16:9') return 'Horizontal 16:9 composition';
+  return 'Square 1:1 composition';
+}
+
 export function buildKeyframePrompt(
   actionPrompt: string,
   canonicalDesc: KitCanonicalDesc | null,
   aspectRatio: string,
+  identity: KeyframeIdentityOptions = {},
 ): string {
-  const orientation =
-    aspectRatio === '9:16'
-      ? 'Vertical 9:16 composition (portrait, full-height framing)'
-      : aspectRatio === '16:9'
-        ? 'Horizontal 16:9 composition'
-        : 'Square 1:1 composition';
+  const orientation = orientationForAspect(aspectRatio);
+  const styleLine = styleBlockLine(identity.style);
   const lines: string[] = [
     'Commercial keyframe: the exact same mascot character from the reference images.',
     `Scene: ${actionPrompt}`,
     `${orientation}, clean supermarket/retail setting, vivid commercial lighting.`,
-    'No text, no numbers, no price tags, no logos, no watermark anywhere in the image.',
+    identity.source === 'logo'
+      ? 'No added text, numbers, price tags or watermarks anywhere in the image; the lettering ' +
+        "and marks that belong to the character's own logo design stay as in the references."
+      : 'No text, no numbers, no price tags, no logos, no watermark anywhere in the image.',
+    ...(styleLine ? [styleLine] : []),
   ];
   if (canonicalDesc) {
-    lines.push('', 'Character sheet (keep the character EXACTLY like this):');
-    if (canonicalDesc.traits.length > 0) lines.push(`- Traits: ${canonicalDesc.traits.join('; ')}`);
-    if (canonicalDesc.colors.length > 0) lines.push(`- Colors: ${canonicalDesc.colors.join(', ')}`);
-    if (canonicalDesc.style) lines.push(`- Style: ${canonicalDesc.style}`);
-    if (canonicalDesc.doNots.length > 0) lines.push(`- Never: ${canonicalDesc.doNots.join('; ')}`);
-    // Acessórios são props da arte original, não identidade: só entram quando
-    // a ação da cena pede, senão o mascote carrega a cesta o comercial inteiro.
-    if ((canonicalDesc.accessories?.length ?? 0) > 0) {
-      lines.push(
-        `- Removable props — include ONLY if the scene action above explicitly asks for them, ` +
-          `otherwise the character's hands are empty: ${canonicalDesc.accessories!.join(', ')}.`,
-      );
-    }
-    if (canonicalDesc.adjustments) {
-      lines.push(
-        `- User adjustments (highest priority, follow strictly): ${canonicalDesc.adjustments}`,
-      );
-    }
+    lines.push(
+      ...characterSheetLines(canonicalDesc, !!styleLine, 'the scene action above', 'Traits'),
+    );
   }
   return lines.join('\n');
 }
@@ -112,13 +150,13 @@ export function buildKeyframePromptV2(input: {
   environmentDescription?: string | null;
   /** Nome do produto cuja FOTO REAL está entre as referências (embalagem fiel). */
   productName?: string | null;
+  /** Estilo fixo do kit (bloco `STYLE_BLOCKS`); nulo = kit anterior, prompt inalterado. */
+  style?: McKitStyle | null;
+  /** Origem do kit — informativa aqui: o texto v2 já preserva as marcas do personagem aprovado. */
+  source?: McKitSource | null;
 }): string {
-  const orientation =
-    input.aspectRatio === '9:16'
-      ? 'Vertical 9:16 composition (portrait, full-height framing)'
-      : input.aspectRatio === '16:9'
-        ? 'Horizontal 16:9 composition'
-        : 'Square 1:1 composition';
+  const orientation = orientationForAspect(input.aspectRatio);
+  const styleLine = styleBlockLine(input.style);
   const safeArea =
     input.safeArea === 'left'
       ? 'Keep the LEFT third of the frame free of the character and important objects (graphics overlay).'
@@ -153,23 +191,13 @@ export function buildKeyframePromptV2(input: {
     'No store signs, posters, banners, hanging boards, shelf price tags or written labels anywhere ' +
       'in the setting; keep shelf packaging plain and simple (busy text in the background makes the ' +
       'video generator hallucinate captions).',
+    ...(styleLine ? [styleLine] : []),
   ];
   const desc = input.canonicalDesc;
   if (desc) {
-    lines.push('', 'Character sheet (keep the character EXACTLY like this):');
-    if (desc.traits.length > 0) lines.push(`- Permanent traits: ${desc.traits.join('; ')}`);
-    if (desc.colors.length > 0) lines.push(`- Colors: ${desc.colors.join(', ')}`);
-    if (desc.style) lines.push(`- Style: ${desc.style}`);
-    if (desc.doNots.length > 0) lines.push(`- Never: ${desc.doNots.join('; ')}`);
-    if ((desc.accessories?.length ?? 0) > 0) {
-      lines.push(
-        `- Removable props — include ONLY if the starting frame above explicitly asks for them, ` +
-          `otherwise the character's hands are empty: ${desc.accessories!.join(', ')}.`,
-      );
-    }
-    if (desc.adjustments) {
-      lines.push(`- User adjustments (highest priority, follow strictly): ${desc.adjustments}`);
-    }
+    lines.push(
+      ...characterSheetLines(desc, !!styleLine, 'the starting frame above', 'Permanent traits'),
+    );
   }
   return lines.join('\n');
 }

@@ -152,6 +152,7 @@ export class McMaterializerService {
       dialogue: scene.dialogue,
       durationS: scene.durationS,
       generation: scene.generation,
+      style: kit.style ?? null, // D5: estilo fixo do kit invalida o keyframe
     });
     const steps: McStep[] = [];
 
@@ -382,6 +383,7 @@ export class McMaterializerService {
       keyframeBase: {
         kitId: kit.id,
         kitVersion: kit.version,
+        style: kit.style ?? null, // D5: só entra no hash quando definido
         aspectRatio: project.aspectRatio,
         initialFramePrompt: prompts.initialFrame,
         promptLang: prompts.lang,

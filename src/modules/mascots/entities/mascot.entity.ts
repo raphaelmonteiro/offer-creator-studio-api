@@ -14,6 +14,19 @@ import {
  */
 export type MascotStatus = 'draft' | 'segmenting' | 'needs_review' | 'ready' | 'failed';
 
+/**
+ * Tipo da linha (change video-formatos-personagem, D5): `mascot` é o
+ * personagem enviado pelo usuário; `logo` é o logo da marca registrado como
+ * personagem de origem de um kit, reaproveitando upload, cliente, direitos e
+ * recorte. Linhas anteriores à change são `mascot` (default do banco).
+ */
+export const MASCOT_KINDS = ['mascot', 'logo'] as const;
+export type MascotKind = (typeof MASCOT_KINDS)[number];
+
+export function isMascotKind(value: unknown): value is MascotKind {
+  return typeof value === 'string' && (MASCOT_KINDS as readonly string[]).includes(value);
+}
+
 @Entity('mascots')
 @Index('IDX_mascots_user_status', ['userId', 'status', 'createdAt'])
 export class Mascot {
@@ -25,6 +38,10 @@ export class Mascot {
 
   @Column({ type: 'uuid', nullable: true })
   clientId: string | null;
+
+  /** `mascot` (personagem enviado) ou `logo` (logo da marca como personagem de origem). */
+  @Column({ type: 'varchar', length: 10, default: 'mascot' })
+  kind: MascotKind;
 
   @Column({ type: 'varchar', length: 120 })
   name: string;

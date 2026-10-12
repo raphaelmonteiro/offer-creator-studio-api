@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queue.service';
 import { ResourceGuardService } from '../../shared/resource-guard/resource-guard.service';
 import { SharedModule } from '../../shared/shared.module';
+import { ClientsModule } from '../clients/clients.module';
 import { EmailModule } from '../email/email.module';
 import { MascotsModule } from '../mascots/mascots.module';
 import { CommercialsController } from './commercials.controller';
@@ -11,6 +12,7 @@ import { CommercialsService } from './commercials.service';
 import { MC_QUEUE_CONCURRENCY, parseMcFormats } from './domain/mc-pipeline.config';
 import { McCharacterKit } from './entities/mc-character-kit.entity';
 import { McEvent } from './entities/mc-event.entity';
+import { McKitCandidate } from './entities/mc-kit-candidate.entity';
 import { McProject } from './entities/mc-project.entity';
 import { McScene } from './entities/mc-scene.entity';
 import { McStep } from './entities/mc-step.entity';
@@ -60,10 +62,13 @@ import { McVoicesService } from './services/mc-voices.service';
   imports: [
     SharedModule,
     MascotsModule,
+    // ClientsModule: o kit com origem `logo` lê `clients.logoUrl` via
+    // ClientsService para registrar o logo como personagem de origem (D5).
+    ClientsModule,
     // EmailModule: e-mail de conclusão do comercial (plano §10 v1) — envio
     // NÃO bloqueante, tratado no McPipelineService.
     EmailModule,
-    TypeOrmModule.forFeature([McCharacterKit, McProject, McScene, McStep, McEvent]),
+    TypeOrmModule.forFeature([McCharacterKit, McKitCandidate, McProject, McScene, McStep, McEvent]),
   ],
   controllers: [CommercialsController, McEventsController],
   providers: [

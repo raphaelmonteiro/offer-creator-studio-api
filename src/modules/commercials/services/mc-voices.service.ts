@@ -9,6 +9,7 @@ import { ElevenLabsProvider, ElevenLabsVoice } from '../../../shared/providers/e
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { SystemSettingsService } from '../../../shared/settings/system-settings.service';
 import { VoiceCatalogEntry } from '../../../shared/voice/voice-catalog.entity';
+import { applyVoiceVisibility } from '../../../shared/voice/voice-visibility';
 import { VoicePreviewDto } from '../dto/voice-preview.dto';
 import {
   elevenLabsVoiceSettings,
@@ -103,10 +104,14 @@ export class McVoicesService {
   /**
    * Sincroniza o voice_catalog com a conta ElevenLabs (GET /v1/voices) no boot
    * da API — idempotente e aditivo: insere vozes que faltam, aplica nome/
-   * estilo/ordem da curadoria às curadas, NUNCA apaga linhas nem mexe em
-   * `enabled` (é a chave do admin para tirar uma voz do ar). Kits apontam
-   * para o `id` da linha, que é preservado. Falha de API não derruba o boot —
-   * loga e tenta na próxima subida.
+   * estilo/ordem/`curated` da curadoria às curadas, NUNCA apaga linhas nem
+   * mexe em `enabled` (é a chave do admin para tirar uma voz do ar) nem em
+   * `ownerUserId`. Kits apontam para o `id` da linha, que é preservado. Falha
+   * de API não derruba o boot — loga e tenta na próxima subida.
+   *
+   * `curated` (D10) é PERSISTIDO: só é promovido a true para as vozes da
+   * curadoria; nunca é rebaixado pelo sync, para não desfazer uma promoção
+   * manual do admin em voz fora da lista (Voice Library, clone).
    */
   async syncCatalog(): Promise<void> {
     const repo = this.dataSource.getRepository(VoiceCatalogEntry);
@@ -121,7 +126,7 @@ export class McVoicesService {
       const toSave: Array<Partial<VoiceCatalogEntry>> = [];
       let inserted = 0;
       let updated = 0;
-      for (const { curated, ...row } of this.catalogRows(voices)) {
+      for (const row of this.catalogRows(voices)) {
         const current = byProvider.get(row.providerVoiceId as string);
         if (!current) {
           toSave.push(row);
@@ -129,11 +134,12 @@ export class McVoicesService {
           continue;
         }
         if (
-          curated &&
+          row.curated &&
           (current.name !== row.name ||
             current.style !== row.style ||
             current.gender !== row.gender ||
-            current.sort !== row.sort)
+            current.sort !== row.sort ||
+            current.curated !== true)
         ) {
           toSave.push({
             ...current,
@@ -141,6 +147,7 @@ export class McVoicesService {
             style: row.style,
             gender: row.gender,
             sort: row.sort,
+            curated: true,
           });
           updated += 1;
         }
@@ -156,10 +163,14 @@ export class McVoicesService {
     }
   }
 
-  /** Catálogo curado habilitado — o que a UI de escolha de voz do kit lista. */
-  async list(): Promise<VoiceCatalogEntry[]> {
+  /**
+   * Vozes visíveis para o usuário (D10): habilitadas E (curadas OU cujo dono é
+   * ele) — o que a UI de escolha de voz do kit lista. Voz de outro dono ou não
+   * curada sem dono não aparece.
+   */
+  async list(userId: string): Promise<VoiceCatalogEntry[]> {
     return this.dataSource.getRepository(VoiceCatalogEntry).find({
-      where: { enabled: true },
+      where: applyVoiceVisibility({}, userId),
       order: { sort: 'ASC', name: 'ASC' },
     });
   }
@@ -168,12 +179,13 @@ export class McVoicesService {
    * Resolve o identificador vindo do cliente para o voice_id REAL da
    * ElevenLabs, aceitando tanto o id da linha do catálogo (o que a UI envia)
    * quanto o próprio providerVoiceId (compatibilidade com integrações/API).
-   * Também é a guarda de curadoria: voz fora do catálogo habilitado → 422
+   * Também é a guarda de curadoria E de tenant: voz fora do catálogo, fora do
+   * ar ou invisível para `userId` (de outro dono, não curada sem dono) → 422
    * (sem isso, qualquer voice_id da ElevenLabs viraria gasto de TTS).
    * Bug de origem: a ElevenLabs responde HTTP 400 "invalid_uid" para o UUID
    * do catálogo — era o erro do preview na primeira tentativa real da UI.
    */
-  async resolveProviderVoiceId(idOrProviderId: string): Promise<string> {
+  async resolveProviderVoiceId(userId: string, idOrProviderId: string): Promise<string> {
     const repo = this.dataSource.getRepository(VoiceCatalogEntry);
     // A coluna `id` é uuid: consultar {id: 'FGY2...'} com um providerVoiceId
     // não-UUID faz o Postgres estourar no cast ANTES de avaliar o OR
@@ -183,12 +195,12 @@ export class McVoicesService {
       idOrProviderId,
     );
     const entry = await repo.findOne({
-      where: isUuid
-        ? [
-            { id: idOrProviderId, enabled: true },
-            { providerVoiceId: idOrProviderId, enabled: true },
-          ]
-        : [{ providerVoiceId: idOrProviderId, enabled: true }],
+      where: applyVoiceVisibility(
+        isUuid
+          ? [{ id: idOrProviderId }, { providerVoiceId: idOrProviderId }]
+          : [{ providerVoiceId: idOrProviderId }],
+        userId,
+      ),
     });
     if (!entry) {
       throw new HttpException(
@@ -208,7 +220,7 @@ export class McVoicesService {
    */
   async preview(userId: string, dto: VoicePreviewDto): Promise<{ url: string; cached: boolean }> {
     const text = dto.text.trim();
-    const providerVoiceId = await this.resolveProviderVoiceId(dto.voiceId);
+    const providerVoiceId = await this.resolveProviderVoiceId(userId, dto.voiceId);
     // O perfil de entrega entra no cache: mudar velocidade/expressividade gera amostra nova.
     const delivery = mergeVoiceDelivery(resolveVoiceDelivery(process.env), dto.delivery);
     const hash = createHash('sha256')
@@ -252,12 +264,15 @@ export class McVoicesService {
 
   // ─────────────────────────────── internos ───────────────────────────────
 
-  /** Linhas do catálogo: curadas na ordem da curadoria, depois o resto da conta por nome. */
-  private catalogRows(
-    voices: ElevenLabsVoice[],
-  ): Array<Partial<VoiceCatalogEntry> & { curated: boolean }> {
+  /**
+   * Linhas do catálogo: curadas na ordem da curadoria (com `curated: true`
+   * persistido), depois o resto da conta por nome (`curated: false`, sem dono
+   * — o sync não sabe para quem um clone foi feito; `ownerUserId` é atribuído
+   * fora daqui).
+   */
+  private catalogRows(voices: ElevenLabsVoice[]): Array<Partial<VoiceCatalogEntry>> {
     const used = new Set<string>();
-    const rows: Array<Partial<VoiceCatalogEntry> & { curated: boolean }> = [];
+    const rows: Array<Partial<VoiceCatalogEntry>> = [];
 
     for (const [index, curated] of CURATED_VOICES.entries()) {
       const found = voices.find(

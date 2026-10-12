@@ -1,5 +1,6 @@
 import { McVoiceDelivery, voiceDeliveryKey } from './mc-voice-delivery';
 import { computeInputHash, MC_BUILDER_VERSIONS, MC_BUILDER_VERSIONS_V2 } from './input-hash';
+import { McKitSource, McKitStyle } from './mc-kit-identity';
 import { KLING_ACTION_MODEL, KLING_AVATAR_MODEL } from './mc-pipeline.config';
 import { McPromptLang, McSelectedReference } from './mc-quality';
 import { McScriptEndcard, McScriptSeal, McStepType } from './mc-types';
@@ -34,6 +35,16 @@ export interface SceneHashContext {
   dialogue: string | null;
   durationS: number;
   generation: number;
+  /**
+   * Estilo fixo do kit (D5): entra no keyframe só quando definido, para que
+   * kits anteriores (style nulo) mantenham os hashes — "nada é regerado".
+   */
+  style?: McKitStyle | null;
+}
+
+/** Chave de estilo só quando há estilo: kit legado ⇒ hash idêntico ao de antes da change. */
+function styleKey(style: McKitStyle | null | undefined): { style?: McKitStyle } {
+  return style ? { style } : {};
 }
 
 /** Cadeia de TTS do módulo (plano §5.3): multilingual_v2 (obedece speed/style) com fallback eleven_v3. */
@@ -57,6 +68,7 @@ export function computeSceneStepHashes(ctx: SceneHashContext): SceneStepHashes {
     aspectRatio: ctx.aspectRatio,
     kitId: ctx.kitId,
     kitVersion: ctx.kitVersion,
+    ...styleKey(ctx.style),
   });
   const tts = spoken
     ? computeInputHash(McStepType.TTS, MC_BUILDER_VERSIONS.tts, {
@@ -131,6 +143,8 @@ export interface KeyframeHashInputV2 {
   environment: { id: string; version: number; assetId: string | null } | null;
   attempt: number;
   model?: string;
+  /** Estilo fixo do kit (D5) — só entra quando definido (kit legado mantém o hash). */
+  style?: McKitStyle | null;
 }
 
 export function computeKeyframeHashV2(input: KeyframeHashInputV2): string {
@@ -140,6 +154,7 @@ export function computeKeyframeHashV2(input: KeyframeHashInputV2): string {
     aspectRatio: input.aspectRatio,
     prompt: input.initialFramePrompt,
     lang: input.promptLang,
+    ...styleKey(input.style),
     references: input.references.map((r) => ({ assetId: r.assetId, role: r.role })),
     environment: input.environment
       ? {
@@ -150,6 +165,41 @@ export function computeKeyframeHashV2(input: KeyframeHashInputV2): string {
       : null,
     model: input.model ?? MC_KEYFRAME_MODEL_V2,
     attempt: input.attempt,
+  });
+}
+
+// ─────────────────────────── referências do kit ───────────────────────────
+
+/** Versão do builder dos prompts de referência (kit-prompts.ts): bump quando o texto dos slots muda. */
+export const MC_KIT_REFERENCE_BUILDER_VERSION = 1;
+
+/**
+ * Hash do kit (D1/D5): a REQUISIÇÃO efetiva de uma referência — imagem de
+ * origem, slot, prompt resolvido (que já carrega o bloco de estilo e a cor de
+ * fundo), e os próprios `style`/`backgroundColor`/`source` explícitos, para a
+ * matriz de invalidação não depender do texto. Gravado no asset da referência.
+ */
+export interface KitReferenceHashInput {
+  slot: number;
+  prompt: string;
+  /** sha256 da imagem enviada como referência (mascote, logo ou identidade escolhida). */
+  sourceImageHash: string;
+  source: McKitSource;
+  style: McKitStyle | null;
+  /** Cor de fundo efetiva do slot frontal (nome ou hex). */
+  backgroundColor: string;
+  model: string;
+}
+
+export function computeKitReferenceHash(input: KitReferenceHashInput): string {
+  return computeInputHash('kit_reference', MC_KIT_REFERENCE_BUILDER_VERSION, {
+    slot: input.slot,
+    prompt: input.prompt,
+    sourceImageHash: input.sourceImageHash,
+    source: input.source,
+    style: input.style,
+    backgroundColor: input.backgroundColor,
+    model: input.model,
   });
 }
 

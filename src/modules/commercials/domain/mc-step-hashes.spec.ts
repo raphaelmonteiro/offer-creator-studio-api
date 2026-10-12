@@ -1,4 +1,12 @@
-import { computeAssemblyHash, computeSceneStepHashes, SceneHashContext } from './mc-step-hashes';
+import {
+  computeAssemblyHash,
+  computeKeyframeHashV2,
+  computeKitReferenceHash,
+  computeSceneStepHashes,
+  KeyframeHashInputV2,
+  KitReferenceHashInput,
+  SceneHashContext,
+} from './mc-step-hashes';
 
 const base: SceneHashContext = {
   kitId: 'kit-1',
@@ -73,5 +81,67 @@ describe('mc-step-hashes — matriz de invalidação (plano §6.3)', () => {
     expect(computeAssemblyHash(scenes, { text: 'Oferta R$ 9,90' }, '9:16')).not.toBe(h1);
     // ordem de entrada não importa (ordenado por idx internamente)
     expect(computeAssemblyHash([scenes[1], scenes[0]], null, '9:16')).toBe(h1);
+  });
+});
+
+/**
+ * Change video-formatos-personagem (D1/D5): estilo fixo no hash do keyframe
+ * (só quando definido — kit anterior mantém o hash) e hash do kit com estilo,
+ * cor de fundo, imagem de origem, slot, prompt, origem e modelo.
+ */
+describe('mc-step-hashes — estilo e cor de fundo (D1/D5)', () => {
+  it('keyframe legado: estilo definido muda o hash; nulo ou ausente mantém o hash de antes', () => {
+    const before = computeSceneStepHashes(base);
+    expect(computeSceneStepHashes({ ...base, style: null }).keyframe).toBe(before.keyframe);
+    expect(computeSceneStepHashes({ ...base, style: 'cartoon_2d' }).keyframe).not.toBe(
+      before.keyframe,
+    );
+    expect(computeSceneStepHashes({ ...base, style: 'cartoon_2d' }).keyframe).not.toBe(
+      computeSceneStepHashes({ ...base, style: '3d_render' }).keyframe,
+    );
+    // tts não depende do estilo
+    expect(computeSceneStepHashes({ ...base, style: '3d_render' }).tts).toBe(before.tts);
+  });
+
+  it('keyframe v2: estilo muda o hash; null e undefined são o mesmo hash (kit anterior)', () => {
+    const kf: KeyframeHashInputV2 = {
+      kitId: 'kit-1',
+      kitVersion: 1,
+      aspectRatio: '9:16',
+      initialFramePrompt: 'mascot by the shelf',
+      promptLang: 'en',
+      references: [{ assetId: 'r0', role: 'identity', slot: 2, reason: 'front' }],
+      environment: null,
+      attempt: 1,
+    };
+    const legacy = computeKeyframeHashV2(kf);
+    expect(computeKeyframeHashV2({ ...kf, style: null })).toBe(legacy);
+    expect(computeKeyframeHashV2({ ...kf, style: 'realistic' })).not.toBe(legacy);
+    expect(computeKeyframeHashV2({ ...kf, style: 'realistic' })).not.toBe(
+      computeKeyframeHashV2({ ...kf, style: 'cartoon_2d' }),
+    );
+  });
+
+  it('kit: estilo, cor de fundo, imagem, slot, prompt, origem e modelo invalidam; é estável', () => {
+    const input: KitReferenceHashInput = {
+      slot: 2,
+      prompt: 'Expression reference: front view',
+      sourceImageHash: 'a'.repeat(64),
+      source: 'mascot',
+      style: 'cartoon_2d',
+      backgroundColor: 'light gray',
+      model: 'nano-banana-pro-preview',
+    };
+    const h = computeKitReferenceHash(input);
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
+    expect(computeKitReferenceHash({ ...input })).toBe(h);
+    expect(computeKitReferenceHash({ ...input, style: '3d_render' })).not.toBe(h);
+    expect(computeKitReferenceHash({ ...input, style: null })).not.toBe(h);
+    expect(computeKitReferenceHash({ ...input, backgroundColor: '#1E90FF' })).not.toBe(h);
+    expect(computeKitReferenceHash({ ...input, sourceImageHash: 'b'.repeat(64) })).not.toBe(h);
+    expect(computeKitReferenceHash({ ...input, slot: 0 })).not.toBe(h);
+    expect(computeKitReferenceHash({ ...input, prompt: 'other' })).not.toBe(h);
+    expect(computeKitReferenceHash({ ...input, source: 'logo' })).not.toBe(h);
+    expect(computeKitReferenceHash({ ...input, model: 'other' })).not.toBe(h);
   });
 });

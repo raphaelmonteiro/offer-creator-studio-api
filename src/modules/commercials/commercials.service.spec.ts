@@ -105,6 +105,39 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
     expect(queue.publish).toHaveBeenCalledTimes(1);
   });
 
+  // Aspecto × formato (video-formatos-personagem, design D12): o F3 monta em 720p e recusa 4:5.
+  it('formato scenes + aspecto 4:5 → 422 ASPECT_NOT_SUPPORTED_FOR_FORMAT antes de ler o kit ou gastar', async () => {
+    const promise = service.createProject('u1', { ...dto, aspectRatio: '4:5' });
+    await expect(promise).rejects.toThrow(HttpException);
+    await promise.catch((err: HttpException) => {
+      expect(err.getStatus()).toBe(422);
+      expect(err.getResponse()).toMatchObject({
+        code: 'ASPECT_NOT_SUPPORTED_FOR_FORMAT',
+        details: { format: 'scenes', aspectRatio: '4:5' },
+      });
+    });
+    expect(settings.getFresh).not.toHaveBeenCalled();
+    expect(dataSource.getRepository).not.toHaveBeenCalled();
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(credits.reserve).not.toHaveBeenCalled();
+    expect(queue.publish).not.toHaveBeenCalled();
+  });
+
+  it('projeto nasce com format=scenes e tier=economico explícitos (mesmos defaults da migration)', async () => {
+    await service.createProject('u1', dto);
+    const project = manager.saved.find((row) => row.title === dto.title);
+    expect(project).toMatchObject({ format: 'scenes', tier: 'economico', aspectRatio: '9:16' });
+  });
+
+  it('aspectRatio omitido cai em 9:16 (contrato v1-B1) e passa pela regra do formato', async () => {
+    const { aspectRatio: _omit, ...withoutAspect } = dto;
+    await expect(
+      service.createProject('u1', withoutAspect as CreateProjectDto),
+    ).resolves.toBeDefined();
+    const project = manager.saved.find((row) => row.title === dto.title);
+    expect(project).toMatchObject({ aspectRatio: '9:16', format: 'scenes' });
+  });
+
   // Preflight por formato (spec video-composition-render / design D14)
   const heartbeatWith = (checks: Array<{ id: string; ok: boolean }>) => ({
     at: new Date().toISOString(),

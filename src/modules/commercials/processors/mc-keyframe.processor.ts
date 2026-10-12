@@ -8,7 +8,7 @@ import { TerminalProviderError } from '../../../shared/providers/provider-errors
 import { KitCanonicalDesc, parseCanonicalDesc } from '../domain/kit-prompts';
 import { McSelectedReference } from '../domain/mc-quality';
 import { buildKeyframePrompt, buildKeyframePromptV2 } from '../domain/mc-scene-prompts';
-import { McScript, McStepType } from '../domain/mc-types';
+import { isScenesAspectRatio, McScenesAspectRatio, McScript, McStepType } from '../domain/mc-types';
 import { McStepStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
@@ -33,12 +33,31 @@ export interface KeyframeSnapshot {
   productName?: string | null;
 }
 
-/** Tamanho do PNG por aspecto (Gemini decide o real; o mock usa isto). */
-const SIZE_BY_ASPECT: Record<string, { w: number; h: number }> = {
+/**
+ * Tamanho do PNG por aspecto (Gemini decide o real; o mock usa isto). Tipado
+ * pelo subconjunto do formato `scenes`: 4:5 (formatos novos, design D12) nunca
+ * chega aqui — a admissão recusa com 422 e `assertScenesAspect` falha o step
+ * terminal antes de qualquer gasto se um projeto 4:5 escapar por outro caminho.
+ */
+const SIZE_BY_ASPECT: Record<McScenesAspectRatio, { w: number; h: number }> = {
   '9:16': { w: 720, h: 1280 },
   '16:9': { w: 1280, h: 720 },
   '1:1': { w: 1024, h: 1024 },
 };
+
+/**
+ * Guarda do executor de cenas: um aspecto fora de 9:16 · 1:1 · 16:9 (ex.: 4:5)
+ * falha TERMINAL (`aspect_not_supported`, sem retry) em vez de cair em outro
+ * tamanho em silêncio — um keyframe no enquadramento errado seria pago de novo
+ * no motor de vídeo e espremido pela montagem 720p.
+ */
+export function assertScenesAspect(aspectRatio: string): McScenesAspectRatio {
+  if (isScenesAspectRatio(aspectRatio)) return aspectRatio;
+  throw new TerminalProviderError(
+    `Aspecto "${aspectRatio}" não é suportado pelo formato de cenas (aceitos: 9:16, 1:1, 16:9)`,
+    'aspect_not_supported',
+  );
+}
 
 /**
  * Consumer de steps `keyframe` na fila mc.image existente (o dispatcher do
@@ -82,9 +101,10 @@ export class McKeyframeProcessor {
         .getRepository(McCharacterKit)
         .findOneByOrFail({ id: project.kitId });
       const v2 = step.phase != null && !!step.inputSnapshot;
+      const aspectRatio = assertScenesAspect(project.aspectRatio);
       const image =
         this.provider() === 'mock'
-          ? await this.mockKeyframe(project.aspectRatio, scene.idx)
+          ? await this.mockKeyframe(aspectRatio, scene.idx)
           : v2
             ? await this.generateKeyframeV2(
                 project,
@@ -161,6 +181,7 @@ export class McKeyframeProcessor {
       scene.actionPrompt,
       this.parseCanonicalDesc(kit.canonicalDesc),
       project.aspectRatio,
+      { style: kit.style ?? null, source: kit.source ?? 'mascot' },
     );
     return this.gemini.generateImage({
       prompt,
@@ -198,6 +219,9 @@ export class McKeyframeProcessor {
       safeArea: snapshot.safeArea ?? null,
       environmentDescription: environment?.description ?? null,
       productName: snapshot.productName ?? null,
+      // estilo fixo e origem do kit (D5) — o estilo também está no hash do step
+      style: kit.style ?? null,
+      source: kit.source ?? 'mascot',
     });
     return this.gemini.generateImage({
       prompt,
@@ -256,8 +280,8 @@ export class McKeyframeProcessor {
   }
 
   /** PNG sintético (custo zero) — gradiente + rótulo, no aspecto do projeto. */
-  private async mockKeyframe(aspectRatio: string, idx: number): Promise<Buffer> {
-    const { w, h } = SIZE_BY_ASPECT[aspectRatio] ?? SIZE_BY_ASPECT['9:16'];
+  private async mockKeyframe(aspectRatio: McScenesAspectRatio, idx: number): Promise<Buffer> {
+    const { w, h } = SIZE_BY_ASPECT[aspectRatio];
     const svg =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
       `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">` +

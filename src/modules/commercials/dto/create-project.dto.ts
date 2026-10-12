@@ -63,7 +63,11 @@ export class CreateProjectDto {
   @Length(10, 2000)
   briefing: string;
 
-  /** Default 9:16 (contrato v1-B1) — o front pode omitir. */
+  /**
+   * Default 9:16 (contrato v1-B1) — o front pode omitir. A FORMA aceita os
+   * quatro aspectos (4:5 incluído, design D12); o formato `scenes` recusa 4:5
+   * como regra de negócio (422 ASPECT_NOT_SUPPORTED_FOR_FORMAT no service).
+   */
   @IsOptional()
   @IsIn(MC_ASPECT_RATIOS as readonly string[])
   aspectRatio?: McAspectRatio;

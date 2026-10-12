@@ -52,15 +52,22 @@ export class MascotsController {
           description:
             'Declaração de titularidade ou licença de uso da marca do mascote. Sem ela o mascote não fica pronto para uso.',
         },
+        kind: {
+          type: 'string',
+          enum: ['mascot', 'logo'],
+          example: 'mascot',
+          description:
+            'mascot (padrão) ou logo — o logo da marca registrado como personagem de origem de um kit.',
+        },
       },
     },
   })
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Envia o PNG do mascote (o original nunca é alterado)' })
+  @ApiOperation({ summary: 'Envia o PNG do mascote ou do logo (o original nunca é alterado)' })
   create(
     @CurrentUser() user: { id: string },
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { name?: string; clientId?: string; rightsConfirmed?: string },
+    @Body() body: { name?: string; clientId?: string; rightsConfirmed?: string; kind?: string },
   ) {
     return this.mascots.create(user.id, file, body);
   }

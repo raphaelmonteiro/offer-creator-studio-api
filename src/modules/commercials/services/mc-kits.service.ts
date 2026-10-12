@@ -21,9 +21,11 @@ import { sniffImageMime } from '../../../shared/providers/gemini-image.provider'
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
-import { MascotsService } from '../../mascots/mascots.service';
+import { ClientsService } from '../../clients/clients.service';
+import { MascotsService, MascotView } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import { McVoicesService } from './mc-voices.service';
+import { McKitSource } from '../domain/mc-kit-identity';
 import { sanitizeVoiceDeliveryOverride } from '../domain/mc-voice-delivery';
 import {
   hasPtMirror,
@@ -76,25 +78,29 @@ export class McKitsService {
     private readonly commercials: CommercialsService,
     private readonly voices: McVoicesService,
     private readonly config: ConfigService,
+    private readonly clients: ClientsService,
   ) {}
 
   /**
-   * Cria o kit: valida o mascote (existe, é do usuário, direitos confirmados,
-   * tem imagem utilizável), modera a imagem e enfileira a geração. Kit nasce
-   * 'generating'; o McKitProcessor o leva a 'review' (gate humano).
+   * Cria o kit por ORIGEM (D5): `mascot` valida o mascote (existe, é do
+   * usuário, direitos confirmados, imagem utilizável), modera a imagem e
+   * enfileira a geração das referências — kit nasce 'generating' e o
+   * McKitProcessor o leva a 'review'. `logo` registra o logo como personagem
+   * de origem (linha de `mascots` com `kind = 'logo'`), exige os direitos da
+   * marca e modera, mas NÃO gera referência nenhuma: a rodada de candidatos
+   * (D4, tarefa 2.4) vem antes de qualquer referência.
    */
   async createKit(userId: string, dto: CreateKitDto): Promise<McCharacterKit> {
-    // MascotsService.findOne já resolve 404 (não existe) e 403 (de outro usuário).
-    const mascot = await this.mascots.findOne(userId, dto.mascotId);
+    const source: McKitSource = dto.source ?? 'mascot';
+    const mascot =
+      source === 'logo'
+        ? await this.resolveLogoSource(userId, dto)
+        : await this.resolveMascotSource(userId, dto);
+    // Estilo é exigido para GERAR referências (spec "Estilo não escolhido"):
+    // na origem mascote a geração começa aqui; na origem logo só depois da
+    // escolha do candidato, onde o estilo é cobrado (2.4).
+    if (source === 'mascot' && !dto.style) throw this.styleRequired();
 
-    if (!mascot.rightsConfirmedAt) {
-      throw new UnprocessableEntityException({
-        code: 'MASCOT_RIGHTS_REQUIRED',
-        message:
-          'Confirme a titularidade ou licença de uso do mascote antes de criar o kit — ' +
-          'abra o mascote na biblioteca e aceite o termo de direitos.',
-      });
-    }
     const imageUrl = mascot.cutoutUrl ?? mascot.sourceImageUrl;
     if (!imageUrl) {
       throw new UnprocessableEntityException({
@@ -114,13 +120,164 @@ export class McKitsService {
       });
     }
 
-    // Moderação ANTES de gastar com providers (plano §6.8). Indisponibilidade
-    // do moderador BLOQUEIA a criação (fail-closed com erro acionável) — a
-    // exceção é a ausência de OPENAI_API_KEY em dev, que vira `skipped`
-    // auditado no jsonb.
-    let moderation: ModerationResult;
+    const moderation = await this.moderateImage(imageBuffer);
+    const base = {
+      userId,
+      mascotId: mascot.id,
+      source,
+      style: dto.style ?? null,
+      identityMode: 'generated' as const,
+      voiceId: dto.voiceId ?? null,
+      moderation: this.moderationJson(moderation),
+    };
+    if (moderation.flagged) await this.rejectModerated(base, moderation);
+
+    // Criação + enqueue na MESMA transação (pg-boss é Postgres): se o publish
+    // falhar, o kit não fica órfão em 'generating' para sempre.
+    return this.dataSource.transaction(async (manager) => {
+      const kit = await manager
+        .getRepository(McCharacterKit)
+        .save({ ...base, status: McKitStatus.GENERATING });
+      await this.commercials.appendEvent(manager, {
+        userId,
+        refKind: 'kit',
+        refId: kit.id,
+        kind: 'transition',
+        fromStatus: null,
+        toStatus: McKitStatus.GENERATING,
+        detail: { mascotId: mascot.id, source, style: dto.style ?? null },
+      });
+      // Origem mascote: referências já podem ser geradas. Origem logo: a
+      // rodada de candidatos (2.4) é quem publica o próximo job.
+      if (source === 'mascot') {
+        await this.queue.publish(
+          QUEUES.MC_IMAGE,
+          { kitId: kit.id },
+          { expireInSeconds: MC_IMAGE_EXPIRE_S },
+        );
+      }
+      await this.transitions.notify(
+        manager,
+        userId,
+        { kind: 'mc_kit', kitId: kit.id, status: McKitStatus.GENERATING },
+        MC_EVENTS_CHANNEL,
+      );
+      return kit;
+    });
+  }
+
+  /** Origem `mascot`: mascote do usuário (404/403 pelo MascotsService), do tipo certo e com direitos. */
+  private async resolveMascotSource(userId: string, dto: CreateKitDto): Promise<MascotView> {
+    if (!dto.mascotId) {
+      throw new UnprocessableEntityException({
+        code: 'MASCOT_REQUIRED',
+        message: 'Informe o mascote (mascotId) para criar o kit a partir de um mascote.',
+      });
+    }
+    const mascot = await this.mascots.findOne(userId, dto.mascotId);
+    if ((mascot.kind ?? 'mascot') !== 'mascot') {
+      throw new UnprocessableEntityException({
+        code: 'MASCOT_KIND_MISMATCH',
+        message:
+          'Este cadastro é um logo — para usá-lo como personagem, crie o kit com origem "logo" ' +
+          'informando logoMascotId.',
+      });
+    }
+    if (!mascot.rightsConfirmedAt) {
+      throw new UnprocessableEntityException({
+        code: 'MASCOT_RIGHTS_REQUIRED',
+        message:
+          'Confirme a titularidade ou licença de uso do mascote antes de criar o kit — ' +
+          'abra o mascote na biblioteca e aceite o termo de direitos.',
+      });
+    }
+    return mascot;
+  }
+
+  /**
+   * Origem `logo`: exatamente um de `clientId` (logo cadastrado do cliente →
+   * `MascotsService.createFromUrl`, idempotente) ou `logoMascotId` (logo já
+   * registrado, `kind = 'logo'`). A declaração de direitos da marca é a mesma
+   * exigida do mascote; sem ela, 422 LOGO_RIGHTS_REQUIRED com o `mascotId`
+   * do logo, para o cliente confirmar em `POST /mascots/:id/rights`.
+   */
+  private async resolveLogoSource(userId: string, dto: CreateKitDto): Promise<MascotView> {
+    if (dto.clientId && dto.logoMascotId) {
+      throw new UnprocessableEntityException({
+        code: 'LOGO_SOURCE_AMBIGUOUS',
+        message: 'Informe só um: clientId (logo do cliente) ou logoMascotId (logo já registrado).',
+      });
+    }
+    if (!dto.clientId && !dto.logoMascotId) {
+      throw new UnprocessableEntityException({
+        code: 'LOGO_SOURCE_REQUIRED',
+        message:
+          'Para criar o kit a partir de um logo, informe clientId (logo cadastrado do cliente) ' +
+          'ou logoMascotId (logo já registrado).',
+      });
+    }
+    const mascot = dto.logoMascotId
+      ? await this.mascots.findOne(userId, dto.logoMascotId)
+      : await this.registerClientLogo(userId, dto.clientId as string, dto.rightsConfirmed === true);
+    if (mascot.kind !== 'logo') {
+      throw new UnprocessableEntityException({
+        code: 'MASCOT_KIND_MISMATCH',
+        message: 'O cadastro informado em logoMascotId não é um logo.',
+      });
+    }
+    if (!mascot.rightsConfirmedAt) {
+      throw new UnprocessableEntityException({
+        code: 'LOGO_RIGHTS_REQUIRED',
+        message:
+          'Confirme que você tem o direito de uso da marca antes de criar o kit a partir do logo.',
+        mascotId: mascot.id,
+      });
+    }
+    return mascot;
+  }
+
+  /** Logo cadastrado do cliente (`clients.logoUrl`) → linha de `mascots` com `kind = 'logo'`. */
+  private async registerClientLogo(
+    userId: string,
+    clientId: string,
+    rightsConfirmed: boolean,
+  ): Promise<MascotView> {
+    // ClientsService.findOne já resolve 404 CLIENT_NOT_FOUND.
+    const client = await this.clients.findOne(clientId);
+    if (!client.logoUrl) {
+      throw new UnprocessableEntityException({
+        code: 'CLIENT_LOGO_REQUIRED',
+        message:
+          'Este cliente não tem logo cadastrado. Envie o logo na ficha do cliente ou ' +
+          'registre o arquivo do logo diretamente.',
+      });
+    }
+    return this.mascots.createFromUrl(userId, client.logoUrl, {
+      name: `Logo ${client.name}`.slice(0, 120),
+      clientId,
+      kind: 'logo',
+      rightsConfirmed,
+    });
+  }
+
+  private styleRequired(): UnprocessableEntityException {
+    return new UnprocessableEntityException({
+      code: 'STYLE_REQUIRED',
+      message:
+        'Escolha o estilo do personagem (cartoon_2d, 3d_render ou realistic) antes de gerar ' +
+        'as referências do kit.',
+    });
+  }
+
+  /**
+   * Moderação ANTES de gastar com providers (plano §6.8). Indisponibilidade
+   * do moderador BLOQUEIA a criação (fail-closed com erro acionável) — a
+   * exceção é a ausência de OPENAI_API_KEY em dev, que vira `skipped`
+   * auditado no jsonb.
+   */
+  private async moderateImage(imageBuffer: Buffer): Promise<ModerationResult> {
     try {
-      moderation = await this.moderation.moderate({
+      return await this.moderation.moderate({
         imageBase64: imageBuffer.toString('base64'),
         imageMimeType: sniffImageMime(imageBuffer),
       });
@@ -131,67 +288,36 @@ export class McKitsService {
         message: 'Não foi possível verificar a imagem agora. Tente novamente em instantes.',
       });
     }
+  }
 
-    if (moderation.flagged) {
-      // Resultado auditado MESMO no bloqueio: o kit nasce 'failed' com o
-      // jsonb da moderação — trilha do §6.8 sem gastar um centavo de geração.
-      const blocked = await this.dataSource.getRepository(McCharacterKit).save({
-        userId,
-        mascotId: dto.mascotId,
-        status: McKitStatus.FAILED,
-        voiceId: dto.voiceId ?? null,
-        moderation: this.moderationJson(moderation),
-      });
-      await this.dataSource.transaction(async (manager) => {
-        await this.commercials.appendEvent(manager, {
-          userId,
-          refKind: 'kit',
-          refId: blocked.id,
-          kind: 'moderation_blocked',
-          toStatus: McKitStatus.FAILED,
-          detail: { categories: moderation.categories },
-        });
-      });
-      throw new UnprocessableEntityException({
-        code: 'MASCOT_MODERATION_BLOCKED',
-        message:
-          'A imagem do mascote foi bloqueada pela verificação de conteúdo' +
-          (moderation.categories.length > 0 ? ` (${moderation.categories.join(', ')})` : '') +
-          '. Use outra imagem do personagem.',
-      });
-    }
-
-    // Criação + enqueue na MESMA transação (pg-boss é Postgres): se o publish
-    // falhar, o kit não fica órfão em 'generating' para sempre.
-    return this.dataSource.transaction(async (manager) => {
-      const kit = await manager.getRepository(McCharacterKit).save({
-        userId,
-        mascotId: dto.mascotId,
-        status: McKitStatus.GENERATING,
-        voiceId: dto.voiceId ?? null,
-        moderation: this.moderationJson(moderation),
-      });
+  /**
+   * Resultado auditado MESMO no bloqueio: o kit nasce 'failed' com o jsonb da
+   * moderação — trilha do §6.8 sem gastar um centavo de geração.
+   */
+  private async rejectModerated(
+    base: Pick<McCharacterKit, 'userId' | 'mascotId' | 'source' | 'style' | 'voiceId'> &
+      Partial<McCharacterKit>,
+    moderation: ModerationResult,
+  ): Promise<never> {
+    const blocked = await this.dataSource
+      .getRepository(McCharacterKit)
+      .save({ ...base, status: McKitStatus.FAILED });
+    await this.dataSource.transaction(async (manager) => {
       await this.commercials.appendEvent(manager, {
-        userId,
+        userId: base.userId,
         refKind: 'kit',
-        refId: kit.id,
-        kind: 'transition',
-        fromStatus: null,
-        toStatus: McKitStatus.GENERATING,
-        detail: { mascotId: dto.mascotId },
+        refId: blocked.id,
+        kind: 'moderation_blocked',
+        toStatus: McKitStatus.FAILED,
+        detail: { categories: moderation.categories },
       });
-      await this.queue.publish(
-        QUEUES.MC_IMAGE,
-        { kitId: kit.id },
-        { expireInSeconds: MC_IMAGE_EXPIRE_S },
-      );
-      await this.transitions.notify(
-        manager,
-        userId,
-        { kind: 'mc_kit', kitId: kit.id, status: McKitStatus.GENERATING },
-        MC_EVENTS_CHANNEL,
-      );
-      return kit;
+    });
+    throw new UnprocessableEntityException({
+      code: 'MASCOT_MODERATION_BLOCKED',
+      message:
+        'A imagem do mascote foi bloqueada pela verificação de conteúdo' +
+        (moderation.categories.length > 0 ? ` (${moderation.categories.join(', ')})` : '') +
+        '. Use outra imagem do personagem.',
     });
   }
 
@@ -215,8 +341,9 @@ export class McKitsService {
     }
     // Aceita id do catálogo OU providerVoiceId e grava SEMPRE o id real da
     // ElevenLabs — é ele que o TTS do pipeline usa direto (mesma correção do
-    // preview: a UI envia o id da linha do catálogo).
-    const voiceId = await this.voices.resolveProviderVoiceId(voiceInput);
+    // preview: a UI envia o id da linha do catálogo). Escopado ao usuário
+    // (D10): voz de outro dono ou invisível → 422 VOICE_NOT_IN_CATALOG.
+    const voiceId = await this.voices.resolveProviderVoiceId(userId, voiceInput);
     // Ajuste de entrega: o que veio no body vence; sem body mantém o do kit.
     const voiceDelivery =
       dto.delivery !== undefined
@@ -277,6 +404,9 @@ export class McKitsService {
         message: 'Slot inválido: use um valor entre 0 e 3.',
       });
     }
+    // Regerar uma referência É gerar referência: sem estilo fixo, 422 (spec
+    // "Estilo não escolhido"). Kits aprovados sem estilo não passam por aqui.
+    if (!kit.style) throw this.styleRequired();
     await this.dataSource.transaction(async (manager) => {
       await this.commercials.appendEvent(manager, {
         userId,

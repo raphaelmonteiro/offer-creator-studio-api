@@ -1,5 +1,5 @@
 import {
-  FIXTURE_ASPECTS,
+  FIXTURE_SCENES_ASPECTS,
   fixtureCommercialScript,
   fixtureLongNamesScript,
   fixtureNoProductsScript,
@@ -63,7 +63,8 @@ describe('fixtures v2 (P0) — roteiros utilizáveis', () => {
     expect(text).toBe(
       'CHOCOLATE AO LEITE COM AVELÃS CROCANTES EDIÇÃO COMEMORATIVA 250G — R$ 1.299,90',
     );
-    for (const aspect of FIXTURE_ASPECTS) {
+    // selo da montagem 720p (F3): só os aspectos do formato `scenes`
+    for (const aspect of FIXTURE_SCENES_ASPECTS) {
       const { width } = assemblyDimensions(aspect);
       const style = sealStyle(width, text);
       expect(style.fontSize).toBeGreaterThanOrEqual(22);

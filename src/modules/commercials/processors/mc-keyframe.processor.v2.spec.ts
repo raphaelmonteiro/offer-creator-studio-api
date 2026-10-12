@@ -7,7 +7,7 @@ import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McPipelineService } from '../services/mc-pipeline.service';
 import { McStorageService } from '../services/mc-storage.service';
-import { McKeyframeProcessor } from './mc-keyframe.processor';
+import { assertScenesAspect, McKeyframeProcessor } from './mc-keyframe.processor';
 
 /**
  * Keyframe v2 com referências SELECIONADAS no snapshot: assets do kit por id
@@ -155,5 +155,33 @@ describe('McKeyframeProcessor — pipeline v2: referências por função e foto 
     expect(pipeline.failStep).not.toHaveBeenCalled();
     const call = gemini.generateImage.mock.calls[0][0] as { referenceImages: Buffer[] };
     expect(call.referenceImages).toHaveLength(2);
+  });
+
+  // Aspecto × formato (video-formatos-personagem, design D12): o executor de
+  // cenas só conhece 9:16 · 1:1 · 16:9. Um 4:5 que escape da admissão falha
+  // TERMINAL antes de qualquer chamada paga — nunca cai em outro tamanho.
+  it('projeto 4:5 (fora do formato scenes): falha terminal aspect_not_supported sem chamar o Gemini nem gravar asset', async () => {
+    const original = project.aspectRatio;
+    (project as { aspectRatio: string }).aspectRatio = '4:5';
+    try {
+      await processor.process({ stepId: 'st-kf' });
+    } finally {
+      (project as { aspectRatio: string }).aspectRatio = original;
+    }
+    expect(gemini.generateImage).not.toHaveBeenCalled();
+    expect(storage.saveFile).not.toHaveBeenCalled();
+    expect(pipeline.completeStepAndAdvance).not.toHaveBeenCalled();
+    expect(pipeline.failStep).toHaveBeenCalledTimes(1);
+    const err = pipeline.failStep.mock.calls[0][2] as { code: string; message: string };
+    expect(err.code).toBe('aspect_not_supported');
+    expect(err.message).toMatch(/"4:5".*formato de cenas/);
+  });
+
+  it('assertScenesAspect: aceita os três aspectos do F3 e recusa 4:5/desconhecido', () => {
+    expect(assertScenesAspect('9:16')).toBe('9:16');
+    expect(assertScenesAspect('1:1')).toBe('1:1');
+    expect(assertScenesAspect('16:9')).toBe('16:9');
+    expect(() => assertScenesAspect('4:5')).toThrow(/não é suportado pelo formato de cenas/);
+    expect(() => assertScenesAspect('4:3')).toThrow(/não é suportado pelo formato de cenas/);
   });
 });

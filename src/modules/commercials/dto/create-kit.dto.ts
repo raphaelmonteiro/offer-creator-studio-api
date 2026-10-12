@@ -1,14 +1,60 @@
-import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  ValidateIf,
+} from 'class-validator';
+import { MC_KIT_SOURCES, MC_KIT_STYLES, McKitSource, McKitStyle } from '../domain/mc-kit-identity';
 
 /**
- * Criação de kit — fluxo REAL (plano §4): valida mascote (direitos + recorte),
- * modera a imagem ANTES de gastar e dispara a geração das referências na fila
- * mc.image. A descrição canônica é GERADA pelo worker — não entra mais aqui.
+ * Criação de kit — fluxo REAL (plano §4): valida a origem (mascote ou logo,
+ * com direitos + imagem), modera a imagem ANTES de gastar e, na origem
+ * mascote, dispara a geração das referências na fila mc.image. A descrição
+ * canônica é GERADA pelo worker — não entra mais aqui.
+ *
+ * Forma (400 pelo pipe global): `source` obrigatório; `style` opcional só na
+ * criação (gerar referências sem estilo é regra de negócio → 422
+ * STYLE_REQUIRED); `mascotId` exigido só com `source = 'mascot'`; para `logo`,
+ * `clientId` OU `logoMascotId` (exatamente um — regra do service, 422).
  */
 export class CreateKitDto {
-  /** Referência lógica a mascots.id (sem FK física — plano §6.1). */
+  /** Origem do personagem (D5): `mascot` (mascote enviado) ou `logo` (logo da marca). */
+  @IsIn(MC_KIT_SOURCES)
+  source: McKitSource;
+
+  /** Estilo de render fixo do kit; imutável depois (outro estilo = outro kit). */
+  @IsOptional()
+  @IsIn(MC_KIT_STYLES)
+  style?: McKitStyle;
+
+  /** Referência lógica a mascots.id (sem FK física — plano §6.1). Obrigatório com `source = 'mascot'`. */
+  @ValidateIf((o: CreateKitDto) => o.source === 'mascot')
   @IsUUID()
-  mascotId: string;
+  mascotId?: string;
+
+  /** `source = 'logo'`: cliente cujo `logoUrl` cadastrado vira o personagem de origem. */
+  @ValidateIf((o: CreateKitDto) => o.source === 'logo')
+  @IsOptional()
+  @IsUUID()
+  clientId?: string;
+
+  /** `source = 'logo'`: logo já registrado em `mascots` (`kind = 'logo'`). */
+  @ValidateIf((o: CreateKitDto) => o.source === 'logo')
+  @IsOptional()
+  @IsUUID()
+  logoMascotId?: string;
+
+  /**
+   * Declaração de titularidade/licença da marca para o logo registrado a
+   * partir de `clientId` (mesmo aceite do `POST /mascots/:id/rights`). Sem
+   * ela o kit é recusado com 422 LOGO_RIGHTS_REQUIRED.
+   */
+  @IsOptional()
+  @IsBoolean()
+  rightsConfirmed?: boolean;
 
   /** Voz permanente do mascote (providerVoiceId do voice_catalog). Pode ser definida depois, no approve. */
   @IsOptional()

@@ -141,6 +141,32 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
     expect((source.script as McScript).seal!.products![0].price).toBe('12,90');
   });
 
+  // Aspecto × formato (video-formatos-personagem, design D12): o F3 monta em 720p e recusa 4:5.
+  it('origem scenes + aspectRatio 4:5 → 422 ASPECT_NOT_SUPPORTED_FOR_FORMAT, nada salvo', async () => {
+    const promise = service.duplicateProject(userId, 'p1', { aspectRatio: '4:5' });
+    await expect(promise).rejects.toMatchObject({
+      status: 422,
+      response: expect.objectContaining({
+        code: 'ASPECT_NOT_SUPPORTED_FOR_FORMAT',
+        details: expect.objectContaining({ format: 'scenes', aspectRatio: '4:5' }),
+      }),
+    });
+    expect(saved).toHaveLength(0);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(commercials.appendEvent).not.toHaveBeenCalled();
+  });
+
+  it('cópia herda format/tier da origem (origem anterior à migration lê scenes/economico)', async () => {
+    await service.duplicateProject(userId, 'p1', { aspectRatio: '1:1' });
+    expect(saved[0]).toMatchObject({ format: 'scenes', tier: 'economico' });
+
+    saved.length = 0;
+    source.format = 'talking_art';
+    source.tier = 'premium';
+    await service.duplicateProject(userId, 'p1', { aspectRatio: '4:5' });
+    expect(saved[0]).toMatchObject({ format: 'talking_art', tier: 'premium', aspectRatio: '4:5' });
+  });
+
   it('sem aspectRatio no body, herda o formato da origem', async () => {
     await service.duplicateProject(userId, 'p1', {});
     expect(saved[0]).toMatchObject({ aspectRatio: '9:16' });

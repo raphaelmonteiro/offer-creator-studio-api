@@ -1,0 +1,247 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`kit-prompts — prompts fixos das referências do kit (plano §4) estilo fixo, origem e cor de fundo (D1/D5) snapshot dos 4 slots: estilo 3d_render × origem logo 1`] = `
+[
+  "Turnaround reference: the exact same mascot character from the reference image, three-quarter view facing left, full body, neutral standing pose, arms relaxed. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Turnaround reference: the exact same mascot character from the reference image, full profile (side) view, full body, neutral standing pose. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Expression reference: the exact same mascot character from the reference image, front view, talking pose with mouth open mid-speech and hands gesturing expressively, friendly and energetic. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Action reference: the exact same mascot character from the reference image, front three-quarter view, cheerfully holding a plain generic unlabeled product box with both hands at chest height, presenting it to the camera. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- The only object in the image is the plain generic box; do NOT add: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`kit-prompts — prompts fixos das referências do kit (plano §4) estilo fixo, origem e cor de fundo (D1/D5) snapshot dos 4 slots: estilo 3d_render × origem mascot 1`] = `
+[
+  "Turnaround reference: the exact same mascot character from the reference image, three-quarter view facing left, full body, neutral standing pose, arms relaxed. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Turnaround reference: the exact same mascot character from the reference image, full profile (side) view, full body, neutral standing pose. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Expression reference: the exact same mascot character from the reference image, front view, talking pose with mouth open mid-speech and hands gesturing expressively, friendly and energetic. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Action reference: the exact same mascot character from the reference image, front three-quarter view, cheerfully holding a plain generic unlabeled product box with both hands at chest height, presenting it to the camera. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- The only object in the image is the plain generic box; do NOT add: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`kit-prompts — prompts fixos das referências do kit (plano §4) estilo fixo, origem e cor de fundo (D1/D5) snapshot dos 4 slots: estilo cartoon_2d × origem logo 1`] = `
+[
+  "Turnaround reference: the exact same mascot character from the reference image, three-quarter view facing left, full body, neutral standing pose, arms relaxed. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Turnaround reference: the exact same mascot character from the reference image, full profile (side) view, full body, neutral standing pose. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Expression reference: the exact same mascot character from the reference image, front view, talking pose with mouth open mid-speech and hands gesturing expressively, friendly and energetic. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Action reference: the exact same mascot character from the reference image, front three-quarter view, cheerfully holding a plain generic unlabeled product box with both hands at chest height, presenting it to the camera. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- The only object in the image is the plain generic box; do NOT add: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`kit-prompts — prompts fixos das referências do kit (plano §4) estilo fixo, origem e cor de fundo (D1/D5) snapshot dos 4 slots: estilo cartoon_2d × origem mascot 1`] = `
+[
+  "Turnaround reference: the exact same mascot character from the reference image, three-quarter view facing left, full body, neutral standing pose, arms relaxed. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Turnaround reference: the exact same mascot character from the reference image, full profile (side) view, full body, neutral standing pose. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Expression reference: the exact same mascot character from the reference image, front view, talking pose with mouth open mid-speech and hands gesturing expressively, friendly and energetic. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Action reference: the exact same mascot character from the reference image, front three-quarter view, cheerfully holding a plain generic unlabeled product box with both hands at chest height, presenting it to the camera. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- The only object in the image is the plain generic box; do NOT add: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`kit-prompts — prompts fixos das referências do kit (plano §4) estilo fixo, origem e cor de fundo (D1/D5) snapshot dos 4 slots: estilo realistic × origem logo 1`] = `
+[
+  "Turnaround reference: the exact same mascot character from the reference image, three-quarter view facing left, full body, neutral standing pose, arms relaxed. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Turnaround reference: the exact same mascot character from the reference image, full profile (side) view, full body, neutral standing pose. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Expression reference: the exact same mascot character from the reference image, front view, talking pose with mouth open mid-speech and hands gesturing expressively, friendly and energetic. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Action reference: the exact same mascot character from the reference image, front three-quarter view, cheerfully holding a plain generic unlabeled product box with both hands at chest height, presenting it to the camera. Plain solid light gray background, even studio lighting, no added text, no watermark (the lettering and marks that belong to the logo itself stay exactly as in the reference).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- The only object in the image is the plain generic box; do NOT add: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`kit-prompts — prompts fixos das referências do kit (plano §4) estilo fixo, origem e cor de fundo (D1/D5) snapshot dos 4 slots: estilo realistic × origem mascot 1`] = `
+[
+  "Turnaround reference: the exact same mascot character from the reference image, three-quarter view facing left, full body, neutral standing pose, arms relaxed. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Turnaround reference: the exact same mascot character from the reference image, full profile (side) view, full body, neutral standing pose. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Expression reference: the exact same mascot character from the reference image, front view, talking pose with mouth open mid-speech and hands gesturing expressively, friendly and energetic. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- IMPORTANT — the character must NOT hold or carry any object, prop or accessory: both hands are empty and clearly visible. Specifically, do NOT include: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Action reference: the exact same mascot character from the reference image, front three-quarter view, cheerfully holding a plain generic unlabeled product box with both hands at chest height, presenting it to the camera. Plain solid light gray background, even studio lighting, no text, no logo, no watermark.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- The only object in the image is the plain generic box; do NOT add: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;

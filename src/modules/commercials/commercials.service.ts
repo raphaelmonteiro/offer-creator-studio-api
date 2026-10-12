@@ -27,8 +27,11 @@ import {
   McProjectStatus,
   McStepStatus,
 } from './domain/mc-state-machines';
+import { assertAspectSupportedForFormat } from './domain/mc-composition.config';
 import {
   MC_DEFAULT_PROJECT_FORMAT,
+  MC_DEFAULT_PROJECT_TIER,
+  McAspectRatio,
   McProjectFormat,
   McStepType,
   resolveProjectOptions,
@@ -132,10 +135,18 @@ export class CommercialsService {
       );
     }
 
+    // O formato chega no DTO com os formatos novos (tarefas 4.x); até lá todo
+    // projeto é 'scenes' (F3), que monta em 720p e NÃO aceita 4:5 (design D12):
+    // regra de negócio → 422 ASPECT_NOT_SUPPORTED_FOR_FORMAT antes de qualquer
+    // leitura ou gasto (a forma do DTO, '4:5' incluído, já passou pelo pipe).
+    const format: McProjectFormat = MC_DEFAULT_PROJECT_FORMAT;
+    // Contrato v1-B1: aspectRatio default 9:16 — o front pode omitir.
+    const aspectRatio: McAspectRatio = dto.aspectRatio ?? '9:16';
+    assertAspectSupportedForFormat(format, aspectRatio);
+
     // Preflight de render (design D14): recusa antes de qualquer gasto quando o
-    // worker publicou que falta requisito do formato. O formato chega no DTO
-    // com os formatos novos (tarefas 4.x); até lá todo projeto é 'scenes'.
-    await this.assertRenderAvailable(MC_DEFAULT_PROJECT_FORMAT);
+    // worker publicou que falta requisito do formato.
+    await this.assertRenderAvailable(format);
 
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: dto.kitId });
     if (!kit) throw new NotFoundException('Kit não encontrado');
@@ -154,10 +165,9 @@ export class CommercialsService {
       // go-live, flag MC_CREDITS_ENABLED) a reserva é 0 e nada vai ao ledger.
       const reservedCredits = creditsEnabled('commercials') ? MC_PROJECT_MINI_RESERVE_CREDITS : 0;
 
-      // Contrato v1-B1: aspectRatio default 9:16; música/legendas default on;
-      // produtos (máx. 6) chegam prontos do front (name+price) e viram os
-      // selos determinísticos do roteiro/montagem (plano §5.4).
-      const aspectRatio = dto.aspectRatio ?? '9:16';
+      // Contrato v1-B1: música/legendas default on; produtos (máx. 6) chegam
+      // prontos do front (name+price) e viram os selos determinísticos do
+      // roteiro/montagem (plano §5.4).
       // Executor congelado na criação (ADR-001 §5): configuração/coorte decide;
       // desligar a flag depois NÃO muda projetos em andamento.
       const pipelineVersion = pipelineVersionForNewProject(userId);
@@ -183,6 +193,10 @@ export class CommercialsService {
         status: McProjectStatus.DRAFT,
         reservedCredits,
         pipelineVersion,
+        // Formato/tier explícitos (design D6): o F3 é 'scenes' + 'economico'
+        // (rótulo, sem troca de motor) — os mesmos defaults da migration.
+        format,
+        tier: MC_DEFAULT_PROJECT_TIER,
         revision: 0,
         quality: pipelineVersion === MC_PIPELINE_V2 ? { ...MC_EMPTY_QUALITY } : null,
       });

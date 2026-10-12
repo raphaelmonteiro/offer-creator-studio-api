@@ -1,5 +1,6 @@
 import { McVoiceDeliveryOverride } from '../domain/mc-voice-delivery';
-import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import { Check, Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import { McKitIdentityMode, McKitSource, McKitStyle } from '../domain/mc-kit-identity';
 import { McKitStatus } from '../domain/mc-state-machines';
 
 /**
@@ -20,6 +21,7 @@ export { McKitStatus };
  */
 @Entity('mc_character_kits')
 @Index(['userId', 'status'])
+@Check('CHK_mc_kits_identity_mode', `"identityMode" = 'generated' OR "source" = 'logo'`)
 export class McCharacterKit {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -27,9 +29,41 @@ export class McCharacterKit {
   @Column()
   userId: string;
 
-  /** Referência lógica a mascots.id — reusa direitos/identidade, sem FK física. */
+  /**
+   * Referência lógica a mascots.id — reusa direitos/identidade, sem FK física.
+   * Com `source = 'logo'` aponta para a linha de `mascots` com `kind = 'logo'`
+   * (o logo registrado como personagem de origem, D5). Segue NOT NULL.
+   */
   @Column({ type: 'uuid' })
   mascotId: string;
+
+  /** Origem do personagem (D5): mascote enviado ou logo da marca. Imutável após a aprovação. */
+  @Column({ type: 'varchar', length: 10, default: 'mascot' })
+  source: McKitSource;
+
+  /** Estilo de render fixo do kit; NULL nos kits anteriores à change ("herdado"). */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  style: McKitStyle | null;
+
+  /** `generated` ou `logo_as_is` (este só com `source = 'logo'`, CHECK no banco). */
+  @Column({ type: 'varchar', length: 12, default: 'generated' })
+  identityMode: McKitIdentityMode;
+
+  /** Identidade estilizada: candidato escolhido (logo) ou referência frontal canônica (mascote). */
+  @Column({ type: 'uuid', nullable: true })
+  identityAssetId: string | null;
+
+  /** Tile do personagem (recorte da identidade com alfa), gerado na aprovação (D1). */
+  @Column({ type: 'uuid', nullable: true })
+  tileAssetId: string | null;
+
+  /** Cor de fundo padrão do tile e do slot frontal das referências (#RRGGBB ou #RRGGBBAA). */
+  @Column({ type: 'varchar', length: 9, nullable: true })
+  tileBackgroundColor: string | null;
+
+  /** Rodada corrente de candidatos de mascotização (mc_kit_candidates.roundId). */
+  @Column({ type: 'uuid', nullable: true })
+  candidateRoundId: string | null;
 
   @Column({ type: 'varchar', length: 20, default: McKitStatus.GENERATING })
   status: McKitStatus;

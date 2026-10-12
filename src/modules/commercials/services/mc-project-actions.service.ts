@@ -26,7 +26,13 @@ import {
   McProjectStatus,
   McSceneStatus,
 } from '../domain/mc-state-machines';
-import { McScript, resolveProjectOptions } from '../domain/mc-types';
+import { assertAspectSupportedForFormat } from '../domain/mc-composition.config';
+import {
+  MC_DEFAULT_PROJECT_FORMAT,
+  MC_DEFAULT_PROJECT_TIER,
+  McScript,
+  resolveProjectOptions,
+} from '../domain/mc-types';
 import { McCharacterKit, McKitStatus } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
@@ -274,6 +280,13 @@ export class McProjectActionsService {
         message: 'O projeto de origem ainda não tem roteiro para copiar.',
       });
     }
+    // A cópia fica no MESMO formato/tier da origem (design D6); o formato
+    // `scenes` (F3) não aceita 4:5 (design D12) → 422 antes de qualquer escrita.
+    const format = source.format ?? MC_DEFAULT_PROJECT_FORMAT;
+    const tier = source.tier ?? MC_DEFAULT_PROJECT_TIER;
+    const aspectRatio = dto.aspectRatio ?? source.aspectRatio;
+    assertAspectSupportedForFormat(format, aspectRatio);
+
     const kit = await this.getKit(source.kitId);
     const title = await this.nextCopyTitle(userId, source.title);
 
@@ -283,10 +296,12 @@ export class McProjectActionsService {
         kitId: kit.id,
         title,
         briefing: source.briefing,
+        format,
+        tier,
         // Deep copy: editar o roteiro da cópia NUNCA pode tocar no original
         // (os dois jsonb têm que ser independentes).
         script: JSON.parse(JSON.stringify(source.script)) as McScript,
-        aspectRatio: dto.aspectRatio ?? source.aspectRatio,
+        aspectRatio,
         targetDurationS: source.targetDurationS,
         options: resolveProjectOptions(source.options),
         status: McProjectStatus.STORYBOARD_REVIEW,

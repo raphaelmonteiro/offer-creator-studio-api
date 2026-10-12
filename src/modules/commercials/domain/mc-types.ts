@@ -16,8 +16,33 @@ export enum McStepType {
   ASSEMBLY = 'assembly',
 }
 
-export const MC_ASPECT_RATIOS = ['9:16', '1:1', '16:9'] as const;
+/**
+ * Aspectos de saída do comercial. `'4:5'` (feed) entrou com a change
+ * video-formatos-personagem (design D12) para os formatos novos (F1/F2, que
+ * montam em 1080p via `compositionDimensions`); o formato `scenes` (F3) monta
+ * em 720p (`assemblyDimensions`) e NÃO o aceita — ver `MC_SCENES_ASPECT_RATIOS`.
+ * A ordem é só de apresentação; nenhum código depende do índice.
+ */
+export const MC_ASPECT_RATIOS = ['9:16', '4:5', '1:1', '16:9'] as const;
 export type McAspectRatio = (typeof MC_ASPECT_RATIOS)[number];
+
+/**
+ * Subconjunto aceito pelo formato `scenes` (F3): keyframe, motores de vídeo e
+ * montagem 720p só conhecem 9:16 · 1:1 · 16:9. A admissão recusa 4:5 com
+ * 422 ASPECT_NOT_SUPPORTED_FOR_FORMAT (`assertAspectSupportedForFormat`).
+ */
+export const MC_SCENES_ASPECT_RATIOS = [
+  '9:16',
+  '1:1',
+  '16:9',
+] as const satisfies readonly McAspectRatio[];
+export type McScenesAspectRatio = (typeof MC_SCENES_ASPECT_RATIOS)[number];
+
+export function isScenesAspectRatio(
+  aspectRatio: string | null | undefined,
+): aspectRatio is McScenesAspectRatio {
+  return (MC_SCENES_ASPECT_RATIOS as readonly string[]).includes(aspectRatio ?? '');
+}
 
 /**
  * Formatos de projeto (change video-formatos-personagem, design D6):
@@ -29,6 +54,42 @@ export type McAspectRatio = (typeof MC_ASPECT_RATIOS)[number];
 export const MC_PROJECT_FORMATS = ['scenes', 'talking_art', 'offer_carousel'] as const;
 export type McProjectFormat = (typeof MC_PROJECT_FORMATS)[number];
 export const MC_DEFAULT_PROJECT_FORMAT: McProjectFormat = 'scenes';
+
+/**
+ * Tier do projeto (design D2/D6): decide o motor de fala dos formatos novos
+ * (`economico` = Kling Avatar standard, `premium` = motor 1080p nativo). No
+ * formato `scenes` é só rótulo (`economico`), sem troca de motor.
+ */
+export const MC_PROJECT_TIERS = ['economico', 'premium'] as const;
+export type McProjectTier = (typeof MC_PROJECT_TIERS)[number];
+export const MC_DEFAULT_PROJECT_TIER: McProjectTier = 'economico';
+
+/** Canal de entrega (design D13): define perfil de encode e limites de tamanho. NULL = sem perfil. */
+export const MC_PROJECT_CHANNELS = ['instagram', 'whatsapp'] as const;
+export type McProjectChannel = (typeof MC_PROJECT_CHANNELS)[number];
+
+/**
+ * Caixa do logo na arte de origem (design D9b), em FRAÇÕES 0..1 da largura/
+ * altura da arte — independe da resolução de saída escolhida.
+ */
+export interface McLogoBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Origem da arte que virou projeto (design D9): documento do Chroma + página + hash do snapshot. */
+export const MC_SOURCE_ART_KINDS = ['flyer', 'social', 'v2_document'] as const;
+export type McSourceArtKind = (typeof MC_SOURCE_ART_KINDS)[number];
+
+export interface McSourceArt {
+  kind: McSourceArtKind;
+  id: string;
+  pageIndex: number;
+  /** Hash do snapshot rasterizado — muda quando a arte é editada depois da ponte. */
+  snapshotHash: string;
+}
 
 /**
  * Tipos de cena do pipeline v2 (ADR-001 §3.1) — o TIPO determina o grafo de

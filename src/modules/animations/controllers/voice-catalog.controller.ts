@@ -2,8 +2,10 @@ import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { CurrentUser } from '../../../common/decorators/user.decorator';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { VoiceCatalogEntry } from '../../../shared/voice/voice-catalog.entity';
+import { applyVoiceVisibility } from '../../../shared/voice/voice-visibility';
 
 /** Vozes padrão exibidas enquanto o catálogo curado (seed/admin) está vazio. */
 const DEFAULT_VOICES = [
@@ -43,10 +45,15 @@ const DEFAULT_VOICES = [
 export class VoiceCatalogController {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
+  /**
+   * Vozes visíveis para o usuário (D10): habilitadas E (curadas OU de que ele
+   * é dono) — mesmo predicado de src/shared/voice/voice-visibility.ts que o
+   * módulo commercials usa (sem cruzar a fronteira do ESLint).
+   */
   @Get()
-  async findAll() {
+  async findAll(@CurrentUser() user: { id: string }) {
     const voices = await this.dataSource.getRepository(VoiceCatalogEntry).find({
-      where: { enabled: true },
+      where: applyVoiceVisibility({}, user.id),
       order: { sort: 'ASC', name: 'ASC' },
     });
     return voices.length > 0 ? voices : DEFAULT_VOICES;

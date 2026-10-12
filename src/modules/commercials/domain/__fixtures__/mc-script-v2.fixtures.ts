@@ -1,6 +1,15 @@
 import { MC_SCRIPT_SCHEMA_V2 } from '../mc-quality';
 import { sceneSourceHash } from '../mc-script-v2';
-import { McAspectRatio, McScript, McScriptScene, McSceneType, McSealProduct } from '../mc-types';
+import {
+  MC_ASPECT_RATIOS,
+  MC_SCENES_ASPECT_RATIOS,
+  McAspectRatio,
+  McScenesAspectRatio,
+  McScript,
+  McScriptScene,
+  McSceneType,
+  McSealProduct,
+} from '../mc-types';
 
 /**
  * Fixtures de ROTEIRO do pipeline v2 (plano P0): presenter, action e
@@ -204,4 +213,7 @@ export function fixtureNoProductsScript(): McScript {
   return script;
 }
 
-export const FIXTURE_ASPECTS: McAspectRatio[] = ['9:16', '1:1', '16:9'];
+/** Todos os aspectos do produto (4:5 incluído — formatos novos, design D12). */
+export const FIXTURE_ASPECTS: McAspectRatio[] = [...MC_ASPECT_RATIOS];
+/** Aspectos do formato `scenes` (F3): os que a montagem 720p (`assemblyDimensions`) conhece. */
+export const FIXTURE_SCENES_ASPECTS: McScenesAspectRatio[] = [...MC_SCENES_ASPECT_RATIOS];

@@ -11,6 +11,7 @@ import {
   IsNumber,
 } from 'class-validator';
 import { MASCOT_ENTRANCES, MASCOT_GESTURES } from '../domain/presence-animation';
+import { MASCOT_KINDS } from '../entities/mascot.entity';
 
 /** PATCH /v1/mascots/:id — renomear e (re)vincular a um cliente. */
 export class UpdateMascotDto {
@@ -65,6 +66,11 @@ export class QueryMascotsDto {
   @IsOptional()
   @IsIn(['draft', 'segmenting', 'needs_review', 'ready', 'failed'])
   status?: string;
+
+  /** `mascot` ou `logo` (logo da marca registrado como personagem de origem); sem filtro lista os dois. */
+  @IsOptional()
+  @IsIn(MASCOT_KINDS as unknown as string[])
+  kind?: string;
 
   /** Por padrão a lista esconde arquivados. */
   @IsOptional()

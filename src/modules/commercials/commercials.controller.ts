@@ -147,9 +147,10 @@ export class CommercialsController {
 
   // ───────────────────────────── voz (plano §5.3) ─────────────────────────────
 
+  /** Vozes visíveis para o usuário: curadas + as de que ele é dono (D10). */
   @Get('voices')
-  listVoices() {
-    return this.voices.list();
+  listVoices(@CurrentUser() user: { id: string }) {
+    return this.voices.list(user.id);
   }
 
   /** Preview de TTS (multilingual_v2 → eleven_v3), com cache e teto diário. */

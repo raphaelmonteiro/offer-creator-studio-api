@@ -97,8 +97,11 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
       // fora da curadoria: nome original, ordenada depois de todas as curadas
       expect(rows[3]).toMatchObject({ name: 'Locutor da Rede', gender: 'male', enabled: true });
       expect(rows[3].sort as number).toBeGreaterThan(CURATED_VOICES.length);
-      // o flag interno de curadoria não vai para o banco
-      expect(rows[0]).not.toHaveProperty('curated');
+      // D10: `curated` é PERSISTIDO — true nas curadas, false nas demais; o sync
+      // nunca atribui dono (não sabe para quem um clone foi feito)
+      expect(rows.slice(0, 3).every((r) => r.curated === true)).toBe(true);
+      expect(rows[3]).toMatchObject({ curated: false });
+      expect(rows.some((r) => 'ownerUserId' in r)).toBe(false);
     });
 
     it('tabela já populada: só insere o que falta, aplica nome/ordem da curadoria e PRESERVA id/enabled', async () => {
@@ -111,6 +114,7 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
           gender: 'female',
           style: 'animada',
           enabled: false, // admin tirou do ar
+          curated: true,
           sort: 1,
         },
         {
@@ -120,6 +124,7 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
           gender: 'female',
           style: 'institucional',
           enabled: true,
+          curated: true,
           sort: 1, // ordem antiga (era a 2ª de 6)
         },
       ]);
@@ -128,7 +133,7 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
       // Laura: nada mudou → não é reescrita; Sarah: só a ordem → atualizada mantendo id/enabled
       expect(rows.map((r) => r.providerVoiceId)).toEqual(['v-liam', 'v-sarah', 'v-cloned']);
       const sarah = rows.find((r) => r.providerVoiceId === 'v-sarah');
-      expect(sarah).toMatchObject({ id: 'row-sarah', enabled: true, sort: 6 });
+      expect(sarah).toMatchObject({ id: 'row-sarah', enabled: true, curated: true, sort: 6 });
       expect(rows.find((r) => r.providerVoiceId === 'v-laura')).toBeUndefined();
     });
 
@@ -142,7 +147,54 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
           gender: 'female',
           style: 'animada',
           enabled: true,
+          curated: true,
           sort: 1,
+        },
+      ]);
+      await service.syncCatalog();
+      expect(voiceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('D10: linha curada antiga sem o flag (anterior à migration) recebe curated = true no próximo sync, preservando id/enabled/dono', async () => {
+      elevenLabs.listVoices.mockResolvedValue([account[0]]);
+      voiceRepo.find.mockResolvedValue([
+        {
+          id: 'row-laura',
+          providerVoiceId: 'v-laura',
+          name: 'Laura — Animada',
+          gender: 'female',
+          style: 'animada',
+          enabled: false,
+          curated: false,
+          ownerUserId: null,
+          sort: 1,
+        },
+      ]);
+      await service.syncCatalog();
+      const rows = voiceRepo.save.mock.calls[0][0] as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: 'row-laura',
+        enabled: false,
+        curated: true,
+        ownerUserId: null,
+        sort: 1,
+      });
+    });
+
+    it('D10: voz fora da curadoria promovida pelo admin (curated = true) ou com dono NÃO é rebaixada nem reescrita pelo sync', async () => {
+      elevenLabs.listVoices.mockResolvedValue([account[3]]);
+      voiceRepo.find.mockResolvedValue([
+        {
+          id: 'row-cloned',
+          providerVoiceId: 'v-cloned',
+          name: 'Locutor da Rede',
+          gender: 'male',
+          style: null,
+          enabled: true,
+          curated: true, // promoção manual
+          ownerUserId: 'u1',
+          sort: 100,
         },
       ]);
       await service.syncCatalog();
@@ -177,23 +229,173 @@ describe('McVoicesService — seed do catálogo + preview de TTS (plano §5.3)',
   describe('resolveProviderVoiceId', () => {
     it('REGRESSÃO: input não-UUID (providerVoiceId) NUNCA consulta a coluna id — o cast uuid do Postgres estoura antes do OR', async () => {
       voiceRepo.findOne.mockResolvedValueOnce({ providerVoiceId: 'FGY2WhTYpPnrIDTdsKH5' });
-      await service.resolveProviderVoiceId('FGY2WhTYpPnrIDTdsKH5');
-      const where = voiceRepo.findOne.mock.calls.at(-1)?.[0]?.where;
-      expect(where).toEqual([{ providerVoiceId: 'FGY2WhTYpPnrIDTdsKH5', enabled: true }]);
+      await service.resolveProviderVoiceId('u1', 'FGY2WhTYpPnrIDTdsKH5');
+      const where = voiceRepo.findOne.mock.calls.at(-1)?.[0]?.where as Array<
+        Record<string, unknown>
+      >;
+      // D10: cada alternativa é escopada ao tenant (curada OU do usuário), sempre habilitada
+      expect(where).toEqual([
+        { providerVoiceId: 'FGY2WhTYpPnrIDTdsKH5', enabled: true, curated: true },
+        { providerVoiceId: 'FGY2WhTYpPnrIDTdsKH5', enabled: true, ownerUserId: 'u1' },
+      ]);
+      expect(where.some((w) => 'id' in w)).toBe(false);
     });
 
-    it('input em formato UUID consulta id OU providerVoiceId', async () => {
+    it('input em formato UUID consulta id OU providerVoiceId (cada um escopado ao tenant)', async () => {
       voiceRepo.findOne.mockResolvedValueOnce({ providerVoiceId: 'voice-1' });
-      await service.resolveProviderVoiceId('d85f1a8d-f6e9-413d-bf19-a42ba036f3e3');
-      const where = voiceRepo.findOne.mock.calls.at(-1)?.[0]?.where;
-      expect(where).toHaveLength(2);
+      const uuid = 'd85f1a8d-f6e9-413d-bf19-a42ba036f3e3';
+      await service.resolveProviderVoiceId('u1', uuid);
+      const where = voiceRepo.findOne.mock.calls.at(-1)?.[0]?.where as Array<
+        Record<string, unknown>
+      >;
+      expect(where).toHaveLength(4);
+      expect(where).toEqual(
+        expect.arrayContaining([
+          { id: uuid, enabled: true, curated: true },
+          { id: uuid, enabled: true, ownerUserId: 'u1' },
+          { providerVoiceId: uuid, enabled: true, curated: true },
+          { providerVoiceId: uuid, enabled: true, ownerUserId: 'u1' },
+        ]),
+      );
     });
 
     it('voz fora do catálogo → 422 VOICE_NOT_IN_CATALOG', async () => {
       voiceRepo.findOne.mockResolvedValueOnce(null);
-      await expect(service.resolveProviderVoiceId('inexistente')).rejects.toMatchObject({
+      await expect(service.resolveProviderVoiceId('u1', 'inexistente')).rejects.toMatchObject({
+        status: 422,
         response: expect.objectContaining({ code: 'VOICE_NOT_IN_CATALOG' }),
       });
+    });
+  });
+
+  /**
+   * Cenários da spec `video-character-kit` ("Vozes visíveis por tenant"):
+   * repositório em memória que avalia o `where` do TypeORM (array = OR entre
+   * alternativas; objeto = AND entre chaves) sobre um catálogo fixo — o
+   * resultado de list/resolve é verificado de ponta a ponta, não só a consulta.
+   */
+  describe('visibilidade por tenant (D10) — list e resolveProviderVoiceId', () => {
+    const uuidOf = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const catalog = [
+      {
+        id: uuidOf(1),
+        providerVoiceId: 'pv-liam',
+        name: 'Liam — Jovem',
+        enabled: true,
+        curated: true,
+        ownerUserId: null,
+        sort: 0,
+      },
+      {
+        id: uuidOf(2),
+        providerVoiceId: 'pv-laura',
+        name: 'Laura — Animada',
+        enabled: true,
+        curated: true,
+        ownerUserId: null,
+        sort: 1,
+      },
+      {
+        id: uuidOf(3),
+        providerVoiceId: 'pv-off',
+        name: 'Fora do ar',
+        enabled: false,
+        curated: true,
+        ownerUserId: null,
+        sort: 2,
+      },
+      {
+        id: uuidOf(4),
+        providerVoiceId: 'pv-mine',
+        name: 'Clone do u1',
+        enabled: true,
+        curated: false,
+        ownerUserId: 'u1',
+        sort: 100,
+      },
+      {
+        id: uuidOf(5),
+        providerVoiceId: 'pv-theirs',
+        name: 'Clone do u2',
+        enabled: true,
+        curated: false,
+        ownerUserId: 'u2',
+        sort: 101,
+      },
+      {
+        id: uuidOf(6),
+        providerVoiceId: 'pv-orphan',
+        name: 'Voice Library',
+        enabled: true,
+        curated: false,
+        ownerUserId: null,
+        sort: 102,
+      },
+    ];
+    const matches = (row: Record<string, unknown>, where: unknown): boolean => {
+      const alternatives = Array.isArray(where) ? where : [where];
+      return alternatives.some((alt) =>
+        Object.entries(alt as Record<string, unknown>).every(([k, v]) => row[k] === v),
+      );
+    };
+
+    beforeEach(() => {
+      voiceRepo.find.mockImplementation(async ({ where }: { where: unknown }) =>
+        catalog.filter((r) => matches(r, where)),
+      );
+      voiceRepo.findOne.mockImplementation(
+        async ({ where }: { where: unknown }) => catalog.find((r) => matches(r, where)) ?? null,
+      );
+    });
+
+    it('voz curada: todas as curadas habilitadas aparecem na lista de qualquer usuário e resolvem', async () => {
+      const ids = (await service.list('u3')).map((v) => v.providerVoiceId);
+      expect(ids).toEqual(['pv-liam', 'pv-laura']);
+      await expect(service.resolveProviderVoiceId('u3', uuidOf(1))).resolves.toBe('pv-liam');
+      await expect(service.resolveProviderVoiceId('u3', 'pv-laura')).resolves.toBe('pv-laura');
+    });
+
+    it('voz de outro tenant: não aparece na lista deste usuário e um kit que a referencie é recusado com VOICE_NOT_IN_CATALOG', async () => {
+      const ids = (await service.list('u1')).map((v) => v.providerVoiceId);
+      expect(ids).toContain('pv-mine');
+      expect(ids).not.toContain('pv-theirs');
+      // pelo id do catálogo e pelo providerVoiceId — os dois formatos que approveKit/preview/worker aceitam
+      for (const input of [uuidOf(5), 'pv-theirs']) {
+        await expect(service.resolveProviderVoiceId('u1', input)).rejects.toMatchObject({
+          status: 422,
+          response: expect.objectContaining({ code: 'VOICE_NOT_IN_CATALOG' }),
+        });
+      }
+      // para o dono, a mesma voz resolve
+      await expect(service.resolveProviderVoiceId('u2', uuidOf(5))).resolves.toBe('pv-theirs');
+    });
+
+    it('voz não curada sem dono (Voice Library): oculta para todos e recusada em kit, até um admin marcá-la como curada', async () => {
+      for (const userId of ['u1', 'u2', 'u3']) {
+        const ids = (await service.list(userId)).map((v) => v.providerVoiceId);
+        expect(ids).not.toContain('pv-orphan');
+        expect(ids).not.toContain('pv-off');
+        await expect(service.resolveProviderVoiceId(userId, 'pv-orphan')).rejects.toMatchObject({
+          response: expect.objectContaining({ code: 'VOICE_NOT_IN_CATALOG' }),
+        });
+      }
+      // promoção pelo admin: curated = true → visível para todos
+      catalog[5].curated = true;
+      try {
+        expect((await service.list('u3')).map((v) => v.providerVoiceId)).toContain('pv-orphan');
+      } finally {
+        catalog[5].curated = false;
+      }
+    });
+
+    it('preview usa o resolve escopado: voz de outro dono não gera TTS nem conta no teto', async () => {
+      await expect(
+        service.preview('u1', { voiceId: 'pv-theirs', text: 'oi' }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'VOICE_NOT_IN_CATALOG' }),
+      });
+      expect(elevenLabs.synthesize).not.toHaveBeenCalled();
+      expect(settings.set).not.toHaveBeenCalled();
     });
   });
 

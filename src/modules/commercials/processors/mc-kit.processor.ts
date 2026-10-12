@@ -3,12 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In } from 'typeorm';
 import OpenAI from 'openai';
+import { createHash } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as sharp from 'sharp';
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import {
+  GEMINI_IMAGE_MODEL,
   GeminiImageProvider,
   sniffImageMime,
 } from '../../../shared/providers/gemini-image.provider';
@@ -19,14 +21,25 @@ import { CommercialsService } from '../commercials.service';
 import {
   buildKitReferencePrompt,
   isKitReferenceSlot,
+  KIT_REFERENCE_BACKGROUND_DEFAULT,
   KIT_REFERENCE_SLOT_COUNT,
   KIT_REFERENCE_SLOTS,
   KitCanonicalDesc,
+  KitReferencePromptOptions,
   KitReferenceSlot,
   parseCanonicalDesc,
 } from '../domain/kit-prompts';
+import { McKitSource, McKitStyle } from '../domain/mc-kit-identity';
 import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
+import { computeKitReferenceHash } from '../domain/mc-step-hashes';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+
+/** Identidade do kit resolvida para prompt e hash (kits anteriores: mascote, sem estilo, cinza claro). */
+type KitIdentity = Required<KitReferencePromptOptions> & {
+  style: McKitStyle | null;
+  source: McKitSource;
+  backgroundColor: string;
+};
 
 /**
  * Mínimo de referências para o kit valer a revisão (plano §4): com menos de 2
@@ -334,14 +347,29 @@ export class McKitProcessor {
     return parsed;
   }
 
-  /** (b) Gera a imagem do slot, grava em uploads/commercials/kits/{kitId}/ e cria o media asset. */
+  /**
+   * (b) Gera a imagem do slot, grava em uploads/commercials/kits/{kitId}/ e
+   * cria o media asset. O prompt leva o estilo fixo, a origem e a cor de fundo
+   * do kit (D5), e o hash da requisição (D1: "entra no hash do kit") fica no
+   * asset (`contentHash` + metadata) para auditoria e reuso.
+   */
   private async generateAndSaveReference(
     kit: McCharacterKit,
     slot: KitReferenceSlot,
     desc: KitCanonicalDesc | null,
     mascotImage: Buffer,
   ): Promise<string> {
-    const prompt = buildKitReferencePrompt(slot, desc);
+    const identity = this.kitIdentity(kit);
+    const prompt = buildKitReferencePrompt(slot, desc, identity);
+    const inputHash = computeKitReferenceHash({
+      slot,
+      prompt,
+      sourceImageHash: createHash('sha256').update(mascotImage).digest('hex'),
+      source: identity.source,
+      style: identity.style,
+      backgroundColor: identity.backgroundColor,
+      model: this.provider() === 'mock' ? 'mock' : GEMINI_IMAGE_MODEL,
+    });
     const image =
       this.provider() === 'mock'
         ? await this.mockReferenceImage(slot)
@@ -361,10 +389,14 @@ export class McKitProcessor {
       fileUrl,
       mimeType: 'image/png',
       fileSize: String(image.length),
+      contentHash: inputHash,
       metadata: {
         kitId: kit.id,
         slot,
         provider: this.provider(),
+        inputHash,
+        style: identity.style,
+        source: identity.source,
         // 1500 e não 500: com a ficha embutida, as regras que mais importam na
         // auditoria (acessórios proibidos, ajustes do usuário) vinham depois do
         // corte antigo e o metadata não servia para conferir o que foi enviado.
@@ -372,6 +404,15 @@ export class McKitProcessor {
       },
     });
     return asset.id;
+  }
+
+  /** Kits anteriores à change não têm estilo nem cor: valem os defaults do prompt legado. */
+  private kitIdentity(kit: McCharacterKit): KitIdentity {
+    return {
+      style: kit.style ?? null,
+      source: kit.source ?? 'mascot',
+      backgroundColor: kit.tileBackgroundColor ?? KIT_REFERENCE_BACKGROUND_DEFAULT,
+    };
   }
 
   /** PNG sintético (sem custo): fundo colorido + rótulo do slot, via sharp. */

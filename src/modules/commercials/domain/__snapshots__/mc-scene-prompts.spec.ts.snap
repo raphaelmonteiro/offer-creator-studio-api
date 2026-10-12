@@ -1,0 +1,193 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`mc-scene-prompts — estilo fixo e origem do kit (D5) snapshot keyframe legado + v2: estilo 3d_render × origem logo 1`] = `
+[
+  "Commercial keyframe: the exact same mascot character from the reference images.
+Scene: The mascot waves at the camera
+Vertical 9:16 composition (portrait, full-height framing), clean supermarket/retail setting, vivid commercial lighting.
+No added text, numbers, price tags or watermarks anywhere in the image; the lettering and marks that belong to the character's own logo design stay as in the references.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the scene action above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Commercial keyframe: the exact same mascot character from the reference images.
+This is the STARTING frame of a short motion — show the initial state only, not a sequence.
+Starting frame: The mascot stands by the shelf, smiling
+Vertical 9:16 composition (portrait, full-height framing). Clean supermarket/retail setting, vivid commercial lighting.
+Keep the LOWER third of the frame free of the character's face and important objects (price/caption overlay).
+No ADDED promotional text, numbers, price tags or watermarks anywhere in the image (the text printed on the real product package stays as it is). Emblems or marks that are part of the approved character design stay as in the references.
+No store signs, posters, banners, hanging boards, shelf price tags or written labels anywhere in the setting; keep shelf packaging plain and simple (busy text in the background makes the video generator hallucinate captions).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Permanent traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the starting frame above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`mc-scene-prompts — estilo fixo e origem do kit (D5) snapshot keyframe legado + v2: estilo 3d_render × origem mascot 1`] = `
+[
+  "Commercial keyframe: the exact same mascot character from the reference images.
+Scene: The mascot waves at the camera
+Vertical 9:16 composition (portrait, full-height framing), clean supermarket/retail setting, vivid commercial lighting.
+No text, no numbers, no price tags, no logos, no watermark anywhere in the image.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the scene action above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Commercial keyframe: the exact same mascot character from the reference images.
+This is the STARTING frame of a short motion — show the initial state only, not a sequence.
+Starting frame: The mascot stands by the shelf, smiling
+Vertical 9:16 composition (portrait, full-height framing). Clean supermarket/retail setting, vivid commercial lighting.
+Keep the LOWER third of the frame free of the character's face and important objects (price/caption overlay).
+No ADDED promotional text, numbers, price tags or watermarks anywhere in the image (the text printed on the real product package stays as it is). Emblems or marks that are part of the approved character design stay as in the references.
+No store signs, posters, banners, hanging boards, shelf price tags or written labels anywhere in the setting; keep shelf packaging plain and simple (busy text in the background makes the video generator hallucinate captions).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): 3D animated-feature style render: full volumetric forms, soft studio lighting with gentle subsurface scattering, matte materials, subtle ambient occlusion, no flat 2D outlines.
+
+Character sheet (keep the character EXACTLY like this):
+- Permanent traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the starting frame above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`mc-scene-prompts — estilo fixo e origem do kit (D5) snapshot keyframe legado + v2: estilo cartoon_2d × origem logo 1`] = `
+[
+  "Commercial keyframe: the exact same mascot character from the reference images.
+Scene: The mascot waves at the camera
+Vertical 9:16 composition (portrait, full-height framing), clean supermarket/retail setting, vivid commercial lighting.
+No added text, numbers, price tags or watermarks anywhere in the image; the lettering and marks that belong to the character's own logo design stay as in the references.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the scene action above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Commercial keyframe: the exact same mascot character from the reference images.
+This is the STARTING frame of a short motion — show the initial state only, not a sequence.
+Starting frame: The mascot stands by the shelf, smiling
+Vertical 9:16 composition (portrait, full-height framing). Clean supermarket/retail setting, vivid commercial lighting.
+Keep the LOWER third of the frame free of the character's face and important objects (price/caption overlay).
+No ADDED promotional text, numbers, price tags or watermarks anywhere in the image (the text printed on the real product package stays as it is). Emblems or marks that are part of the approved character design stay as in the references.
+No store signs, posters, banners, hanging boards, shelf price tags or written labels anywhere in the setting; keep shelf packaging plain and simple (busy text in the background makes the video generator hallucinate captions).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Permanent traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the starting frame above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`mc-scene-prompts — estilo fixo e origem do kit (D5) snapshot keyframe legado + v2: estilo cartoon_2d × origem mascot 1`] = `
+[
+  "Commercial keyframe: the exact same mascot character from the reference images.
+Scene: The mascot waves at the camera
+Vertical 9:16 composition (portrait, full-height framing), clean supermarket/retail setting, vivid commercial lighting.
+No text, no numbers, no price tags, no logos, no watermark anywhere in the image.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the scene action above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Commercial keyframe: the exact same mascot character from the reference images.
+This is the STARTING frame of a short motion — show the initial state only, not a sequence.
+Starting frame: The mascot stands by the shelf, smiling
+Vertical 9:16 composition (portrait, full-height framing). Clean supermarket/retail setting, vivid commercial lighting.
+Keep the LOWER third of the frame free of the character's face and important objects (price/caption overlay).
+No ADDED promotional text, numbers, price tags or watermarks anywhere in the image (the text printed on the real product package stays as it is). Emblems or marks that are part of the approved character design stay as in the references.
+No store signs, posters, banners, hanging boards, shelf price tags or written labels anywhere in the setting; keep shelf packaging plain and simple (busy text in the background makes the video generator hallucinate captions).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Flat 2D vector cartoon illustration: clean uniform outlines, flat solid color fills, minimal cel shading, no 3D volume, no photographic texture.
+
+Character sheet (keep the character EXACTLY like this):
+- Permanent traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the starting frame above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`mc-scene-prompts — estilo fixo e origem do kit (D5) snapshot keyframe legado + v2: estilo realistic × origem logo 1`] = `
+[
+  "Commercial keyframe: the exact same mascot character from the reference images.
+Scene: The mascot waves at the camera
+Vertical 9:16 composition (portrait, full-height framing), clean supermarket/retail setting, vivid commercial lighting.
+No added text, numbers, price tags or watermarks anywhere in the image; the lettering and marks that belong to the character's own logo design stay as in the references.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the scene action above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Commercial keyframe: the exact same mascot character from the reference images.
+This is the STARTING frame of a short motion — show the initial state only, not a sequence.
+Starting frame: The mascot stands by the shelf, smiling
+Vertical 9:16 composition (portrait, full-height framing). Clean supermarket/retail setting, vivid commercial lighting.
+Keep the LOWER third of the frame free of the character's face and important objects (price/caption overlay).
+No ADDED promotional text, numbers, price tags or watermarks anywhere in the image (the text printed on the real product package stays as it is). Emblems or marks that are part of the approved character design stay as in the references.
+No store signs, posters, banners, hanging boards, shelf price tags or written labels anywhere in the setting; keep shelf packaging plain and simple (busy text in the background makes the video generator hallucinate captions).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Permanent traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the starting frame above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;
+
+exports[`mc-scene-prompts — estilo fixo e origem do kit (D5) snapshot keyframe legado + v2: estilo realistic × origem mascot 1`] = `
+[
+  "Commercial keyframe: the exact same mascot character from the reference images.
+Scene: The mascot waves at the camera
+Vertical 9:16 composition (portrait, full-height framing), clean supermarket/retail setting, vivid commercial lighting.
+No text, no numbers, no price tags, no logos, no watermark anywhere in the image.
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the scene action above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+  "Commercial keyframe: the exact same mascot character from the reference images.
+This is the STARTING frame of a short motion — show the initial state only, not a sequence.
+Starting frame: The mascot stands by the shelf, smiling
+Vertical 9:16 composition (portrait, full-height framing). Clean supermarket/retail setting, vivid commercial lighting.
+Keep the LOWER third of the frame free of the character's face and important objects (price/caption overlay).
+No ADDED promotional text, numbers, price tags or watermarks anywhere in the image (the text printed on the real product package stays as it is). Emblems or marks that are part of the approved character design stay as in the references.
+No store signs, posters, banners, hanging boards, shelf price tags or written labels anywhere in the setting; keep shelf packaging plain and simple (busy text in the background makes the video generator hallucinate captions).
+Rendering style (FIXED for this character — takes precedence over any other style instruction): Photorealistic rendering: physically plausible materials, textures and lighting, natural shadows and reflections, while keeping the character's exact design, proportions, colors and features unchanged.
+
+Character sheet (keep the character EXACTLY like this):
+- Permanent traits: friendly capybara; red apron
+- Colors: #FF4500
+- Never: never change the species
+- Removable props — include ONLY if the starting frame above explicitly asks for them, otherwise the character's hands are empty: green shopping basket.
+- User adjustments (follow strictly; they refine the character but never override the fixed rendering style above): Make the eyes a bit bigger",
+]
+`;

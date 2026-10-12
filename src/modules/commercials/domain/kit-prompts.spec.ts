@@ -1,6 +1,8 @@
 import {
   buildKitReferencePrompt,
   isKitReferenceSlot,
+  KIT_FRONT_SLOT,
+  KIT_REFERENCE_BACKGROUND_DEFAULT,
   KIT_REFERENCE_SLOT_COUNT,
   KIT_REFERENCE_SLOTS,
   KIT_SLOT_WITH_PROP,
@@ -10,6 +12,7 @@ import {
   mergeTranslatedSheet,
   parseCanonicalDesc,
 } from './kit-prompts';
+import { MC_KIT_SOURCES, MC_KIT_STYLES, STYLE_BLOCKS } from './mc-kit-identity';
 
 describe('kit-prompts — prompts fixos das referências do kit (plano §4)', () => {
   it('tem exatamente 4 slots na ordem contratada com a UI de review', () => {
@@ -120,6 +123,99 @@ describe('kit-prompts — prompts fixos das referências do kit (plano §4)', ()
       });
       expect(prompt).toContain('User adjustments (highest priority, follow strictly)');
       expect(prompt.trimEnd().endsWith('Remove the basket from his hands')).toBe(true);
+    });
+  });
+
+  /**
+   * Change video-formatos-personagem (D1/D5): estilo como bloco fixo (fim do
+   * hack de `adjustments`), origem `logo` sem "no logo", cor de fundo do slot
+   * frontal como parâmetro. Os snapshots são o contrato de reprodutibilidade:
+   * mudar um prompt = mudar o snapshot de propósito (e o hash do kit).
+   */
+  describe('estilo fixo, origem e cor de fundo (D1/D5)', () => {
+    const desc: KitCanonicalDesc = {
+      traits: ['friendly capybara', 'red apron'],
+      colors: ['#FF4500'],
+      style: 'hand-drawn 2D sketch',
+      doNots: ['never change the species'],
+      accessories: ['green shopping basket'],
+      adjustments: 'Make the eyes a bit bigger',
+    };
+    const allSlots = (options: Parameters<typeof buildKitReferencePrompt>[2]) =>
+      KIT_REFERENCE_SLOTS.map((_, slot) =>
+        buildKitReferencePrompt(slot as KitReferenceSlot, desc, options),
+      );
+    const matrix = MC_KIT_STYLES.flatMap((style) =>
+      MC_KIT_SOURCES.map((source) => [style, source] as const),
+    );
+
+    it.each(matrix)('snapshot dos 4 slots: estilo %s × origem %s', (style, source) => {
+      expect(allSlots({ style, source })).toMatchSnapshot();
+    });
+
+    it('bloco de estilo entra em todo slot e o estilo livre da ficha sai (não disputa com o fixo)', () => {
+      for (const style of MC_KIT_STYLES) {
+        for (const prompt of allSlots({ style, source: 'mascot' })) {
+          expect(prompt).toContain(STYLE_BLOCKS[style]);
+          expect(prompt).toContain('Rendering style (FIXED for this character');
+          expect(prompt).not.toContain('- Style: hand-drawn 2D sketch');
+        }
+      }
+    });
+
+    it('com estilo fixo, os ajustes do usuário deixam de ser "highest priority" (não mudam o estilo)', () => {
+      const prompt = buildKitReferencePrompt(0, desc, { style: '3d_render' });
+      expect(prompt).not.toContain('highest priority');
+      expect(prompt).toContain('never override the fixed rendering style above');
+      expect(prompt.trimEnd().endsWith('Make the eyes a bit bigger')).toBe(true);
+    });
+
+    it('sem estilo (kit anterior) o prompt é o legado: sem bloco, com "- Style:" da ficha e ajustes prioritários', () => {
+      const legacy = buildKitReferencePrompt(0, desc);
+      expect(legacy).toBe(buildKitReferencePrompt(0, desc, {}));
+      expect(legacy).toBe(buildKitReferencePrompt(0, desc, { style: null, source: 'mascot' }));
+      expect(legacy).not.toContain('Rendering style');
+      expect(legacy).toContain('- Style: hand-drawn 2D sketch');
+      expect(legacy).toContain('User adjustments (highest priority, follow strictly)');
+      expect(buildKitReferencePrompt(1)).toBe(
+        'Turnaround reference: the exact same mascot character from the reference image, ' +
+          'full profile (side) view, full body, neutral standing pose. ' +
+          'Plain solid light gray background, even studio lighting, no text, no logo, no watermark.',
+      );
+    });
+
+    it('origem logo: cai o "no logo" (as marcas do logo são a identidade), fica proibido texto adicionado', () => {
+      for (const prompt of allSlots({ source: 'logo', style: 'cartoon_2d' })) {
+        expect(prompt).not.toMatch(/no logo/);
+        expect(prompt).toContain('no added text, no watermark');
+        expect(prompt).toContain(
+          'marks that belong to the logo itself stay exactly as in the reference',
+        );
+      }
+      for (const prompt of allSlots({ source: 'mascot', style: 'cartoon_2d' })) {
+        expect(prompt).toMatch(/no text, no logo, no watermark/);
+      }
+    });
+
+    it('cor de fundo só no slot frontal: hex vira cor exata; os demais seguem no cinza claro', () => {
+      expect(KIT_FRONT_SLOT).toBe(2);
+      expect(KIT_REFERENCE_BACKGROUND_DEFAULT).toBe('light gray');
+      const prompts = allSlots({ backgroundColor: '#1e90ff' });
+      expect(prompts[KIT_FRONT_SLOT]).toContain(
+        'Plain solid background filled with the exact color #1E90FF (uniform, no gradient, no texture)',
+      );
+      expect(prompts[KIT_FRONT_SLOT]).not.toContain('light gray');
+      for (const slot of [0, 1, 3]) {
+        expect(prompts[slot]).toContain('Plain solid light gray background');
+        expect(prompts[slot]).not.toContain('#1E90FF');
+      }
+      // nome de cor segue como texto; vazio/nulo cai no padrão
+      expect(
+        buildKitReferencePrompt(KIT_FRONT_SLOT, null, { backgroundColor: 'warm beige' }),
+      ).toContain('Plain solid warm beige background');
+      expect(buildKitReferencePrompt(KIT_FRONT_SLOT, null, { backgroundColor: null })).toBe(
+        buildKitReferencePrompt(KIT_FRONT_SLOT),
+      );
     });
   });
 

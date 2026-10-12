@@ -7,6 +7,7 @@ import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.servi
 import { ModerationProvider } from '../../../shared/providers/moderation.provider';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
+import { ClientsService } from '../../clients/clients.service';
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import { McKitStatus } from '../domain/mc-state-machines';
@@ -33,12 +34,19 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
   let queue: { publish: jest.Mock };
-  let mascots: { findOne: jest.Mock };
+  let mascots: { findOne: jest.Mock; createFromUrl: jest.Mock };
   let moderation: { moderate: jest.Mock };
   let commercials: { appendEvent: jest.Mock };
   let voices: { resolveProviderVoiceId: jest.Mock };
   let config: { get: jest.Mock };
+  let clients: { findOne: jest.Mock };
   let service: McKitsService;
+  /** Origem mascote com estilo — o mínimo que gera referências (STYLE_REQUIRED sem o estilo). */
+  const mascotDto = {
+    source: 'mascot' as const,
+    style: 'cartoon_2d' as const,
+    mascotId: 'mascot-1',
+  };
 
   beforeAll(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mc-kits-'));
@@ -78,7 +86,11 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       notify: jest.fn().mockResolvedValue(undefined),
     };
     queue = { publish: jest.fn().mockResolvedValue('job-1') };
-    mascots = { findOne: jest.fn().mockResolvedValue({ ...mascotBase }) };
+    mascots = {
+      findOne: jest.fn().mockResolvedValue({ ...mascotBase }),
+      createFromUrl: jest.fn(),
+    };
+    clients = { findOne: jest.fn() };
     moderation = {
       moderate: jest.fn().mockResolvedValue({ flagged: false, categories: [] }),
     };
@@ -87,7 +99,9 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       get: jest.fn((key: string, def?: string) => (key === 'UPLOAD_DEST' ? tmpDir : def)),
     };
     // resolve passthrough: nos testes o voiceId de entrada já é o do provider
-    voices = { resolveProviderVoiceId: jest.fn((v: string) => Promise.resolve(v)) };
+    voices = {
+      resolveProviderVoiceId: jest.fn((_userId: string, v: string) => Promise.resolve(v)),
+    };
     service = new McKitsService(
       dataSource as unknown as DataSource,
       transitions as unknown as TaskTransitionService,
@@ -97,12 +111,13 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       commercials as unknown as CommercialsService,
       voices as unknown as McVoicesService,
       config as unknown as ConfigService,
+      clients as unknown as ClientsService,
     );
   });
 
   it('mascote sem aceite de direitos → 422 MASCOT_RIGHTS_REQUIRED, sem moderação nem fila', async () => {
     mascots.findOne.mockResolvedValue({ ...mascotBase, rightsConfirmedAt: null });
-    await expect(service.createKit('u1', { mascotId: 'mascot-1' })).rejects.toMatchObject({
+    await expect(service.createKit('u1', mascotDto)).rejects.toMatchObject({
       response: { code: 'MASCOT_RIGHTS_REQUIRED' },
     });
     expect(moderation.moderate).not.toHaveBeenCalled();
@@ -115,7 +130,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       cutoutUrl: null,
       sourceImageUrl: null,
     });
-    await expect(service.createKit('u1', { mascotId: 'mascot-1' })).rejects.toMatchObject({
+    await expect(service.createKit('u1', mascotDto)).rejects.toMatchObject({
       response: { code: 'MASCOT_IMAGE_REQUIRED' },
     });
     expect(queue.publish).not.toHaveBeenCalled();
@@ -127,7 +142,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       cutoutUrl: '/uploads/mascots/nao-existe.png',
       sourceImageUrl: null,
     });
-    await expect(service.createKit('u1', { mascotId: 'mascot-1' })).rejects.toMatchObject({
+    await expect(service.createKit('u1', mascotDto)).rejects.toMatchObject({
       response: { code: 'MASCOT_IMAGE_MISSING' },
     });
   });
@@ -138,7 +153,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       categories: ['violence'],
       raw: { results: [] },
     });
-    await expect(service.createKit('u1', { mascotId: 'mascot-1' })).rejects.toMatchObject({
+    await expect(service.createKit('u1', mascotDto)).rejects.toMatchObject({
       response: { code: 'MASCOT_MODERATION_BLOCKED' },
     });
     // o kit nasce failed com o jsonb da moderação — trilha sem gasto de geração
@@ -156,7 +171,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
   });
 
   it('caminho feliz: moderação ANTES da fila; kit generating; mc.image com expireInSeconds 300', async () => {
-    const kit = await service.createKit('u1', { mascotId: 'mascot-1', voiceId: 'voice-9' });
+    const kit = await service.createKit('u1', { ...mascotDto, voiceId: 'voice-9' });
 
     expect(moderation.moderate).toHaveBeenCalledWith(
       expect.objectContaining({ imageBase64: Buffer.from('png-bytes').toString('base64') }),
@@ -179,6 +194,157 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       { kind: 'mc_kit', kitId: kit.id, status: McKitStatus.GENERATING },
       MC_EVENTS_CHANNEL,
     );
+  });
+
+  /**
+   * Change video-formatos-personagem (D5): o kit nasce de um mascote OU do
+   * logo da marca; o estilo é exigido para gerar referências; o logo precisa
+   * dos direitos da marca; só a origem logo passa por candidatos (2.4).
+   */
+  describe('origem e estilo (D5) — createKit por origem', () => {
+    const logoBase = {
+      id: 'logo-1',
+      kind: 'logo',
+      clientId: 'c1',
+      rightsConfirmedAt: new Date(),
+      cutoutUrl: null,
+      sourceImageUrl: '/uploads/mascots/cutout.png',
+    };
+
+    it('mascote sem estilo → 422 STYLE_REQUIRED antes de moderar (gerar referência exige estilo)', async () => {
+      await expect(
+        service.createKit('u1', { source: 'mascot', mascotId: 'mascot-1' }),
+      ).rejects.toMatchObject({ status: 422, response: { code: 'STYLE_REQUIRED' } });
+      expect(moderation.moderate).not.toHaveBeenCalled();
+      expect(kitRepo.save).not.toHaveBeenCalled();
+      expect(queue.publish).not.toHaveBeenCalled();
+    });
+
+    it('mascote com estilo → kit generating com source/style/identityMode, job de referência e SEM rodada de candidatos', async () => {
+      const kit = await service.createKit('u1', { ...mascotDto, style: '3d_render' });
+      expect(kitRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'mascot',
+          style: '3d_render',
+          identityMode: 'generated',
+          mascotId: 'mascot-1',
+          status: McKitStatus.GENERATING,
+        }),
+      );
+      expect(queue.publish).toHaveBeenCalledTimes(1);
+      expect(queue.publish).toHaveBeenCalledWith(
+        QUEUES.MC_IMAGE,
+        { kitId: kit.id },
+        { expireInSeconds: MC_IMAGE_EXPIRE_S },
+      );
+      expect(kit.candidateRoundId ?? null).toBeNull();
+      expect(mascots.createFromUrl).not.toHaveBeenCalled();
+      expect(clients.findOne).not.toHaveBeenCalled();
+    });
+
+    it('mascotId que aponta para um logo → 422 MASCOT_KIND_MISMATCH', async () => {
+      mascots.findOne.mockResolvedValue({ ...mascotBase, kind: 'logo' });
+      await expect(service.createKit('u1', mascotDto)).rejects.toMatchObject({
+        response: { code: 'MASCOT_KIND_MISMATCH' },
+      });
+    });
+
+    it('logo por clientId: registra o logo via createFromUrl; sem direitos → 422 LOGO_RIGHTS_REQUIRED com o mascotId', async () => {
+      clients.findOne.mockResolvedValue({
+        id: 'c1',
+        name: 'Mercado Bom',
+        logoUrl: 'http://cdn/uploads/logos/l.png',
+      });
+      mascots.createFromUrl.mockResolvedValue({ ...logoBase, rightsConfirmedAt: null });
+      await expect(
+        service.createKit('u1', { source: 'logo', clientId: 'c1', style: 'cartoon_2d' }),
+      ).rejects.toMatchObject({
+        status: 422,
+        response: { code: 'LOGO_RIGHTS_REQUIRED', mascotId: 'logo-1' },
+      });
+      expect(mascots.createFromUrl).toHaveBeenCalledWith('u1', 'http://cdn/uploads/logos/l.png', {
+        name: 'Logo Mercado Bom',
+        clientId: 'c1',
+        kind: 'logo',
+        rightsConfirmed: false,
+      });
+      expect(moderation.moderate).not.toHaveBeenCalled();
+      expect(kitRepo.save).not.toHaveBeenCalled();
+      expect(queue.publish).not.toHaveBeenCalled();
+    });
+
+    it('logo por clientId com rightsConfirmed: kit generating com source logo e NENHUMA referência enfileirada (candidatos vêm antes, D4)', async () => {
+      clients.findOne.mockResolvedValue({
+        id: 'c1',
+        name: 'Mercado Bom',
+        logoUrl: '/uploads/logos/l.png',
+      });
+      mascots.createFromUrl.mockResolvedValue({ ...logoBase });
+      const kit = await service.createKit('u1', {
+        source: 'logo',
+        clientId: 'c1',
+        rightsConfirmed: true,
+      });
+      expect(mascots.createFromUrl).toHaveBeenCalledWith(
+        'u1',
+        '/uploads/logos/l.png',
+        expect.objectContaining({ kind: 'logo', rightsConfirmed: true }),
+      );
+      // estilo é opcional na criação do kit de logo (cobrado na rodada de candidatos)
+      expect(kit).toMatchObject({
+        status: McKitStatus.GENERATING,
+        source: 'logo',
+        style: null,
+        identityMode: 'generated',
+        mascotId: 'logo-1',
+      });
+      expect(moderation.moderate).toHaveBeenCalledTimes(1);
+      expect(queue.publish).not.toHaveBeenCalled();
+      expect(transitions.notify).toHaveBeenCalledWith(
+        manager,
+        'u1',
+        { kind: 'mc_kit', kitId: kit.id, status: McKitStatus.GENERATING },
+        MC_EVENTS_CHANNEL,
+      );
+    });
+
+    it('cliente sem logo cadastrado → 422 CLIENT_LOGO_REQUIRED', async () => {
+      clients.findOne.mockResolvedValue({ id: 'c1', name: 'Mercado', logoUrl: null });
+      await expect(
+        service.createKit('u1', { source: 'logo', clientId: 'c1' }),
+      ).rejects.toMatchObject({ response: { code: 'CLIENT_LOGO_REQUIRED' } });
+      expect(mascots.createFromUrl).not.toHaveBeenCalled();
+    });
+
+    it('logoMascotId: precisa ser kind logo (422 MASCOT_KIND_MISMATCH) e ter direitos (LOGO_RIGHTS_REQUIRED)', async () => {
+      mascots.findOne.mockResolvedValue({ ...mascotBase, kind: 'mascot' });
+      await expect(
+        service.createKit('u1', { source: 'logo', logoMascotId: 'mascot-1' }),
+      ).rejects.toMatchObject({ response: { code: 'MASCOT_KIND_MISMATCH' } });
+
+      mascots.findOne.mockResolvedValue({ ...logoBase, rightsConfirmedAt: null });
+      await expect(
+        service.createKit('u1', { source: 'logo', logoMascotId: 'logo-1' }),
+      ).rejects.toMatchObject({ response: { code: 'LOGO_RIGHTS_REQUIRED', mascotId: 'logo-1' } });
+
+      mascots.findOne.mockResolvedValue({ ...logoBase });
+      const kit = await service.createKit('u1', { source: 'logo', logoMascotId: 'logo-1' });
+      expect(kit).toMatchObject({ source: 'logo', mascotId: 'logo-1' });
+      expect(clients.findOne).not.toHaveBeenCalled();
+      expect(queue.publish).not.toHaveBeenCalled();
+    });
+
+    it('logo: clientId e logoMascotId juntos → LOGO_SOURCE_AMBIGUOUS; nenhum → LOGO_SOURCE_REQUIRED', async () => {
+      await expect(
+        service.createKit('u1', { source: 'logo', clientId: 'c1', logoMascotId: 'logo-1' }),
+      ).rejects.toMatchObject({ status: 422, response: { code: 'LOGO_SOURCE_AMBIGUOUS' } });
+      await expect(service.createKit('u1', { source: 'logo' })).rejects.toMatchObject({
+        status: 422,
+        response: { code: 'LOGO_SOURCE_REQUIRED' },
+      });
+      expect(mascots.findOne).not.toHaveBeenCalled();
+      expect(clients.findOne).not.toHaveBeenCalled();
+    });
   });
 
   describe('approve', () => {
@@ -282,11 +448,26 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       expect(queue.publish).not.toHaveBeenCalled();
     });
 
+    it('kit em review sem estilo → 422 STYLE_REQUIRED (regerar É gerar referência); nada enfileirado', async () => {
+      kitRepo.findOneBy.mockResolvedValue({
+        id: 'kit-r',
+        userId: 'u1',
+        status: McKitStatus.REVIEW,
+        style: null,
+      });
+      await expect(service.regenerateReference('u1', 'kit-r', { slot: 2 })).rejects.toMatchObject({
+        status: 422,
+        response: { code: 'STYLE_REQUIRED' },
+      });
+      expect(queue.publish).not.toHaveBeenCalled();
+    });
+
     it('em review: enfileira {kitId, slot} com singletonKey anti-duplo-clique', async () => {
       kitRepo.findOneBy.mockResolvedValue({
         id: 'kit-r',
         userId: 'u1',
         status: McKitStatus.REVIEW,
+        style: 'cartoon_2d',
       });
       await expect(service.regenerateReference('u1', 'kit-r', { slot: 2 })).resolves.toEqual({
         queued: true,

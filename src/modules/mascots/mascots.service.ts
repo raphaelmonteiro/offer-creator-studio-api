@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -17,7 +18,7 @@ import { BackgroundRemovalService } from '../ai/background-removal.service';
 import { MascotRigService } from './services/mascot-rig.service';
 import { MascotRig, isMascotRig } from './domain/rig.types';
 import { RigValidationError, parseRig } from './domain/rig-validation';
-import { Mascot } from './entities/mascot.entity';
+import { isMascotKind, MASCOT_KINDS, Mascot, MascotKind } from './entities/mascot.entity';
 import { MascotPreviewQueryDto, QueryMascotsDto, UpdateMascotDto } from './dto/mascot.dto';
 import {
   MASCOT_CRAFT,
@@ -73,7 +74,7 @@ export class MascotsService {
   async create(
     userId: string,
     file: Express.Multer.File,
-    fields: { name?: string; clientId?: string; rightsConfirmed?: unknown },
+    fields: { name?: string; clientId?: string; rightsConfirmed?: unknown; kind?: unknown },
   ): Promise<MascotView> {
     if (!file?.buffer) {
       throw new BadRequestException({
@@ -100,6 +101,8 @@ export class MascotsService {
         message: 'Informe um nome para o mascote (entre 2 e 120 caracteres).',
       });
     }
+    // Multipart passa por @SkipValidation(): os campos de texto são validados aqui.
+    const kind = this.parseKind(fields.kind);
 
     let meta: sharp.Metadata;
     try {
@@ -111,17 +114,93 @@ export class MascotsService {
       });
     }
 
+    return this.persist(userId, file, meta, {
+      name,
+      kind,
+      clientId: fields.clientId || null,
+      rightsConfirmed: this.parseBoolean(fields.rightsConfirmed),
+      metadata: { originalFilename: file.originalname, sourceMimeType: file.mimetype },
+    });
+  }
+
+  /**
+   * Registra uma imagem que JÁ está no bucket (`/uploads/*` — o caso do
+   * `clients.logoUrl`, design D5) como personagem de origem. O arquivo é
+   * COPIADO para a pasta de mascotes (o logo do cliente não é tocado) e
+   * formatos fora de PNG/WebP viram PNG; depois segue o mesmo caminho do
+   * upload (preview, recorte por alfa, direitos, status).
+   *
+   * Idempotente por (usuário, cliente, tipo, URL de origem): chamar de novo
+   * devolve a mesma linha — e confirma os direitos se `rightsConfirmed` vier
+   * agora (reaproveita `confirmRights`). Logo trocado no cliente = URL nova =
+   * linha nova.
+   */
+  async createFromUrl(
+    userId: string,
+    url: string,
+    fields: {
+      name: string;
+      clientId?: string | null;
+      kind?: MascotKind;
+      rightsConfirmed?: boolean;
+    },
+  ): Promise<MascotView> {
+    const kind = fields.kind ?? 'mascot';
+    const clientId = fields.clientId ?? null;
+    const existing = await this.findBySourceUrl(userId, url, kind, clientId);
+    if (existing) {
+      return fields.rightsConfirmed && !existing.rightsConfirmedAt
+        ? this.confirmRights(userId, existing.id)
+        : this.toView(existing);
+    }
+    const buffer = await this.readLocalFile(url);
+    if (!buffer) {
+      throw new UnprocessableEntityException({
+        code: 'SOURCE_IMAGE_MISSING',
+        message: 'A imagem de origem não foi encontrada no servidor. Envie o arquivo novamente.',
+      });
+    }
+    if (buffer.length > MAX_SOURCE_BYTES) {
+      throw new UnprocessableEntityException({
+        code: 'SOURCE_IMAGE_TOO_LARGE',
+        message: 'A imagem de origem excede o limite de 10 MB.',
+      });
+    }
+    const { file, meta } = await this.toUploadable(buffer, url);
+    const name = fields.name.trim().slice(0, 120);
+    return this.persist(userId, file, meta, {
+      name: name.length >= 2 ? name : 'Logo',
+      kind,
+      clientId,
+      rightsConfirmed: fields.rightsConfirmed === true,
+      metadata: { sourceUrl: url, importedFrom: 'url', sourceMimeType: file.mimetype },
+    });
+  }
+
+  /** Grava o arquivo (fonte imutável), deriva preview/recorte e cria a linha — comum ao upload e à URL. */
+  private async persist(
+    userId: string,
+    file: Express.Multer.File,
+    meta: sharp.Metadata,
+    fields: {
+      name: string;
+      kind: MascotKind;
+      clientId: string | null;
+      rightsConfirmed: boolean;
+      metadata: Record<string, unknown>;
+    },
+  ): Promise<MascotView> {
     const source = await this.uploads.uploadFile(file, UPLOAD_FOLDER);
     const hasAlpha = Boolean(meta.hasAlpha);
 
     const previewUrl = await this.derivePreview(file.buffer, source.id);
     const cutoutUrl = hasAlpha ? await this.deriveCutoutFromAlpha(file.buffer, source.id) : null;
 
-    const rightsConfirmed = this.parseBoolean(fields.rightsConfirmed);
     const mascot = this.repo.create({
       userId,
-      clientId: fields.clientId || null,
-      name,
+      clientId: fields.clientId,
+      kind: fields.kind,
+      name: fields.name,
       sourceImageUrl: source.url,
       cutoutUrl,
       previewUrl,
@@ -130,17 +209,57 @@ export class MascotsService {
       hasAlpha,
       rig: {},
       rigVersion: 1,
-      metadata: {
-        originalFilename: file.originalname,
-        sourceMimeType: file.mimetype,
-        cutoutSource: cutoutUrl ? 'alpha-original' : null,
-      },
-      rightsConfirmedAt: rightsConfirmed ? new Date() : null,
-      rightsConfirmedBy: rightsConfirmed ? userId : null,
+      metadata: { ...fields.metadata, cutoutSource: cutoutUrl ? 'alpha-original' : null },
+      rightsConfirmedAt: fields.rightsConfirmed ? new Date() : null,
+      rightsConfirmedBy: fields.rightsConfirmed ? userId : null,
       status: 'draft',
     });
     mascot.status = this.resolveStatus(mascot);
     return this.toView(await this.repo.save(mascot));
+  }
+
+  /** PNG/WebP seguem como estão; outros formatos raster viram PNG (mesma regra de aceite do upload). */
+  private async toUploadable(
+    buffer: Buffer,
+    url: string,
+  ): Promise<{ file: Express.Multer.File; meta: sharp.Metadata }> {
+    let meta: sharp.Metadata;
+    try {
+      meta = await sharp(buffer).metadata();
+    } catch {
+      throw new UnprocessableEntityException({
+        code: 'INVALID_SOURCE_IMAGE',
+        message: 'A imagem de origem não pôde ser lida como imagem.',
+      });
+    }
+    const keep = meta.format === 'png' || meta.format === 'webp';
+    const data = keep ? buffer : await sharp(buffer).png().toBuffer();
+    if (!keep) meta = await sharp(data).metadata();
+    const ext = keep ? (meta.format as string) : 'png';
+    const base = path.basename(url.split('?')[0]).replace(/\.[^.]+$/, '');
+    const file = {
+      buffer: data,
+      originalname: `${this.slug(base || 'logo')}.${ext}`,
+      size: data.length,
+      mimetype: `image/${ext}`,
+      fieldname: 'file',
+      encoding: '7bit',
+    } as Express.Multer.File;
+    return { file, meta };
+  }
+
+  /** Linha viva já registrada a partir da mesma URL (idempotência do createFromUrl). */
+  private async findBySourceUrl(
+    userId: string,
+    url: string,
+    kind: MascotKind,
+    clientId: string | null,
+  ): Promise<Mascot | null> {
+    const rows = await this.repo.find({
+      where: { userId, kind, clientId: clientId ?? IsNull(), archivedAt: IsNull() },
+      order: { createdAt: 'DESC' },
+    });
+    return rows.find((m) => m.metadata?.sourceUrl === url) ?? null;
   }
 
   // ─────────────────────────────── recorte ───────────────────────────────
@@ -308,6 +427,7 @@ export class MascotsService {
     const where: FindOptionsWhere<Mascot> = {
       userId,
       ...(query.clientId && { clientId: query.clientId }),
+      ...(query.kind && { kind: query.kind as MascotKind }),
       ...(query.status && { status: query.status as Mascot['status'] }),
       ...(query.search && { name: ILike(`%${query.search}%`) }),
       ...(query.includeArchived === 'true' ? {} : { archivedAt: IsNull() }),
@@ -494,6 +614,16 @@ export class MascotsService {
 
   private parseBoolean(value: unknown): boolean {
     return value === true || value === 'true' || value === '1' || value === 1;
+  }
+
+  /** `kind` do multipart: ausente = mascote; valor fora do vocabulário é erro de forma (400). */
+  private parseKind(value: unknown): MascotKind {
+    if (value === undefined || value === null || value === '') return 'mascot';
+    if (isMascotKind(value)) return value;
+    throw new BadRequestException({
+      code: 'INVALID_MASCOT_KIND',
+      message: `Tipo inválido: use ${MASCOT_KINDS.join(' ou ')}.`,
+    });
   }
 
   private slug(value: string): string {

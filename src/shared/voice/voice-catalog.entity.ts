@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 
 /**
  * Catálogo curado de vozes ElevenLabs (TDD §5.3) — seed/admin, nunca a lista
@@ -34,6 +34,19 @@ export class VoiceCatalogEntry {
 
   @Column({ default: true })
   enabled: boolean;
+
+  /**
+   * Curada pela equipe (CURATED_VOICES do sync ou promoção manual do admin):
+   * visível para TODOS os usuários. Não curada e sem dono (Voice Library,
+   * clones antigos da conta) fica oculta para todos (D10).
+   */
+  @Column({ default: false })
+  curated: boolean;
+
+  /** Dono de uma voz clonada para um usuário — só ele a vê e a usa num kit. */
+  @Index('IDX_voice_catalog_owner_user')
+  @Column({ type: 'uuid', nullable: true })
+  ownerUserId: string | null;
 
   @Column({ type: 'int', default: 0 })
   sort: number;

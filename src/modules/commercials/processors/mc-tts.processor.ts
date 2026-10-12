@@ -97,11 +97,12 @@ export class McTtsProcessor {
 
       // Blindagem: kits aprovados antes da correção do resolve guardaram o id
       // da LINHA do catálogo em voiceId (ElevenLabs responde 400 invalid_uid).
-      // O resolve aceita ambos os formatos e valida contra o catálogo.
+      // O resolve aceita ambos os formatos e valida contra o catálogo VISÍVEL
+      // para o dono do kit (D10) — voz de outro tenant não gera TTS.
       const providerVoiceId =
         this.provider() === 'mock'
           ? null
-          : await this.voices.resolveProviderVoiceId(kit.voiceId as string);
+          : await this.voices.resolveProviderVoiceId(kit.userId, kit.voiceId as string);
       const v2 = step.phase != null;
       const { audio, alignment } =
         this.provider() === 'mock'

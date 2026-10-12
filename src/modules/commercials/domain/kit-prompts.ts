@@ -1,3 +1,5 @@
+import { McKitSource, McKitStyle, styleBlockLine } from './mc-kit-identity';
+
 /**
  * Prompts FIXOS das 4 imagens de referência do kit do personagem
  * (plano-comerciais §4: turnaround + expressões + pose com prop). Função pura,
@@ -7,6 +9,12 @@
  * A imagem do mascote SEMPRE vai junto como referência (inlineData) — o texto
  * ancora pose/enquadramento e a fidelidade visual vem da referência + da
  * descrição canônica (quando já existir).
+ *
+ * Change video-formatos-personagem (D1/D5): o estilo entra como bloco FIXO
+ * (`STYLE_BLOCKS`) em todo slot — `adjustments` volta a ser só ajuste do
+ * usuário, nunca alavanca de estilo; com `source = 'logo'` as marcas do logo
+ * fazem parte da identidade (cai o "no logo", fica a proibição de texto
+ * adicionado); a cor de fundo do slot frontal é parâmetro.
  */
 
 /**
@@ -69,26 +77,81 @@ export const KIT_REFERENCE_SLOT_COUNT = KIT_REFERENCE_SLOTS.length;
  */
 export const KIT_SLOT_WITH_PROP: KitReferenceSlot = 3;
 
-const SLOT_PROMPTS: readonly string[] = [
+/**
+ * Slot FRONTAL (identidade): a única referência de frente do grid e a que o
+ * tile recorta (D1 "referência frontal canônica"). Só ele recebe a cor de
+ * fundo parametrizada; os demais seguem no cinza claro de sempre.
+ */
+export const KIT_FRONT_SLOT: KitReferenceSlot = 2;
+
+/** Cor de fundo padrão do slot frontal — o mesmo "light gray" fixo de antes. */
+export const KIT_REFERENCE_BACKGROUND_DEFAULT = 'light gray';
+
+/** Opções de identidade do kit que entram no prompt (todas opcionais = comportamento legado). */
+export interface KitReferencePromptOptions {
+  style?: McKitStyle | null;
+  source?: McKitSource | null;
+  /** Cor de fundo do slot frontal: nome em inglês ("light gray") ou hex (#RRGGBB[AA]). */
+  backgroundColor?: string | null;
+}
+
+/** Pose de cada slot (a cauda — fundo, luz, proibições — é montada por `slotTail`). */
+const SLOT_POSES: readonly string[] = [
   // 0 — ¾ esquerda
   'Turnaround reference: the exact same mascot character from the reference image, ' +
-    'three-quarter view facing left, full body, neutral standing pose, arms relaxed. ' +
-    'Plain solid light gray background, even studio lighting, no text, no logo, no watermark.',
+    'three-quarter view facing left, full body, neutral standing pose, arms relaxed.',
   // 1 — perfil
   'Turnaround reference: the exact same mascot character from the reference image, ' +
-    'full profile (side) view, full body, neutral standing pose. ' +
-    'Plain solid light gray background, even studio lighting, no text, no logo, no watermark.',
-  // 2 — pose de fala
+    'full profile (side) view, full body, neutral standing pose.',
+  // 2 — pose de fala (frente)
   'Expression reference: the exact same mascot character from the reference image, ' +
     'front view, talking pose with mouth open mid-speech and hands gesturing expressively, ' +
-    'friendly and energetic. ' +
-    'Plain solid light gray background, even studio lighting, no text, no logo, no watermark.',
+    'friendly and energetic.',
   // 3 — segurando produto genérico
   'Action reference: the exact same mascot character from the reference image, ' +
     'front three-quarter view, cheerfully holding a plain generic unlabeled product box ' +
-    'with both hands at chest height, presenting it to the camera. ' +
-    'Plain solid light gray background, even studio lighting, no text, no logo, no watermark.',
+    'with both hands at chest height, presenting it to the camera.',
 ];
+
+/** "light gray" vira o texto de sempre; hex vira cor exata (o tile precisa de borda uniforme). */
+function backgroundDirective(color: string): string {
+  const value = color.trim() || KIT_REFERENCE_BACKGROUND_DEFAULT;
+  if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(value)) {
+    return `Plain solid background filled with the exact color ${value.toUpperCase()} (uniform, no gradient, no texture)`;
+  }
+  return `Plain solid ${value} background`;
+}
+
+/**
+ * Cauda do slot: fundo, luz e proibições. Com origem `logo` as marcas e
+ * letras do próprio logo SÃO a identidade — cai o "no logo", fica proibido só
+ * texto adicionado/promocional.
+ */
+function slotTail(slot: KitReferenceSlot, options: KitReferencePromptOptions): string {
+  const background = backgroundDirective(
+    slot === KIT_FRONT_SLOT
+      ? (options.backgroundColor ?? KIT_REFERENCE_BACKGROUND_DEFAULT)
+      : KIT_REFERENCE_BACKGROUND_DEFAULT,
+  );
+  const ban =
+    options.source === 'logo'
+      ? 'no added text, no watermark (the lettering and marks that belong to the logo itself ' +
+        'stay exactly as in the reference)'
+      : 'no text, no logo, no watermark';
+  return `${background}, even studio lighting, ${ban}.`;
+}
+
+/**
+ * Linha dos ajustes do usuário. Com estilo fixo no kit eles deixam de ser
+ * "highest priority": refinam o personagem, nunca o estilo (D5 — fim do hack
+ * de escrever o estilo em `adjustments`). Compartilhada com o keyframe.
+ */
+export function userAdjustmentsLine(adjustments: string, styleFixed: boolean): string {
+  return styleFixed
+    ? '- User adjustments (follow strictly; they refine the character but never override ' +
+        `the fixed rendering style above): ${adjustments}`
+    : `- User adjustments (highest priority, follow strictly): ${adjustments}`;
+}
 
 /** Guarda de slot compartilhada por prompt-builder, DTO e processor. */
 export function isKitReferenceSlot(value: unknown): value is KitReferenceSlot {
@@ -221,24 +284,29 @@ export function noPropsRule(accessories: string[] | undefined): string {
 }
 
 /**
- * Prompt do slot, com a descrição canônica embutida quando disponível (a
- * descrição reforça identidade: cores, estilo e do-nots entram como regras).
- * Acessórios entram como NEGATIVA (exceto no slot da caixa genérica, que já
- * tem o próprio prop) e os ajustes do usuário vêm por último, com prioridade.
+ * Prompt do slot: pose + cauda (fundo/luz/proibições) + bloco FIXO de estilo
+ * (quando o kit tem estilo) + descrição canônica quando disponível (a
+ * descrição reforça identidade: cores e do-nots entram como regras; o estilo
+ * livre da ficha só entra quando NÃO há estilo fixo, para não disputar com
+ * ele). Acessórios entram como NEGATIVA (exceto no slot da caixa genérica,
+ * que já tem o próprio prop) e os ajustes do usuário vêm por último.
  */
 export function buildKitReferencePrompt(
   slot: KitReferenceSlot,
   canonicalDesc?: KitCanonicalDesc | null,
+  options: KitReferencePromptOptions = {},
 ): string {
   if (!isKitReferenceSlot(slot)) {
     throw new Error(`Slot de referência inválido: ${String(slot)} (esperado 0..3)`);
   }
-  const base = SLOT_PROMPTS[slot];
-  if (!canonicalDesc) return base;
-  const lines: string[] = [base, '', 'Character sheet (keep the character EXACTLY like this):'];
+  const styleLine = styleBlockLine(options.style);
+  const lines: string[] = [`${SLOT_POSES[slot]} ${slotTail(slot, options)}`];
+  if (styleLine) lines.push(styleLine);
+  if (!canonicalDesc) return lines.join('\n');
+  lines.push('', 'Character sheet (keep the character EXACTLY like this):');
   if (canonicalDesc.traits.length > 0) lines.push(`- Traits: ${canonicalDesc.traits.join('; ')}`);
   if (canonicalDesc.colors.length > 0) lines.push(`- Colors: ${canonicalDesc.colors.join(', ')}`);
-  if (canonicalDesc.style) lines.push(`- Style: ${canonicalDesc.style}`);
+  if (canonicalDesc.style && !styleLine) lines.push(`- Style: ${canonicalDesc.style}`);
   if (canonicalDesc.doNots.length > 0) {
     lines.push(`- Never: ${canonicalDesc.doNots.join('; ')}`);
   }
@@ -250,9 +318,7 @@ export function buildKitReferencePrompt(
     );
   }
   if (canonicalDesc.adjustments) {
-    lines.push(
-      `- User adjustments (highest priority, follow strictly): ${canonicalDesc.adjustments}`,
-    );
+    lines.push(userAdjustmentsLine(canonicalDesc.adjustments, !!styleLine));
   }
   return lines.join('\n');
 }
