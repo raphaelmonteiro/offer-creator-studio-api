@@ -15,6 +15,7 @@ import {
 import { sceneSourceHash } from '../domain/mc-script-v2';
 import { McProjectStatus, McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import { McScript, McStepType } from '../domain/mc-types';
+import { fixtureTalkTileScript } from '../domain/__fixtures__/mc-script-v2.fixtures';
 import { McCharacterKit, McKitStatus } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
@@ -1011,6 +1012,120 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
         }),
       );
       await expect(service.convertToV2(userId, 'p1')).resolves.toBeDefined(); // idempotente quando já é v2 (fixture continua v1 aqui; só valida que não lança)
+    });
+  });
+
+  describe('approveProduction — cenas talk_tile (change video-formatos-personagem, D7, tarefa 3.6)', () => {
+    const TALK_1 = 'fx-talk-1';
+    const TALK_2 = 'fx-talk-2';
+    const TALK_3 = 'fx-talk-3';
+    const originalLogoEngine = process.env.MC_TALK_ENGINE_LOGO;
+
+    beforeEach(() => {
+      project.status = McProjectStatus.VISUAL_REVIEW;
+      project.script = fixtureTalkTileScript();
+      project.tier = 'economico';
+      project.quality = resolveQuality({
+        preparation: {
+          revision: 1,
+          kitId: 'k1',
+          kitVersion: 1,
+          aspectRatio: '9:16',
+          scenes: [],
+          startedAt: 'now',
+          completedAt: 'now',
+          hash: 'manifest-talk',
+        },
+      });
+      kit.tileAssetId = 'tile-1';
+      kit.identityMode = 'generated';
+      scenes = [TALK_1, TALK_2, TALK_3].map((sceneId, idx) => ({
+        id: `talk-row-${idx + 1}`,
+        projectId: 'p1',
+        idx,
+        scriptSceneId: sceneId,
+        sceneType: 'talk_tile',
+        generation: 1,
+        status: McSceneStatus.PENDING,
+        dialogue: 'fala',
+        durationS: 6,
+        keyframeAssetId: null, // talk_tile NÃO tem keyframe
+        audioAssetId: `talk-au-${idx + 1}`,
+        videoAssetId: null,
+        finalAssetId: null,
+        rerollCount: 0,
+      }));
+      assets = [1, 2, 3].map((n) => ({
+        id: `talk-au-${n}`,
+        userId,
+        fileUrl: `/uploads/talk-au-${n}.mp3`,
+        durationMs: 6000,
+        metadata: { alignment: { characters: ['a'] } },
+      }));
+      delete process.env.MC_TALK_ENGINE_LOGO;
+    });
+
+    afterEach(() => {
+      if (originalLogoEngine === undefined) delete process.env.MC_TALK_ENGINE_LOGO;
+      else process.env.MC_TALK_ENGINE_LOGO = originalLogoEngine;
+    });
+
+    const approve = () =>
+      service.approveProduction(userId, 'p1', {
+        expectedRevision: 1,
+        manifestHash: 'manifest-talk',
+      });
+
+    it('fala de 12 s com motor de 15 s/chamada → aprova sem exigir keyframe (um único clipe por fala)', async () => {
+      assets[1].durationMs = 12000;
+      await approve();
+      expect(project.status).toBe(McProjectStatus.GENERATING);
+      expect(materializer.materializeProductionV2).toHaveBeenCalled();
+    });
+
+    it('fala de 18 s com motor de 15 s/chamada → 422 SPEECH_SENTENCE_TOO_LONG com {sceneId, measuredS, limitS}, nada reservado', async () => {
+      assets[1].durationMs = 18000;
+      await expect(approve()).rejects.toMatchObject({
+        status: 422,
+        response: {
+          code: 'SPEECH_SENTENCE_TOO_LONG',
+          details: { sceneId: TALK_2, measuredS: 18, limitS: 15 },
+          issues: [
+            expect.objectContaining({
+              code: 'SPEECH_SENTENCE_TOO_LONG',
+              sceneId: TALK_2,
+              message: expect.stringMatching(/18\.0s.*15s.*Divida a fala/),
+            }),
+          ],
+        },
+      });
+      expect(credits.reserve).not.toHaveBeenCalled();
+      expect(materializer.materializeProductionV2).not.toHaveBeenCalled();
+      expect(project.status).toBe(McProjectStatus.VISUAL_REVIEW);
+    });
+
+    it('o limite vem do motor efetivo: logo_as_is em premium usa o motor de LOGO (maxChunkS próprio)', async () => {
+      process.env.MC_TALK_ENGINE_LOGO = 'minimax/h3-max/lip-sync/image-to-video|0.08|10';
+      project.tier = 'premium';
+      kit.identityMode = 'logo_as_is';
+      assets[0].durationMs = 12000; // cabe nos 15 s do premium, não nos 10 s do motor de logo
+      await expect(approve()).rejects.toMatchObject({
+        response: {
+          code: 'SPEECH_SENTENCE_TOO_LONG',
+          details: expect.objectContaining({ sceneId: TALK_1, measuredS: 12, limitS: 10 }),
+        },
+      });
+    });
+
+    it('kit sem tile de fala → 422 KIT_TILE_MISSING (a imagem do clipe é o tile, não um keyframe)', async () => {
+      kit.tileAssetId = null;
+      await expect(approve()).rejects.toMatchObject({ response: { code: 'KIT_TILE_MISSING' } });
+      expect(credits.reserve).not.toHaveBeenCalled();
+    });
+
+    it('voz selecionada indisponível continua bloqueando (AUDIO_MISSING)', async () => {
+      assets[2].fileUrl = null;
+      await expect(approve()).rejects.toMatchObject({ response: { code: 'AUDIO_MISSING' } });
     });
   });
 });

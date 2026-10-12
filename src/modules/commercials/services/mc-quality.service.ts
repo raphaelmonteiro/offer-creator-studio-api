@@ -22,8 +22,8 @@ import {
 import { SystemSettingsService } from '../../../shared/settings/system-settings.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { CommercialsService, MC_PAUSED_KEY } from '../commercials.service';
-import { scenePlan } from '../domain/mc-execution-plan';
-import { klingActionDuration } from '../domain/mc-pipeline.config';
+import { scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
+import { klingActionDuration, talkEngineFor } from '../domain/mc-pipeline.config';
 import { custoProducaoDaCena, MC_STEP_CREDITS, quotePhase } from '../domain/mc-pricing.config';
 import {
   approvalAuthorizes,
@@ -181,7 +181,7 @@ export class McQualityService {
           productRef: scene.productRef,
           sealCue: scene.sealCue ?? before?.sealCue ?? defaultSealCue(scene.durationS),
           safeArea: scene.safeArea ?? before?.safeArea ?? 'lower_third',
-          actionPrompt: scene.actionPrompt.trim(),
+          actionPrompt: (scene.actionPrompt ?? '').trim(),
           dialogue: scene.dialogue?.trim() ? scene.dialogue.trim() : null,
           durationS: scene.durationS,
         };
@@ -785,7 +785,10 @@ export class McQualityService {
         manifestHash: manifest.hash,
       });
     }
-    await this.getApprovedKit(project.kitId); // kit precisa estar aprovado; não é input da produção
+    // kit precisa estar aprovado; no talk_tile ele também define o tile e o
+    // motor (tier × identidade), cujo `maxChunkS` limita cada fala (D7).
+    const kit = await this.getApprovedKit(project.kitId);
+    const talkEngine = talkEngineFor({ tier: project.tier, identityMode: kit.identityMode });
     const script = this.validatedScript(project);
     const scenes = (
       await this.dataSource
@@ -811,12 +814,22 @@ export class McQualityService {
       if (!scriptScene) continue;
       const plan = scenePlan(scriptScene.sceneType as McSceneType);
       const sceneId = scriptScene.sceneId as string;
-      const keyframe = assets.find((a) => a.id === scene.keyframeAssetId);
-      if (!keyframe || keyframe.userId !== userId || !keyframe.fileUrl) {
+      const talkTile = scriptScene.sceneType === 'talk_tile';
+      if (sceneUsesKeyframe(scriptScene.sceneType as McSceneType)) {
+        const keyframe = assets.find((a) => a.id === scene.keyframeAssetId);
+        if (!keyframe || keyframe.userId !== userId || !keyframe.fileUrl) {
+          problems.push({
+            code: 'KEYFRAME_MISSING',
+            sceneId,
+            message: `Cena ${scriptScene.idx + 1}: imagem selecionada indisponível.`,
+          });
+        }
+      } else if (talkTile && !kit.tileAssetId) {
+        // A imagem do clipe falado é o tile do kit (D1) — sem ele não há produção.
         problems.push({
-          code: 'KEYFRAME_MISSING',
+          code: 'KIT_TILE_MISSING',
           sceneId,
-          message: `Cena ${scriptScene.idx + 1}: imagem selecionada indisponível.`,
+          message: `Cena ${scriptScene.idx + 1}: o kit não tem tile de fala — reaprove o kit para gerá-lo.`,
         });
       }
       if (plan.hasTts) {
@@ -837,6 +850,21 @@ export class McQualityService {
                 sceneId,
                 message: `Cena ${scriptScene.idx + 1}: a locução (${(audio.durationMs / 1000).toFixed(1)}s) não cabe no clipe de ${clipS}s. Encurte a fala ou divida a cena.`,
                 detail: { audioMs: audio.durationMs, clipS, excessMs: excess },
+              });
+            }
+          }
+          // talk_tile (D7 "uma fala, um clipe"): a fala MEDIDA precisa caber
+          // numa chamada do motor — nunca cortar palavras nem acelerar; o
+          // usuário divide ou encurta a fala.
+          if (talkTile && audio.durationMs != null) {
+            const measuredS = Number((audio.durationMs / 1000).toFixed(2));
+            const limitS = talkEngine.maxChunkS;
+            if (measuredS > limitS) {
+              problems.push({
+                code: 'SPEECH_SENTENCE_TOO_LONG',
+                sceneId,
+                message: `Cena ${scriptScene.idx + 1}: a fala mede ${measuredS.toFixed(1)}s e o motor aceita até ${limitS}s por chamada. Divida a fala em duas ou encurte o texto.`,
+                detail: { sceneId, measuredS, limitS, engine: talkEngine.model },
               });
             }
           }
@@ -861,6 +889,8 @@ export class McQualityService {
       throw new UnprocessableEntityException({
         code: problems[0].code,
         message: problems[0].message,
+        // `details` do primeiro problema no topo (ex.: {sceneId, measuredS, limitS}); a lista completa em `issues`
+        ...(problems[0].detail ? { details: problems[0].detail } : {}),
         issues: problems,
       });
     }

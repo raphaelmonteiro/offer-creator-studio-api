@@ -15,6 +15,8 @@
  */
 export enum McKitStatus {
   GENERATING = 'generating',
+  /** Rodada de candidatos de mascotização pronta, aguardando a escolha do usuário (D4). */
+  CANDIDATES = 'candidates',
   REVIEW = 'review',
   APPROVED = 'approved',
   FAILED = 'failed',
@@ -61,10 +63,24 @@ export enum McStepStatus {
  * continua em review enquanto o usuário lapida o grid. Kit failed é terminal:
  * o usuário cria outro kit (nada de créditos envolvido — kit não reserva na
  * v0, plano §4).
+ *
+ * Change video-formatos-personagem (D4): `generating` é "worker ocupado"
+ * (rodada de candidatos OU referências); `candidates` é "rodada pronta,
+ * aguardando a escolha". Origem logo: generating → candidates → generating
+ * (nova rodada com ajustes, ou escolha → referências) → review.
+ * candidates → review é "usar o logo como está" (sem referências).
+ * review → generating é identidade trocada em revisão (candidato ou variante
+ * com boca escolhida): as referências são refeitas a partir dela.
  */
 export const MC_KIT_TRANSITIONS: Record<McKitStatus, McKitStatus[]> = {
-  [McKitStatus.GENERATING]: [McKitStatus.REVIEW, McKitStatus.FAILED],
-  [McKitStatus.REVIEW]: [McKitStatus.APPROVED, McKitStatus.FAILED, McKitStatus.ARCHIVED],
+  [McKitStatus.GENERATING]: [McKitStatus.REVIEW, McKitStatus.CANDIDATES, McKitStatus.FAILED],
+  [McKitStatus.CANDIDATES]: [McKitStatus.GENERATING, McKitStatus.REVIEW, McKitStatus.FAILED],
+  [McKitStatus.REVIEW]: [
+    McKitStatus.APPROVED,
+    McKitStatus.GENERATING,
+    McKitStatus.FAILED,
+    McKitStatus.ARCHIVED,
+  ],
   [McKitStatus.APPROVED]: [McKitStatus.ARCHIVED],
   [McKitStatus.FAILED]: [],
   [McKitStatus.ARCHIVED]: [],

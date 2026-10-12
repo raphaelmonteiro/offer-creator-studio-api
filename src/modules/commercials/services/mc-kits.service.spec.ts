@@ -1,19 +1,42 @@
+import {
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
+import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { ModerationProvider } from '../../../shared/providers/moderation.provider';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { ClientsService } from '../../clients/clients.service';
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
+import { McMouthVerdict } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+import { McKitCandidatesService } from './mc-kit-candidates.service';
+import { McKitTileService } from './mc-kit-tile.service';
+import { McKitViewService } from './mc-kit-view.service';
 import { MC_IMAGE_EXPIRE_S, McKitsService } from './mc-kits.service';
+import { McMouthGateService } from './mc-mouth-gate.service';
+import { McStorageService } from './mc-storage.service';
 import { McVoicesService } from './mc-voices.service';
+
+const passedVerdict: McMouthVerdict = {
+  hasMouth: true,
+  mouthOpenPossible: true,
+  confidence: 0.92,
+  bbox: { x: 0.3, y: 0.15, w: 0.4, h: 0.4 },
+  model: 'mock',
+  at: '2026-10-12T00:00:00.000Z',
+};
+const blockedVerdict: McMouthVerdict = { ...passedVerdict, mouthOpenPossible: false };
+const undecidedVerdict: McMouthVerdict = { ...passedVerdict, confidence: 0.4 };
 
 describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
   let tmpDir: string;
@@ -30,7 +53,9 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
     findOneBy: jest.Mock;
     findOneByOrFail: jest.Mock;
     find: jest.Mock;
+    update: jest.Mock;
   };
+  let assetRepo: { findOneBy: jest.Mock };
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
   let queue: { publish: jest.Mock };
@@ -40,6 +65,15 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
   let voices: { resolveProviderVoiceId: jest.Mock };
   let config: { get: jest.Mock };
   let clients: { findOne: jest.Mock };
+  let view: {
+    findOwned: jest.Mock;
+    findOne: jest.Mock;
+    toView: jest.Mock;
+    resolveIdentityAsset: jest.Mock;
+  };
+  let candidates: { openRound: jest.Mock; translateAdjustments: jest.Mock };
+  let mouthGate: { inspect: jest.Mock };
+  let tile: { build: jest.Mock; discard: jest.Mock };
   let service: McKitsService;
   /** Origem mascote com estilo — o mínimo que gera referências (STYLE_REQUIRED sem o estilo). */
   const mascotDto = {
@@ -69,14 +103,18 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         Promise.resolve({ id: where.id, referenceAssetIds: [] }),
       ),
       find: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue(undefined),
     };
+    assetRepo = { findOneBy: jest.fn().mockResolvedValue(null) };
     manager = {
       getRepository: jest.fn(() => kitRepo),
       save: jest.fn(),
       update: jest.fn(),
     };
     dataSource = {
-      getRepository: jest.fn(() => kitRepo),
+      getRepository: jest.fn((entity: unknown) =>
+        entity === AnimationAsset ? assetRepo : kitRepo,
+      ),
       transaction: jest.fn((cb: (m: EntityManager) => Promise<unknown>) =>
         cb(manager as unknown as EntityManager),
       ),
@@ -102,6 +140,43 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
     voices = {
       resolveProviderVoiceId: jest.fn((_userId: string, v: string) => Promise.resolve(v)),
     };
+    // Leitura do kit (ownership 404/403) como o McKitViewService real faria sobre o repo mockado.
+    view = {
+      findOwned: jest.fn(async (userId: string, id: string) => {
+        const kit = await kitRepo.findOneBy({ id });
+        if (!kit) throw new NotFoundException('Kit não encontrado');
+        if (kit.userId !== userId) throw new ForbiddenException();
+        return kit;
+      }),
+      findOne: jest.fn(async (userId: string, id: string) => ({
+        ...(await view.findOwned(userId, id)),
+        references: [],
+      })),
+      toView: jest.fn(async (kit: McCharacterKit) => ({ ...kit, references: [] })),
+      resolveIdentityAsset: jest.fn().mockResolvedValue({
+        id: 'front-1',
+        fileUrl: '/uploads/mascots/cutout.png',
+        metadata: { slot: 2 },
+      }),
+    };
+    candidates = {
+      openRound: jest.fn().mockResolvedValue({ roundId: 'round-1', count: 4 }),
+      translateAdjustments: jest.fn((text: string) => Promise.resolve(text)),
+    };
+    mouthGate = { inspect: jest.fn().mockResolvedValue(passedVerdict) };
+    tile = {
+      build: jest.fn().mockResolvedValue({
+        assetId: 'tile-1',
+        url: '/uploads/commercials/kits/kit-r/tile.png',
+        width: 720,
+        height: 960,
+        ratio: 0.75,
+        faceFraction: 0.6,
+        backgroundColor: '#E5E7EB',
+        hasAlpha: false,
+      }),
+      discard: jest.fn().mockResolvedValue(undefined),
+    };
     service = new McKitsService(
       dataSource as unknown as DataSource,
       transitions as unknown as TaskTransitionService,
@@ -112,6 +187,11 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       voices as unknown as McVoicesService,
       config as unknown as ConfigService,
       clients as unknown as ClientsService,
+      view as unknown as McKitViewService,
+      candidates as unknown as McKitCandidatesService,
+      mouthGate as unknown as McMouthGateService,
+      tile as unknown as McKitTileService,
+      new McStorageService(config as unknown as ConfigService),
     );
   });
 
@@ -273,7 +353,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       expect(queue.publish).not.toHaveBeenCalled();
     });
 
-    it('logo por clientId com rightsConfirmed: kit generating com source logo e NENHUMA referência enfileirada (candidatos vêm antes, D4)', async () => {
+    it('logo por clientId com rightsConfirmed: kit generating com source logo, gate de boca no logo cru e a PRIMEIRA rodada de candidatos aberta — nenhuma referência enfileirada (D4)', async () => {
       clients.findOne.mockResolvedValue({
         id: 'c1',
         name: 'Mercado Bom',
@@ -283,6 +363,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       const kit = await service.createKit('u1', {
         source: 'logo',
         clientId: 'c1',
+        style: '3d_render',
         rightsConfirmed: true,
       });
       expect(mascots.createFromUrl).toHaveBeenCalledWith(
@@ -290,15 +371,25 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         '/uploads/logos/l.png',
         expect.objectContaining({ kind: 'logo', rightsConfirmed: true }),
       );
-      // estilo é opcional na criação do kit de logo (cobrado na rodada de candidatos)
       expect(kit).toMatchObject({
         status: McKitStatus.GENERATING,
         source: 'logo',
-        style: null,
+        style: '3d_render',
         identityMode: 'generated',
         mascotId: 'logo-1',
+        tileBackgroundColor: '#E5E7EB',
+        candidateRoundId: 'round-1',
       });
+      // gate de boca rodou no logo cru e ficou gravado no kit
+      expect(mouthGate.inspect).toHaveBeenCalledTimes(1);
+      expect(kit.mouthGate).toEqual({ logo: passedVerdict });
       expect(moderation.moderate).toHaveBeenCalledTimes(1);
+      // a rodada de candidatos é quem publica o job — nada de {kitId} de referências
+      expect(candidates.openRound).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ id: kit.id, source: 'logo', style: '3d_render' }),
+        { kind: 'mascotization' },
+      );
       expect(queue.publish).not.toHaveBeenCalled();
       expect(transitions.notify).toHaveBeenCalledWith(
         manager,
@@ -306,6 +397,27 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         { kind: 'mc_kit', kitId: kit.id, status: McKitStatus.GENERATING },
         MC_EVENTS_CHANNEL,
       );
+    });
+
+    it('logo sem estilo → 422 STYLE_REQUIRED antes de moderar (candidatos são gerados no estilo do kit)', async () => {
+      mascots.findOne.mockResolvedValue({ ...logoBase });
+      await expect(
+        service.createKit('u1', { source: 'logo', logoMascotId: 'logo-1' }),
+      ).rejects.toMatchObject({ status: 422, response: { code: 'STYLE_REQUIRED' } });
+      expect(moderation.moderate).not.toHaveBeenCalled();
+      expect(candidates.openRound).not.toHaveBeenCalled();
+      expect(kitRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('cor de marca pedida na criação vira o fundo liso dos candidatos e do tile', async () => {
+      mascots.findOne.mockResolvedValue({ ...logoBase });
+      const kit = await service.createKit('u1', {
+        source: 'logo',
+        logoMascotId: 'logo-1',
+        style: 'cartoon_2d',
+        tileBackgroundColor: '#ffcc00',
+      });
+      expect(kit.tileBackgroundColor).toBe('#FFCC00');
     });
 
     it('cliente sem logo cadastrado → 422 CLIENT_LOGO_REQUIRED', async () => {
@@ -328,10 +440,15 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       ).rejects.toMatchObject({ response: { code: 'LOGO_RIGHTS_REQUIRED', mascotId: 'logo-1' } });
 
       mascots.findOne.mockResolvedValue({ ...logoBase });
-      const kit = await service.createKit('u1', { source: 'logo', logoMascotId: 'logo-1' });
+      const kit = await service.createKit('u1', {
+        source: 'logo',
+        logoMascotId: 'logo-1',
+        style: 'cartoon_2d',
+      });
       expect(kit).toMatchObject({ source: 'logo', mascotId: 'logo-1' });
       expect(clients.findOne).not.toHaveBeenCalled();
       expect(queue.publish).not.toHaveBeenCalled();
+      expect(candidates.openRound).toHaveBeenCalledTimes(1);
     });
 
     it('logo: clientId e logoMascotId juntos → LOGO_SOURCE_AMBIGUOUS; nenhum → LOGO_SOURCE_REQUIRED', async () => {
@@ -432,6 +549,174 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
     it('kit de outro usuário → 403', async () => {
       kitRepo.findOneBy.mockResolvedValue({ ...reviewKit, userId: 'u2' });
       await expect(service.approveKit('u1', 'kit-r', {})).rejects.toMatchObject({ status: 403 });
+    });
+
+    /**
+     * Gate de boca e tile na aprovação (D1/D4, spec video-character-kit
+     * "Gate de boca legível" e "Tile do personagem").
+     */
+    describe('gate de boca e tile', () => {
+      it('boca legível: tile gerado da identidade; identityAssetId/tileAssetId/cor/veredito gravados no kit aprovado', async () => {
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+
+        expect(mouthGate.inspect).toHaveBeenCalledTimes(1);
+        expect(tile.build).toHaveBeenCalledWith(
+          expect.objectContaining({ id: 'kit-r' }),
+          expect.objectContaining({ id: 'front-1' }),
+          passedVerdict.bbox,
+        );
+        expect(transitions.casTransition).toHaveBeenCalledWith(
+          manager,
+          McCharacterKit,
+          'kit-r',
+          McKitStatus.REVIEW,
+          McKitStatus.APPROVED,
+          expect.objectContaining({
+            identityAssetId: 'front-1',
+            tileAssetId: 'tile-1',
+            tileBackgroundColor: '#E5E7EB',
+            mouthGate: { identity: { ...passedVerdict, identityAssetId: 'front-1' } },
+          }),
+        );
+      });
+
+      it('boca de traço único → 422 MOUTH_NOT_LEGIBLE com a ação de variante; veredito gravado; kit segue em review', async () => {
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        mouthGate.inspect.mockResolvedValue(blockedVerdict);
+        await expect(
+          service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+        ).rejects.toMatchObject({
+          status: 422,
+          response: {
+            code: 'MOUTH_NOT_LEGIBLE',
+            details: expect.objectContaining({ actions: ['mouth_variant', 'choose_candidate'] }),
+          },
+        });
+        expect(kitRepo.update).toHaveBeenCalledWith(
+          { id: 'kit-r', status: McKitStatus.REVIEW },
+          { mouthGate: { identity: { ...blockedVerdict, identityAssetId: 'front-1' } } },
+        );
+        expect(tile.build).not.toHaveBeenCalled();
+        expect(transitions.casTransition).not.toHaveBeenCalled();
+      });
+
+      it('variante com boca escolhida (identidade nova) → gate roda de novo na nova identidade e aprova', async () => {
+        kitRepo.findOneBy.mockResolvedValue({
+          ...reviewKit,
+          identityAssetId: 'variant-1',
+          mouthGate: { identity: { ...blockedVerdict, identityAssetId: 'front-1' } },
+        });
+        view.resolveIdentityAsset.mockResolvedValue({
+          id: 'variant-1',
+          fileUrl: '/uploads/mascots/cutout.png',
+        });
+        mouthGate.inspect.mockResolvedValue(passedVerdict);
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+        expect(mouthGate.inspect).toHaveBeenCalledTimes(1); // veredito antigo era de outra identidade
+        expect(transitions.casTransition).toHaveBeenCalledWith(
+          manager,
+          McCharacterKit,
+          'kit-r',
+          McKitStatus.REVIEW,
+          McKitStatus.APPROVED,
+          expect.objectContaining({
+            identityAssetId: 'variant-1',
+            mouthGate: { identity: { ...passedVerdict, identityAssetId: 'variant-1' } },
+          }),
+        );
+      });
+
+      it('resultado incerto: sem acceptMouthRisk → 422 MOUTH_GATE_UNDECIDED; com ele aprova e registra o aceite', async () => {
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        mouthGate.inspect.mockResolvedValue(undecidedVerdict);
+        await expect(
+          service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+        ).rejects.toMatchObject({
+          status: 422,
+          response: { code: 'MOUTH_GATE_UNDECIDED' },
+        });
+        expect(transitions.casTransition).not.toHaveBeenCalled();
+
+        // segunda tentativa: o veredito da MESMA identidade já está no kit — não roda visão de novo
+        kitRepo.findOneBy.mockResolvedValue({
+          ...reviewKit,
+          mouthGate: { identity: { ...undecidedVerdict, identityAssetId: 'front-1' } },
+        });
+        mouthGate.inspect.mockClear();
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3', acceptMouthRisk: true });
+        expect(mouthGate.inspect).not.toHaveBeenCalled();
+        const patch = transitions.casTransition.mock.calls[0][5] as {
+          mouthGate: { riskAccepted: { identityAssetId: string; confidence: number } };
+        };
+        expect(patch.mouthGate.riskAccepted).toMatchObject({
+          identityAssetId: 'front-1',
+          confidence: 0.4,
+        });
+        expect(commercials.appendEvent).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({
+            toStatus: McKitStatus.APPROVED,
+            detail: expect.objectContaining({ mouthGate: 'undecided', riskAccepted: true }),
+          }),
+        );
+      });
+
+      it('borda do tile não uniforme → 422 TILE_BORDER_NOT_UNIFORM; kit fica em review com o veredito gravado', async () => {
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        tile.build.mockRejectedValue(
+          new UnprocessableEntityException({ code: 'TILE_BORDER_NOT_UNIFORM', message: 'x' }),
+        );
+        await expect(
+          service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+        ).rejects.toMatchObject({
+          status: 422,
+          response: { code: 'TILE_BORDER_NOT_UNIFORM' },
+        });
+        expect(transitions.casTransition).not.toHaveBeenCalled();
+        expect(kitRepo.update).toHaveBeenCalledWith(
+          { id: 'kit-r', status: McKitStatus.REVIEW },
+          { mouthGate: { identity: { ...passedVerdict, identityAssetId: 'front-1' } } },
+        );
+      });
+
+      it('tile já gerado para a MESMA identidade é reaproveitado; identidade diferente → tile novo', async () => {
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit, tileAssetId: 'tile-old' });
+        assetRepo.findOneBy.mockResolvedValue({
+          id: 'tile-old',
+          metadata: { identityAssetId: 'front-1', backgroundColor: '#ABCDEF' },
+        });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+        expect(tile.build).not.toHaveBeenCalled();
+        expect(transitions.casTransition).toHaveBeenCalledWith(
+          manager,
+          McCharacterKit,
+          'kit-r',
+          McKitStatus.REVIEW,
+          McKitStatus.APPROVED,
+          expect.objectContaining({ tileAssetId: 'tile-old', tileBackgroundColor: '#ABCDEF' }),
+        );
+
+        // tile antigo pertence a outra identidade (trocada em revisão): regera
+        assetRepo.findOneBy.mockResolvedValue({
+          id: 'tile-old',
+          metadata: { identityAssetId: 'other', backgroundColor: '#ABCDEF' },
+        });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+        expect(tile.build).toHaveBeenCalledTimes(1);
+      });
+
+      it('kit sem identidade (sem referência frontal e sem candidato) → 422 KIT_IDENTITY_MISSING', async () => {
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        view.resolveIdentityAsset.mockResolvedValue(null);
+        await expect(
+          service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+        ).rejects.toMatchObject({
+          status: 422,
+          response: { code: 'KIT_IDENTITY_MISSING' },
+        });
+        expect(mouthGate.inspect).not.toHaveBeenCalled();
+      });
     });
   });
 

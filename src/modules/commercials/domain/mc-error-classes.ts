@@ -40,8 +40,22 @@ export const MC_MAX_EXECUTIONS: Record<McErrorClass, number> = {
   quality: 3, // 1ª geração + 2 regerações automáticas por texto inventado
 };
 
-/** Código do erro que o ingest lança quando a inspeção reprova o clipe. */
+/** Código do erro que o ingest lança quando a inspeção reprova o clipe por texto inventado. */
 export const MC_CLIP_TEXT_ERROR_CODE = 'clip_text_detected';
+/** Inspeção: rosto/corpo deformado (change video-formatos-personagem, D11). */
+export const MC_CLIP_DEFORMED_ERROR_CODE = 'clip_deformed';
+/** Inspeção: boca parada dentro das janelas de fala (D11). */
+export const MC_CLIP_MOUTH_STILL_ERROR_CODE = 'clip_mouth_still';
+/** Conformação: clipe mais curto que o áudio além dos 300 ms clonáveis (D7 — "boca parada"). */
+export const MC_CLIP_TOO_SHORT_ERROR_CODE = 'clip_too_short';
+
+/** Todos os códigos da classe `quality`: nova geração no provider até o teto, depois aceite. */
+export const MC_QUALITY_ERROR_CODES: readonly string[] = [
+  MC_CLIP_TEXT_ERROR_CODE,
+  MC_CLIP_DEFORMED_ERROR_CODE,
+  MC_CLIP_MOUTH_STILL_ERROR_CODE,
+  MC_CLIP_TOO_SHORT_ERROR_CODE,
+];
 
 /** Backoff dos retries via fila (startAfterSeconds), indexado por nº de execuções já feitas. */
 export const MC_RETRY_BACKOFF_S = [15, 30, 60] as const;
@@ -60,7 +74,7 @@ export function classifyMcError(err: unknown): McErrorClass {
   if (err instanceof TerminalProviderError) {
     if (err.code === 'content_policy') return 'content_policy';
     if (err.code === 'quota') return 'quota';
-    if (err.code === MC_CLIP_TEXT_ERROR_CODE) return 'quality';
+    if (MC_QUALITY_ERROR_CODES.includes(err.code)) return 'quality';
     return 'validation';
   }
   return 'internal';

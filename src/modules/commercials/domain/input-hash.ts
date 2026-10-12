@@ -14,6 +14,7 @@ export const MC_BUILDER_VERSIONS: Record<McStepType, number> = {
   [McStepType.LIPSYNC]: 1,
   [McStepType.ASSEMBLY]: 1,
   [McStepType.SCENE_COMPOSE]: 1,
+  [McStepType.TALK]: 1,
 };
 
 /**
@@ -30,6 +31,8 @@ export const MC_BUILDER_VERSIONS_V2: Record<McStepType, number> = {
   [McStepType.LIPSYNC]: 2,
   [McStepType.ASSEMBLY]: 2,
   [McStepType.SCENE_COMPOSE]: 1,
+  /** Clipe falado a partir do tile (change video-formatos-personagem): só existe no v2. */
+  [McStepType.TALK]: 1,
 };
 
 /**

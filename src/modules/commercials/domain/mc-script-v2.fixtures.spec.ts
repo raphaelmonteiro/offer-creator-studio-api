@@ -1,10 +1,12 @@
 import {
+  FIXTURE_PRODUCTS,
   FIXTURE_SCENES_ASPECTS,
   fixtureCommercialScript,
   fixtureLongNamesScript,
   fixtureNoProductsScript,
   fixturePendingDerivationScript,
   fixtureSingleSceneScript,
+  fixtureTalkTileScript,
 } from './__fixtures__/mc-script-v2.fixtures';
 import {
   buildSealCuesV2,
@@ -109,5 +111,57 @@ describe('fixtures v2 (P0) — roteiros utilizáveis', () => {
     }));
     expect(quotePhase('preparation', 1, inputs).totalCredits).toBe(4 * 1 + 3 * 4); // 4 keyframes + 3 TTS
     expect(quotePhase('production', 1, inputs).totalCredits).toBe(56 + 89 + 89 + 56); // presenter, voiceover(video), action, presenter
+  });
+});
+
+describe('fixture talk_tile (change video-formatos-personagem, D6/D7)', () => {
+  it('três falas talk_tile válidas SEM initialFrame/cenário/referências; gesto opcional', () => {
+    const script = fixtureTalkTileScript();
+    expect(validateScriptV2(script)).toEqual([]);
+    expect(script.scenes.map((s) => s.sceneType)).toEqual(['talk_tile', 'talk_tile', 'talk_tile']);
+    expect(script.scenes.every((s) => s.initialFrame === undefined)).toBe(true);
+    expect(script.scenes.every((s) => s.environmentId === null)).toBe(true);
+    expect(script.scenes.every((s) => !!s.dialogue)).toBe(true);
+    // gesto só na primeira (com derivação EN); as outras sem ação — aceitas pela validação
+    expect(script.scenes[0].actionPrompt).toBe('Acena no início.');
+    expect(effectiveScenePrompts(script.scenes[0])?.motion).toBe('Waves at the start.');
+    expect(script.scenes[1].actionPrompt).toBe('');
+    expect(script.scenes.map((s) => s.durationS)).toEqual([6, 7, 5]);
+  });
+
+  it('cor da janela e produto citado entram quando pedidos', () => {
+    const script = fixtureTalkTileScript({
+      products: FIXTURE_PRODUCTS,
+      backgroundColor: '#FF8800',
+    });
+    expect(validateScriptV2(script)).toEqual([]);
+    expect(script.talkBackgroundColor).toBe('#FF8800');
+    expect(script.scenes[1].productRef).toBe('prod-arroz');
+    expect(fixtureTalkTileScript().talkBackgroundColor).toBeUndefined();
+  });
+
+  it('cotação: preparação só TTS (3 × 4); produção só talk (3 × 56), nunca keyframe', () => {
+    const script = fixtureTalkTileScript();
+    const inputs = script.scenes.map((s) => ({
+      sceneId: s.sceneId as string,
+      sceneType: s.sceneType as McSceneType,
+      cached: [],
+    }));
+    const preparation = quotePhase('preparation', 1, inputs);
+    expect(preparation.totalCredits).toBe(3 * 4);
+    expect(preparation.items.map((i) => i.stepType)).toEqual(['tts', 'tts', 'tts']);
+    const production = quotePhase('production', 1, inputs);
+    expect(production.items.filter((i) => i.sceneId).map((i) => i.stepType)).toEqual([
+      'talk',
+      'talk',
+      'talk',
+    ]);
+    expect(production.totalCredits).toBe(3 * 56);
+  });
+
+  it('cena talk_tile com um tipo de ação vazio e sem fala é recusada (uma fala, um clipe)', () => {
+    const script = fixtureTalkTileScript();
+    script.scenes[2] = { ...script.scenes[2], dialogue: null };
+    expect(validateScriptV2(script).map((i) => i.code)).toContain('SCENE_DIALOGUE_TYPE');
   });
 });

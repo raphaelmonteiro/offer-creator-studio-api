@@ -66,20 +66,44 @@ export class GeminiImageProvider {
 
   /** Gera 1 imagem e devolve o binário (PNG/JPEG conforme o modelo devolver). */
   async generateImage(params: GeminiGenerateImageParams): Promise<Buffer> {
-    const primary = params.model ?? GEMINI_IMAGE_MODEL;
+    return (await this.generateImageWithModel(params)).image;
+  }
+
+  /**
+   * Cadeia de modelos (change video-formatos-personagem, 2.6): o modelo
+   * pedido (ex.: GEMINI_IMAGE_MODEL_REFS) → o modelo atual → o fallback
+   * documentado, sem repetição. Só o modelo indisponível (404) avança na
+   * cadeia — quota e content_policy valem para a CONTA/CONTEÚDO e falhariam
+   * igual.
+   */
+  static modelChain(requested?: string | null): string[] {
+    const chain = [
+      requested?.trim() || GEMINI_IMAGE_MODEL,
+      GEMINI_IMAGE_MODEL,
+      GEMINI_IMAGE_FALLBACK_MODEL,
+    ];
+    return chain.filter((model, index) => chain.indexOf(model) === index);
+  }
+
+  /** Igual a `generateImage`, devolvendo também o modelo que efetivamente gerou (hash/auditoria). */
+  async generateImageWithModel(
+    params: GeminiGenerateImageParams,
+  ): Promise<{ image: Buffer; model: string }> {
+    const chain = GeminiImageProvider.modelChain(params.model);
     const references = await this.loadReferences(params.referenceImages ?? []);
-    try {
-      return await withRetry(() => this.callModel(primary, params, references));
-    } catch (err) {
-      // Só o modelo indisponível (404) cai para o fallback — quota e
-      // content_policy valem para a CONTA/CONTEÚDO e falhariam igual.
-      const modelMissing = err instanceof TerminalProviderError && err.code === 'model_not_found';
-      if (!modelMissing || primary === GEMINI_IMAGE_FALLBACK_MODEL) throw err;
-      this.logger.warn(
-        `Modelo ${primary} indisponível — tentando fallback ${GEMINI_IMAGE_FALLBACK_MODEL}`,
-      );
-      return withRetry(() => this.callModel(GEMINI_IMAGE_FALLBACK_MODEL, params, references));
+    for (const [index, model] of chain.entries()) {
+      try {
+        const image = await withRetry(() => this.callModel(model, params, references));
+        return { image, model };
+      } catch (err) {
+        const modelMissing = err instanceof TerminalProviderError && err.code === 'model_not_found';
+        const next = chain[index + 1];
+        if (!modelMissing || !next) throw err;
+        this.logger.warn(`Modelo ${model} indisponível — tentando fallback ${next}`);
+      }
     }
+    // inalcançável: a cadeia nunca é vazia e o último erro é relançado acima
+    throw new TerminalProviderError('Nenhum modelo de imagem disponível', 'model_not_found');
   }
 
   private async callModel(

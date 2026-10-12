@@ -1,6 +1,7 @@
 import { McVoiceDeliveryOverride } from '../domain/mc-voice-delivery';
 import { Check, Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { McKitIdentityMode, McKitSource, McKitStyle } from '../domain/mc-kit-identity';
+import { McKitMouthGate } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
 
 /**
@@ -94,6 +95,13 @@ export class McCharacterKit {
   /** Resultado auditado da moderação (omni-moderation, plano §6.8). */
   @Column({ type: 'jsonb', nullable: true })
   moderation: Record<string, unknown> | null;
+
+  /**
+   * Gate de boca legível (D4): veredito sobre o logo cru (criação), sobre a
+   * identidade (antes da aprovação) e o aceite de risco registrado.
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  mouthGate: McKitMouthGate | null;
 
   @CreateDateColumn()
   createdAt: Date;

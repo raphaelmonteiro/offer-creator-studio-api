@@ -12,6 +12,7 @@ import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+import { McKitViewService } from '../services/mc-kit-view.service';
 import { McKitProcessor } from './mc-kit.processor';
 
 describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () => {
@@ -29,7 +30,7 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
 
   let assetSeq: number;
   let kitRepo: { findOneBy: jest.Mock };
-  let assetRepo: { save: jest.Mock };
+  let assetRepo: { save: jest.Mock; findOneBy: jest.Mock };
   let manager: {
     findOne: jest.Mock;
     find: jest.Mock;
@@ -39,9 +40,11 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
   let commercials: { appendEvent: jest.Mock };
-  let gemini: { generateImage: jest.Mock };
+  let gemini: { generateImageWithModel: jest.Mock };
   let mascots: { findOne: jest.Mock };
   let config: { get: jest.Mock };
+  let view: { resolveIdentityAsset: jest.Mock };
+  let env: Record<string, string | undefined>;
   let processor: McKitProcessor;
 
   beforeAll(async () => {
@@ -62,6 +65,7 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       save: jest.fn((obj: Record<string, unknown>) =>
         Promise.resolve({ id: `asset-${++assetSeq}`, ...obj }),
       ),
+      findOneBy: jest.fn().mockResolvedValue(null),
     };
     manager = {
       findOne: jest.fn(),
@@ -82,7 +86,7 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       notify: jest.fn().mockResolvedValue(undefined),
     };
     commercials = { appendEvent: jest.fn().mockResolvedValue(undefined) };
-    gemini = { generateImage: jest.fn() };
+    gemini = { generateImageWithModel: jest.fn() };
     mascots = {
       findOne: jest.fn().mockResolvedValue({
         id: 'mascot-1',
@@ -90,9 +94,11 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
         sourceImageUrl: '/uploads/mascots/cutout.png',
       }),
     };
+    env = { UPLOAD_DEST: tmpDir };
     config = {
-      get: jest.fn((key: string, def?: string) => (key === 'UPLOAD_DEST' ? tmpDir : def)),
+      get: jest.fn((key: string, def?: string) => env[key] ?? def),
     };
+    view = { resolveIdentityAsset: jest.fn().mockResolvedValue(null) };
     processor = new McKitProcessor(
       dataSource as unknown as DataSource,
       transitions as unknown as TaskTransitionService,
@@ -100,6 +106,7 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       gemini as unknown as GeminiImageProvider,
       mascots as unknown as MascotsService,
       config as unknown as ConfigService,
+      view as unknown as McKitViewService,
     );
   });
 
@@ -151,7 +158,7 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       { kind: 'mc_kit', kitId: 'kit-1', status: McKitStatus.REVIEW },
       MC_EVENTS_CHANNEL,
     );
-    expect(gemini.generateImage).not.toHaveBeenCalled(); // mock não gasta API
+    expect(gemini.generateImageWithModel).not.toHaveBeenCalled(); // mock não gasta API
   });
 
   it('gemini: falha de UMA imagem não derruba o kit — segue para review com 3 referências', async () => {
@@ -162,11 +169,12 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
         'generateCanonicalDesc',
       )
       .mockResolvedValue({ traits: ['t'], colors: ['#fff'], style: 's', doNots: [] });
-    gemini.generateImage
-      .mockResolvedValueOnce(Buffer.from('img-0'))
+    const ok = (name: string) => ({ image: Buffer.from(name), model: 'nano-banana-pro-preview' });
+    gemini.generateImageWithModel
+      .mockResolvedValueOnce(ok('img-0'))
       .mockRejectedValueOnce(new TerminalProviderError('bloqueada', 'content_policy'))
-      .mockResolvedValueOnce(Buffer.from('img-2'))
-      .mockResolvedValueOnce(Buffer.from('img-3'));
+      .mockResolvedValueOnce(ok('img-2'))
+      .mockResolvedValueOnce(ok('img-3'));
 
     await processor.process({ kitId: 'kit-1' });
 
@@ -198,8 +206,8 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
         'generateCanonicalDesc',
       )
       .mockResolvedValue({ traits: ['t'], colors: [], style: 's', doNots: [] });
-    gemini.generateImage
-      .mockResolvedValueOnce(Buffer.from('img-0'))
+    gemini.generateImageWithModel
+      .mockResolvedValueOnce({ image: Buffer.from('img-0'), model: 'nano-banana-pro-preview' })
       .mockRejectedValue(new TerminalProviderError('bloqueada', 'content_policy'));
 
     await processor.process({ kitId: 'kit-1' });
@@ -231,7 +239,7 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
     process.env.MC_KIT_PROVIDER = 'gemini'; // sem OPENAI_API_KEY no ConfigService fake → falha
     await processor.process({ kitId: 'kit-1' });
 
-    expect(gemini.generateImage).not.toHaveBeenCalled();
+    expect(gemini.generateImageWithModel).not.toHaveBeenCalled();
     expect(assetRepo.save).not.toHaveBeenCalled();
     expect(transitions.casTransition).toHaveBeenCalledWith(
       manager,
@@ -248,6 +256,102 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
     expect(mascots.findOne).not.toHaveBeenCalled();
     expect(transitions.casTransition).not.toHaveBeenCalled();
     expect(assetRepo.save).not.toHaveBeenCalled();
+  });
+
+  /** Change video-formatos-personagem: identidade escolhida como fonte, modelo das referências (2.6). */
+  describe('identidade e modelo das referências (D4 / 2.6)', () => {
+    it('kit de logo em generating SEM candidato escolhido → no-op (nunca falha o kit; a rodada de candidatos é quem gera)', async () => {
+      kitRepo.findOneBy.mockResolvedValue({
+        ...baseKit,
+        source: 'logo',
+        identityMode: 'generated',
+        identityAssetId: null,
+      });
+      await processor.process({ kitId: 'kit-1' });
+      expect(mascots.findOne).not.toHaveBeenCalled();
+      expect(assetRepo.save).not.toHaveBeenCalled();
+      expect(transitions.casTransition).not.toHaveBeenCalled();
+    });
+
+    it('logo usado como está não gera referências (no-op)', async () => {
+      kitRepo.findOneBy.mockResolvedValue({
+        ...baseKit,
+        source: 'logo',
+        identityMode: 'logo_as_is',
+        identityAssetId: 'logo-asset',
+      });
+      await processor.process({ kitId: 'kit-1' });
+      expect(assetRepo.save).not.toHaveBeenCalled();
+      expect(transitions.casTransition).not.toHaveBeenCalled();
+    });
+
+    it('com identityAssetId (candidato escolhido): a fonte das referências é a identidade, não a imagem do mascote; referências antigas são descartadas', async () => {
+      await fs.writeFile(
+        path.join(tmpDir, 'mascots', 'identity.png'),
+        Buffer.from('identity-bytes'),
+      );
+      kitRepo.findOneBy.mockResolvedValue({
+        ...baseKit,
+        source: 'logo',
+        identityAssetId: 'cand-asset',
+        referenceAssetIds: ['old-1', 'old-2'],
+      });
+      assetRepo.findOneBy.mockResolvedValue({
+        id: 'cand-asset',
+        fileUrl: '/uploads/mascots/identity.png',
+      });
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      jest
+        .spyOn(
+          processor as unknown as { generateCanonicalDesc: (img: Buffer) => Promise<unknown> },
+          'generateCanonicalDesc',
+        )
+        .mockResolvedValue({ traits: ['t'], colors: [], style: 's', doNots: [] });
+      gemini.generateImageWithModel.mockResolvedValue({
+        image: Buffer.from('img'),
+        model: 'nano-banana-pro-preview',
+      });
+
+      await processor.process({ kitId: 'kit-1' });
+
+      expect(mascots.findOne).not.toHaveBeenCalled();
+      const call = gemini.generateImageWithModel.mock.calls[0][0] as { referenceImages: Buffer[] };
+      expect(call.referenceImages[0]).toEqual(Buffer.from('identity-bytes'));
+      expect(manager.softDelete).toHaveBeenCalledWith(AnimationAsset, ['old-1', 'old-2']);
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-1',
+        McKitStatus.GENERATING,
+        McKitStatus.REVIEW,
+        expect.objectContaining({
+          referenceAssetIds: ['asset-1', 'asset-2', 'asset-3', 'asset-4'],
+        }),
+      );
+    });
+
+    it('GEMINI_IMAGE_MODEL_REFS escolhe o modelo das referências; o hash/metadata levam o modelo EFETIVO (fallback do provider)', async () => {
+      env.GEMINI_IMAGE_MODEL_REFS = 'gemini-nano-banana-2.1';
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      jest
+        .spyOn(
+          processor as unknown as { generateCanonicalDesc: (img: Buffer) => Promise<unknown> },
+          'generateCanonicalDesc',
+        )
+        .mockResolvedValue({ traits: ['t'], colors: [], style: 's', doNots: [] });
+      gemini.generateImageWithModel.mockResolvedValue({
+        image: Buffer.from('img'),
+        model: 'nano-banana-pro-preview', // o provider caiu para o modelo atual
+      });
+
+      await processor.process({ kitId: 'kit-1' });
+
+      expect(gemini.generateImageWithModel).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'gemini-nano-banana-2.1', aspectRatio: '1:1' }),
+      );
+      const saved = assetRepo.save.mock.calls[0][0] as { metadata: { model: string } };
+      expect(saved.metadata.model).toBe('nano-banana-pro-preview');
+    });
   });
 
   describe('regeneração de 1 célula ({kitId, slot})', () => {
@@ -271,12 +375,15 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       await processor.process({ kitId: 'kit-1', slot: 2 });
 
       expect(assetRepo.save).toHaveBeenCalledTimes(1);
+      // slot 2 é a referência FRONTAL = identidade do kit de mascote: trocá-la
+      // também zera o tile/veredito (ainda inexistentes aqui) — ver teste abaixo.
       expect(manager.update).toHaveBeenCalledWith(
         McCharacterKit,
         { id: 'kit-1' },
-        { referenceAssetIds: ['a1', 'a2', 'a4', 'asset-1'] },
+        { referenceAssetIds: ['a1', 'a2', 'a4', 'asset-1'], tileAssetId: null, mouthGate: null },
       );
       expect(manager.softDelete).toHaveBeenCalledWith(AnimationAsset, 'a3');
+      expect(manager.softDelete).toHaveBeenCalledTimes(1); // sem tile anterior, nada mais a descartar
       expect(commercials.appendEvent).toHaveBeenCalledWith(
         manager,
         expect.objectContaining({
@@ -286,6 +393,44 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       );
       // kit permanece em review — nenhuma transição de status
       expect(transitions.casTransition).not.toHaveBeenCalled();
+    });
+
+    it('regenerar a referência frontal (slot 2) de um kit de mascote descarta o tile e o veredito de boca da identidade anterior', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+      manager.findOne.mockResolvedValue({
+        ...reviewKit,
+        identityAssetId: null,
+        tileAssetId: 'tile-old',
+        mouthGate: {
+          logo: { hasMouth: true },
+          identity: { hasMouth: true, identityAssetId: 'a3' },
+          riskAccepted: { at: 'x' },
+        },
+      });
+      manager.find.mockResolvedValue([{ id: 'a3', metadata: { slot: 2 } }]);
+
+      await processor.process({ kitId: 'kit-1', slot: 2 });
+
+      expect(manager.update).toHaveBeenCalledWith(
+        McCharacterKit,
+        { id: 'kit-1' },
+        {
+          referenceAssetIds: ['a1', 'a2', 'a4', 'asset-1'],
+          tileAssetId: null,
+          mouthGate: { logo: { hasMouth: true } },
+        },
+      );
+      expect(manager.softDelete).toHaveBeenCalledWith(AnimationAsset, 'tile-old');
+
+      // slot que não é o frontal não mexe no tile
+      manager.update.mockClear();
+      manager.find.mockResolvedValue([{ id: 'a2', metadata: { slot: 1 } }]);
+      await processor.process({ kitId: 'kit-1', slot: 1 });
+      expect(manager.update).toHaveBeenCalledWith(
+        McCharacterKit,
+        { id: 'kit-1' },
+        { referenceAssetIds: ['a1', 'a3', 'a4', 'asset-2'] },
+      );
     });
 
     it('kit fora de review → regeneração é no-op', async () => {

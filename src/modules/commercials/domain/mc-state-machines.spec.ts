@@ -1,14 +1,18 @@
 import {
+  MC_KIT_TRANSITIONS,
   MC_PROJECT_TRANSITIONS,
   MC_SCENE_TRANSITIONS,
   MC_STEP_TRANSITIONS,
   McInvalidTransitionError,
+  McKitStatus,
   McProjectStatus,
   McSceneStatus,
   McStepStatus,
+  assertKitTransition,
   assertProjectTransition,
   assertSceneTransition,
   assertStepTransition,
+  canTransitionKit,
   canTransitionProject,
   canTransitionScene,
   canTransitionStep,
@@ -121,5 +125,53 @@ describe('McStateMachines (plano-comerciais §6.1)', () => {
         expect(allProject).toContain(current);
       }
     }
+  });
+});
+
+/**
+ * Change video-formatos-personagem (D4): `candidates` entre `generating` e a
+ * escolha do candidato; `review → generating` para identidade trocada;
+ * `candidates → review` para "usar o logo como está".
+ */
+describe('McStateMachines — matriz de kits (candidatos, D4)', () => {
+  const allKit = Object.values(McKitStatus);
+
+  for (const from of allKit) {
+    for (const to of allKit) {
+      const allowed = MC_KIT_TRANSITIONS[from].includes(to);
+      it(`${from} → ${to} deve ser ${allowed ? 'permitida' : 'rejeitada'}`, () => {
+        expect(canTransitionKit(from, to)).toBe(allowed);
+        if (!allowed) {
+          expect(() => assertKitTransition(from, to)).toThrow(McInvalidTransitionError);
+        }
+      });
+    }
+  }
+
+  it('rodada de candidatos: generating → candidates → generating (nova rodada ou escolha) | failed', () => {
+    expect(canTransitionKit(McKitStatus.GENERATING, McKitStatus.CANDIDATES)).toBe(true);
+    expect(canTransitionKit(McKitStatus.CANDIDATES, McKitStatus.GENERATING)).toBe(true);
+    expect(canTransitionKit(McKitStatus.CANDIDATES, McKitStatus.FAILED)).toBe(true);
+    // candidatos nunca aprovam direto: referências e revisão vêm antes
+    expect(canTransitionKit(McKitStatus.CANDIDATES, McKitStatus.APPROVED)).toBe(false);
+  });
+
+  it('"usar como está": candidates → review sem passar por generating', () => {
+    expect(canTransitionKit(McKitStatus.CANDIDATES, McKitStatus.REVIEW)).toBe(true);
+  });
+
+  it('identidade trocada em revisão reabre a geração das referências (review → generating)', () => {
+    expect(canTransitionKit(McKitStatus.REVIEW, McKitStatus.GENERATING)).toBe(true);
+    // kit aprovado é imutável: nunca volta
+    expect(canTransitionKit(McKitStatus.APPROVED, McKitStatus.GENERATING)).toBe(false);
+    expect(canTransitionKit(McKitStatus.APPROVED, McKitStatus.CANDIDATES)).toBe(false);
+  });
+
+  it('caminhos de review/approved preservados', () => {
+    expect(canTransitionKit(McKitStatus.GENERATING, McKitStatus.REVIEW)).toBe(true);
+    expect(canTransitionKit(McKitStatus.REVIEW, McKitStatus.APPROVED)).toBe(true);
+    expect(canTransitionKit(McKitStatus.APPROVED, McKitStatus.ARCHIVED)).toBe(true);
+    expect(MC_KIT_TRANSITIONS[McKitStatus.FAILED]).toEqual([]);
+    expect(MC_KIT_TRANSITIONS[McKitStatus.ARCHIVED]).toEqual([]);
   });
 });

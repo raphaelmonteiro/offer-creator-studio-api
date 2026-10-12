@@ -176,7 +176,9 @@ export function validateScriptV2(script: McScript): McScriptIssue[] {
         issues.push({ code: 'SCENE_DIALOGUE_TYPE', sceneId, message: dialogueIssue });
       }
     }
-    if (!canon(scene.actionPrompt)) {
+    // talk_tile (D6/D7): a imagem é o tile do kit — não há keyframe, e o
+    // `actionPrompt` é só um gesto OPCIONAL enviado ao motor de fala.
+    if (scene.sceneType !== 'talk_tile' && !canon(scene.actionPrompt)) {
       issues.push({ code: 'SCENE_WITHOUT_ACTION', sceneId, message: `Cena ${sceneId} sem ação.` });
     }
     if (!Number.isFinite(scene.durationS) || scene.durationS <= 0) {

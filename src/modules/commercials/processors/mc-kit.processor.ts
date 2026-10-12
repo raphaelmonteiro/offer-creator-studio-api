@@ -21,6 +21,7 @@ import { CommercialsService } from '../commercials.service';
 import {
   buildKitReferencePrompt,
   isKitReferenceSlot,
+  KIT_FRONT_SLOT,
   KIT_REFERENCE_BACKGROUND_DEFAULT,
   KIT_REFERENCE_SLOT_COUNT,
   KIT_REFERENCE_SLOTS,
@@ -30,9 +31,11 @@ import {
   parseCanonicalDesc,
 } from '../domain/kit-prompts';
 import { McKitSource, McKitStyle } from '../domain/mc-kit-identity';
+import { McKitMouthGate } from '../domain/mc-mouth-gate';
 import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
 import { computeKitReferenceHash } from '../domain/mc-step-hashes';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+import { McKitViewService } from '../services/mc-kit-view.service';
 
 /** Identidade do kit resolvida para prompt e hash (kits anteriores: mascote, sem estilo, cinza claro). */
 type KitIdentity = Required<KitReferencePromptOptions> & {
@@ -83,6 +86,7 @@ export class McKitProcessor {
     private readonly gemini: GeminiImageProvider,
     private readonly mascots: MascotsService,
     private readonly config: ConfigService,
+    private readonly view: McKitViewService,
   ) {
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
     this.openai = apiKey ? new OpenAI({ apiKey }) : null;
@@ -98,10 +102,23 @@ export class McKitProcessor {
     // Idempotência: job duplicado/expirado que re-entra com o kit já fora de
     // 'generating' vira no-op (mesma disciplina CAS do McScriptProcessor).
     if (kit.status !== McKitStatus.GENERATING) return;
+    // Origem logo sem identidade escolhida: as referências só nascem DEPOIS
+    // da escolha do candidato (D4) — job perdido/antigo não pode falhar o kit.
+    if (kit.source === 'logo' && kit.identityMode === 'generated' && !kit.identityAssetId) {
+      this.logger.warn(
+        `Kit ${kit.id}: job de referências sem candidato escolhido — ignorado (rodada de candidatos pendente).`,
+      );
+      return;
+    }
+    // Logo usado como está: identidade são os pixels do logo; nada a estilizar.
+    if (kit.identityMode === 'logo_as_is') {
+      this.logger.warn(`Kit ${kit.id}: identidade logo_as_is não gera referências — ignorado.`);
+      return;
+    }
 
     let mascotImage: Buffer;
     try {
-      mascotImage = await this.loadMascotImage(kit);
+      mascotImage = await this.loadIdentityImage(kit);
     } catch (err) {
       await this.failKit(kit, 'mascot_image_unavailable', (err as Error).message);
       return;
@@ -162,6 +179,10 @@ export class McKitProcessor {
         { canonicalDesc: JSON.stringify(desc), referenceAssetIds: okAssetIds },
       );
       if (!won) return;
+      // Identidade trocada em revisão (review → generating): as referências
+      // antigas saem de cena junto com o grid que as substituiu.
+      const previous = (kit.referenceAssetIds ?? []).filter((id) => !okAssetIds.includes(id));
+      if (previous.length > 0) await manager.softDelete(AnimationAsset, previous);
       await this.commercials.appendEvent(manager, {
         userId: kit.userId,
         refKind: 'kit',
@@ -169,7 +190,12 @@ export class McKitProcessor {
         kind: 'transition',
         fromStatus: McKitStatus.GENERATING,
         toStatus: McKitStatus.REVIEW,
-        detail: { referenceCount: okAssetIds.length, failures: failures.length },
+        detail: {
+          referenceCount: okAssetIds.length,
+          failures: failures.length,
+          identityAssetId: kit.identityAssetId ?? null,
+          replacedReferences: previous.length,
+        },
       });
       await this.transitions.notify(
         manager,
@@ -188,7 +214,7 @@ export class McKitProcessor {
 
     const desc = this.parseCanonicalDesc(kit.canonicalDesc);
     try {
-      const mascotImage = await this.loadMascotImage(kit);
+      const mascotImage = await this.loadIdentityImage(kit);
       const newAssetId = await this.generateAndSaveReference(kit, slot, desc, mascotImage);
       await this.dataSource.transaction(async (manager) => {
         // Lock pessimista: duas regens simultâneas (slots diferentes) não podem
@@ -206,14 +232,34 @@ export class McKitProcessor {
           ...fresh.referenceAssetIds.filter((id) => id !== previous?.id),
           newAssetId,
         ];
-        await manager.update(McCharacterKit, { id: kit.id }, { referenceAssetIds: nextIds });
+        // Referência frontal É a identidade do kit de mascote (D1): trocá-la
+        // descarta o tile e o veredito de boca gravados para a anterior.
+        const identityChanged = slot === KIT_FRONT_SLOT && !fresh.identityAssetId;
+        await manager.update(
+          McCharacterKit,
+          { id: kit.id },
+          {
+            referenceAssetIds: nextIds,
+            ...(identityChanged
+              ? { tileAssetId: null, mouthGate: this.withoutIdentityVerdict(fresh) }
+              : {}),
+          },
+        );
         if (previous) await manager.softDelete(AnimationAsset, previous.id);
+        if (identityChanged && fresh.tileAssetId) {
+          await manager.softDelete(AnimationAsset, fresh.tileAssetId);
+        }
         await this.commercials.appendEvent(manager, {
           userId: kit.userId,
           refKind: 'kit',
           refId: kit.id,
           kind: 'reference_regenerated',
-          detail: { slot, assetId: newAssetId, replacedAssetId: previous?.id ?? null },
+          detail: {
+            slot,
+            assetId: newAssetId,
+            replacedAssetId: previous?.id ?? null,
+            tileDiscarded: identityChanged ? (fresh.tileAssetId ?? null) : null,
+          },
         });
         await this.notifyKit(manager, kit, McKitStatus.REVIEW);
       });
@@ -361,6 +407,19 @@ export class McKitProcessor {
   ): Promise<string> {
     const identity = this.kitIdentity(kit);
     const prompt = buildKitReferencePrompt(slot, desc, identity);
+    // Modelo das referências (2.6): GEMINI_IMAGE_MODEL_REFS (ex.: 2.1, mais
+    // barato) com o modelo atual na cadeia de fallback do provider; o hash
+    // leva o modelo que EFETIVAMENTE gerou.
+    const generated =
+      this.provider() === 'mock'
+        ? { image: await this.mockReferenceImage(slot), model: 'mock' }
+        : await this.gemini.generateImageWithModel({
+            prompt,
+            referenceImages: [mascotImage],
+            aspectRatio: '1:1',
+            model: this.referencesModel(),
+          });
+    const image = generated.image;
     const inputHash = computeKitReferenceHash({
       slot,
       prompt,
@@ -368,16 +427,8 @@ export class McKitProcessor {
       source: identity.source,
       style: identity.style,
       backgroundColor: identity.backgroundColor,
-      model: this.provider() === 'mock' ? 'mock' : GEMINI_IMAGE_MODEL,
+      model: generated.model,
     });
-    const image =
-      this.provider() === 'mock'
-        ? await this.mockReferenceImage(slot)
-        : await this.gemini.generateImage({
-            prompt,
-            referenceImages: [mascotImage],
-            aspectRatio: '1:1',
-          });
 
     const fileUrl = await this.saveFile(kit.id, `ref-${slot}-${Date.now()}.png`, image);
     const asset = await this.dataSource.getRepository(AnimationAsset).save({
@@ -394,9 +445,11 @@ export class McKitProcessor {
         kitId: kit.id,
         slot,
         provider: this.provider(),
+        model: generated.model,
         inputHash,
         style: identity.style,
         source: identity.source,
+        identityAssetId: kit.identityAssetId ?? null,
         // 1500 e não 500: com a ficha embutida, as regras que mais importam na
         // auditoria (acessórios proibidos, ajustes do usuário) vinham depois do
         // corte antigo e o metadata não servia para conferir o que foi enviado.
@@ -404,6 +457,11 @@ export class McKitProcessor {
       },
     });
     return asset.id;
+  }
+
+  /** Modelo das 4 referências: GEMINI_IMAGE_MODEL_REFS, senão o modelo atual (Nano Banana Pro). */
+  private referencesModel(): string {
+    return this.config.get<string>('GEMINI_IMAGE_MODEL_REFS')?.trim() || GEMINI_IMAGE_MODEL;
   }
 
   /** Kits anteriores à change não têm estilo nem cor: valem os defaults do prompt legado. */
@@ -431,6 +489,26 @@ export class McKitProcessor {
 
   // ─────────────────────────────── suporte ───────────────────────────────
 
+  /**
+   * Imagem de origem das referências (2.6): a identidade escolhida
+   * (`identityAssetId` — candidato de mascotização ou variante com boca)
+   * quando existe; senão a imagem do mascote (recorte, senão a fonte), como
+   * sempre. A referência frontal gerada é a identidade canônica do kit de
+   * mascote, mas NÃO vira fonte das demais (evita deriva a cada regeneração).
+   */
+  private async loadIdentityImage(kit: McCharacterKit): Promise<Buffer> {
+    if (kit.identityAssetId) {
+      const asset = await this.dataSource
+        .getRepository(AnimationAsset)
+        .findOneBy({ id: kit.identityAssetId });
+      if (!asset?.fileUrl) throw new Error('Asset da identidade do kit não encontrado');
+      const buffer = await this.readUploadsFile(asset.fileUrl);
+      if (!buffer) throw new Error('Arquivo da identidade do kit não encontrado no disco');
+      return buffer;
+    }
+    return this.loadMascotImage(kit);
+  }
+
   /** Imagem do mascote (recorte, senão a fonte) lida do bucket local. */
   private async loadMascotImage(kit: McCharacterKit): Promise<Buffer> {
     const mascot = await this.mascots.findOne(kit.userId, kit.mascotId);
@@ -439,6 +517,13 @@ export class McKitProcessor {
     const buffer = await this.readUploadsFile(imageUrl);
     if (!buffer) throw new Error('Arquivo de imagem do mascote não encontrado no disco');
     return buffer;
+  }
+
+  /** Identidade trocada: o veredito de boca e o aceite de risco da anterior caem; o do logo fica. */
+  private withoutIdentityVerdict(kit: McCharacterKit): McKitMouthGate | null {
+    if (!kit.mouthGate) return null;
+    const { identity: _identity, riskAccepted: _risk, ...rest } = kit.mouthGate;
+    return Object.keys(rest).length > 0 ? rest : null;
   }
 
   private parseCanonicalDesc(raw: string | null): KitCanonicalDesc | null {

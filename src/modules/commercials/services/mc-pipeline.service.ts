@@ -32,6 +32,11 @@ import {
   McStepStatus,
 } from '../domain/mc-state-machines';
 import { McScript, McStepType } from '../domain/mc-types';
+
+/** Submits assíncronos caros (video/lipsync/talk): consomem no SUBMIT, verificável pelo providerJobId. */
+export function isSubmitConsumeStep(type: McStepType): boolean {
+  return type === McStepType.VIDEO || type === McStepType.LIPSYNC || type === McStepType.TALK;
+}
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
@@ -440,7 +445,7 @@ export class McPipelineService {
   private stepConsumedCreditsFinal(step: McStep): number {
     if (step.status === McStepStatus.SKIPPED_CACHED || step.status === McStepStatus.CANCELED)
       return 0;
-    if (step.type === McStepType.VIDEO || step.type === McStepType.LIPSYNC) {
+    if (isSubmitConsumeStep(step.type)) {
       return step.providerJobId && step.status !== McStepStatus.FAILED ? step.costCredits : 0;
     }
     return step.status === McStepStatus.SUCCEEDED ? step.costCredits : 0;
@@ -828,8 +833,7 @@ export class McPipelineService {
    * falhou nunca consumiu).
    */
   stepConsumedCredits(step: McStep): number {
-    const submitConsume = step.type === McStepType.VIDEO || step.type === McStepType.LIPSYNC;
-    return submitConsume && step.providerJobId ? step.costCredits : 0;
+    return isSubmitConsumeStep(step.type) && step.providerJobId ? step.costCredits : 0;
   }
 
   private async applySceneShortcut(

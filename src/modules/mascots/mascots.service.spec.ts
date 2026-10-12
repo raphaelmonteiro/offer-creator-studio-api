@@ -185,3 +185,75 @@ describe('MascotsService — logo como personagem de origem (D5)', () => {
     });
   });
 });
+
+/** Correções da revisão (change video-formatos-personagem): teto por `stat` e lista por tipo. */
+describe('MascotsService — teto de tamanho antes da leitura e lista por tipo', () => {
+  let tmpDir: string;
+  let repo: {
+    create: jest.Mock;
+    save: jest.Mock;
+    find: jest.Mock;
+    findOne: jest.Mock;
+    findAndCount: jest.Mock;
+  };
+  let uploads: { uploadFile: jest.Mock };
+  let service: MascotsService;
+
+  beforeAll(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mascots-cap-'));
+    await fs.mkdir(path.join(tmpDir, 'logos'), { recursive: true });
+    // arquivo esparso de 10 MB + 1 byte: ocupa quase nada no disco, mas o stat vê o tamanho
+    const handle = await fs.open(path.join(tmpDir, 'logos', 'huge.png'), 'w');
+    await handle.truncate(10 * 1024 * 1024 + 1);
+    await handle.close();
+  });
+
+  afterAll(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    repo = {
+      create: jest.fn((obj: Record<string, unknown>) => ({ ...obj })),
+      save: jest.fn(async (obj: Record<string, unknown>) => ({ id: 'm-1', ...obj })),
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn(),
+      findAndCount: jest.fn().mockResolvedValue([[], 0]),
+    };
+    uploads = { uploadFile: jest.fn() };
+    const config = {
+      get: jest.fn((key: string, def?: string) => (key === 'UPLOAD_DEST' ? tmpDir : def)),
+    };
+    service = new MascotsService(
+      repo as unknown as Repository<Mascot>,
+      uploads as unknown as UploadsService,
+      {} as BackgroundRemovalService,
+      {} as MascotRigService,
+      config as unknown as ConfigService,
+    );
+  });
+
+  it('imagem de origem acima de 10 MB → 422 SOURCE_IMAGE_TOO_LARGE pelo stat, sem ler o arquivo', async () => {
+    const readSpy = jest.spyOn(fs, 'readFile');
+    await expect(
+      service.createFromUrl('u1', '/uploads/logos/huge.png', { name: 'Logo', kind: 'logo' }),
+    ).rejects.toMatchObject({ status: 422, response: { code: 'SOURCE_IMAGE_TOO_LARGE' } });
+    expect(readSpy).not.toHaveBeenCalled();
+    expect(uploads.uploadFile).not.toHaveBeenCalled();
+    readSpy.mockRestore();
+  });
+
+  it('findAll lista só mascotes por padrão; kind=logo filtra logos; kind=all lista os dois', async () => {
+    await service.findAll('u1', {});
+    expect(repo.findAndCount).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ userId: 'u1', kind: 'mascot' }) }),
+    );
+    await service.findAll('u1', { kind: 'logo' });
+    expect(repo.findAndCount).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ kind: 'logo' }) }),
+    );
+    await service.findAll('u1', { kind: 'all' });
+    const where = (repo.findAndCount.mock.calls[2][0] as { where: Record<string, unknown> }).where;
+    expect(where).not.toHaveProperty('kind');
+  });
+});

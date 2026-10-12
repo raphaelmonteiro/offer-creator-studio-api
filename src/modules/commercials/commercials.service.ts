@@ -37,6 +37,7 @@ import {
   resolveProjectOptions,
 } from './domain/mc-types';
 import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
+import { availableProjectActions, McProjectAction } from './domain/mc-project-available-actions';
 import { randomUUID } from 'crypto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { McCharacterKit, McKitStatus } from './entities/mc-character-kit.entity';
@@ -344,6 +345,8 @@ export class CommercialsService {
         }
       >;
       steps: Array<McStep & { outputUrl: string | null; outputPosterUrl: string | null }>;
+      /** Ações oferecidas à UI (ex.: `refazer`, `duplicar_como_economico` após falha do motor premium). */
+      availableActions: McProjectAction[];
     }
   > {
     const project = await this.dataSource.getRepository(McProject).findOneBy({ id });
@@ -375,6 +378,7 @@ export class CommercialsService {
       finalUrl: url(project.finalAssetId),
       posterUrl: (project.finalAssetId && urls.get(project.finalAssetId)?.posterUrl) || null,
       lastDeliveryUrl: url(lastDeliveryAssetId),
+      availableActions: availableProjectActions(project, steps),
       scenes: scenes.map((s) => ({
         ...s,
         keyframeUrl: url(s.keyframeAssetId),

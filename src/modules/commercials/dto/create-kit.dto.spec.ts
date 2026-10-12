@@ -59,3 +59,32 @@ describe('CreateKitDto — forma do POST /commercials/kits (D5, erros 400 pelo p
     ).toContain('voiceId.maxLength');
   });
 });
+
+describe('CreateKitDto — cor de fundo do tile (tarefa 2.4)', () => {
+  it('tileBackgroundColor é opcional e precisa ser hex #RRGGBB ou #RRGGBBAA', async () => {
+    expect(
+      await errorsOf({
+        source: 'mascot',
+        style: 'cartoon_2d',
+        mascotId: MASCOT_ID,
+        tileBackgroundColor: '#FFCC00',
+      }),
+    ).toEqual([]);
+    expect(
+      await errorsOf({
+        source: 'mascot',
+        style: 'cartoon_2d',
+        mascotId: MASCOT_ID,
+        tileBackgroundColor: '#ffcc0080',
+      }),
+    ).toEqual([]);
+    expect(
+      await errorsOf({
+        source: 'mascot',
+        style: 'cartoon_2d',
+        mascotId: MASCOT_ID,
+        tileBackgroundColor: 'light gray',
+      }),
+    ).toContain('tileBackgroundColor.matches');
+  });
+});

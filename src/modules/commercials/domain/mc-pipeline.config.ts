@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { QUEUES, QueueName } from '../../../shared/queue/animation-queue.service';
-import { MC_PROJECT_FORMATS, McProjectFormat, McStepType } from './mc-types';
+import { McKitIdentityMode } from './mc-kit-identity';
+import { MC_PROJECT_FORMATS, McProjectFormat, McProjectTier, McStepType } from './mc-types';
 
 /**
  * Configuração das filas do pipeline de produção (plano-comerciais §6.4):
@@ -50,6 +51,8 @@ export const MC_STEP_QUEUE: Record<McStepType, QueueName> = {
   [McStepType.LIPSYNC]: QUEUES.MC_SUBMIT,
   [McStepType.ASSEMBLY]: QUEUES.MC_FFMPEG,
   [McStepType.SCENE_COMPOSE]: QUEUES.MC_FFMPEG,
+  /** Clipe falado a partir do tile: submit assíncrono no fal (mc.submit → mc.poll → mc.ingest). */
+  [McStepType.TALK]: QUEUES.MC_SUBMIT,
 };
 
 /**
@@ -93,9 +96,153 @@ export function klingActionDuration(durationS: number): KlingActionDuration {
   return durationS > 7.5 ? '10' : '5';
 }
 
-/** US$/s do step, por tipo (lipsync = Avatar; video = motor de ação). */
+/**
+ * US$/s do step, por tipo (lipsync = Avatar; video = motor de ação; talk =
+ * motor econômico). Fallback da telemetria quando o modelo do step não é
+ * reconhecido — o caminho principal é `mcUsdPerSecondForModel`.
+ */
 export function mcUsdPerSecond(stepType: McStepType): number {
-  return stepType === McStepType.VIDEO ? KLING_ACTION_USD_PER_S : KLING_AVATAR_USD_PER_S;
+  if (stepType === McStepType.VIDEO) return KLING_ACTION_USD_PER_S;
+  if (stepType === McStepType.TALK) return mcTalkEngines().economico.usdPerSecond;
+  return KLING_AVATAR_USD_PER_S;
+}
+
+// ───────────────────────── motores de fala por tier/origem ─────────────────────────
+
+/**
+ * Motor de fala (change video-formatos-personagem, design D2): modelo no fal,
+ * tarifa em US$/s de saída e máximo de segundos de áudio por chamada
+ * (`maxChunkS` — uma fala cujo TTS medido passa disso bloqueia a aprovação
+ * com SPEECH_SENTENCE_TOO_LONG, nunca é cortada nem acelerada, D7).
+ */
+export interface McTalkEngine {
+  model: string;
+  usdPerSecond: number;
+  maxChunkS: number;
+}
+
+/** Chaves de configuração dos motores: por tier (econômico/premium) e o motor de logo. */
+export const MC_TALK_ENGINE_KEYS = ['economico', 'premium', 'logo'] as const;
+export type McTalkEngineKey = (typeof MC_TALK_ENGINE_KEYS)[number];
+
+export type McTalkEngines = Record<McTalkEngineKey, McTalkEngine>;
+
+/** Modelos de referência (fal) — defaults do `.env.example`, bake-offs 3.9/7.3 podem trocar por config. */
+export const KLING_AVATAR_PRO_MODEL = 'fal-ai/kling-video/ai-avatar/v2/pro';
+export const MINIMAX_H3_LIPSYNC_MODEL = 'minimax/h3-max/lip-sync/image-to-video';
+
+/** Defaults quando `MC_TALK_ENGINE_*` está vazio (mesmos valores do .env.example). */
+export const MC_TALK_ENGINE_DEFAULTS: McTalkEngines = {
+  economico: { model: KLING_AVATAR_MODEL, usdPerSecond: KLING_AVATAR_USD_PER_S, maxChunkS: 15 },
+  premium: { model: KLING_AVATAR_PRO_MODEL, usdPerSecond: 0.115, maxChunkS: 15 },
+  logo: { model: MINIMAX_H3_LIPSYNC_MODEL, usdPerSecond: 0.08, maxChunkS: 15 },
+};
+
+const MC_TALK_ENGINE_ENV: Record<McTalkEngineKey, string> = {
+  economico: 'MC_TALK_ENGINE_ECONOMICO',
+  premium: 'MC_TALK_ENGINE_PREMIUM',
+  logo: 'MC_TALK_ENGINE_LOGO',
+};
+
+/**
+ * `modelo|usdPorSegundo|maxChunkS` → motor tipado. Vazio = default; mal
+ * formado é erro de configuração (modelo em branco, tarifa negativa ou NaN,
+ * maxChunkS ≤ 0) — nunca silenciar uma tarifa errada na telemetria.
+ */
+export function parseTalkEngine(
+  raw: string | undefined,
+  fallback: McTalkEngine,
+  label = 'MC_TALK_ENGINE',
+): McTalkEngine {
+  const text = (raw ?? '').trim();
+  if (!text) return { ...fallback };
+  const [modelRaw, usdRaw, maxRaw] = text.split('|').map((t) => t.trim());
+  const model = modelRaw ?? '';
+  if (!model) throw new Error(`${label}: modelo em branco em "${text}"`);
+  const usdPerSecond = usdRaw ? Number(usdRaw) : fallback.usdPerSecond;
+  if (!Number.isFinite(usdPerSecond) || usdPerSecond < 0) {
+    throw new Error(`${label}: tarifa inválida "${usdRaw}" (US$/s, número ≥ 0)`);
+  }
+  const maxChunkS = maxRaw ? Number(maxRaw) : fallback.maxChunkS;
+  if (!Number.isFinite(maxChunkS) || maxChunkS <= 0) {
+    throw new Error(`${label}: maxChunkS inválido "${maxRaw}" (segundos > 0)`);
+  }
+  return { model, usdPerSecond, maxChunkS };
+}
+
+/** Os três motores configurados (lidos do env a cada chamada: barato e testável). */
+export function mcTalkEngines(env: NodeJS.ProcessEnv = process.env): McTalkEngines {
+  return {
+    economico: parseTalkEngine(
+      env[MC_TALK_ENGINE_ENV.economico],
+      MC_TALK_ENGINE_DEFAULTS.economico,
+      MC_TALK_ENGINE_ENV.economico,
+    ),
+    premium: parseTalkEngine(
+      env[MC_TALK_ENGINE_ENV.premium],
+      MC_TALK_ENGINE_DEFAULTS.premium,
+      MC_TALK_ENGINE_ENV.premium,
+    ),
+    logo: parseTalkEngine(
+      env[MC_TALK_ENGINE_ENV.logo],
+      MC_TALK_ENGINE_DEFAULTS.logo,
+      MC_TALK_ENGINE_ENV.logo,
+    ),
+  };
+}
+
+/**
+ * Chave do motor pela regra D2: kit `logo_as_is` usa o motor de LOGO em
+ * qualquer tier (até o bake-off provar que o premium articula logos); os
+ * demais usam o motor do tier. O motor do TIER é também o fallback quando o
+ * motor de logo responde erro de disponibilidade (`talkFallbackEngineKey`).
+ */
+export function talkEngineKeyFor(input: {
+  tier: McProjectTier | null | undefined;
+  identityMode: McKitIdentityMode | null | undefined;
+}): McTalkEngineKey {
+  if (input.identityMode === 'logo_as_is') return 'logo';
+  return input.tier === 'premium' ? 'premium' : 'economico';
+}
+
+export function talkEngineFor(
+  input: {
+    tier: McProjectTier | null | undefined;
+    identityMode: McKitIdentityMode | null | undefined;
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): McTalkEngine & { key: McTalkEngineKey } {
+  const key = talkEngineKeyFor(input);
+  return { key, ...mcTalkEngines(env)[key] };
+}
+
+/** Motor de fallback por indisponibilidade: só existe para o motor de logo (→ motor do tier). */
+export function talkFallbackEngineKey(
+  key: McTalkEngineKey,
+  tier: McProjectTier | null | undefined,
+): McTalkEngineKey | null {
+  if (key !== 'logo') return null;
+  return tier === 'premium' ? 'premium' : 'economico';
+}
+
+/**
+ * Tarifa (US$/s) de um MODELO (D2: substitui a tarifa por tipo de step na
+ * telemetria do ingest): motores configurados primeiro, depois os modelos
+ * fixos do pipeline (Avatar standard, ação Kling v3). `null` = desconhecido —
+ * o chamador cai na tarifa por tipo de step e registra.
+ */
+export function mcUsdPerSecondForModel(
+  model: string | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): number | null {
+  if (!model) return null;
+  const engines = mcTalkEngines(env);
+  for (const key of MC_TALK_ENGINE_KEYS) {
+    if (engines[key].model === model) return engines[key].usdPerSecond;
+  }
+  if (model === KLING_AVATAR_MODEL) return KLING_AVATAR_USD_PER_S;
+  if (model === KLING_ACTION_MODEL) return KLING_ACTION_USD_PER_S;
+  return null;
 }
 
 /** Teto de binário por data URI aceito no submit (lição do PoC — plano §5.3). */

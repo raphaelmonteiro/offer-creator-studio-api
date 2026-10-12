@@ -153,6 +153,15 @@ export class MascotsService {
         ? this.confirmRights(userId, existing.id)
         : this.toView(existing);
     }
+    // Tamanho conferido pelo `stat` ANTES de ler: um arquivo gigante no bucket
+    // não entra em memória só para ser recusado em seguida.
+    const size = await this.localFileSize(url);
+    if (size != null && size > MAX_SOURCE_BYTES) {
+      throw new UnprocessableEntityException({
+        code: 'SOURCE_IMAGE_TOO_LARGE',
+        message: 'A imagem de origem excede o limite de 10 MB.',
+      });
+    }
     const buffer = await this.readLocalFile(url);
     if (!buffer) {
       throw new UnprocessableEntityException({
@@ -421,13 +430,19 @@ export class MascotsService {
 
   // ──────────────────────────────── CRUD ────────────────────────────────
 
+  /**
+   * Lista do usuário. Sem `kind` só os mascotes aparecem (a biblioteca de
+   * personagens não mistura os logos registrados como origem de kit);
+   * `kind=logo` lista os logos e `kind=all` lista os dois.
+   */
   async findAll(userId: string, query: QueryMascotsDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    const kind = query.kind ?? 'mascot';
     const where: FindOptionsWhere<Mascot> = {
       userId,
       ...(query.clientId && { clientId: query.clientId }),
-      ...(query.kind && { kind: query.kind as MascotKind }),
+      ...(kind !== 'all' && { kind: kind as MascotKind }),
       ...(query.status && { status: query.status as Mascot['status'] }),
       ...(query.search && { name: ILike(`%${query.search}%`) }),
       ...(query.includeArchived === 'true' ? {} : { archivedAt: IsNull() }),
@@ -598,13 +613,30 @@ export class MascotsService {
     return index >= 0 ? url.slice(index) : null;
   }
 
-  /** Lê de volta um arquivo do bucket local a partir da URL persistida. */
-  private async readLocalFile(url: string): Promise<Buffer | null> {
+  /** Caminho no disco de uma URL `/uploads/*` persistida, com guarda anti-path-traversal. */
+  private resolveLocalPath(url: string): string | null {
     const uploadsPath = this.toUploadsPath(url);
     if (!uploadsPath) return null;
     const uploadsDir = path.resolve(this.config.get<string>('UPLOAD_DEST', './uploads'));
     const filePath = path.resolve(uploadsDir, uploadsPath.replace(/^\/uploads\//, ''));
-    if (!filePath.startsWith(uploadsDir + path.sep)) return null;
+    return filePath.startsWith(uploadsDir + path.sep) ? filePath : null;
+  }
+
+  /** Tamanho em bytes do arquivo do bucket (null se fora do bucket/ausente). */
+  private async localFileSize(url: string): Promise<number | null> {
+    const filePath = this.resolveLocalPath(url);
+    if (!filePath) return null;
+    try {
+      return (await fs.stat(filePath)).size;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Lê de volta um arquivo do bucket local a partir da URL persistida. */
+  private async readLocalFile(url: string): Promise<Buffer | null> {
+    const filePath = this.resolveLocalPath(url);
+    if (!filePath) return null;
     try {
       return await fs.readFile(filePath);
     } catch {

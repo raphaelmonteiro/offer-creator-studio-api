@@ -22,7 +22,13 @@ import { AdminPauseDto } from './dto/admin-pause.dto';
 import { CreateKitDto } from './dto/create-kit.dto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { DuplicateProjectDto } from './dto/duplicate-project.dto';
-import { ApproveKitDto, RegenerateReferenceDto, UpdateKitSheetDto } from './dto/kit-actions.dto';
+import {
+  ApproveKitDto,
+  CandidatesRoundDto,
+  RegenerateReferenceDto,
+  UpdateKitSheetDto,
+} from './dto/kit-actions.dto';
+import { McKitCandidatesService } from './services/mc-kit-candidates.service';
 import {
   ApproveProductionDto,
   RegeneratePreviewDto,
@@ -54,6 +60,7 @@ export class CommercialsController {
   constructor(
     private readonly commercials: CommercialsService,
     private readonly kits: McKitsService,
+    private readonly kitCandidates: McKitCandidatesService,
     private readonly voices: McVoicesService,
     private readonly actions: McProjectActionsService,
     private readonly quality: McQualityService,
@@ -143,6 +150,49 @@ export class CommercialsController {
   @Post('kits/:id/sheet/translate')
   translateKitSheet(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
     return this.kits.translateSheet(user.id, id);
+  }
+
+  // ───────────── candidatos de mascotização e gate de boca (D4, tarefas 2.4–2.7) ─────────────
+
+  /** Rodadas de candidatos (antigas preservadas) com URLs — kit de logo. */
+  @Get('kits/:id/candidates')
+  listKitCandidates(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
+    return this.kitCandidates.list(user.id, id);
+  }
+
+  /** Nova rodada com ajustes em texto livre; só com a rodada anterior pronta (`candidates`). */
+  @Post('kits/:id/candidates')
+  startKitCandidatesRound(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CandidatesRoundDto,
+  ) {
+    return this.kitCandidates.startRound(user.id, id, dto.adjustments);
+  }
+
+  /** Escolhe o candidato: vira a identidade do kit e as referências são geradas a partir dele. */
+  @Post('kits/:id/candidates/:cid/choose')
+  chooseKitCandidate(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('cid', ParseUUIDPipe) cid: string,
+  ) {
+    return this.kitCandidates.choose(user.id, id, cid);
+  }
+
+  /** Usa o logo como está (`logo_as_is`) — só quando o gate de boca passou no logo cru. */
+  @Post('kits/:id/use-as-is')
+  useKitLogoAsIs(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
+    return this.kitCandidates.useAsIs(user.id, id);
+  }
+
+  /** Gate de boca reprovado/indeciso: gera uma variante da identidade com boca articulável. */
+  @Post('kits/:id/mouth-variant')
+  requestKitMouthVariant(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.kitCandidates.requestMouthVariant(user.id, id);
   }
 
   // ───────────────────────────── voz (plano §5.3) ─────────────────────────────

@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   ValidateIf,
 } from 'class-validator';
@@ -61,4 +62,15 @@ export class CreateKitDto {
   @IsString()
   @MaxLength(100)
   voiceId?: string;
+
+  /**
+   * Cor de fundo liso do tile e do slot frontal (`#RRGGBB`/`#RRGGBBAA`): cor
+   * de marca quando a UI oferece; sem ela, kit de logo usa cinza claro e kit
+   * de mascote segue o prompt legado.
+   */
+  @IsOptional()
+  @Matches(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/, {
+    message: 'tileBackgroundColor deve ser uma cor hex (#RRGGBB ou #RRGGBBAA).',
+  })
+  tileBackgroundColor?: string;
 }

@@ -13,6 +13,12 @@ export enum McStepType {
   LIPSYNC = 'lipsync',
   /** Pipeline v2 (ADR-001 §3.1): vídeo de ação + TTS → clipe final da cena (FFmpeg). */
   SCENE_COMPOSE = 'scene_compose',
+  /**
+   * Change video-formatos-personagem (D6/D7): clipe falado a partir do TILE do
+   * kit + áudio da cena, no motor escolhido por tier/origem (fila mc.submit).
+   * Nunca passa por keyframe nem por arte de fundo.
+   */
+  TALK = 'talk',
   ASSEMBLY = 'assembly',
 }
 
@@ -98,8 +104,11 @@ export interface McSourceArt {
  * - action: ação física sem locução → keyframe → motor de ação.
  * - action_voiceover: ação com narração sobreposta → keyframe → motor de ação;
  *   TTS; ambos → scene_compose. NUNCA Avatar.
+ * - talk_tile (change video-formatos-personagem, D6/D7): UMA fala = UM clipe,
+ *   gerado a partir do tile do kit + TTS da cena → `talk`. Sem keyframe, sem
+ *   arte de fundo; a composição (F1/F2) acontece nos steps de projeto.
  */
-export const MC_SCENE_TYPES = ['presenter', 'action', 'action_voiceover'] as const;
+export const MC_SCENE_TYPES = ['presenter', 'action', 'action_voiceover', 'talk_tile'] as const;
 export type McSceneType = (typeof MC_SCENE_TYPES)[number];
 
 /** Área livre reservada aos elementos gráficos (selo/legenda) no planejamento da cena. */
@@ -221,6 +230,12 @@ export interface McScript {
   seal?: McScriptSeal | null;
   /** Cartela final opcional — ausente quando o usuário não tem estabelecimento. */
   endcard?: McScriptEndcard | null;
+  /**
+   * Formatos novos (D1): cor (#RRGGBB) da janela/preset onde o tile de fala é
+   * composto — o fundo liso do tile é recolorido para ela antes do motor de
+   * fala e ela entra no hash do `talk`. Ausente = `tileBackgroundColor` do kit.
+   */
+  talkBackgroundColor?: string | null;
 }
 
 /**

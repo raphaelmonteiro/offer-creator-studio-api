@@ -265,6 +265,36 @@ export function computeLipsyncHashV2(input: LipsyncHashInputV2): string {
   });
 }
 
+export interface TalkHashInputV2 {
+  /** Modelo do motor de fala efetivamente escolhido (tier/origem, D2). */
+  engineModel: string;
+  /** Tile do kit (asset) — recolorido em memória, nunca regerado. */
+  tileAssetId: string;
+  /** Áudio SELECIONADO da fala (asset), não o hash do step de TTS. */
+  audioAssetId: string;
+  /** Prompt resolvido (`buildTalkPrompt`) — gesto + pose neutra + proibições. */
+  prompt: string;
+  /** Cor da janela/preset para a qual o fundo do tile é recolorido (#RRGGBB). */
+  backgroundColor: string;
+  attempt: number;
+}
+
+/**
+ * Hash do `talk` (change video-formatos-personagem, D1/D7): motor, tile,
+ * áudio, prompt e COR DE FUNDO — mudar a cor da janela regera o clipe (o TTS
+ * é reaproveitado); trocar de tier troca o motor e regera.
+ */
+export function computeTalkHashV2(input: TalkHashInputV2): string {
+  return computeInputHash(McStepType.TALK, MC_BUILDER_VERSIONS_V2.talk, {
+    engineModel: input.engineModel,
+    tileAssetId: input.tileAssetId,
+    audioAssetId: input.audioAssetId,
+    prompt: input.prompt,
+    backgroundColor: input.backgroundColor.trim().toUpperCase(),
+    attempt: input.attempt,
+  });
+}
+
 export interface SceneComposeHashInput {
   videoAssetId: string;
   audioAssetId: string;

@@ -21,10 +21,19 @@ import {
   MC_DATA_URI_MAX_BYTES,
   MC_FIRST_POLL_DELAY_S,
   mcExpireForQueue,
+  mcTalkEngines,
+  McTalkEngine,
+  McTalkEngineKey,
+  talkEngineFor,
+  talkFallbackEngineKey,
 } from '../domain/mc-pipeline.config';
 import { buildActionVideoPrompt, buildAvatarVideoPrompt } from '../domain/mc-scene-prompts';
 import { assertStepTransition, McStepStatus } from '../domain/mc-state-machines';
+import { buildTalkSubmitInput, isTalkEngineAvailabilityError } from '../domain/mc-talk-engines';
+import { buildTalkPrompt } from '../domain/mc-talk-prompts';
 import { McStepType, sceneActionPromptEn } from '../domain/mc-types';
+import { McKitIdentityMode } from '../domain/mc-kit-identity';
+import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
@@ -64,6 +73,28 @@ export async function ensureImageUnderCap(
 
 export function toDataUri(buffer: Buffer, mime: string): string {
   return `data:${mime};base64,${buffer.toString('base64')}`;
+}
+
+/** Cor de fundo quando nem o projeto nem o kit definem uma (branco neutro). */
+export const MC_TALK_DEFAULT_BACKGROUND = '#FFFFFF';
+
+const HEX_COLOR = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+/** #RRGGBB(AA) válido → normalizado em maiúsculas; qualquer outra coisa → null. */
+export function normalizeHexColor(value: string | null | undefined): string | null {
+  const text = (value ?? '').trim();
+  return HEX_COLOR.test(text) ? text.toUpperCase() : null;
+}
+
+/**
+ * Tile de FALA (D1): o tile do kit (recorte com alfa) com o fundo liso
+ * recolorido para a cor da janela/preset — `flatten` do alfa sobre a cor, PNG
+ * sem transparência. Recolorir não é regeração: a identidade é a mesma, só a
+ * cor atrás muda (e ela entra no hash do step).
+ */
+export async function recolorTileBackground(buffer: Buffer, hex: string): Promise<Buffer> {
+  const color = normalizeHexColor(hex) ?? MC_TALK_DEFAULT_BACKGROUND;
+  return sharp(buffer).flatten({ background: color }).png().toBuffer();
 }
 
 /**
@@ -114,7 +145,11 @@ export class McTalkingProcessor {
   }
 
   async process({ stepId }: { stepId: string; projectId?: string }): Promise<void> {
-    const step = await this.pipeline.claimStep(stepId, [McStepType.LIPSYNC, McStepType.VIDEO]);
+    const step = await this.pipeline.claimStep(stepId, [
+      McStepType.LIPSYNC,
+      McStepType.VIDEO,
+      McStepType.TALK,
+    ]);
     if (!step) {
       await this.recoverOrphanSubmit(stepId);
       return;
@@ -132,12 +167,20 @@ export class McTalkingProcessor {
       // antes do submit pago — aprovação caída entre o claim e aqui cancela o
       // step sem enviar nada ao provider.
       if (!(await this.pipeline.assertSubmitAllowed(step))) return;
-      const submit =
+      const submit: {
+        provider: string;
+        providerJobId: string;
+        statusUrl: string;
+        responseUrl: string;
+        inputSnapshot?: Record<string, unknown>;
+      } =
         this.provider() === 'mock'
           ? await this.mockSubmit(step, scene)
           : step.type === McStepType.LIPSYNC
             ? await this.submitKlingAvatar(scene, step)
-            : await this.submitKlingAction(scene, project, step);
+            : step.type === McStepType.TALK
+              ? await this.submitTalk(scene, project, step)
+              : await this.submitKlingAction(scene, project, step);
 
       await this.dataSource.transaction(async (manager) => {
         assertStepTransition(McStepStatus.RUNNING, McStepStatus.PROVIDER_WAIT);
@@ -147,7 +190,12 @@ export class McTalkingProcessor {
           step.id,
           McStepStatus.RUNNING,
           McStepStatus.PROVIDER_WAIT,
-          { provider: submit.provider, providerJobId: submit.providerJobId },
+          {
+            provider: submit.provider,
+            providerJobId: submit.providerJobId,
+            // talk (D2): o motor EFETIVO fica no snapshot do step (fallback registrado)
+            ...(submit.inputSnapshot ? { inputSnapshot: submit.inputSnapshot } : {}),
+          },
         );
         if (!won) return;
         await this.commercials.appendEvent(manager, {
@@ -298,13 +346,130 @@ export class McTalkingProcessor {
     };
   }
 
+  /**
+   * STEP `talk` (change video-formatos-personagem, D1/D2/D7): clipe falado a
+   * partir do TILE do kit. Entrada do motor = tile de fala (tile recolorido
+   * para a cor da janela) + áudio da cena + prompt curto (pose neutra no
+   * início/fim, sem texto). NUNCA vai arte de fundo, preço, nome ou logo.
+   *
+   * Motor: `talkEngineFor({tier, identityMode})` — `logo_as_is` usa o motor de
+   * logo em qualquer tier; os demais, o do tier. Fallback para o motor do tier
+   * SÓ em erro de disponibilidade do motor de logo (nunca por reprovação de
+   * inspeção), com o motor efetivo gravado no snapshot do step.
+   */
+  private async submitTalk(
+    scene: McScene,
+    project: McProject,
+    step: McStep,
+  ): Promise<{
+    provider: string;
+    providerJobId: string;
+    statusUrl: string;
+    responseUrl: string;
+    inputSnapshot: Record<string, unknown>;
+  }> {
+    const snapshot = (step.inputSnapshot ?? {}) as {
+      tileAssetId?: string | null;
+      audioAssetId?: string | null;
+      backgroundColor?: string | null;
+      motion?: string | null;
+      prompt?: string | null;
+      engine?: Partial<McTalkEngine> & { key?: McTalkEngineKey };
+      tier?: string | null;
+      identityMode?: McKitIdentityMode | null;
+    };
+    const kit = await this.dataSource
+      .getRepository(McCharacterKit)
+      .findOneBy({ id: project.kitId });
+    const tileAssetId = snapshot.tileAssetId ?? kit?.tileAssetId ?? null;
+    const tile = await this.loadAssetBuffer(tileAssetId, 'tile de fala');
+    const audio = await this.loadAssetBuffer(snapshot.audioAssetId ?? scene.audioAssetId, 'áudio');
+    if (audio.length > MC_DATA_URI_MAX_BYTES) {
+      throw new TerminalProviderError(
+        'Áudio da fala excede o teto de 3,3MB do data URI',
+        'audio_too_large',
+      );
+    }
+    const backgroundColor =
+      normalizeHexColor(snapshot.backgroundColor) ??
+      normalizeHexColor(kit?.tileBackgroundColor) ??
+      MC_TALK_DEFAULT_BACKGROUND;
+    const speakingTile = await ensureImageUnderCap(
+      await recolorTileBackground(tile, backgroundColor),
+    );
+    const prompt = snapshot.prompt?.trim() || buildTalkPrompt(snapshot.motion);
+    const tier = (snapshot.tier ?? project.tier ?? 'economico') as 'economico' | 'premium';
+    const identityMode = snapshot.identityMode ?? kit?.identityMode ?? 'generated';
+    const chosen: McTalkEngine & { key: McTalkEngineKey } =
+      snapshot.engine?.model && snapshot.engine.key
+        ? {
+            key: snapshot.engine.key,
+            model: snapshot.engine.model,
+            usdPerSecond: snapshot.engine.usdPerSecond ?? 0,
+            maxChunkS: snapshot.engine.maxChunkS ?? 0,
+          }
+        : talkEngineFor({ tier, identityMode });
+    const ingredients = {
+      imageUrl: toDataUri(speakingTile, sniffImageMime(speakingTile)),
+      audioUrl: toDataUri(audio, 'audio/mpeg'),
+      prompt,
+    };
+    let effective = chosen;
+    let fallbackFrom: string | null = null;
+    let result: Awaited<ReturnType<FalQueueClient['submit']>>;
+    try {
+      result = await this.fal.submit(chosen.model, buildTalkSubmitInput(chosen.model, ingredients));
+    } catch (err) {
+      const fallbackKey = talkFallbackEngineKey(chosen.key, tier);
+      if (!fallbackKey || !isTalkEngineAvailabilityError(err)) throw err;
+      const fallback = { key: fallbackKey, ...mcTalkEngines()[fallbackKey] };
+      this.logger.warn(
+        `Motor ${chosen.model} indisponível (${(err as Error).message}) — ` +
+          `fallback para o motor do tier (${fallback.model})`,
+      );
+      result = await this.fal.submit(
+        fallback.model,
+        buildTalkSubmitInput(fallback.model, ingredients),
+      );
+      effective = fallback;
+      fallbackFrom = chosen.model;
+    }
+    return {
+      provider: effective.model,
+      providerJobId: result.requestId,
+      statusUrl: result.statusUrl,
+      responseUrl: result.responseUrl,
+      inputSnapshot: {
+        ...(step.inputSnapshot ?? {}),
+        tileAssetId,
+        backgroundColor,
+        prompt,
+        tier,
+        identityMode,
+        engine: {
+          key: chosen.key,
+          model: chosen.model,
+          usdPerSecond: chosen.usdPerSecond,
+          maxChunkS: chosen.maxChunkS,
+        },
+        effectiveEngine: {
+          key: effective.key,
+          model: effective.model,
+          usdPerSecond: effective.usdPerSecond,
+          maxChunkS: effective.maxChunkS,
+          ...(fallbackFrom ? { fallbackFrom } : {}),
+        },
+      },
+    };
+  }
+
   /** Clipe sintético (cor + áudio muxado quando houver) em mock-jobs/{jobId}.mp4 — custo zero. */
   private async mockSubmit(
     step: McStep,
     scene: McScene,
   ): Promise<{ provider: string; providerJobId: string; statusUrl: string; responseUrl: string }> {
     const jobId = randomUUID();
-    const spoken = step.type === McStepType.LIPSYNC;
+    const spoken = step.type === McStepType.LIPSYNC || step.type === McStepType.TALK;
     const snapshot = (step.inputSnapshot ?? null) as {
       audioAssetId?: string;
       providerDuration?: string;
@@ -329,7 +494,9 @@ export class McTalkingProcessor {
     await fs.mkdir(this.storage.mockJobsAbsDir(), { recursive: true });
     const outPath = this.storage.mockJobAbsPath(jobId);
     const args = ['-y', '-hide_banner', '-loglevel', 'error'];
-    args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=720x1280:r=30:d=${durationS}`);
+    // talk: tile 3:4 (proporção típica do tile do kit); demais: 9:16 da cena
+    const size = step.type === McStepType.TALK ? '720x960' : '720x1280';
+    args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`);
     if (audioPath)
       args.push('-i', audioPath, '-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-shortest');
     // -f mp4 explícito: o sufixo .part (escrita atômica) impede o ffmpeg de

@@ -1,5 +1,8 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
+export const MC_KIT_CANDIDATE_KINDS = ['mascotization', 'mouth_variant'] as const;
+export type McKitCandidateKind = (typeof MC_KIT_CANDIDATE_KINDS)[number];
+
 /**
  * Candidato de mascotização do logo (design D4): uma imagem derivada do logo
  * no estilo do kit, gerada em rodadas de 4 a 6. As rodadas anteriores são
@@ -24,6 +27,13 @@ export class McKitCandidate {
   /** Posição do candidato dentro da rodada (0..5). */
   @Column({ type: 'int' })
   idx: number;
+
+  /**
+   * Natureza da rodada: `mascotization` (candidatos derivados do logo) ou
+   * `mouth_variant` (variante com boca da identidade atual, gate de boca).
+   */
+  @Column({ type: 'varchar', length: 20, default: 'mascotization' })
+  kind: McKitCandidateKind;
 
   /** Asset da imagem gerada (animation_assets); nulo enquanto a geração não concluiu. */
   @Column({ type: 'uuid', nullable: true })

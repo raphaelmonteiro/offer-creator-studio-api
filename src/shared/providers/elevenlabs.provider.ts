@@ -86,12 +86,18 @@ export class ElevenLabsProvider {
    * `normalized_alignment` é preferido quando vem: ele reflete o texto
    * NORMALIZADO que o modelo realmente falou (números viram extenso), que é o
    * que aparece no áudio — e portanto o que a legenda deve mostrar.
+   *
+   * `previousText`/`nextText` (opcionais): texto das falas vizinhas, enviado
+   * como `previous_text`/`next_text` para a prosódia de uma fala por chamada
+   * (change video-formatos-personagem, D7) — nunca é falado, só condiciona.
    */
   async synthesizeWithTimestamps(params: {
     text: string;
     voiceId: string;
     settings?: Record<string, unknown>;
     modelId?: string;
+    previousText?: string | null;
+    nextText?: string | null;
   }): Promise<{ audio: Buffer; alignment: ElevenLabsCharacterAlignment | null }> {
     return withRetry(async () => {
       const response = await fetch(
@@ -106,6 +112,8 @@ export class ElevenLabsProvider {
             text: params.text,
             model_id: params.modelId ?? ELEVENLABS_DEFAULT_MODEL,
             voice_settings: params.settings ?? { stability: 0.5, similarity_boost: 0.75 },
+            ...(params.previousText?.trim() ? { previous_text: params.previousText.trim() } : {}),
+            ...(params.nextText?.trim() ? { next_text: params.nextText.trim() } : {}),
           }),
         },
       ).catch((err) => {

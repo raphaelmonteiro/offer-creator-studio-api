@@ -9,6 +9,10 @@ import {
   mcRefundsOnTerminal,
   mcRetryDelayS,
   mcShouldRetry,
+  MC_CLIP_MOUTH_STILL_ERROR_CODE,
+  MC_CLIP_TOO_SHORT_ERROR_CODE,
+  MC_CLIP_DEFORMED_ERROR_CODE,
+  MC_CLIP_TEXT_ERROR_CODE,
 } from './mc-error-classes';
 
 describe('mc-error-classes — classificação e política por classe (plano §6.4)', () => {
@@ -78,5 +82,25 @@ describe('mc-error-classes — classificação e política por classe (plano §6
     );
     expect(mcErrorCode(new TransientProviderError('x'), 'f')).toBe('provider_transient');
     expect(mcErrorCode(new Error('x'), 'keyframe_failed')).toBe('keyframe_failed');
+  });
+});
+
+describe('classe quality — códigos da conformação e da inspeção (D7/D11)', () => {
+  it('clip_text_detected, clip_deformed, clip_mouth_still e clip_too_short são `quality` (3 execuções, depois aceite)', () => {
+    for (const code of [
+      MC_CLIP_TEXT_ERROR_CODE,
+      MC_CLIP_DEFORMED_ERROR_CODE,
+      MC_CLIP_MOUTH_STILL_ERROR_CODE,
+      MC_CLIP_TOO_SHORT_ERROR_CODE,
+    ]) {
+      expect(classifyMcError(new TerminalProviderError('x', code))).toBe('quality');
+    }
+    expect(mcShouldRetry('quality', 1)).toBe(true);
+    expect(mcShouldRetry('quality', 2)).toBe(true);
+    expect(mcShouldRetry('quality', 3)).toBe(false);
+    // conformação que falha por outro motivo continua validação
+    expect(classifyMcError(new TerminalProviderError('x', 'talk_conform_failed'))).toBe(
+      'validation',
+    );
   });
 });

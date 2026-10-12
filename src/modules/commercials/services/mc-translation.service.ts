@@ -41,6 +41,18 @@ export class McTranslationService {
 
   private async derive(scene: McScriptScene, sourceHash: string): Promise<McSceneDerived> {
     const at = new Date().toISOString();
+    // Cena sem ação (talk_tile sem gesto, D6): nada a traduzir — derivação pt
+    // vazia explícita, sem gastar chamada.
+    if (!scene.actionPrompt?.trim() && !scene.initialFrame?.trim()) {
+      return {
+        sourceHash,
+        initialFrameEn: null,
+        actionPromptEn: null,
+        lang: 'pt',
+        provider: 'none',
+        at,
+      };
+    }
     if (this.provider() !== 'openai') {
       return {
         sourceHash,

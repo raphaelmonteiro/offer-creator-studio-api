@@ -3,9 +3,11 @@ import {
   computeKeyframeHashV2,
   computeKitReferenceHash,
   computeSceneStepHashes,
+  computeTalkHashV2,
   KeyframeHashInputV2,
   KitReferenceHashInput,
   SceneHashContext,
+  TalkHashInputV2,
 } from './mc-step-hashes';
 
 const base: SceneHashContext = {
@@ -143,5 +145,40 @@ describe('mc-step-hashes — estilo e cor de fundo (D1/D5)', () => {
     expect(computeKitReferenceHash({ ...input, prompt: 'other' })).not.toBe(h);
     expect(computeKitReferenceHash({ ...input, source: 'logo' })).not.toBe(h);
     expect(computeKitReferenceHash({ ...input, model: 'other' })).not.toBe(h);
+  });
+});
+
+describe('mc-step-hashes — talk (change video-formatos-personagem, D1/D2/D7)', () => {
+  const base: TalkHashInputV2 = {
+    engineModel: 'fal-ai/kling-video/ai-avatar/v2/standard',
+    tileAssetId: 'tile-1',
+    audioAssetId: 'au-1',
+    prompt: 'Waves. Static medium shot.',
+    backgroundColor: '#FF8800',
+    attempt: 1,
+  };
+
+  it('é estável e muda com motor, tile, áudio, prompt, cor de fundo e tentativa', () => {
+    expect(computeTalkHashV2(base)).toBe(computeTalkHashV2({ ...base }));
+    expect(computeTalkHashV2(base)).toMatch(/^[0-9a-f]{64}$/);
+    expect(
+      computeTalkHashV2({ ...base, engineModel: 'fal-ai/kling-video/ai-avatar/v2/pro' }),
+    ).not.toBe(computeTalkHashV2(base));
+    expect(computeTalkHashV2({ ...base, tileAssetId: 'tile-2' })).not.toBe(computeTalkHashV2(base));
+    expect(computeTalkHashV2({ ...base, audioAssetId: 'au-2' })).not.toBe(computeTalkHashV2(base));
+    expect(computeTalkHashV2({ ...base, prompt: 'Nods. Static medium shot.' })).not.toBe(
+      computeTalkHashV2(base),
+    );
+    expect(computeTalkHashV2({ ...base, attempt: 2 })).not.toBe(computeTalkHashV2(base));
+  });
+
+  it('cor da janela alterada → hash novo (clipe regerado; o TTS é outro step e não muda)', () => {
+    expect(computeTalkHashV2({ ...base, backgroundColor: '#00FF00' })).not.toBe(
+      computeTalkHashV2(base),
+    );
+    // a mesma cor em caixa diferente é a mesma requisição
+    expect(computeTalkHashV2({ ...base, backgroundColor: ' #ff8800 ' })).toBe(
+      computeTalkHashV2(base),
+    );
   });
 });

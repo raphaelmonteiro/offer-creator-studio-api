@@ -237,3 +237,56 @@ describe('mc-scheduler — pipeline v2 (ADR §4.1/§4.2)', () => {
     ).toEqual([]);
   });
 });
+
+describe('mc-scheduler — cenas talk_tile (change video-formatos-personagem, D6)', () => {
+  it('preparing agenda SÓ o tts da cena talk_tile — nunca keyframe', () => {
+    const scenes = [scene('s1', 'talk_tile'), scene('s2', 'talk_tile')];
+    const steps = [
+      step('s1', McStepType.TTS, McStepStatus.PENDING),
+      step('s2', McStepType.TTS, McStepStatus.PENDING),
+      // um keyframe pendente por engano NUNCA sai (não está no plano)
+      step('s2', McStepType.KEYFRAME, McStepStatus.PENDING),
+      step('s1', McStepType.TALK, McStepStatus.PENDING),
+    ];
+    const ready = readySteps(v2(McProjectStatus.PREPARING), scenes, steps);
+    expect(ready.map((r) => r.type)).toEqual([McStepType.TTS, McStepType.TTS]);
+    expect(ready.some((r) => r.type === McStepType.KEYFRAME)).toBe(false);
+    expect(ready.some((r) => r.type === McStepType.TALK)).toBe(false);
+  });
+
+  it('preparationComplete: só o tts conta; generating agenda o talk quando o tts está pronto (ou em cache)', () => {
+    const scenes = [scene('s1', 'talk_tile'), scene('s2', 'talk_tile')];
+    const steps = [
+      step('s1', McStepType.TTS, McStepStatus.SUCCEEDED),
+      step('s2', McStepType.TTS, McStepStatus.SKIPPED_CACHED),
+      step('s1', McStepType.TALK, McStepStatus.PENDING),
+      step('s2', McStepType.TALK, McStepStatus.PENDING),
+    ];
+    expect(preparationComplete({ revision: 1 }, scenes, steps)).toBe(true);
+    const ready = readySteps(v2(McProjectStatus.GENERATING), scenes, steps);
+    expect(ready.map((r) => r.type)).toEqual([McStepType.TALK, McStepType.TALK]);
+    // tts ainda pendente segura o talk
+    steps[0].status = McStepStatus.PENDING;
+    expect(preparationComplete({ revision: 1 }, scenes, steps)).toBe(false);
+    expect(readySteps(v2(McProjectStatus.GENERATING), scenes, steps).map((r) => r.id)).toEqual([
+      's2-talk-1',
+    ]);
+  });
+
+  it('final da cena talk_tile é o talk; assembly só com todos os talk prontos', () => {
+    expect(sceneFinalStepType({ dialogue: 'x', sceneType: 'talk_tile' })).toBe(McStepType.TALK);
+    const scenes = [scene('s1', 'talk_tile', McSceneStatus.READY), scene('s2', 'talk_tile')];
+    const steps = [
+      step('s1', McStepType.TTS, McStepStatus.SUCCEEDED),
+      step('s1', McStepType.TALK, McStepStatus.SUCCEEDED),
+      step('s2', McStepType.TTS, McStepStatus.SUCCEEDED),
+      step('s2', McStepType.TALK, McStepStatus.PROVIDER_WAIT),
+      step(null, McStepType.ASSEMBLY, McStepStatus.PENDING),
+    ];
+    expect(readySteps(v2(McProjectStatus.GENERATING), scenes, steps)).toEqual([]);
+    steps[3].status = McStepStatus.SUCCEEDED;
+    expect(readySteps(v2(McProjectStatus.GENERATING), scenes, steps).map((r) => r.type)).toEqual([
+      McStepType.ASSEMBLY,
+    ]);
+  });
+});

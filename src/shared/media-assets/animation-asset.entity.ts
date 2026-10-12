@@ -18,6 +18,10 @@ export type AnimationAssetKind =
   | 'export'
   /** Imagem de referência do kit do mascote (plano-comerciais §6.1, kinds novos). */
   | 'kit_reference'
+  /** Candidato de mascotização do logo / variante com boca / cópia do logo usado como está (D4). */
+  | 'kit_candidate'
+  /** Tile do personagem: recorte da identidade com alfa, gerado na aprovação do kit (D1). */
+  | 'kit_tile'
   /** Keyframe de cena do comercial (plano-comerciais §6.1). */
   | 'keyframe'
   /** Clipe cru de cena (sem fala) do comercial (plano-comerciais §6.1). */

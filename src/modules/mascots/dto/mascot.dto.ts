@@ -67,9 +67,9 @@ export class QueryMascotsDto {
   @IsIn(['draft', 'segmenting', 'needs_review', 'ready', 'failed'])
   status?: string;
 
-  /** `mascot` ou `logo` (logo da marca registrado como personagem de origem); sem filtro lista os dois. */
+  /** `mascot` (default) ou `logo` (logo da marca registrado como personagem de origem); `all` lista os dois. */
   @IsOptional()
-  @IsIn(MASCOT_KINDS as unknown as string[])
+  @IsIn([...MASCOT_KINDS, 'all'])
   kind?: string;
 
   /** Por padrão a lista esconde arquivados. */

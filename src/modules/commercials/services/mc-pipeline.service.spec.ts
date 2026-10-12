@@ -8,6 +8,7 @@ import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-q
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { EmailService } from '../../email/email.service';
 import { CommercialsService } from '../commercials.service';
+import { availableProjectActions } from '../domain/mc-project-available-actions';
 import { McProjectStatus, McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
 import { McProject } from '../entities/mc-project.entity';
@@ -494,5 +495,97 @@ describe('McPipelineService — avanço do scheduler e política de falha (plano
       McProjectStatus.SUCCEEDED,
       expect.objectContaining({ finalAssetId: 'asset-final', consumedCredits: 160 }),
     );
+  });
+
+  describe('step talk (change video-formatos-personagem, D2) — falha terminal do motor', () => {
+    it('motor indisponível em todas as tentativas: estorno do consumido no submit, providerCostUsd INALTERADO, needs_attention com "refazer" e "duplicar como econômico"', async () => {
+      const fx = fixture({
+        project: {
+          ...project(),
+          tier: 'premium',
+          pipelineVersion: 2,
+          revision: 1,
+          providerCostUsd: '1.2300',
+        },
+        scenes: [spokenScene()],
+        steps: [
+          step(McStepType.TALK, McStepStatus.PROVIDER_WAIT, {
+            id: 'st-talk',
+            attempts: 4, // transiente esgotou os retries
+            providerJobId: 'job-talk', // consumiu no submit
+            costCredits: 56,
+            projectRevision: 1,
+            phase: 'production',
+          }),
+        ],
+      });
+      const service = build(fx);
+      await service.failStep(
+        fx.state.steps[0] as unknown as McStep,
+        McStepStatus.PROVIDER_WAIT,
+        new TransientProviderError('HTTP 503'),
+      );
+      expect(queue.publish).not.toHaveBeenCalled();
+      // talk consome no submit (verificável pelo providerJobId) → estorno do step
+      expect(credits.refundUnconsumed).toHaveBeenCalledWith(
+        expect.anything(),
+        userId,
+        'st-talk',
+        56,
+        0,
+      );
+      // custo externo zero: nada incrementa providerCostUsd numa falha
+      expect(fx.manager.increment).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        'providerCostUsd',
+        expect.anything(),
+      );
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        expect.anything(),
+        McProject,
+        'p1',
+        McProjectStatus.GENERATING,
+        McProjectStatus.NEEDS_ATTENTION,
+        expect.objectContaining({
+          errorCode: 'provider_transient',
+          quality: expect.objectContaining({ resumePhase: 'production' }),
+        }),
+      );
+      // ações oferecidas na UI a partir do estado resultante
+      expect(
+        availableProjectActions(
+          { status: McProjectStatus.NEEDS_ATTENTION, tier: 'premium', revision: 1 },
+          [
+            {
+              sceneId: 'sc1',
+              type: McStepType.TALK,
+              status: McStepStatus.FAILED,
+              projectRevision: 1,
+            },
+          ],
+        ),
+      ).toEqual(['refazer', 'duplicar_como_economico']);
+    });
+
+    it('stepConsumedCredits: talk com providerJobId consumiu; sem providerJobId não', () => {
+      const service = build(fixture({ project: project() }));
+      expect(
+        service.stepConsumedCredits(
+          step(McStepType.TALK, McStepStatus.FAILED, {
+            providerJobId: 'j',
+            costCredits: 56,
+          }) as unknown as McStep,
+        ),
+      ).toBe(56);
+      expect(
+        service.stepConsumedCredits(
+          step(McStepType.TALK, McStepStatus.FAILED, {
+            providerJobId: null,
+            costCredits: 56,
+          }) as unknown as McStep,
+        ),
+      ).toBe(0);
+    });
   });
 });

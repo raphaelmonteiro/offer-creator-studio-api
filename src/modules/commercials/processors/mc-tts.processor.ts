@@ -12,7 +12,7 @@ import {
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { syntheticAlignment } from '../domain/mc-captions';
 import { McStepStatus } from '../domain/mc-state-machines';
-import { McStepType } from '../domain/mc-types';
+import { McScript, McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
@@ -38,13 +38,43 @@ export const MC_TTS_FALLBACK_MODEL = 'eleven_v3';
 /** Duração do mp3 de silêncio do provider mock (segundos) — legado. */
 const MOCK_TTS_DURATION_S = 2;
 
+/** Teto padrão (s) da duração do TTS mock — `MC_MOCK_TTS_MAX_S` sobrescreve. */
+export const MC_MOCK_TTS_MAX_S_DEFAULT = 20;
+
+/** Cap do mock configurável (change video-formatos-personagem, 3.6): testar SPEECH_SENTENCE_TOO_LONG sem API. */
+export function mockTtsMaxS(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.MC_MOCK_TTS_MAX_S);
+  return Number.isFinite(raw) && raw > 0 ? raw : MC_MOCK_TTS_MAX_S_DEFAULT;
+}
+
 /**
  * Mock v2: a duração acompanha o texto (15 chars/s, mesma taxa do diretor),
  * para que a validação "locução cabe no clipe" e o manifesto exercitem
- * números realistas sem gastar API. Faixa 1–20s.
+ * números realistas sem gastar API. Faixa 1–`maxS` (default 20 s).
  */
-export function estimateSpeechSeconds(text: string): number {
-  return Math.min(20, Math.max(1, Math.round((text.trim().length / 15) * 10) / 10));
+export function estimateSpeechSeconds(text: string, maxS: number = mockTtsMaxS()): number {
+  return Math.min(maxS, Math.max(1, Math.round((text.trim().length / 15) * 10) / 10));
+}
+
+/**
+ * Falas VIZINHAS da cena no roteiro (D7: prosódia de uma fala por chamada —
+ * `previous_text`/`next_text` da ElevenLabs). Localiza a cena pela identidade
+ * (v2) ou pela posição (legado); vizinhas sem fala contam como ausentes.
+ */
+export function neighbourDialogues(
+  script: Pick<McScript, 'scenes'> | null | undefined,
+  scene: { scriptSceneId?: string | null; idx: number },
+): { previousText: string | null; nextText: string | null } {
+  const scenes = [...(script?.scenes ?? [])].sort((a, b) => a.idx - b.idx);
+  const position = scene.scriptSceneId
+    ? scenes.findIndex((s) => s.sceneId === scene.scriptSceneId)
+    : scenes.findIndex((s) => s.idx === scene.idx);
+  if (position < 0) return { previousText: null, nextText: null };
+  const text = (value: string | null | undefined) => (value?.trim() ? value.trim() : null);
+  return {
+    previousText: text(scenes[position - 1]?.dialogue),
+    nextText: text(scenes[position + 1]?.dialogue),
+  };
 }
 
 /**
@@ -114,6 +144,7 @@ export class McTtsProcessor {
               scene.dialogue,
               providerVoiceId as string,
               kitVoiceDelivery(kit),
+              neighbourDialogues(project.script, scene),
             );
       // Duração MEDIDA (probe) — base do planejamento de voiceover e do
       // manifesto de preparação (ADR §3.6: usar a duração medida do TTS).
@@ -183,15 +214,22 @@ export class McTtsProcessor {
     text: string,
     voiceId: string,
     delivery: McVoiceDelivery,
+    context: { previousText: string | null; nextText: string | null } = {
+      previousText: null,
+      nextText: null,
+    },
   ): Promise<{ audio: Buffer; alignment: ElevenLabsCharacterAlignment | null }> {
     // Mesmo perfil de entrega do preview (velocidade/expressividade do KIT):
-    // o que o usuário aprovou na amostra é o que a cena fala.
+    // o que o usuário aprovou na amostra é o que a cena fala. As falas
+    // vizinhas vão como contexto de prosódia (D7), nunca são faladas.
     try {
       return await this.elevenLabs.synthesizeWithTimestamps({
         text,
         voiceId,
         modelId: MC_TTS_PRIMARY_MODEL,
         settings: elevenLabsVoiceSettings(delivery, MC_TTS_PRIMARY_MODEL),
+        previousText: context.previousText,
+        nextText: context.nextText,
       });
     } catch (err) {
       if (!(err instanceof TerminalProviderError)) throw err;
@@ -201,6 +239,8 @@ export class McTtsProcessor {
         voiceId,
         modelId: MC_TTS_FALLBACK_MODEL,
         settings: elevenLabsVoiceSettings(delivery, MC_TTS_FALLBACK_MODEL),
+        previousText: context.previousText,
+        nextText: context.nextText,
       });
     }
   }

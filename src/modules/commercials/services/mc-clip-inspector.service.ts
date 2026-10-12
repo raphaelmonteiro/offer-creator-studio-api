@@ -6,39 +6,123 @@ import {
   GEMINI_VISION_MODEL,
   GeminiImageProvider,
 } from '../../../shared/providers/gemini-image.provider';
-import { mcShouldRetry } from '../domain/mc-error-classes';
+import { SpeechWindow } from '../domain/mc-captions';
+import {
+  MC_CLIP_DEFORMED_ERROR_CODE,
+  MC_CLIP_MOUTH_STILL_ERROR_CODE,
+  MC_CLIP_TEXT_ERROR_CODE,
+  mcShouldRetry,
+} from '../domain/mc-error-classes';
+import { McKitSource, McKitStyle } from '../domain/mc-kit-identity';
 
 /**
- * Inspeção automática do clipe gerado (opção B, 24/09): o Kling Avatar às
- * vezes INVENTA letreiros, placas, etiquetas e "legendas" ilegíveis. Depois do
- * download, amostramos quadros e perguntamos ao Gemini (visão) se há texto
- * indesejado; o ingest reprova o clipe (classe `quality` → nova geração) até
- * o teto e depois aceita, com o veredito gravado no asset.
+ * Inspeção automática do clipe gerado (opção B, 24/09; generalizada pela change
+ * video-formatos-personagem, D11): depois do download, amostramos quadros e
+ * perguntamos ao Gemini (visão) se há texto inventado, rosto/corpo deformado
+ * e — dentro das janelas de fala, por PARES de quadros (t, t+0,25 s) — boca
+ * parada. O ingest reprova o clipe (classe `quality` → nova geração) até o
+ * teto e depois aceita, com o veredito gravado no asset.
  *
- * Nunca derruba o ingest: qualquer erro aqui vira `null` (sem veredito).
- * Desligável com MC_CLIP_TEXT_CHECK=off.
+ * O prompt é dirigido pelo CONTEXTO (origem, estilo, tipo de fundo): um tile
+ * em fundo liso não exige corredor de supermercado nem elementos de cena.
+ *
+ * Nunca derruba o ingest: desligado (`MC_CLIP_TEXT_CHECK=off`) ou erro ⇒
+ * veredito "não inspecionado" (`available: false`), que o ingest grava no
+ * asset para a revisão sinalizar.
  */
+export type McInspectionReason = 'text' | 'deformation' | 'mouth_still';
+
+export type McMouthCheck = 'checked' | 'skipped' | 'still';
+
+export interface ClipInspectionContext {
+  source: McKitSource;
+  style: McKitStyle | null;
+  /** `plain` = tile em fundo liso (talk); `scene` = cena gerada com cenário (keyframe). */
+  backgroundKind: 'plain' | 'scene';
+  /** Janelas de fala (s, relativas ao clipe) — vazio = checagem de boca pulada. */
+  speechWindows: SpeechWindow[];
+}
+
 export interface ClipInspection {
+  /** true = reprovado por pelo menos um motivo (texto, deformação ou boca parada). */
   flagged: boolean;
+  reasons: McInspectionReason[];
   where: string | null;
   description: string;
   frames: number;
+  /** Pares de quadros comparados dentro das janelas de fala. */
+  pairs: number;
+  mouthCheck: McMouthCheck;
   model: string;
+  /** false = inspeção indisponível/desligada: clipe aceito com veredito "não inspecionado". */
+  available: boolean;
+  verdict: 'ok' | 'reprovado' | 'não inspecionado';
 }
 
 export const MC_CLIP_INSPECTION_FRAMES = 4;
+/** Pares (t, t+0,25 s) dentro das janelas de fala para a boca (D11: 2 a 3 pares). */
+export const MC_CLIP_INSPECTION_PAIRS = 3;
+export const MC_CLIP_INSPECTION_PAIR_DELTA_S = 0.25;
 
-export const MC_CLIP_INSPECTION_PROMPT = [
-  'You are the QA reviewer of a short animated supermarket commercial. The images are frames',
-  'sampled from ONE generated video clip of a cartoon mascot in a store aisle.',
-  'Task: detect UNWANTED TEXT rendered inside the scene by the video generator: captions,',
-  'subtitles, signs, hanging boards, banners, posters, price tags, stickers, watermarks or',
-  'garbled/illegible glyphs that look like writing.',
-  'NOT unwanted: the printed label of a real product package that the mascot holds or that',
-  'sits on the shelves (brand name and package art are expected).',
-  'Answer ONLY with compact JSON: {"unwanted_text": true|false, "where": "top|middle|bottom|null",',
-  '"description": "<max 20 words>"}.',
-].join(' ');
+export const MC_CLIP_INSPECTION_DEFAULT_CONTEXT: ClipInspectionContext = {
+  source: 'mascot',
+  style: null,
+  backgroundKind: 'scene',
+  speechWindows: [],
+};
+
+const STYLE_WORDS: Record<McKitStyle, string> = {
+  cartoon_2d: 'flat 2D cartoon',
+  '3d_render': '3D animated-feature style',
+  realistic: 'photorealistic',
+};
+
+/** Prompt de QA dirigido pelo contexto: nunca presume "mascote num corredor de loja". */
+export function buildClipInspectionPrompt(ctx: ClipInspectionContext, pairs: number): string {
+  const subject =
+    ctx.source === 'logo'
+      ? "a brand logo character (a logo given a face/mouth, or the logo's own face)"
+      : 'a mascot character';
+  const style = ctx.style ? ` rendered as ${STYLE_WORDS[ctx.style]}` : '';
+  const background =
+    ctx.backgroundKind === 'plain'
+      ? 'The character stands alone on a PLAIN solid-color background; there is no scene, ' +
+        'no props and no shelves — do not expect or require any setting.'
+      : 'The character is in a generated setting (for example a store); the printed label of a ' +
+        'real product package held by the character or sitting on shelves is expected and NOT unwanted.';
+  const lines = [
+    `You are the QA reviewer of a short animated commercial. The images are frames sampled from ONE`,
+    `generated video clip of ${subject}${style}, speaking to the camera in Brazilian Portuguese.`,
+    background,
+    'Check 1 (unwanted_text): detect text rendered inside the clip by the video generator:',
+    'captions, subtitles, signs, boards, banners, posters, price tags, stickers, watermarks or',
+    "garbled glyphs that look like writing. Lettering that is part of the character's own logo",
+    'design is NOT unwanted.',
+    'Check 2 (deformed): face or body melted, duplicated or missing features, extra limbs, broken',
+    'identity between frames (clearly a different character).',
+  ];
+  if (pairs > 0) {
+    lines.push(
+      `Check 3 (mouth_moving): the LAST ${pairs * 2} images are ${pairs} PAIRS of consecutive frames`,
+      '(each pair is 0.25 s apart) taken while the character is speaking. In each pair compare the',
+      'mouth: it should visibly change (open/close, shape). Answer mouth_moving=false ONLY if the',
+      'mouth is frozen in every pair.',
+    );
+  } else {
+    lines.push('There are no speech-window frame pairs: answer mouth_moving=null.');
+  }
+  lines.push(
+    'Answer ONLY with compact JSON: {"unwanted_text": true|false, "where": "top|middle|bottom|null",',
+    '"deformed": true|false, "mouth_moving": true|false|null, "description": "<max 20 words>"}.',
+  );
+  return lines.join(' ');
+}
+
+/** Prompt legado (cena gerada, sem janelas) — mantido para o snapshot de compatibilidade. */
+export const MC_CLIP_INSPECTION_PROMPT = buildClipInspectionPrompt(
+  MC_CLIP_INSPECTION_DEFAULT_CONTEXT,
+  0,
+);
 
 @Injectable()
 export class McClipInspectorService {
@@ -53,7 +137,7 @@ export class McClipInspectorService {
     return process.env.MC_CLIP_TEXT_CHECK !== 'off';
   }
 
-  /** Quadros em instantes espalhados (evita o 1º quadro, que é o keyframe). */
+  /** Quadros em instantes espalhados (evita o 1º quadro, que é o keyframe/tile). */
   static sampleTimesS(durationMs: number, frames: number = MC_CLIP_INSPECTION_FRAMES): number[] {
     const d = Math.max(0.2, durationMs / 1000);
     return Array.from({ length: frames }, (_, i) =>
@@ -61,32 +145,94 @@ export class McClipInspectorService {
     );
   }
 
-  static parseVerdict(
-    text: string,
-  ): { flagged: boolean; where: string | null; description: string } | null {
+  /**
+   * Instantes dos PARES (t, t+Δ) dentro das janelas de fala: as janelas mais
+   * longas primeiro (mais chance de boca em movimento), t no centro da janela,
+   * e o par inteiro precisa caber na janela e no clipe. Sem janela que caiba
+   * nenhum par → lista vazia (checagem pulada e registrada).
+   */
+  static speechPairTimesS(
+    windows: SpeechWindow[],
+    durationMs: number,
+    pairs: number = MC_CLIP_INSPECTION_PAIRS,
+    deltaS: number = MC_CLIP_INSPECTION_PAIR_DELTA_S,
+  ): number[] {
+    const clipS = durationMs / 1000;
+    const usable = windows
+      .filter((w) => w.endS - w.startS >= deltaS && w.startS + deltaS <= clipS)
+      .sort((a, b) => b.endS - b.startS - (a.endS - a.startS))
+      .slice(0, pairs)
+      .sort((a, b) => a.startS - b.startS);
+    return usable.map((w) => {
+      const center = (w.startS + w.endS) / 2 - deltaS / 2;
+      const t = Math.min(Math.max(w.startS, center), Math.min(w.endS, clipS) - deltaS);
+      return Number(Math.max(0, t).toFixed(2));
+    });
+  }
+
+  static parseVerdict(text: string): {
+    flagged: boolean;
+    reasons: McInspectionReason[];
+    where: string | null;
+    description: string;
+    mouthMoving: boolean | null;
+  } | null {
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return null;
     try {
       const parsed = JSON.parse(match[0]) as {
         unwanted_text?: unknown;
         where?: unknown;
+        deformed?: unknown;
+        mouth_moving?: unknown;
         description?: unknown;
       };
       if (typeof parsed.unwanted_text !== 'boolean') return null;
+      const reasons: McInspectionReason[] = [];
+      if (parsed.unwanted_text) reasons.push('text');
+      if (parsed.deformed === true) reasons.push('deformation');
+      const mouthMoving = typeof parsed.mouth_moving === 'boolean' ? parsed.mouth_moving : null;
+      if (mouthMoving === false) reasons.push('mouth_still');
       return {
-        flagged: parsed.unwanted_text,
+        flagged: reasons.length > 0,
+        reasons,
         where: typeof parsed.where === 'string' && parsed.where !== 'null' ? parsed.where : null,
         description: typeof parsed.description === 'string' ? parsed.description.slice(0, 200) : '',
+        mouthMoving,
       };
     } catch {
       return null;
     }
   }
 
+  /** Código de erro (classe `quality`) do primeiro motivo da reprovação. */
+  static errorCodeFor(inspection: ClipInspection): string {
+    const first = inspection.reasons[0];
+    if (first === 'mouth_still') return MC_CLIP_MOUTH_STILL_ERROR_CODE;
+    if (first === 'deformation') return MC_CLIP_DEFORMED_ERROR_CODE;
+    return MC_CLIP_TEXT_ERROR_CODE;
+  }
+
+  /** Veredito "não inspecionado": clipe aceito, sinalizado na revisão (D11). */
+  static unavailable(reason: string): ClipInspection {
+    return {
+      flagged: false,
+      reasons: [],
+      where: null,
+      description: reason.slice(0, 200),
+      frames: 0,
+      pairs: 0,
+      mouthCheck: 'skipped',
+      model: GEMINI_VISION_MODEL,
+      available: false,
+      verdict: 'não inspecionado',
+    };
+  }
+
   /**
    * Decisão do ingest a partir do veredito: 'retry' = reprova e regera (classe
    * quality), 'accept' = teto de gerações atingido, entrega com registro,
-   * 'ok' = limpo ou sem veredito.
+   * 'ok' = limpo, sem veredito ou não inspecionado.
    */
   static decision(
     inspection: ClipInspection | null,
@@ -100,10 +246,16 @@ export class McClipInspectorService {
     videoPath: string,
     durationMs: number,
     tempDir: string,
-  ): Promise<ClipInspection | null> {
-    if (!this.enabled()) return null;
+    ctx: ClipInspectionContext = MC_CLIP_INSPECTION_DEFAULT_CONTEXT,
+  ): Promise<ClipInspection> {
+    if (!this.enabled()) return McClipInspectorService.unavailable('MC_CLIP_TEXT_CHECK=off');
     try {
-      const times = McClipInspectorService.sampleTimesS(durationMs);
+      const spread = McClipInspectorService.sampleTimesS(durationMs);
+      const pairStarts = McClipInspectorService.speechPairTimesS(ctx.speechWindows, durationMs);
+      const times = [
+        ...spread,
+        ...pairStarts.flatMap((t) => [t, Number((t + MC_CLIP_INSPECTION_PAIR_DELTA_S).toFixed(2))]),
+      ];
       const frames: Buffer[] = [];
       for (const [i, t] of times.entries()) {
         const out = path.join(tempDir, `inspect-${i}.jpg`);
@@ -130,20 +282,42 @@ export class McClipInspectorService {
         frames.push(await fs.readFile(out));
       }
       const text = await this.gemini.describeImages({
-        prompt: MC_CLIP_INSPECTION_PROMPT,
+        prompt: buildClipInspectionPrompt(ctx, pairStarts.length),
         images: frames,
       });
       const verdict = McClipInspectorService.parseVerdict(text);
       if (!verdict) {
         this.logger.warn(`Inspeção do clipe: resposta não interpretável: ${text.slice(0, 120)}`);
-        return null;
+        return McClipInspectorService.unavailable('resposta não interpretável');
       }
-      return { ...verdict, frames: frames.length, model: GEMINI_VISION_MODEL };
+      const mouthCheck: McMouthCheck =
+        pairStarts.length === 0 || verdict.mouthMoving === null
+          ? 'skipped'
+          : verdict.mouthMoving
+            ? 'checked'
+            : 'still';
+      // Sem pares, o modelo não pode reprovar por boca parada.
+      const reasons =
+        pairStarts.length === 0
+          ? verdict.reasons.filter((r) => r !== 'mouth_still')
+          : verdict.reasons;
+      return {
+        flagged: reasons.length > 0,
+        reasons,
+        where: verdict.where,
+        description: verdict.description,
+        frames: frames.length,
+        pairs: pairStarts.length,
+        mouthCheck,
+        model: GEMINI_VISION_MODEL,
+        available: true,
+        verdict: reasons.length > 0 ? 'reprovado' : 'ok',
+      };
     } catch (err) {
       this.logger.warn(
-        `Inspeção do clipe indisponível (${(err as Error).message}) — clipe segue sem veredito.`,
+        `Inspeção do clipe indisponível (${(err as Error).message}) — clipe aceito como "não inspecionado".`,
       );
-      return null;
+      return McClipInspectorService.unavailable((err as Error).message);
     }
   }
 }

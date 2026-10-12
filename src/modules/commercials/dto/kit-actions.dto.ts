@@ -3,6 +3,7 @@ import { VoiceDeliveryDto } from './voice-preview.dto';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsInt,
   IsOptional,
   IsString,
@@ -29,6 +30,24 @@ export class ApproveKitDto {
   @ValidateNested()
   @Type(() => VoiceDeliveryDto)
   delivery?: VoiceDeliveryDto;
+
+  /**
+   * Gate de boca INDECISO (confiança < 0,7): o usuário aprova assumindo o
+   * risco; a decisão fica registrada no kit (`mouthGate.riskAccepted`). Sem
+   * isso o service responde 422 MOUTH_GATE_UNDECIDED.
+   */
+  @IsOptional()
+  @IsBoolean()
+  acceptMouthRisk?: boolean;
+}
+
+/** Nova rodada de candidatos (POST /kits/:id/candidates): ajustes livres em pt-BR. */
+export class CandidatesRoundDto {
+  /** "menos infantil, manter o olho azul" — entra no prompt da rodada (traduzido quando possível). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(600)
+  adjustments?: string;
 }
 
 /** Regeneração de UMA referência do grid (plano §4: "regeneração por célula"). */

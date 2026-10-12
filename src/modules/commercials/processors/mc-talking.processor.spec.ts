@@ -12,15 +12,25 @@ import {
   KLING_ACTION_MODEL,
   KLING_ACTION_NEGATIVE_PROMPT,
   KLING_AVATAR_MODEL,
+  KLING_AVATAR_PRO_MODEL,
+  MINIMAX_H3_LIPSYNC_MODEL,
 } from '../domain/mc-pipeline.config';
 import { McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
+import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McPipelineService } from '../services/mc-pipeline.service';
 import { McStorageService } from '../services/mc-storage.service';
-import { ensureImageUnderCap, McTalkingProcessor, toDataUri } from './mc-talking.processor';
+import {
+  ensureImageUnderCap,
+  McTalkingProcessor,
+  normalizeHexColor,
+  recolorTileBackground,
+  toDataUri,
+} from './mc-talking.processor';
+import { TransientProviderError } from '../../../shared/providers/provider-errors';
 
 describe('ensureImageUnderCap — teto de data URI do fal (lição do PoC, ~3,3MB)', () => {
   it('imagem abaixo do teto passa intacta (mesmo buffer)', async () => {
@@ -356,5 +366,360 @@ describe('McTalkingProcessor — submit do Kling AI Avatar v2 (plano §5.3/§6.4
     await processor.process({ stepId: 'st-1' });
     expect(fal.submit).not.toHaveBeenCalled();
     expect(queue.publish).not.toHaveBeenCalled();
+  });
+});
+
+describe('recolorTileBackground — tile de fala (D1: fundo liso recolorido, nunca regerado)', () => {
+  async function transparentTile(): Promise<Buffer> {
+    // 8×8 RGBA: centro opaco azul, borda transparente
+    const raw = Buffer.alloc(8 * 8 * 4, 0);
+    for (let y = 2; y < 6; y += 1) {
+      for (let x = 2; x < 6; x += 1) {
+        const i = (y * 8 + x) * 4;
+        raw[i] = 0x11;
+        raw[i + 1] = 0x22;
+        raw[i + 2] = 0xff;
+        raw[i + 3] = 0xff;
+      }
+    }
+    return sharp(raw, { raw: { width: 8, height: 8, channels: 4 } })
+      .png()
+      .toBuffer();
+  }
+
+  it('achata o alfa sobre a cor pedida (canto vira a cor; personagem intacto), PNG sem alfa', async () => {
+    const out = await recolorTileBackground(await transparentTile(), '#ff8800');
+    const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    expect(info.channels).toBe(3);
+    expect([data[0], data[1], data[2]]).toEqual([0xff, 0x88, 0x00]); // canto = fundo
+    const center = (4 * 8 + 4) * 3;
+    expect([data[center], data[center + 1], data[center + 2]]).toEqual([0x11, 0x22, 0xff]);
+  });
+
+  it('cor inválida cai no branco padrão; normalizeHexColor aceita #RRGGBB(AA)', async () => {
+    const out = await recolorTileBackground(await transparentTile(), 'laranja');
+    const { data } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    expect([data[0], data[1], data[2]]).toEqual([0xff, 0xff, 0xff]);
+    expect(normalizeHexColor(' #ff8800 ')).toBe('#FF8800');
+    expect(normalizeHexColor('#FF8800CC')).toBe('#FF8800CC');
+    expect(normalizeHexColor('ff8800')).toBeNull();
+    expect(normalizeHexColor(null)).toBeNull();
+  });
+});
+
+describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.4)', () => {
+  const originalProvider = process.env.MC_PIPELINE_PROVIDER;
+  const originalEngines = {
+    eco: process.env.MC_TALK_ENGINE_ECONOMICO,
+    pre: process.env.MC_TALK_ENGINE_PREMIUM,
+    logo: process.env.MC_TALK_ENGINE_LOGO,
+  };
+  const scene = {
+    id: 'sc1',
+    projectId: 'p1',
+    idx: 0,
+    generation: 1,
+    actionPrompt: '',
+    dialogue: 'Olá, chegaram as ofertas!',
+    durationS: 6,
+    keyframeAssetId: null,
+    audioAssetId: 'a-audio',
+  };
+  let project: Record<string, unknown>;
+  let kit: Record<string, unknown>;
+  let step: Record<string, unknown>;
+  let tilePng: Buffer;
+  let pipeline: Record<string, jest.Mock>;
+  let transitions: { casTransition: jest.Mock };
+  let queue: { publish: jest.Mock };
+  let fal: { submit: jest.Mock };
+  let storage: Record<string, jest.Mock>;
+  let processor: McTalkingProcessor;
+
+  beforeAll(async () => {
+    const raw = Buffer.alloc(16 * 16 * 4, 0);
+    for (let y = 4; y < 12; y += 1) {
+      for (let x = 4; x < 12; x += 1) {
+        const i = (y * 16 + x) * 4;
+        raw[i + 2] = 0xff;
+        raw[i + 3] = 0xff;
+      }
+    }
+    tilePng = await sharp(raw, { raw: { width: 16, height: 16, channels: 4 } })
+      .png()
+      .toBuffer();
+  });
+
+  beforeEach(() => {
+    process.env.MC_PIPELINE_PROVIDER = 'real';
+    delete process.env.MC_TALK_ENGINE_ECONOMICO;
+    delete process.env.MC_TALK_ENGINE_PREMIUM;
+    delete process.env.MC_TALK_ENGINE_LOGO;
+    project = {
+      id: 'p1',
+      userId: 'u1',
+      kitId: 'kit-1',
+      title: 'T',
+      tier: 'economico',
+      script: null,
+    };
+    kit = {
+      id: 'kit-1',
+      tileAssetId: 'a-tile',
+      tileBackgroundColor: '#00FF00',
+      identityMode: 'generated',
+      source: 'mascot',
+    };
+    step = {
+      id: 'st-talk',
+      projectId: 'p1',
+      sceneId: 'sc1',
+      sceneGeneration: 1,
+      type: McStepType.TALK,
+      status: McStepStatus.RUNNING,
+      phase: 'production',
+      projectRevision: 1,
+      costCredits: 56,
+      attempts: 1,
+      providerJobId: null,
+      inputSnapshot: {
+        tileAssetId: 'a-tile',
+        audioAssetId: 'a-audio',
+        backgroundColor: '#FF0000',
+        motion: 'Waves at the start.',
+        tier: 'economico',
+        identityMode: 'generated',
+      },
+    };
+    pipeline = {
+      claimStep: jest.fn(() => Promise.resolve({ ...step })),
+      failStep: jest.fn().mockResolvedValue(undefined),
+      consumeStepCredits: jest.fn().mockResolvedValue(undefined),
+      notifyStep: jest.fn().mockResolvedValue(undefined),
+      assertSubmitAllowed: jest.fn().mockResolvedValue(true),
+    };
+    transitions = { casTransition: jest.fn().mockResolvedValue(true) };
+    queue = { publish: jest.fn().mockResolvedValue(undefined) };
+    fal = {
+      submit: jest.fn().mockResolvedValue({
+        requestId: 'req-t',
+        statusUrl: 'https://queue.fal.run/m/requests/req-t/status',
+        responseUrl: 'https://queue.fal.run/m/requests/req-t',
+      }),
+    };
+    storage = {
+      readUploadsFile: jest.fn((url: string) =>
+        Promise.resolve(url.includes('a-tile') ? tilePng : Buffer.from('mp3-pequeno')),
+      ),
+      mockJobsAbsDir: jest.fn(),
+      mockJobAbsPath: jest.fn(),
+    };
+    const dataSource = {
+      getRepository: jest.fn((entity: unknown) => ({
+        findOneBy: jest.fn((where: { id: string }) => {
+          if (entity === McScene) return Promise.resolve(scene);
+          if (entity === McProject) return Promise.resolve(project);
+          if (entity === McStep) return Promise.resolve(step);
+          if (entity === McCharacterKit) return Promise.resolve(kit);
+          if (entity === AnimationAsset)
+            return Promise.resolve({ id: where.id, fileUrl: `/uploads/${where.id}.bin` });
+          return Promise.resolve(null);
+        }),
+      })),
+      transaction: jest.fn((cb: (m: unknown) => Promise<unknown>) =>
+        cb({ findOneByOrFail: jest.fn().mockResolvedValue(project) }),
+      ),
+    };
+    processor = new McTalkingProcessor(
+      dataSource as unknown as DataSource,
+      pipeline as unknown as McPipelineService,
+      transitions as unknown as TaskTransitionService,
+      { appendEvent: jest.fn().mockResolvedValue(undefined) } as unknown as CommercialsService,
+      queue as unknown as AnimationQueueService,
+      fal as unknown as FalQueueClient,
+      {} as unknown as FfmpegRunner,
+      storage as unknown as McStorageService,
+    );
+  });
+
+  afterEach(() => {
+    if (originalProvider === undefined) delete process.env.MC_PIPELINE_PROVIDER;
+    else process.env.MC_PIPELINE_PROVIDER = originalProvider;
+    const restore = (key: string, value: string | undefined) => {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    };
+    restore('MC_TALK_ENGINE_ECONOMICO', originalEngines.eco);
+    restore('MC_TALK_ENGINE_PREMIUM', originalEngines.pre);
+    restore('MC_TALK_ENGINE_LOGO', originalEngines.logo);
+  });
+
+  function submitted(): { model: string; input: Record<string, unknown> } {
+    const [model, input] = fal.submit.mock.calls[0] as [string, Record<string, unknown>];
+    return { model, input };
+  }
+
+  it('envia SÓ o tile de fala (recolorido para a cor da janela) + áudio + prompt — nunca arte de fundo', async () => {
+    await processor.process({ stepId: 'st-talk' });
+    expect(pipeline.failStep).not.toHaveBeenCalled();
+    const { model, input } = submitted();
+    expect(model).toBe(KLING_AVATAR_MODEL); // econômico + kit gerado
+    expect(Object.keys(input).sort()).toEqual(['audio_url', 'image_url', 'prompt']);
+    expect(input.audio_url).toMatch(/^data:audio\/mpeg;base64,/);
+    // o tile enviado é o tile do kit achatado sobre a cor da janela (#FF0000 do snapshot)
+    const image = Buffer.from((input.image_url as string).split(',')[1], 'base64');
+    const { data, info } = await sharp(image).raw().toBuffer({ resolveWithObject: true });
+    expect(info.channels).toBe(3);
+    expect([data[0], data[1], data[2]]).toEqual([0xff, 0x00, 0x00]);
+    // prompt: gesto + pose neutra no início/fim + sem câmera + sem texto
+    expect(input.prompt).toMatch(/^Waves at the start\. /);
+    expect(input.prompt).toContain('neutral, front-facing resting pose');
+    expect(input.prompt).toContain('no camera motion');
+    expect(input.prompt).toMatch(/no captions, no subtitles, no signs/);
+    // provider = modelo do motor; motor efetivo registrado no snapshot do step
+    expect(transitions.casTransition).toHaveBeenCalledWith(
+      expect.anything(),
+      McStep,
+      'st-talk',
+      McStepStatus.RUNNING,
+      McStepStatus.PROVIDER_WAIT,
+      expect.objectContaining({
+        provider: KLING_AVATAR_MODEL,
+        providerJobId: 'req-t',
+        inputSnapshot: expect.objectContaining({
+          backgroundColor: '#FF0000',
+          engine: expect.objectContaining({ key: 'economico', model: KLING_AVATAR_MODEL }),
+          effectiveEngine: expect.objectContaining({ key: 'economico', model: KLING_AVATAR_MODEL }),
+        }),
+      }),
+    );
+    expect(pipeline.consumeStepCredits).toHaveBeenCalledTimes(1); // consumo no submit
+    expect(queue.publish).toHaveBeenCalledWith(
+      QUEUES.MC_POLL,
+      expect.objectContaining({ stepId: 'st-talk', attempt: 1 }),
+      expect.objectContaining({ singletonKey: 'poll:st-talk:1' }),
+    );
+  });
+
+  it('sem cor no snapshot usa a cor padrão do tile do kit', async () => {
+    delete (step.inputSnapshot as Record<string, unknown>).backgroundColor;
+    await processor.process({ stepId: 'st-talk' });
+    const image = Buffer.from((submitted().input.image_url as string).split(',')[1], 'base64');
+    const { data } = await sharp(image).raw().toBuffer({ resolveWithObject: true });
+    expect([data[0], data[1], data[2]]).toEqual([0x00, 0xff, 0x00]);
+    expect(transitions.casTransition.mock.calls[0][5]).toMatchObject({
+      inputSnapshot: expect.objectContaining({ backgroundColor: '#00FF00' }),
+    });
+  });
+
+  it('tier premium + kit gerado → motor premium (Kling Avatar pro)', async () => {
+    project.tier = 'premium';
+    (step.inputSnapshot as Record<string, unknown>).tier = 'premium';
+    await processor.process({ stepId: 'st-talk' });
+    expect(submitted().model).toBe(KLING_AVATAR_PRO_MODEL);
+    expect(submitted().input).toEqual({
+      image_url: expect.stringMatching(/^data:image\/png;base64,/),
+      audio_url: expect.any(String),
+      prompt: expect.any(String),
+    });
+  });
+
+  it('logo_as_is em projeto PREMIUM → motor de logo (H3 Max), não o premium', async () => {
+    project.tier = 'premium';
+    kit.identityMode = 'logo_as_is';
+    kit.source = 'logo';
+    (step.inputSnapshot as Record<string, unknown>).tier = 'premium';
+    (step.inputSnapshot as Record<string, unknown>).identityMode = 'logo_as_is';
+    await processor.process({ stepId: 'st-talk' });
+    expect(submitted().model).toBe(MINIMAX_H3_LIPSYNC_MODEL);
+    expect(submitted().input).toEqual({
+      image_url: expect.any(String),
+      audio_url: expect.any(String),
+      prompt: expect.any(String),
+    });
+    expect(transitions.casTransition.mock.calls[0][5]).toMatchObject({
+      provider: MINIMAX_H3_LIPSYNC_MODEL,
+      inputSnapshot: expect.objectContaining({
+        effectiveEngine: expect.objectContaining({ key: 'logo' }),
+      }),
+    });
+  });
+
+  it('motor do snapshot (materializer) prevalece sobre o recomputado — o hash assinou aquele modelo', async () => {
+    (step.inputSnapshot as Record<string, unknown>).engine = {
+      key: 'premium',
+      model: KLING_AVATAR_PRO_MODEL,
+      usdPerSecond: 0.115,
+      maxChunkS: 15,
+    };
+    await processor.process({ stepId: 'st-talk' });
+    expect(submitted().model).toBe(KLING_AVATAR_PRO_MODEL);
+  });
+
+  it('motor de logo indisponível (503 após retries) → fallback para o motor do tier, efetivo gravado', async () => {
+    project.tier = 'premium';
+    kit.identityMode = 'logo_as_is';
+    (step.inputSnapshot as Record<string, unknown>).tier = 'premium';
+    (step.inputSnapshot as Record<string, unknown>).identityMode = 'logo_as_is';
+    fal.submit.mockRejectedValueOnce(new TransientProviderError('HTTP 503')).mockResolvedValueOnce({
+      requestId: 'req-fb',
+      statusUrl: 'https://queue.fal.run/m/requests/req-fb/status',
+      responseUrl: 'https://queue.fal.run/m/requests/req-fb',
+    });
+    await processor.process({ stepId: 'st-talk' });
+    expect(fal.submit).toHaveBeenCalledTimes(2);
+    expect(fal.submit.mock.calls[0][0]).toBe(MINIMAX_H3_LIPSYNC_MODEL);
+    expect(fal.submit.mock.calls[1][0]).toBe(KLING_AVATAR_PRO_MODEL);
+    expect(pipeline.failStep).not.toHaveBeenCalled();
+    expect(transitions.casTransition.mock.calls[0][5]).toMatchObject({
+      provider: KLING_AVATAR_PRO_MODEL,
+      providerJobId: 'req-fb',
+      inputSnapshot: expect.objectContaining({
+        engine: expect.objectContaining({ key: 'logo', model: MINIMAX_H3_LIPSYNC_MODEL }),
+        effectiveEngine: expect.objectContaining({
+          key: 'premium',
+          model: KLING_AVATAR_PRO_MODEL,
+          fallbackFrom: MINIMAX_H3_LIPSYNC_MODEL,
+        }),
+      }),
+    });
+  });
+
+  it('erro que NÃO é de disponibilidade (400) no motor de logo → sem fallback, step falha', async () => {
+    kit.identityMode = 'logo_as_is';
+    (step.inputSnapshot as Record<string, unknown>).identityMode = 'logo_as_is';
+    fal.submit.mockRejectedValueOnce(
+      new TerminalProviderError('HTTP 400: bad image', 'provider_rejected'),
+    );
+    await processor.process({ stepId: 'st-talk' });
+    expect(fal.submit).toHaveBeenCalledTimes(1);
+    expect(pipeline.failStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'st-talk' }),
+      McStepStatus.RUNNING,
+      expect.any(TerminalProviderError),
+      expect.anything(),
+    );
+  });
+
+  it('motor do tier indisponível (não é o de logo) → sem fallback: falha de fornecedor, nada consumido', async () => {
+    fal.submit.mockRejectedValueOnce(new TransientProviderError('HTTP 503'));
+    await processor.process({ stepId: 'st-talk' });
+    expect(fal.submit).toHaveBeenCalledTimes(1);
+    expect(pipeline.consumeStepCredits).not.toHaveBeenCalled();
+    expect(pipeline.failStep).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'st-talk' }),
+      McStepStatus.RUNNING,
+      expect.any(TransientProviderError),
+      expect.anything(),
+    );
+  });
+
+  it('kit sem tile → validação terminal sem chamar o provider', async () => {
+    kit.tileAssetId = null;
+    (step.inputSnapshot as Record<string, unknown>).tileAssetId = null;
+    await processor.process({ stepId: 'st-talk' });
+    expect(fal.submit).not.toHaveBeenCalled();
+    const err = pipeline.failStep.mock.calls[0][2] as TerminalProviderError;
+    expect(err.code).toBe('missing_input_asset');
   });
 });

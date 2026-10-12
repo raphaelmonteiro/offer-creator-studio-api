@@ -16,6 +16,7 @@ describe('mc-pipeline.config — filas, expiração e allowlist (plano §6.4/§6
     expect(mcQueueForStep(McStepType.TTS)).toBe(QUEUES.MC_TTS);
     expect(mcQueueForStep(McStepType.VIDEO)).toBe(QUEUES.MC_SUBMIT);
     expect(mcQueueForStep(McStepType.LIPSYNC)).toBe(QUEUES.MC_SUBMIT);
+    expect(mcQueueForStep(McStepType.TALK)).toBe(QUEUES.MC_SUBMIT); // talk = submit assíncrono (D6)
     expect(mcQueueForStep(McStepType.ASSEMBLY)).toBe(QUEUES.MC_FFMPEG);
   });
 

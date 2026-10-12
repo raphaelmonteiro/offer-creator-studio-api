@@ -1,9 +1,17 @@
 import { EntityManager } from 'typeorm';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { CommercialsService } from '../commercials.service';
+import { fixtureTalkTileScript } from '../domain/__fixtures__/mc-script-v2.fixtures';
+import {
+  KLING_AVATAR_MODEL,
+  KLING_AVATAR_PRO_MODEL,
+  MINIMAX_H3_LIPSYNC_MODEL,
+} from '../domain/mc-pipeline.config';
 import { MC_PIPELINE_V2, MC_SCRIPT_SCHEMA_V2 } from '../domain/mc-quality';
 import { sceneSourceHash } from '../domain/mc-script-v2';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
+import { computeTtsHashV2 } from '../domain/mc-step-hashes';
+import { kitVoiceDelivery } from '../domain/mc-voice-delivery';
 import { McScript, McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
@@ -500,5 +508,289 @@ describe('McMaterializerService — pipeline v2 (ADR §3.3/§4.2)', () => {
       completed: true,
     });
     expect(other.hash).not.toBe(manifest.hash);
+  });
+});
+
+/**
+ * Cenas talk_tile (change video-formatos-personagem, D1/D2/D6/D7): preparação só
+ * TTS (sem keyframe, sem derivação obrigatória), produção só `talk` com o tile,
+ * a cor da janela e o motor do tier/identidade no hash e no snapshot.
+ */
+describe('McMaterializerService — cenas talk_tile (tarefas 3.3/3.4/3.8)', () => {
+  const talkKit = {
+    id: 'kit-1',
+    userId: 'u1',
+    version: 1,
+    voiceId: 'voice-1',
+    referenceAssetIds: [],
+    cutoutAssetId: null,
+    tileAssetId: 'tile-1',
+    tileBackgroundColor: '#112233',
+    identityMode: 'generated',
+    source: 'mascot',
+    style: '3d_render',
+  } as unknown as McCharacterKit;
+  const tileAsset = { id: 'tile-1', fileUrl: '/uploads/tile.png', width: 720, height: 960 };
+  const originalEngines = {
+    eco: process.env.MC_TALK_ENGINE_ECONOMICO,
+    pre: process.env.MC_TALK_ENGINE_PREMIUM,
+    logo: process.env.MC_TALK_ENGINE_LOGO,
+  };
+  let service: McMaterializerService;
+
+  function talkProject(script: McScript, tier: 'economico' | 'premium' = 'economico'): McProject {
+    return {
+      id: 'proj-talk',
+      userId: 'u1',
+      kitId: 'kit-1',
+      aspectRatio: '9:16',
+      pipelineVersion: MC_PIPELINE_V2,
+      revision: 1,
+      tier,
+      format: 'talking_art',
+      script,
+      options: null,
+    } as unknown as McProject;
+  }
+
+  beforeEach(() => {
+    delete process.env.MC_TALK_ENGINE_ECONOMICO;
+    delete process.env.MC_TALK_ENGINE_PREMIUM;
+    delete process.env.MC_TALK_ENGINE_LOGO;
+    service = new McMaterializerService({
+      appendEvent: jest.fn().mockResolvedValue(undefined),
+    } as unknown as CommercialsService);
+  });
+
+  afterEach(() => {
+    const restore = (key: string, value: string | undefined) => {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    };
+    restore('MC_TALK_ENGINE_ECONOMICO', originalEngines.eco);
+    restore('MC_TALK_ENGINE_PREMIUM', originalEngines.pre);
+    restore('MC_TALK_ENGINE_LOGO', originalEngines.logo);
+  });
+
+  async function prepared(script: McScript, tier: 'economico' | 'premium' = 'economico') {
+    const manager = fakeManager({ assets: [tileAsset] });
+    manager.seed(McCharacterKit, [{ ...talkKit }]);
+    const project = talkProject(script, tier);
+    const scenes = await service.syncScenesV2(manager, project, script, { rearm: true });
+    const preparation = await service.materializePreparationV2(
+      manager,
+      project,
+      talkKit,
+      script,
+      scenes,
+    );
+    return { manager, project, scenes, preparation };
+  }
+
+  it('preparação: só TTS por fala (nunca keyframe), sem exigir derivação; cotação 3 × 4 cr', async () => {
+    const script = fixtureTalkTileScript();
+    const { preparation, scenes } = await prepared(script);
+    expect(preparation.steps.map((s) => s.type)).toEqual([
+      McStepType.TTS,
+      McStepType.TTS,
+      McStepType.TTS,
+    ]);
+    expect(preparation.steps.every((s) => s.phase === 'preparation' && s.attempt === 1)).toBe(true);
+    expect(preparation.items.reduce((sum, i) => sum + i.credits, 0)).toBe(12);
+    const tts2 = preparation.steps.find((s) => s.sceneId === scenes[1].id)!;
+    expect(tts2.inputSnapshot).toMatchObject({
+      dialogue: script.scenes[1].dialogue,
+      voiceId: 'voice-1',
+      plannedDurationS: 7,
+    });
+  });
+
+  it('produção: um `talk` por fala com tile, áudio, cor da janela e motor do tier no snapshot; hash muda com a cor e com o tier', async () => {
+    const script = fixtureTalkTileScript({ backgroundColor: '#ff8800' });
+    const { manager, project, scenes } = await prepared(script);
+    for (const scene of scenes) {
+      await manager.update(
+        McScene,
+        { id: scene.id },
+        { audioAssetId: `au-${scene.scriptSceneId}` },
+      );
+      Object.assign(scene, { audioAssetId: `au-${scene.scriptSceneId}` });
+    }
+    const { steps, items } = await service.materializeProductionV2(
+      manager,
+      project,
+      script,
+      scenes,
+    );
+    expect(steps.map((s) => s.type)).toEqual([McStepType.TALK, McStepType.TALK, McStepType.TALK]);
+    expect(steps.every((s) => s.status === McStepStatus.PENDING && s.phase === 'production')).toBe(
+      true,
+    );
+    expect(items.reduce((sum, i) => sum + i.credits, 0)).toBe(3 * 56);
+    const talk1 = steps[0];
+    expect(talk1.inputSnapshot).toMatchObject({
+      tileAssetId: 'tile-1',
+      tileWidth: 720,
+      tileHeight: 960,
+      audioAssetId: 'au-fx-talk-1',
+      backgroundColor: '#FF8800', // cor da janela do roteiro, normalizada
+      motion: 'Waves at the start.',
+      lang: 'en',
+      engine: expect.objectContaining({ key: 'economico', model: KLING_AVATAR_MODEL }),
+      tier: 'economico',
+      identityMode: 'generated',
+      sceneType: 'talk_tile',
+    });
+    expect((talk1.inputSnapshot as { prompt: string }).prompt).toContain('neutral, front-facing');
+    // sem gesto: prompt só com o sufixo fixo, motion vazio em pt
+    expect(steps[1].inputSnapshot).toMatchObject({ motion: '', lang: 'pt' });
+    // nunca há arte de fundo no snapshot do talk
+    expect(Object.keys(talk1.inputSnapshot as object)).not.toEqual(
+      expect.arrayContaining(['backgroundArtAssetId', 'keyframeAssetId']),
+    );
+
+    // cor diferente → hash diferente (clipe regerado; o TTS é outro step)
+    const recolored = fixtureTalkTileScript({ backgroundColor: '#00ff00' });
+    const other = await service.materializeProductionV2(
+      manager,
+      { ...project, revision: 2, script: recolored } as McProject,
+      recolored,
+      scenes,
+      { forceNewAttempt: false },
+    );
+    expect(other.steps[0].inputHash).not.toBe(talk1.inputHash);
+    // mesma cor em caixa diferente → mesma requisição
+    const same = fixtureTalkTileScript({ backgroundColor: '#FF8800' });
+    const again = await service.materializeProductionV2(
+      manager,
+      { ...project, revision: 3, script: same } as McProject,
+      same,
+      scenes,
+    );
+    expect(again.steps[0].inputHash).toBe(talk1.inputHash);
+  });
+
+  it('cor da janela ausente cai no tileBackgroundColor do kit; tier premium troca o motor (e o hash)', async () => {
+    const script = fixtureTalkTileScript();
+    const { manager, scenes } = await prepared(script, 'premium');
+    for (const scene of scenes) Object.assign(scene, { audioAssetId: 'au' });
+    const premium = await service.materializeProductionV2(
+      manager,
+      talkProject(script, 'premium'),
+      script,
+      [scenes[0]],
+    );
+    expect(premium.steps[0].inputSnapshot).toMatchObject({
+      backgroundColor: '#112233',
+      tier: 'premium',
+      engine: expect.objectContaining({ key: 'premium', model: KLING_AVATAR_PRO_MODEL }),
+    });
+    const economico = await service.materializeProductionV2(
+      manager,
+      { ...talkProject(script, 'economico'), revision: 2 } as McProject,
+      script,
+      [scenes[0]],
+    );
+    expect(economico.steps[0].inputHash).not.toBe(premium.steps[0].inputHash);
+  });
+
+  it('logo_as_is usa o motor de logo em premium', async () => {
+    const script = fixtureTalkTileScript();
+    const manager = fakeManager({ assets: [tileAsset] });
+    manager.seed(McCharacterKit, [{ ...talkKit, identityMode: 'logo_as_is', source: 'logo' }]);
+    const project = talkProject(script, 'premium');
+    const scenes = await service.syncScenesV2(manager, project, script, { rearm: true });
+    for (const scene of scenes) Object.assign(scene, { audioAssetId: 'au' });
+    const { steps } = await service.materializeProductionV2(manager, project, script, [scenes[0]]);
+    expect(steps[0].inputSnapshot).toMatchObject({
+      identityMode: 'logo_as_is',
+      engine: expect.objectContaining({ key: 'logo', model: MINIMAX_H3_LIPSYNC_MODEL }),
+    });
+  });
+
+  it('kit sem tile → erro de pré-condição antes de criar o step', async () => {
+    const script = fixtureTalkTileScript();
+    const manager = fakeManager({ assets: [] });
+    manager.seed(McCharacterKit, [{ ...talkKit, tileAssetId: null }]);
+    const project = talkProject(script);
+    const scenes = await service.syncScenesV2(manager, project, script, { rearm: true });
+    for (const scene of scenes) Object.assign(scene, { audioAssetId: 'au' });
+    await expect(
+      service.materializeProductionV2(manager, project, script, [scenes[0]]),
+    ).rejects.toThrow(/sem tile de fala/);
+    expect(manager.steps()).toHaveLength(0);
+  });
+
+  it('duplicar premium → econômico: tts clonado como skipped_cached é reaproveitado (selectedAssetMatches) e SÓ os talk executam', async () => {
+    const script = fixtureTalkTileScript();
+    const manager = fakeManager({ assets: [tileAsset] });
+    manager.seed(McCharacterKit, [{ ...talkKit }]);
+    const copy = { ...talkProject(script, 'economico'), revision: 0 } as McProject;
+    // cenas da cópia com o áudio selecionado + clone do tts da origem (o que duplicateProject grava)
+    const baseHashFor = (dialogue: string) =>
+      computeTtsHashV2({
+        delivery: kitVoiceDelivery(talkKit),
+        dialogue,
+        voiceId: 'voice-1',
+        attempt: 0,
+      });
+    manager.seed(
+      McScene,
+      script.scenes.map((s, i) => ({
+        id: `copy-sc-${i}`,
+        projectId: copy.id,
+        idx: i,
+        scriptSceneId: s.sceneId,
+        sceneType: 'talk_tile',
+        generation: 1,
+        rerollCount: 0,
+        status: McSceneStatus.PENDING,
+        durationS: s.durationS,
+        actionPrompt: s.actionPrompt,
+        dialogue: s.dialogue,
+        audioAssetId: `au-${i}`,
+        keyframeAssetId: null,
+      })),
+    );
+    manager.seed(
+      McStep,
+      script.scenes.map((s, i) => ({
+        id: `clone-tts-${i}`,
+        projectId: copy.id,
+        sceneId: `copy-sc-${i}`,
+        sceneGeneration: 1,
+        projectRevision: 0,
+        phase: 'preparation',
+        attempt: 1,
+        type: McStepType.TTS,
+        status: McStepStatus.SKIPPED_CACHED,
+        inputHash: `h-${i}`,
+        outputAssetId: `au-${i}`,
+        inputSnapshot: { baseHash: baseHashFor(s.dialogue as string), dialogue: s.dialogue },
+      })),
+    );
+    const scenes = await service.syncScenesV2(manager, copy, script, { rearm: true });
+    const preparation = await service.materializePreparationV2(
+      manager,
+      copy,
+      talkKit,
+      script,
+      scenes,
+    );
+    expect(preparation.steps).toHaveLength(3);
+    expect(preparation.steps.every((s) => s.status === McStepStatus.SKIPPED_CACHED)).toBe(true);
+    expect(preparation.steps.map((s) => s.outputAssetId)).toEqual(['au-0', 'au-1', 'au-2']);
+    expect(preparation.items.every((i) => i.cached && i.credits === 0)).toBe(true);
+    // produção: um talk pendente por fala — nada mais
+    const production = await service.materializeProductionV2(manager, copy, script, scenes);
+    expect(production.steps.map((s) => [s.type, s.status])).toEqual([
+      [McStepType.TALK, McStepStatus.PENDING],
+      [McStepType.TALK, McStepStatus.PENDING],
+      [McStepType.TALK, McStepStatus.PENDING],
+    ]);
+    expect(production.steps[0].inputSnapshot).toMatchObject({
+      engine: expect.objectContaining({ key: 'economico' }),
+      audioAssetId: 'au-0',
+    });
   });
 });

@@ -4,6 +4,7 @@ import {
   CAPTION_MAX_CHARS,
   ElevenLabsAlignment,
   syntheticAlignment,
+  speechWindowsFromAlignment,
 } from './mc-captions';
 
 /** Alinhamento por caractere no formato da ElevenLabs, 1 caractere = `step` segundos. */
@@ -92,5 +93,31 @@ describe('mc-captions — legendas a partir dos timestamps do TTS (plano §5.4)'
     expect(alignment.character_end_times_seconds[3]).toBeCloseTo(2);
     // e alimenta o pipeline de legendas normalmente
     expect(buildCaptionCues(alignment)[0].text).toBe('abcd');
+  });
+});
+
+describe('speechWindowsFromAlignment — janelas de fala para a inspeção de boca (D11)', () => {
+  it('palavras contíguas formam uma janela; pausa maior que o gap abre outra', () => {
+    const alignment = {
+      characters: ['O', 'i', ' ', 'a', 'í', ' ', 'j', 'á'],
+      character_start_times_seconds: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 1.4, 1.5],
+      character_end_times_seconds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 1.5, 1.6],
+    };
+    expect(speechWindowsFromAlignment(alignment)).toEqual([
+      { startS: 0, endS: 0.5 },
+      { startS: 1.4, endS: 1.6 },
+    ]);
+  });
+
+  it('sem alinhamento (ausente ou inconsistente) → lista vazia', () => {
+    expect(speechWindowsFromAlignment(null)).toEqual([]);
+    expect(speechWindowsFromAlignment(undefined)).toEqual([]);
+    expect(
+      speechWindowsFromAlignment({
+        characters: ['a', 'b'],
+        character_start_times_seconds: [0],
+        character_end_times_seconds: [0.1],
+      }),
+    ).toEqual([]);
   });
 });

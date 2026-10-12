@@ -63,6 +63,16 @@ const PLANS: Record<McSceneType, McScenePlan> = {
     usesActionEngine: true,
     hasTts: true,
   },
+  talk_tile: {
+    sceneType: 'talk_tile',
+    preparation: [McStepType.TTS],
+    production: [McStepType.TALK],
+    final: McStepType.TALK,
+    deps: { [McStepType.TALK]: [McStepType.TTS] },
+    usesAvatar: true,
+    usesActionEngine: false,
+    hasTts: true,
+  },
 };
 
 export function scenePlan(sceneType: McSceneType): McScenePlan {
@@ -72,7 +82,17 @@ export function scenePlan(sceneType: McSceneType): McScenePlan {
 }
 
 export function isSceneType(value: unknown): value is McSceneType {
-  return value === 'presenter' || value === 'action' || value === 'action_voiceover';
+  return (
+    value === 'presenter' ||
+    value === 'action' ||
+    value === 'action_voiceover' ||
+    value === 'talk_tile'
+  );
+}
+
+/** Cena cujo plano NÃO tem keyframe (a imagem vem do tile do kit): nada de initialFrame/referências. */
+export function sceneUsesKeyframe(sceneType: McSceneType): boolean {
+  return scenePlan(sceneType).preparation.includes(McStepType.KEYFRAME);
 }
 
 /**

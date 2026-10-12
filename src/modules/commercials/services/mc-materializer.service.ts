@@ -3,8 +3,8 @@ import { EntityManager, In } from 'typeorm';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { CommercialsService } from '../commercials.service';
 import { computeContentHash } from '../domain/input-hash';
-import { scenePlan } from '../domain/mc-execution-plan';
-import { klingActionDuration } from '../domain/mc-pipeline.config';
+import { scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
+import { klingActionDuration, talkEngineFor } from '../domain/mc-pipeline.config';
 import { MC_STEP_CREDITS } from '../domain/mc-pricing.config';
 import {
   McPhase,
@@ -15,6 +15,7 @@ import {
 } from '../domain/mc-quality';
 import { keyframeReferenceLimit, selectReferences } from '../domain/mc-references';
 import { effectiveScenePrompts } from '../domain/mc-script-v2';
+import { buildTalkPrompt } from '../domain/mc-talk-prompts';
 import { kitVoiceDelivery } from '../domain/mc-voice-delivery';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import {
@@ -24,6 +25,7 @@ import {
   computeLipsyncHashV2,
   computeSceneComposeHash,
   computeSceneStepHashes,
+  computeTalkHashV2,
   computeTtsHashV2,
   computeVideoHashV2,
   isSpokenScene,
@@ -401,6 +403,40 @@ export class McMaterializerService {
   }
 
   /**
+   * Inputs de preparação de uma cena SEM keyframe (`talk_tile`, D6/D7): só a
+   * fala e a voz. O `keyframeBase` nunca é usado (o plano não tem keyframe),
+   * mas mantém o mesmo contrato de retorno para o laço de materialização.
+   */
+  private buildTtsOnlyInputs(
+    kit: McCharacterKit,
+    scriptScene: McScriptScene,
+  ): ReturnType<McMaterializerService['buildPreparationInputs']> {
+    const prompts = effectiveScenePrompts(scriptScene) ?? {
+      initialFrame: '',
+      motion: (scriptScene.actionPrompt ?? '').trim(),
+      lang: 'pt' as const,
+      provider: 'none',
+    };
+    return {
+      prompts,
+      references: [],
+      environment: null,
+      keyframeBase: {
+        kitId: kit.id,
+        kitVersion: kit.version,
+        style: kit.style ?? null,
+        aspectRatio: '',
+        initialFramePrompt: '',
+        promptLang: prompts.lang,
+        references: [],
+        environment: null,
+      },
+      tts: scriptScene.dialogue ? { dialogue: scriptScene.dialogue, voiceId: kit.voiceId } : null,
+      productName: null,
+    };
+  }
+
+  /**
    * Materializa a PREPARAÇÃO da revisão corrente: para cada cena viva e cada
    * step de preparação do plano, reuso seletivo (asset selecionado com o mesmo
    * baseHash) → skipped_cached; senão nova tentativa (attempt = última + 1)
@@ -419,8 +455,12 @@ export class McMaterializerService {
     for (const scene of scenes) {
       const scriptScene = script.scenes.find((s) => s.sceneId === scene.scriptSceneId);
       if (!scriptScene) continue;
-      const inputs = this.buildPreparationInputs(project, kit, script, scriptScene, kitReferences);
       const plan = scenePlan(scriptScene.sceneType as McSceneType);
+      // talk_tile (D6): só TTS — nada de prompt de keyframe, referências ou
+      // derivação obrigatória; a imagem é o tile do kit.
+      const inputs = sceneUsesKeyframe(scriptScene.sceneType as McSceneType)
+        ? this.buildPreparationInputs(project, kit, script, scriptScene, kitReferences)
+        : this.buildTtsOnlyInputs(kit, scriptScene);
 
       for (const type of plan.preparation) {
         const baseHash =
@@ -506,13 +546,15 @@ export class McMaterializerService {
   ): Promise<McStep> {
     const scriptScene = script.scenes.find((s) => s.sceneId === scene.scriptSceneId);
     if (!scriptScene) throw new Error('Cena não encontrada no roteiro');
-    const inputs = this.buildPreparationInputs(
-      project,
-      kit,
-      script,
-      scriptScene,
-      await this.kitReferencesWithSlots(manager, kit),
-    );
+    const inputs = sceneUsesKeyframe(scriptScene.sceneType as McSceneType)
+      ? this.buildPreparationInputs(
+          project,
+          kit,
+          script,
+          scriptScene,
+          await this.kitReferencesWithSlots(manager, kit),
+        )
+      : this.buildTtsOnlyInputs(kit, scriptScene);
     const attempt = await this.nextAttempt(manager, scene, type);
     const baseHash =
       type === McStepType.KEYFRAME
@@ -577,17 +619,33 @@ export class McMaterializerService {
   ): Promise<{ steps: McStep[]; items: McQuoteItem[] }> {
     const steps: McStep[] = [];
     const items: McQuoteItem[] = [];
+    // talk_tile (D1/D2): o kit entra na produção (tile, cor de fundo e modo
+    // de identidade decidem a imagem e o motor) — carregado uma vez, só se
+    // alguma cena precisa.
+    let talkContext: Awaited<ReturnType<McMaterializerService['talkProductionContext']>> | null =
+      null;
     for (const scene of scenes) {
       if (opts.onlySceneIds && !opts.onlySceneIds.includes(scene.scriptSceneId as string)) continue;
       const scriptScene = script.scenes.find((s) => s.sceneId === scene.scriptSceneId);
       if (!scriptScene) continue;
-      const prompts = effectiveScenePrompts(scriptScene);
-      if (!prompts) throw new Error(`Cena ${scriptScene.sceneId}: derivação pendente`);
       const plan = scenePlan(scriptScene.sceneType as McSceneType);
-      if (!scene.keyframeAssetId)
+      const usesKeyframe = sceneUsesKeyframe(scriptScene.sceneType as McSceneType);
+      const prompts = usesKeyframe
+        ? effectiveScenePrompts(scriptScene)
+        : (effectiveScenePrompts(scriptScene) ?? {
+            initialFrame: '',
+            motion: (scriptScene.actionPrompt ?? '').trim(),
+            lang: 'pt' as const,
+            provider: 'none',
+          });
+      if (!prompts) throw new Error(`Cena ${scriptScene.sceneId}: derivação pendente`);
+      if (usesKeyframe && !scene.keyframeAssetId)
         throw new Error(`Cena ${scriptScene.sceneId}: sem keyframe selecionado`);
       if (plan.hasTts && !scene.audioAssetId)
         throw new Error(`Cena ${scriptScene.sceneId}: sem áudio selecionado`);
+      if (plan.production.includes(McStepType.TALK) && !talkContext) {
+        talkContext = await this.talkProductionContext(manager, project, script);
+      }
 
       const providerDuration = klingActionDuration(scene.durationS);
       let videoStep: McStep | null = null;
@@ -597,7 +655,36 @@ export class McMaterializerService {
           : await this.currentOrFirstAttempt(manager, scene, type);
         let inputHash: string;
         let snapshot: Record<string, unknown>;
-        if (type === McStepType.VIDEO) {
+        if (type === McStepType.TALK) {
+          // Clipe falado a partir do TILE (D1/D2/D7): hash com motor, tile,
+          // áudio, prompt e cor da janela; o snapshot carrega o que o submit
+          // e o ingest precisam sem reler o kit (motor efetivo é gravado
+          // pelo submit em caso de fallback).
+          const ctx = talkContext as NonNullable<typeof talkContext>;
+          const prompt = buildTalkPrompt(prompts.motion);
+          inputHash = computeTalkHashV2({
+            engineModel: ctx.engine.model,
+            tileAssetId: ctx.tileAssetId,
+            audioAssetId: scene.audioAssetId as string,
+            prompt,
+            backgroundColor: ctx.backgroundColor,
+            attempt,
+          });
+          snapshot = {
+            tileAssetId: ctx.tileAssetId,
+            tileWidth: ctx.tileWidth,
+            tileHeight: ctx.tileHeight,
+            audioAssetId: scene.audioAssetId,
+            backgroundColor: ctx.backgroundColor,
+            motion: prompts.motion,
+            lang: prompts.lang,
+            prompt,
+            engine: ctx.engine,
+            tier: ctx.tier,
+            identityMode: ctx.identityMode,
+            sceneType: scriptScene.sceneType,
+          };
+        } else if (type === McStepType.VIDEO) {
           inputHash = computeVideoHashV2({
             keyframeAssetId: scene.keyframeAssetId,
             motionPrompt: prompts.motion,
@@ -652,6 +739,7 @@ export class McMaterializerService {
             !opts.forceNewAttempt &&
             (type === McStepType.VIDEO ||
               type === McStepType.LIPSYNC ||
+              type === McStepType.TALK ||
               (type === McStepType.SCENE_COMPOSE && !!videoStep?.outputAssetId)),
           phase: 'production',
           attempt,
@@ -686,6 +774,54 @@ export class McMaterializerService {
       }
     }
     return { steps, items };
+  }
+
+  /**
+   * Contexto de produção do `talk` (D1/D2): tile do kit (com dimensões, para
+   * o recorte de aspecto no ingest), cor da janela (`script.talkBackgroundColor`
+   * → `kit.tileBackgroundColor`), motor por tier × modo de identidade. Kit sem
+   * tile é erro de pré-condição (a aprovação já recusa com KIT_TILE_MISSING).
+   */
+  async talkProductionContext(
+    manager: EntityManager,
+    project: McProject,
+    script: McScript,
+  ): Promise<{
+    tileAssetId: string;
+    tileWidth: number | null;
+    tileHeight: number | null;
+    backgroundColor: string;
+    tier: McProject['tier'];
+    identityMode: McCharacterKit['identityMode'];
+    engine: { key: string; model: string; usdPerSecond: number; maxChunkS: number };
+  }> {
+    const kit = await manager.findOne(McCharacterKit, { where: { id: project.kitId } });
+    if (!kit) throw new Error(`Kit ${project.kitId} não encontrado`);
+    if (!kit.tileAssetId)
+      throw new Error(`Kit ${kit.id} sem tile de fala (aprovar o kit gera o tile)`);
+    const tile = await manager.findOne(AnimationAsset, { where: { id: kit.tileAssetId } });
+    const tier = project.tier ?? 'economico';
+    const identityMode = kit.identityMode ?? 'generated';
+    const engine = talkEngineFor({ tier, identityMode });
+    const backgroundColor = (
+      script.talkBackgroundColor?.trim() ||
+      kit.tileBackgroundColor?.trim() ||
+      '#FFFFFF'
+    ).toUpperCase();
+    return {
+      tileAssetId: kit.tileAssetId,
+      tileWidth: tile?.width ?? null,
+      tileHeight: tile?.height ?? null,
+      backgroundColor,
+      tier,
+      identityMode,
+      engine: {
+        key: engine.key,
+        model: engine.model,
+        usdPerSecond: engine.usdPerSecond,
+        maxChunkS: engine.maxChunkS,
+      },
+    };
   }
 
   /** Assembly v2: hash do CONTEÚDO renderizado (identidade de cena, finais, selos, cartela, opções). */

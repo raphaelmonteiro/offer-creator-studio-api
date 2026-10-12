@@ -107,9 +107,19 @@ export class ScriptSceneV2Dto {
   @Length(0, 1000)
   initialFrame?: string;
 
+  /**
+   * Ação/movimento da cena. Em `talk_tile` (change video-formatos-personagem,
+   * D6) é só o GESTO opcional enviado ao motor de fala: pode vir vazio ou
+   * omitido; nos demais tipos continua obrigatório (3 a 2000 caracteres).
+   */
+  @ValidateIf(
+    (o: ScriptSceneV2Dto) =>
+      o.sceneType !== 'talk_tile' ||
+      (typeof o.actionPrompt === 'string' && o.actionPrompt.trim() !== ''),
+  )
   @IsString()
   @Length(3, 2000)
-  actionPrompt: string;
+  actionPrompt?: string;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null)

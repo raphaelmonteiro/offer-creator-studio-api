@@ -76,6 +76,40 @@ export function alignmentToWords(alignment: ElevenLabsAlignment): TimedWord[] {
   return words;
 }
 
+/** Janela de fala (segundos relativos ao início do áudio) — base da inspeção de boca (D11). */
+export interface SpeechWindow {
+  startS: number;
+  endS: number;
+}
+
+/** Pausa (s) que separa duas janelas de fala. */
+export const SPEECH_WINDOW_GAP_S = 0.35;
+
+/**
+ * Janelas de FALA a partir do alinhamento por caractere: palavras contíguas
+ * (pausa ≤ gap) formam uma janela; pausas maiores abrem outra. Sem alinhamento
+ * válido → lista vazia (o chamador pula a checagem de boca e registra).
+ */
+export function speechWindowsFromAlignment(
+  alignment: ElevenLabsAlignment | null | undefined,
+  gapS: number = SPEECH_WINDOW_GAP_S,
+): SpeechWindow[] {
+  if (!isValidAlignment(alignment)) return [];
+  const words = alignmentToWords(alignment as ElevenLabsAlignment);
+  const windows: SpeechWindow[] = [];
+  let current: SpeechWindow | null = null;
+  for (const word of words) {
+    if (current && word.startS - current.endS <= gapS) {
+      current.endS = Math.max(current.endS, word.endS);
+      continue;
+    }
+    if (current) windows.push(current);
+    current = { startS: word.startS, endS: word.endS };
+  }
+  if (current) windows.push(current);
+  return windows.filter((w) => w.endS > w.startS);
+}
+
 /**
  * Agrupa o alinhamento em linhas de legenda. `offsetS` desloca as cues para a
  * posição da cena no vídeo final (a montagem concatena as cenas em ordem).

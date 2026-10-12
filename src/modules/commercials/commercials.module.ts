@@ -23,13 +23,18 @@ import { McAssemblyProcessor } from './processors/mc-assembly.processor';
 import { McIngestProcessor } from './processors/mc-ingest.processor';
 import { McClipInspectorService } from './services/mc-clip-inspector.service';
 import { McKeyframeProcessor } from './processors/mc-keyframe.processor';
+import { McKitCandidatesProcessor } from './processors/mc-kit-candidates.processor';
 import { McKitProcessor } from './processors/mc-kit.processor';
 import { McPollProcessor } from './processors/mc-poll.processor';
 import { McSceneComposeProcessor } from './processors/mc-scene-compose.processor';
 import { McScriptProcessor } from './processors/mc-script.processor';
 import { McTalkingProcessor } from './processors/mc-talking.processor';
 import { McTtsProcessor } from './processors/mc-tts.processor';
+import { McKitCandidatesService } from './services/mc-kit-candidates.service';
+import { McKitTileService } from './services/mc-kit-tile.service';
+import { McKitViewService } from './services/mc-kit-view.service';
 import { McKitsService } from './services/mc-kits.service';
+import { McMouthGateService } from './services/mc-mouth-gate.service';
 import { McMaterializerService } from './services/mc-materializer.service';
 import { McPipelineService } from './services/mc-pipeline.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
@@ -74,6 +79,11 @@ import { McVoicesService } from './services/mc-voices.service';
   providers: [
     CommercialsService,
     McKitsService,
+    McKitViewService,
+    McKitCandidatesService,
+    McKitTileService,
+    McMouthGateService,
+    McKitCandidatesProcessor,
     McVoicesService,
     McStorageService,
     McMaterializerService,
@@ -102,6 +112,7 @@ export class CommercialsModule implements OnModuleInit {
     private readonly resourceGuard: ResourceGuardService,
     private readonly scriptProcessor: McScriptProcessor,
     private readonly kitProcessor: McKitProcessor,
+    private readonly kitCandidatesProcessor: McKitCandidatesProcessor,
     private readonly keyframeProcessor: McKeyframeProcessor,
     private readonly ttsProcessor: McTtsProcessor,
     private readonly talkingProcessor: McTalkingProcessor,
@@ -123,15 +134,28 @@ export class CommercialsModule implements OnModuleInit {
         MC_QUEUE_CONCURRENCY[QUEUES.MC_LLM] ?? 2,
         (d: { stepId: string; projectId?: string }) => this.scriptProcessor.process(d),
       );
-      // mc.image transporta DOIS payloads: kit ({kitId, slot?}) e keyframe
-      // ({stepId}) — o dispatcher separa pela forma (uma fila, um consumer).
+      // mc.image transporta TRÊS payloads: kit ({kitId, slot?}), rodada de
+      // candidatos ({kitId, candidates: true, roundId}) e keyframe ({stepId})
+      // — o dispatcher separa pela forma (uma fila, um consumer).
       await this.queue.subscribe(
         QUEUES.MC_IMAGE,
         MC_QUEUE_CONCURRENCY[QUEUES.MC_IMAGE] ?? 4,
-        (d: { kitId?: string; slot?: number; stepId?: string }) =>
-          d.kitId
-            ? this.kitProcessor.process({ kitId: d.kitId, slot: d.slot })
-            : this.keyframeProcessor.process({ stepId: d.stepId as string }),
+        (d: {
+          kitId?: string;
+          slot?: number;
+          stepId?: string;
+          candidates?: boolean;
+          roundId?: string;
+        }) => {
+          if (!d.kitId) return this.keyframeProcessor.process({ stepId: d.stepId as string });
+          if (d.candidates) {
+            return this.kitCandidatesProcessor.process({
+              kitId: d.kitId,
+              roundId: d.roundId as string,
+            });
+          }
+          return this.kitProcessor.process({ kitId: d.kitId, slot: d.slot });
+        },
       );
       await this.queue.subscribe(
         QUEUES.MC_TTS,

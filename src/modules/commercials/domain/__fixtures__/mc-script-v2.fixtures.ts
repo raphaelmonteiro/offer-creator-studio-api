@@ -213,6 +213,77 @@ export function fixtureNoProductsScript(): McScript {
   return script;
 }
 
+/**
+ * Cena `talk_tile` (change video-formatos-personagem, D6/D7): UMA fala = UM
+ * clipe a partir do tile do kit. Sem `initialFrame`, sem cenário, sem
+ * referências; `actionPrompt` é só o gesto opcional (vazio permitido).
+ */
+export function fixtureTalkTileScene(
+  sceneId: string,
+  idx: number,
+  opts: {
+    dialogue: string;
+    durationS: number;
+    motion?: string;
+    motionEn?: string;
+    productRef?: string | null;
+  },
+): McScriptScene {
+  const base: McScriptScene = {
+    idx,
+    sceneId,
+    sceneType: 'talk_tile',
+    camera: null,
+    environmentId: null,
+    productRef: opts.productRef ?? null,
+    sealCue: null,
+    safeArea: null,
+    actionPrompt: opts.motion ?? '',
+    dialogue: opts.dialogue,
+    durationS: opts.durationS,
+  };
+  return opts.motionEn
+    ? withDerived(base, { initialFrameEn: null, actionPromptEn: opts.motionEn })
+    : base;
+}
+
+/**
+ * Roteiro F1/F2 de três falas (6 s, 7 s e 5 s planejados — o caso "três
+ * falas" da spec video-talking-clip): o diretor (4.1/6.6) emite cenas assim;
+ * aqui só o backend que as executa é exercitado. `talkBackgroundColor` é a
+ * cor da janela (D1); ausente = cor do tile do kit.
+ */
+export function fixtureTalkTileScript(
+  opts: { products?: McSealProduct[]; backgroundColor?: string | null } = {},
+): McScript {
+  return {
+    version: 1,
+    schemaVersion: MC_SCRIPT_SCHEMA_V2,
+    products: opts.products ?? [],
+    environments: [],
+    scenes: [
+      fixtureTalkTileScene('fx-talk-1', 0, {
+        dialogue: 'Olá! Chegaram as ofertas da semana no nosso mercado.',
+        durationS: 6,
+        motion: 'Acena no início.',
+        motionEn: 'Waves at the start.',
+      }),
+      fixtureTalkTileScene('fx-talk-2', 1, {
+        dialogue: 'Arroz integral cinco quilos por vinte e quatro e noventa, só até domingo!',
+        durationS: 7,
+        productRef: opts.products?.[0]?.id ?? null,
+      }),
+      fixtureTalkTileScene('fx-talk-3', 2, {
+        dialogue: 'Corre pra cá e aproveite!',
+        durationS: 5,
+      }),
+    ],
+    seal: null,
+    endcard: null,
+    ...(opts.backgroundColor === undefined ? {} : { talkBackgroundColor: opts.backgroundColor }),
+  };
+}
+
 /** Todos os aspectos do produto (4:5 incluído — formatos novos, design D12). */
 export const FIXTURE_ASPECTS: McAspectRatio[] = [...MC_ASPECT_RATIOS];
 /** Aspectos do formato `scenes` (F3): os que a montagem 720p (`assemblyDimensions`) conhece. */

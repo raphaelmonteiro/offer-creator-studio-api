@@ -5,11 +5,14 @@ import { ModerationProvider } from '../../../shared/providers/moderation.provide
 import { SystemSettingsService } from '../../../shared/settings/system-settings.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { CommercialsService } from '../commercials.service';
+import { MC_EMPTY_QUALITY, MC_PIPELINE_V2 } from '../domain/mc-quality';
 import { computeSceneStepHashes } from '../domain/mc-step-hashes';
-import { McProjectStatus } from '../domain/mc-state-machines';
-import { McScript } from '../domain/mc-types';
+import { McProjectStatus, McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
+import { McScript, McStepType } from '../domain/mc-types';
 import { McCharacterKit, McKitStatus } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
+import { McScene } from '../entities/mc-scene.entity';
+import { McStep } from '../entities/mc-step.entity';
 import { McMaterializerService } from './mc-materializer.service';
 import { McPipelineService } from './mc-pipeline.service';
 import { McProjectActionsService } from './mc-project-actions.service';
@@ -43,7 +46,10 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
   let source: Row;
   let kit: Row;
   let saved: Array<Record<string, unknown>>;
-  let manager: { create: jest.Mock; save: jest.Mock };
+  let manager: { create: jest.Mock; save: jest.Mock; find: jest.Mock };
+  let sourceScenes: Row[];
+  let sourceSteps: Row[];
+  const originalFormats = process.env.MC_FORMATS;
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
   let commercials: { appendEvent: jest.Mock };
@@ -69,14 +75,26 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
     };
     kit = { id: 'kit-1', userId, status: McKitStatus.APPROVED, version: 1, voiceId: 'v1' };
     saved = [];
+    sourceScenes = [];
+    sourceSteps = [];
+    let seq = 0;
     manager = {
       create: jest.fn((_e: unknown, obj: Record<string, unknown>) => ({ ...obj })),
       save: jest.fn((obj: Record<string, unknown>) => {
-        const row = { id: 'p2', ...obj };
-        saved.push(row);
-        return Promise.resolve(row);
+        // como o TypeORM: o id é atribuído NA entidade salva (o service lê
+        // `copy.id` para cenas/steps clonados e para o evento). O primeiro save
+        // é o projeto (p2); cenas/steps clonados ganham ids sequenciais.
+        if (!obj.id) obj.id = saved.length === 0 ? 'p2' : `row-${++seq}`;
+        saved.push(obj);
+        return Promise.resolve(obj);
+      }),
+      find: jest.fn((entity: unknown) => {
+        if (entity === McScene) return Promise.resolve(sourceScenes);
+        if (entity === McStep) return Promise.resolve(sourceSteps);
+        return Promise.resolve([]);
       }),
     };
+    delete process.env.MC_FORMATS;
     projectCount = jest.fn().mockResolvedValue(0);
     dataSource = {
       getRepository: jest.fn((entity: unknown) => ({
@@ -111,6 +129,11 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
       {} as unknown as McMaterializerService,
       {} as unknown as McPipelineService,
     );
+  });
+
+  afterEach(() => {
+    if (originalFormats === undefined) delete process.env.MC_FORMATS;
+    else process.env.MC_FORMATS = originalFormats;
   });
 
   it('cria projeto NOVO em storyboard_review, mesmo kit, no formato pedido', async () => {
@@ -161,10 +184,176 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
     expect(saved[0]).toMatchObject({ format: 'scenes', tier: 'economico' });
 
     saved.length = 0;
+    process.env.MC_FORMATS = 'talking_art';
     source.format = 'talking_art';
     source.tier = 'premium';
     await service.duplicateProject(userId, 'p1', { aspectRatio: '4:5' });
     expect(saved[0]).toMatchObject({ format: 'talking_art', tier: 'premium', aspectRatio: '4:5' });
+  });
+
+  // ── change video-formatos-personagem (D6, tarefa 3.8): tier, campos de formato, gate e reuso de TTS ──
+
+  it('`tier` do DTO sobrepõe o da origem: "duplicar como econômico" de um projeto premium', async () => {
+    source.tier = 'premium';
+    await service.duplicateProject(userId, 'p1', { tier: 'economico' });
+    expect(saved[0]).toMatchObject({ tier: 'economico', format: 'scenes' });
+    expect(commercials.appendEvent).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({ detail: expect.objectContaining({ tier: 'economico' }) }),
+    );
+  });
+
+  it('a cópia carrega pipelineVersion, format, channel, backgroundArtAssetId, sourceArt, layoutPreset e logoBox; nasce com revision 0 e quality vazio', async () => {
+    process.env.MC_FORMATS = 'talking_art';
+    Object.assign(source, {
+      pipelineVersion: MC_PIPELINE_V2,
+      format: 'talking_art',
+      channel: 'instagram',
+      backgroundArtAssetId: 'art-1',
+      sourceArt: { kind: 'social', id: 'fl-1', pageIndex: 0, snapshotHash: 'h' },
+      layoutPreset: 'canto_inferior_direito',
+      logoBox: { x: 0.1, y: 0.8, w: 0.2, h: 0.1 },
+      revision: 7,
+      quality: { approval: { scope: 'production' }, budgets: [{ phase: 'production' }] },
+    });
+    await service.duplicateProject(userId, 'p1', {});
+    expect(saved[0]).toMatchObject({
+      pipelineVersion: MC_PIPELINE_V2,
+      format: 'talking_art',
+      channel: 'instagram',
+      backgroundArtAssetId: 'art-1',
+      sourceArt: { kind: 'social', id: 'fl-1', pageIndex: 0, snapshotHash: 'h' },
+      layoutPreset: 'canto_inferior_direito',
+      logoBox: { x: 0.1, y: 0.8, w: 0.2, h: 0.1 },
+      revision: 0,
+      quality: MC_EMPTY_QUALITY,
+    });
+    // jsonb independentes da origem
+    expect((saved[0] as { sourceArt: unknown }).sourceArt).not.toBe(source.sourceArt);
+    expect((saved[0] as { logoBox: unknown }).logoBox).not.toBe(source.logoBox);
+  });
+
+  it('origem legada (pipelineVersion 1) copia sem quality e sem clonar cenas', async () => {
+    source.pipelineVersion = 1;
+    await service.duplicateProject(userId, 'p1', {});
+    expect(saved[0]).toMatchObject({ pipelineVersion: 1, quality: null, revision: 0 });
+    expect(manager.find).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(1);
+  });
+
+  it('formato novo fora de MC_FORMATS → 422 FORMAT_NOT_ENABLED antes de qualquer escrita', async () => {
+    source.format = 'talking_art';
+    await expect(service.duplicateProject(userId, 'p1', {})).rejects.toMatchObject({
+      status: 422,
+      response: expect.objectContaining({ code: 'FORMAT_NOT_ENABLED' }),
+    });
+    expect(saved).toHaveLength(0);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('reuso de TTS (v2): as falas SELECIONADAS da origem viram cenas + steps tts skipped_cached na cópia (mesmo baseHash/outputAssetId)', async () => {
+    source.pipelineVersion = MC_PIPELINE_V2;
+    sourceScenes = [
+      {
+        id: 'src-sc-1',
+        projectId: 'p1',
+        idx: 0,
+        scriptSceneId: 'fx-talk-1',
+        sceneType: 'talk_tile',
+        status: McSceneStatus.READY,
+        durationS: 6,
+        actionPrompt: '',
+        dialogue: 'Olá!',
+        audioAssetId: 'au-1',
+      },
+      {
+        id: 'src-sc-2',
+        projectId: 'p1',
+        idx: 1,
+        scriptSceneId: 'fx-talk-2',
+        sceneType: 'talk_tile',
+        status: McSceneStatus.READY,
+        durationS: 7,
+        actionPrompt: '',
+        dialogue: 'Arroz em oferta',
+        audioAssetId: null, // sem áudio selecionado: nada a reaproveitar
+      },
+      {
+        id: 'src-sc-3',
+        projectId: 'p1',
+        idx: 2,
+        scriptSceneId: 'fx-talk-3',
+        sceneType: 'talk_tile',
+        status: McSceneStatus.CANCELED, // cena removida: ignorada
+        durationS: 5,
+        actionPrompt: '',
+        dialogue: 'x',
+        audioAssetId: 'au-3',
+      },
+    ];
+    sourceSteps = [
+      {
+        id: 'src-tts-old',
+        sceneId: 'src-sc-1',
+        type: McStepType.TTS,
+        status: McStepStatus.SUCCEEDED,
+        outputAssetId: 'au-1-old',
+        inputHash: 'hash-old',
+        attempt: 1,
+        inputSnapshot: { baseHash: 'base-1', dialogue: 'Olá?' },
+      },
+      {
+        id: 'src-tts-sel',
+        sceneId: 'src-sc-1',
+        type: McStepType.TTS,
+        status: McStepStatus.SUCCEEDED,
+        outputAssetId: 'au-1', // o SELECIONADO
+        inputHash: 'hash-sel',
+        attempt: 2,
+        provider: 'real',
+        inputSnapshot: { baseHash: 'base-1', dialogue: 'Olá!' },
+      },
+      {
+        id: 'src-talk',
+        sceneId: 'src-sc-1',
+        type: McStepType.TALK,
+        status: McStepStatus.FAILED,
+        outputAssetId: null,
+        inputHash: 'hash-talk',
+        attempt: 1,
+      },
+    ];
+    await service.duplicateProject(userId, 'p1', { tier: 'economico' });
+    const copyScenes = saved.filter((r) => 'scriptSceneId' in r);
+    const copySteps = saved.filter((r) => 'inputHash' in r);
+    expect(copyScenes).toHaveLength(1);
+    expect(copyScenes[0]).toMatchObject({
+      projectId: 'p2',
+      scriptSceneId: 'fx-talk-1',
+      idx: 0,
+      generation: 1,
+      status: McSceneStatus.PENDING,
+      audioAssetId: 'au-1',
+      dialogue: 'Olá!',
+    });
+    expect(copySteps).toHaveLength(1); // só o tts selecionado — o talk falhado NÃO é copiado
+    expect(copySteps[0]).toMatchObject({
+      projectId: 'p2',
+      sceneId: copyScenes[0].id,
+      type: McStepType.TTS,
+      status: McStepStatus.SKIPPED_CACHED,
+      inputHash: 'hash-sel',
+      outputAssetId: 'au-1',
+      attempt: 2,
+      projectRevision: 0,
+      phase: 'preparation',
+      costCredits: 0,
+      inputSnapshot: { baseHash: 'base-1', dialogue: 'Olá!' },
+    });
+    expect(commercials.appendEvent).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({ detail: expect.objectContaining({ reusedTts: 1 }) }),
+    );
   });
 
   it('sem aspectRatio no body, herda o formato da origem', async () => {

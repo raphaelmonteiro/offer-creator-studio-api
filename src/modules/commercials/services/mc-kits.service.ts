@@ -1,17 +1,13 @@
 import {
-  ForbiddenException,
   Injectable,
   Logger,
-  NotFoundException,
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, In } from 'typeorm';
+import { DataSource } from 'typeorm';
 import OpenAI from 'openai';
-import * as fs from 'fs/promises';
-import * as path from 'path';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import {
   ModerationProvider,
@@ -26,10 +22,17 @@ import { MascotsService, MascotView } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import { McVoicesService } from './mc-voices.service';
 import { McKitSource } from '../domain/mc-kit-identity';
+import {
+  decideMouthGate,
+  McKitMouthGate,
+  McMouthDecision,
+  McMouthVerdict,
+} from '../domain/mc-mouth-gate';
 import { sanitizeVoiceDeliveryOverride } from '../domain/mc-voice-delivery';
 import {
   hasPtMirror,
   isKitReferenceSlot,
+  KIT_TILE_BACKGROUND_DEFAULT,
   mergeTranslatedSheet,
   parseCanonicalDesc,
   type KitCanonicalDesc,
@@ -40,19 +43,14 @@ import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
 import { CreateKitDto } from '../dto/create-kit.dto';
 import { ApproveKitDto, RegenerateReferenceDto, UpdateKitSheetDto } from '../dto/kit-actions.dto';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+import { MC_IMAGE_EXPIRE_S, McKitCandidatesService } from './mc-kit-candidates.service';
+import { McKitTileService } from './mc-kit-tile.service';
+import { McKitView, McKitViewService } from './mc-kit-view.service';
+import { McMouthGateService } from './mc-mouth-gate.service';
+import { McStorageService } from './mc-storage.service';
 
-/** Geração do kit (4 imagens + descrição) leva minutos, não 15 — expiração própria da fila mc.image. */
-export const MC_IMAGE_EXPIRE_S = 300;
-
-/** Referência do kit resolvida para a UI de review (grid por slot, plano §4). */
-export interface KitReferenceView {
-  assetId: string;
-  slot: number | null;
-  url: string | null;
-  createdAt: Date;
-}
-
-export type McKitView = McCharacterKit & { references: KitReferenceView[] };
+export { MC_IMAGE_EXPIRE_S } from './mc-kit-candidates.service';
+export type { KitReferenceView, McKitView } from './mc-kit-view.service';
 
 /**
  * Fluxo REAL do kit do personagem (plano §4), substituindo o stub da Fase 0:
@@ -64,6 +62,10 @@ export type McKitView = McCharacterKit & { references: KitReferenceView[] };
  * plano §4) é absorvido como custo de onboarding; por isso a falha de geração
  * não tem estorno (não há o que estornar). A cobrança do kit entra, se
  * entrar, junto com a revisão de pricing do go-live.
+ *
+ * Change video-formatos-personagem: origem logo passa por candidatos
+ * (McKitCandidatesService), e a aprovação roda o gate de boca e gera o tile
+ * (McMouthGateService / McKitTileService).
  */
 @Injectable()
 export class McKitsService {
@@ -79,6 +81,11 @@ export class McKitsService {
     private readonly voices: McVoicesService,
     private readonly config: ConfigService,
     private readonly clients: ClientsService,
+    private readonly view: McKitViewService,
+    private readonly candidates: McKitCandidatesService,
+    private readonly mouthGate: McMouthGateService,
+    private readonly tile: McKitTileService,
+    private readonly storage: McStorageService,
   ) {}
 
   /**
@@ -87,8 +94,9 @@ export class McKitsService {
    * enfileira a geração das referências — kit nasce 'generating' e o
    * McKitProcessor o leva a 'review'. `logo` registra o logo como personagem
    * de origem (linha de `mascots` com `kind = 'logo'`), exige os direitos da
-   * marca e modera, mas NÃO gera referência nenhuma: a rodada de candidatos
-   * (D4, tarefa 2.4) vem antes de qualquer referência.
+   * marca e o estilo, modera, roda o gate de boca no logo cru (decide se
+   * "usar como está" existe) e abre a PRIMEIRA rodada de candidatos (D4):
+   * nenhuma referência antes da escolha.
    */
   async createKit(userId: string, dto: CreateKitDto): Promise<McCharacterKit> {
     const source: McKitSource = dto.source ?? 'mascot';
@@ -96,10 +104,9 @@ export class McKitsService {
       source === 'logo'
         ? await this.resolveLogoSource(userId, dto)
         : await this.resolveMascotSource(userId, dto);
-    // Estilo é exigido para GERAR referências (spec "Estilo não escolhido"):
-    // na origem mascote a geração começa aqui; na origem logo só depois da
-    // escolha do candidato, onde o estilo é cobrado (2.4).
-    if (source === 'mascot' && !dto.style) throw this.styleRequired();
+    // Estilo é exigido para GERAR (spec "Estilo não escolhido"): referências
+    // na origem mascote, candidatos na origem logo — ambos começam aqui.
+    if (!dto.style) throw this.styleRequired();
 
     const imageUrl = mascot.cutoutUrl ?? mascot.sourceImageUrl;
     if (!imageUrl) {
@@ -110,7 +117,7 @@ export class McKitsService {
           '(de preferência com fundo transparente) e tente de novo.',
       });
     }
-    const imageBuffer = await this.readUploadsFile(imageUrl);
+    const imageBuffer = await this.storage.readUploadsFile(imageUrl);
     if (!imageBuffer) {
       throw new UnprocessableEntityException({
         code: 'MASCOT_IMAGE_MISSING',
@@ -125,12 +132,21 @@ export class McKitsService {
       userId,
       mascotId: mascot.id,
       source,
-      style: dto.style ?? null,
+      style: dto.style,
       identityMode: 'generated' as const,
       voiceId: dto.voiceId ?? null,
+      // Logo: cor pedida ou cinza claro (fundo liso dos candidatos e do tile);
+      // mascote: só quando pedida (o prompt legado segue em "light gray").
+      tileBackgroundColor:
+        dto.tileBackgroundColor?.toUpperCase() ??
+        (source === 'logo' ? KIT_TILE_BACKGROUND_DEFAULT : null),
       moderation: this.moderationJson(moderation),
+      mouthGate: null as McKitMouthGate | null,
     };
     if (moderation.flagged) await this.rejectModerated(base, moderation);
+    // Gate de boca no logo CRU (spec "Logo usado como está"): se passa, a
+    // opção "usar como está" aparece ao lado dos candidatos.
+    if (source === 'logo') base.mouthGate = { logo: await this.mouthGate.inspect(imageBuffer) };
 
     // Criação + enqueue na MESMA transação (pg-boss é Postgres): se o publish
     // falhar, o kit não fica órfão em 'generating' para sempre.
@@ -145,16 +161,22 @@ export class McKitsService {
         kind: 'transition',
         fromStatus: null,
         toStatus: McKitStatus.GENERATING,
-        detail: { mascotId: mascot.id, source, style: dto.style ?? null },
+        detail: {
+          mascotId: mascot.id,
+          source,
+          style: dto.style,
+          logoMouthGate: base.mouthGate?.logo ? decideMouthGate(base.mouthGate.logo) : null,
+        },
       });
-      // Origem mascote: referências já podem ser geradas. Origem logo: a
-      // rodada de candidatos (2.4) é quem publica o próximo job.
       if (source === 'mascot') {
         await this.queue.publish(
           QUEUES.MC_IMAGE,
           { kitId: kit.id },
           { expireInSeconds: MC_IMAGE_EXPIRE_S },
         );
+      } else {
+        const round = await this.candidates.openRound(manager, kit, { kind: 'mascotization' });
+        kit.candidateRoundId = round.roundId;
       }
       await this.transitions.notify(
         manager,
@@ -321,9 +343,15 @@ export class McKitsService {
     });
   }
 
-  /** review → approved (gate humano §4). Exige voz definida — aqui ou na criação. */
+  /**
+   * review → approved (gate humano §4). Exige voz definida — aqui ou na
+   * criação. Antes de aprovar (D1/D4): a identidade passa pelo gate de boca
+   * (bloqueio 422 MOUTH_NOT_LEGIBLE; indeciso só com `acceptMouthRisk`, com a
+   * decisão registrada no kit) e o tile é gerado a partir dela (recusa 422
+   * TILE_BORDER_NOT_UNIFORM mantém o kit em revisão).
+   */
   async approveKit(userId: string, id: string, dto: ApproveKitDto): Promise<McCharacterKit> {
-    const kit = await this.getOwned(userId, id);
+    const kit = await this.view.findOwned(userId, id);
     if (kit.status !== McKitStatus.REVIEW) {
       throw new UnprocessableEntityException({
         code: 'KIT_NOT_IN_REVIEW',
@@ -350,6 +378,43 @@ export class McKitsService {
         ? sanitizeVoiceDeliveryOverride(dto.delivery as Record<string, unknown>)
         : (kit.voiceDelivery ?? null);
 
+    const identity = await this.resolveIdentity(kit);
+    const { verdict, decision } = await this.identityMouthGate(kit, identity);
+    const gateRecord: McKitMouthGate = {
+      ...(kit.mouthGate ?? {}),
+      identity: { ...verdict, identityAssetId: identity.id },
+    };
+    if (decision === 'blocked') {
+      await this.persistMouthGate(kit.id, gateRecord);
+      throw new UnprocessableEntityException({
+        code: 'MOUTH_NOT_LEGIBLE',
+        message:
+          'A identidade do kit não tem boca legível para animar a fala. Gere uma variante ' +
+          'com boca (ou escolha outro candidato) antes de aprovar.',
+        details: { verdict, actions: ['mouth_variant', 'choose_candidate'] },
+      });
+    }
+    if (decision === 'undecided') {
+      if (dto.acceptMouthRisk !== true) {
+        await this.persistMouthGate(kit.id, gateRecord);
+        throw new UnprocessableEntityException({
+          code: 'MOUTH_GATE_UNDECIDED',
+          message:
+            'Não foi possível confirmar que a boca do personagem é legível. Aprove assumindo ' +
+            'o risco (acceptMouthRisk) ou gere uma variante com boca.',
+          details: { verdict, actions: ['accept_mouth_risk', 'mouth_variant'] },
+        });
+      }
+      gateRecord.riskAccepted = {
+        at: new Date().toISOString(),
+        identityAssetId: identity.id,
+        confidence: verdict.confidence,
+      };
+    } else {
+      delete gateRecord.riskAccepted;
+    }
+    const tile = await this.ensureTile(kit, identity, verdict, gateRecord);
+
     assertKitTransition(McKitStatus.REVIEW, McKitStatus.APPROVED);
     await this.dataSource.transaction(async (manager) => {
       const won = await this.transitions.casTransition(
@@ -358,7 +423,15 @@ export class McKitsService {
         kit.id,
         McKitStatus.REVIEW,
         McKitStatus.APPROVED,
-        { approvedAt: new Date(), voiceId, voiceDelivery },
+        {
+          approvedAt: new Date(),
+          voiceId,
+          voiceDelivery,
+          identityAssetId: identity.id,
+          tileAssetId: tile.assetId,
+          tileBackgroundColor: tile.backgroundColor,
+          mouthGate: gateRecord,
+        },
       );
       if (!won) {
         throw new UnprocessableEntityException({
@@ -373,7 +446,15 @@ export class McKitsService {
         kind: 'transition',
         fromStatus: McKitStatus.REVIEW,
         toStatus: McKitStatus.APPROVED,
-        detail: { voiceId, voiceDelivery },
+        detail: {
+          voiceId,
+          voiceDelivery,
+          identityAssetId: identity.id,
+          tileAssetId: tile.assetId,
+          tileBackgroundColor: tile.backgroundColor,
+          mouthGate: decision,
+          riskAccepted: decision === 'undecided',
+        },
       });
       await this.transitions.notify(
         manager,
@@ -385,13 +466,87 @@ export class McKitsService {
     return this.dataSource.getRepository(McCharacterKit).findOneByOrFail({ id: kit.id });
   }
 
+  /** Identidade efetiva (candidato escolhido / logo como está / referência frontal) ou 422. */
+  private async resolveIdentity(kit: McCharacterKit): Promise<AnimationAsset> {
+    const identity = await this.view.resolveIdentityAsset(kit);
+    if (!identity) {
+      throw new UnprocessableEntityException({
+        code: 'KIT_IDENTITY_MISSING',
+        message:
+          'O kit não tem identidade para o tile: regenere a referência frontal (slot 2) ' +
+          'ou escolha um candidato.',
+      });
+    }
+    return identity;
+  }
+
+  /** Veredito sobre a identidade: reaproveita o já gravado para o MESMO asset (sem repetir visão). */
+  private async identityMouthGate(
+    kit: McCharacterKit,
+    identity: AnimationAsset,
+  ): Promise<{ verdict: McMouthVerdict; decision: McMouthDecision }> {
+    const cached = kit.mouthGate?.identity;
+    if (cached && cached.identityAssetId === identity.id && !cached.error) {
+      return { verdict: cached, decision: decideMouthGate(cached) };
+    }
+    const buffer = identity.fileUrl ? await this.storage.readUploadsFile(identity.fileUrl) : null;
+    if (!buffer) {
+      throw new UnprocessableEntityException({
+        code: 'KIT_IDENTITY_FILE_MISSING',
+        message:
+          'A imagem da identidade do kit não foi encontrada no servidor. Escolha outra ' +
+          'identidade ou regenere a referência frontal.',
+      });
+    }
+    const verdict = await this.mouthGate.inspect(buffer);
+    return { verdict, decision: decideMouthGate(verdict) };
+  }
+
+  /**
+   * Tile da identidade: reaproveita o existente quando foi gerado para o
+   * MESMO asset; senão gera (e grava o veredito antes, para a recusa da borda
+   * não perder a avaliação de boca já paga).
+   */
+  private async ensureTile(
+    kit: McCharacterKit,
+    identity: AnimationAsset,
+    verdict: McMouthVerdict,
+    gateRecord: McKitMouthGate,
+  ): Promise<{ assetId: string; backgroundColor: string | null }> {
+    if (kit.tileAssetId) {
+      const existing = await this.dataSource
+        .getRepository(AnimationAsset)
+        .findOneBy({ id: kit.tileAssetId });
+      if (existing && existing.metadata?.identityAssetId === identity.id) {
+        const color = existing.metadata?.backgroundColor;
+        return {
+          assetId: existing.id,
+          backgroundColor: typeof color === 'string' ? color : kit.tileBackgroundColor,
+        };
+      }
+    }
+    try {
+      const built = await this.tile.build(kit, identity, verdict.bbox);
+      return { assetId: built.assetId, backgroundColor: built.backgroundColor };
+    } catch (err) {
+      await this.persistMouthGate(kit.id, gateRecord);
+      throw err;
+    }
+  }
+
+  private async persistMouthGate(kitId: string, mouthGate: McKitMouthGate): Promise<void> {
+    await this.dataSource
+      .getRepository(McCharacterKit)
+      .update({ id: kitId, status: McKitStatus.REVIEW }, { mouthGate });
+  }
+
   /** Re-gera UMA célula do grid (plano §4). O kit permanece em review; o worker troca o asset do slot. */
   async regenerateReference(
     userId: string,
     id: string,
     dto: RegenerateReferenceDto,
   ): Promise<{ queued: boolean; slot: number }> {
-    const kit = await this.getOwned(userId, id);
+    const kit = await this.view.findOwned(userId, id);
     if (kit.status !== McKitStatus.REVIEW) {
       throw new UnprocessableEntityException({
         code: 'KIT_NOT_IN_REVIEW',
@@ -439,7 +594,7 @@ export class McKitsService {
    * projetos antigos deixariam de ser reproduzíveis.
    */
   async updateSheet(userId: string, id: string, dto: UpdateKitSheetDto): Promise<McKitView> {
-    const kit = await this.getOwned(userId, id);
+    const kit = await this.view.findOwned(userId, id);
     if (kit.status !== McKitStatus.REVIEW) {
       throw new UnprocessableEntityException({
         code: 'KIT_NOT_IN_REVIEW',
@@ -474,7 +629,7 @@ export class McKitsService {
       const text = dto.adjustments.trim();
       if (text) {
         pt.adjustments = text;
-        next.adjustments = await this.translateAdjustments(text);
+        next.adjustments = await this.candidates.translateAdjustments(text);
       }
     } else if (current?.adjustments) {
       next.adjustments = current.adjustments;
@@ -520,7 +675,7 @@ export class McKitsService {
    * Idempotente: ficha já traduzida volta como está, sem gastar chamada.
    */
   async translateSheet(userId: string, id: string): Promise<McKitView> {
-    const kit = await this.getOwned(userId, id);
+    const kit = await this.view.findOwned(userId, id);
     if (kit.status !== McKitStatus.REVIEW) {
       throw new UnprocessableEntityException({
         code: 'KIT_NOT_IN_REVIEW',
@@ -614,77 +769,20 @@ export class McKitsService {
     return JSON.parse(raw) as KitSheetTranslation;
   }
 
-  /**
-   * Ajuste do usuário chega em pt-BR e os motores de imagem leem inglês.
-   * Tradução best-effort: sem chave (ou em modo mock, ou se a API falhar) o
-   * texto original segue como está — pior prompt, nunca erro na tela.
-   */
-  private async translateAdjustments(textPt: string): Promise<string> {
-    const apiKey = this.config.get<string>('OPENAI_API_KEY');
-    if (!apiKey || (process.env.MC_KIT_PROVIDER ?? 'mock') === 'mock') return textPt;
-    try {
-      const openai = new OpenAI({ apiKey });
-      const model = this.config.get<string>('OPENAI_FAST_TEXT_MODEL', 'gpt-4o-mini');
-      const response = await openai.chat.completions.create({
-        model,
-        max_tokens: 300,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'Translate the user instruction about a cartoon mascot from Brazilian ' +
-              'Portuguese to English. It will be appended to an image generation prompt. ' +
-              'Reply with the translation only, imperative and literal, no quotes.',
-          },
-          { role: 'user', content: textPt },
-        ],
-      });
-      const out = response.choices[0]?.message?.content?.trim();
-      return out && out.length > 0 ? out.slice(0, 600) : textPt;
-    } catch (err) {
-      this.logger.warn(`Tradução do ajuste da ficha falhou, mantendo pt-BR: ${String(err)}`);
-      return textPt;
-    }
-  }
-
   async findAll(userId: string): Promise<McKitView[]> {
     const kits = await this.dataSource.getRepository(McCharacterKit).find({
       where: { userId },
       order: { createdAt: 'DESC' },
       take: 100,
     });
-    return Promise.all(kits.map((kit) => this.toView(kit)));
+    return Promise.all(kits.map((kit) => this.view.toView(kit)));
   }
 
   async findOne(userId: string, id: string): Promise<McKitView> {
-    return this.toView(await this.getOwned(userId, id));
+    return this.view.findOne(userId, id);
   }
 
   // ─────────────────────────────── internos ───────────────────────────────
-
-  private async getOwned(userId: string, id: string): Promise<McCharacterKit> {
-    const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id });
-    if (!kit) throw new NotFoundException('Kit não encontrado');
-    if (kit.userId !== userId) throw new ForbiddenException();
-    return kit;
-  }
-
-  /** Resolve referenceAssetIds em URLs para a UI (slot vem do metadata do asset). */
-  private async toView(kit: McCharacterKit): Promise<McKitView> {
-    if (kit.referenceAssetIds.length === 0) return { ...kit, references: [] };
-    const assets = await this.dataSource.getRepository(AnimationAsset).find({
-      where: { id: In(kit.referenceAssetIds) },
-    });
-    const references = assets
-      .map((asset) => ({
-        assetId: asset.id,
-        slot: typeof asset.metadata?.slot === 'number' ? (asset.metadata.slot as number) : null,
-        url: asset.fileUrl,
-        createdAt: asset.createdAt,
-      }))
-      .sort((a, b) => (a.slot ?? 99) - (b.slot ?? 99));
-    return { ...kit, references };
-  }
 
   /** jsonb auditável da moderação (plano §6.8) — sem o raw gigante quando limpo. */
   private moderationJson(result: ModerationResult): Record<string, unknown> {
@@ -696,21 +794,5 @@ export class McKitsService {
       at: new Date().toISOString(),
       ...(result.flagged && result.raw ? { raw: result.raw } : {}),
     };
-  }
-
-  /** Lê um arquivo do bucket local a partir da URL persistida (mesma lógica do MascotsService). */
-  private async readUploadsFile(url: string): Promise<Buffer | null> {
-    const marker = '/uploads/';
-    const index = url.indexOf(marker);
-    const uploadsPath = url.startsWith('/uploads/') ? url : index >= 0 ? url.slice(index) : null;
-    if (!uploadsPath) return null;
-    const uploadsDir = path.resolve(this.config.get<string>('UPLOAD_DEST', './uploads'));
-    const filePath = path.resolve(uploadsDir, uploadsPath.replace(/^\/uploads\//, ''));
-    if (!filePath.startsWith(uploadsDir + path.sep)) return null;
-    try {
-      return await fs.readFile(filePath);
-    } catch {
-      return null;
-    }
   }
 }

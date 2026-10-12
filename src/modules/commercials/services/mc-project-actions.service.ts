@@ -25,17 +25,22 @@ import {
   assertSceneTransition,
   McProjectStatus,
   McSceneStatus,
+  McStepStatus,
 } from '../domain/mc-state-machines';
 import { assertAspectSupportedForFormat } from '../domain/mc-composition.config';
+import { assertFormatEnabled } from '../domain/mc-pipeline.config';
+import { isPipelineV2, MC_EMPTY_QUALITY } from '../domain/mc-quality';
 import {
   MC_DEFAULT_PROJECT_FORMAT,
   MC_DEFAULT_PROJECT_TIER,
   McScript,
+  McStepType,
   resolveProjectOptions,
 } from '../domain/mc-types';
 import { McCharacterKit, McKitStatus } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
+import { McStep } from '../entities/mc-step.entity';
 import { DuplicateProjectDto } from '../dto/duplicate-project.dto';
 import { UpdateScriptDto } from '../dto/update-script.dto';
 import { McMaterializerService } from './mc-materializer.service';
@@ -249,6 +254,14 @@ export class McProjectActionsService {
    *   reaproveita roteiro e falas" (plano §6.3). Keyframe/video/lipsync mudam
    *   (aspectRatio está no hash do keyframe) e são gerados de novo, como deve
    *   ser: o enquadramento é outro.
+   * - Change video-formatos-personagem (D6): a cópia carrega `pipelineVersion`,
+   *   `format`, `channel`, `backgroundArtAssetId`, `sourceArt`, `layoutPreset`
+   *   e `logoBox`, nasce com `revision = 0` e `quality` vazio, passa por
+   *   `assertFormatEnabled`, e aceita `tier` ("duplicar como econômico" após
+   *   falha do motor premium). No v2, as linhas `tts` SELECIONADAS da origem
+   *   são clonadas como `skipped_cached` (mesmo `baseHash`/`outputAssetId`)
+   *   nas cenas da cópia, para `selectedAssetMatches` reaproveitá-las: só os
+   *   clipes de fala (`talk`) são gerados de novo.
    */
   async duplicateProject(
     userId: string,
@@ -280,15 +293,19 @@ export class McProjectActionsService {
         message: 'O projeto de origem ainda não tem roteiro para copiar.',
       });
     }
-    // A cópia fica no MESMO formato/tier da origem (design D6); o formato
-    // `scenes` (F3) não aceita 4:5 (design D12) → 422 antes de qualquer escrita.
+    // A cópia fica no MESMO formato da origem (design D6) e no tier pedido
+    // (ou o da origem); o formato precisa estar admitido (`MC_FORMATS`) e o
+    // formato `scenes` (F3) não aceita 4:5 (design D12) → 422 antes de
+    // qualquer escrita.
     const format = source.format ?? MC_DEFAULT_PROJECT_FORMAT;
-    const tier = source.tier ?? MC_DEFAULT_PROJECT_TIER;
+    const tier = dto.tier ?? source.tier ?? MC_DEFAULT_PROJECT_TIER;
     const aspectRatio = dto.aspectRatio ?? source.aspectRatio;
+    assertFormatEnabled(format);
     assertAspectSupportedForFormat(format, aspectRatio);
 
     const kit = await this.getKit(source.kitId);
     const title = await this.nextCopyTitle(userId, source.title);
+    const v2 = isPipelineV2(source);
 
     const created = await this.dataSource.transaction(async (manager) => {
       const copy = manager.create(McProject, {
@@ -296,8 +313,16 @@ export class McProjectActionsService {
         kitId: kit.id,
         title,
         briefing: source.briefing,
+        pipelineVersion: source.pipelineVersion ?? 1,
         format,
         tier,
+        channel: source.channel ?? null,
+        backgroundArtAssetId: source.backgroundArtAssetId ?? null,
+        sourceArt: source.sourceArt ? JSON.parse(JSON.stringify(source.sourceArt)) : null,
+        layoutPreset: source.layoutPreset ?? null,
+        logoBox: source.logoBox ? { ...source.logoBox } : null,
+        revision: 0,
+        quality: v2 ? { ...MC_EMPTY_QUALITY } : null,
         // Deep copy: editar o roteiro da cópia NUNCA pode tocar no original
         // (os dois jsonb têm que ser independentes).
         script: JSON.parse(JSON.stringify(source.script)) as McScript,
@@ -310,6 +335,7 @@ export class McProjectActionsService {
         moderation: source.moderation,
       });
       await manager.save(copy);
+      const reusedTts = v2 ? await this.cloneSelectedTts(manager, source, copy) : 0;
       await this.commercials.appendEvent(manager, {
         userId,
         refKind: 'project',
@@ -319,7 +345,9 @@ export class McProjectActionsService {
         detail: {
           sourceProjectId: source.id,
           aspectRatio: copy.aspectRatio,
+          tier,
           sceneCount: copy.script?.scenes.length ?? 0,
+          reusedTts,
         },
       });
       await this.transitions.notify(
@@ -335,6 +363,74 @@ export class McProjectActionsService {
       return copy;
     });
     return this.dataSource.getRepository(McProject).findOneByOrFail({ id: created.id });
+  }
+
+  /**
+   * Reuso de TTS na cópia v2 (D6): para cada cena viva da origem com áudio
+   * SELECIONADO, cria a cena homônima na cópia (mesma identidade, geração 1,
+   * `audioAssetId` apontando o mesmo asset) e clona o step `tts` que produziu
+   * esse asset como `skipped_cached` (mesmo `inputHash`, `outputAssetId` e
+   * `inputSnapshot.baseHash`). Na preparação da cópia, `selectedAssetMatches`
+   * encontra o clone e a fala não é sintetizada de novo. @returns nº de falas reaproveitadas.
+   */
+  private async cloneSelectedTts(
+    manager: EntityManager,
+    source: McProject,
+    copy: McProject,
+  ): Promise<number> {
+    const scenes = await manager.find(McScene, { where: { projectId: source.id } });
+    const live = scenes.filter(
+      (s) => s.status !== McSceneStatus.CANCELED && s.scriptSceneId && s.audioAssetId,
+    );
+    if (live.length === 0) return 0;
+    const ttsSteps = await manager.find(McStep, {
+      where: { projectId: source.id, type: McStepType.TTS },
+    });
+    let reused = 0;
+    for (const scene of live) {
+      const producer = ttsSteps
+        .filter(
+          (s) =>
+            s.sceneId === scene.id &&
+            s.outputAssetId === scene.audioAssetId &&
+            (s.status === McStepStatus.SUCCEEDED || s.status === McStepStatus.SKIPPED_CACHED),
+        )
+        .sort((a, b) => (b.attempt ?? 1) - (a.attempt ?? 1))[0];
+      if (!producer) continue;
+      const copyScene = manager.create(McScene, {
+        projectId: copy.id,
+        idx: scene.idx,
+        scriptSceneId: scene.scriptSceneId,
+        sceneType: scene.sceneType,
+        generation: 1,
+        rerollCount: 0,
+        status: McSceneStatus.PENDING,
+        durationS: scene.durationS,
+        actionPrompt: scene.actionPrompt,
+        dialogue: scene.dialogue,
+        audioAssetId: scene.audioAssetId,
+      });
+      await manager.save(copyScene);
+      const clone = manager.create(McStep, {
+        projectId: copy.id,
+        sceneId: copyScene.id,
+        sceneGeneration: 1,
+        projectRevision: 0,
+        phase: 'preparation',
+        attempt: producer.attempt ?? 1,
+        inputSnapshot: producer.inputSnapshot ? { ...producer.inputSnapshot } : null,
+        type: McStepType.TTS,
+        status: McStepStatus.SKIPPED_CACHED,
+        inputHash: producer.inputHash,
+        provider: producer.provider,
+        outputAssetId: producer.outputAssetId,
+        costCredits: 0,
+        finishedAt: new Date(),
+      });
+      await manager.save(clone);
+      reused += 1;
+    }
+    return reused;
   }
 
   /** Título da cópia: "Original (cópia N)", com N = próxima cópia do usuário. */

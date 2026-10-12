@@ -322,3 +322,109 @@ export function buildKitReferencePrompt(
   }
   return lines.join('\n');
 }
+
+// ───────────────────── candidatos de mascotização e variante com boca (D4) ─────────────────────
+
+/** Cor de fundo padrão do tile e dos candidatos de um kit de logo (cinza claro, uniforme). */
+export const KIT_TILE_BACKGROUND_DEFAULT = '#E5E7EB';
+
+/**
+ * Candidatos por rodada: 4 a 6 (spec "Candidatos de mascotização do logo").
+ * O valor efetivo vem de MC_KIT_CANDIDATE_COUNT, sempre clampado a esta faixa.
+ */
+export const KIT_CANDIDATES_MIN = 4;
+export const KIT_CANDIDATES_MAX = 6;
+export const KIT_CANDIDATES_DEFAULT = 4;
+
+/**
+ * Pistas de variação por posição na rodada: a mesma chamada repetida só
+ * varia pela amostragem; a pista pede que cada candidato seja visivelmente
+ * distinto sem sair da identidade do logo.
+ */
+export const KIT_CANDIDATE_VARIATIONS: readonly string[] = [
+  'the most faithful interpretation of the logo silhouette and marks',
+  'rounder, friendlier proportions with a big expressive face',
+  'a more dynamic pose and expression, energetic and welcoming',
+  'bolder stylization while keeping every mark of the logo recognizable',
+  'slimmer, taller proportions with a confident stance',
+  'cute compact proportions with a large head and short limbs',
+];
+
+export interface KitCandidatePromptOptions {
+  style: McKitStyle;
+  /** Cor de fundo liso (hex ou nome em inglês); default KIT_TILE_BACKGROUND_DEFAULT. */
+  backgroundColor?: string | null;
+  /** Ajustes livres do usuário (já em inglês) desta rodada. */
+  adjustments?: string | null;
+  /** Posição (0-based) e total da rodada — escolhe a pista de variação. */
+  idx: number;
+  total: number;
+  /** Quantas referências de estilo vão junto depois do logo (0..3). */
+  styleReferenceCount?: number;
+}
+
+/**
+ * Prompt do candidato de mascotização (Nano Banana `edit` com o logo como
+ * primeira referência): personagem derivado do logo, mantendo formas, cores e
+ * marcas, no estilo FIXO do kit, sobre fundo liso da cor do tile. Nunca
+ * nomeia estúdios ou obras; proíbe texto adicionado (as letras do próprio
+ * logo podem integrar o personagem).
+ */
+export function buildKitCandidatePrompt(options: KitCandidatePromptOptions): string {
+  const refs = options.styleReferenceCount ?? 0;
+  const lines = [
+    'Create a brand mascot character derived from the logo in the first reference image. ' +
+      'Keep the logo’s shapes, colors, and distinctive marks clearly recognizable in the ' +
+      'character; turn the logo into a living, friendly character with a face, eyes and a ' +
+      'clearly drawn mouth that can open and close for lip-sync animation.',
+    'Front view, bust or full body, centered, facing the camera, neutral friendly pose, even ' +
+      'studio lighting.',
+    `${backgroundDirective(options.backgroundColor ?? KIT_TILE_BACKGROUND_DEFAULT)}, filling the ` +
+      'whole frame edge to edge, with nothing else in the scene.',
+    'No added text, no captions, no watermark (lettering that belongs to the logo itself may ' +
+      'remain as part of the character).',
+    styleBlockLine(options.style) as string,
+  ];
+  if (refs > 0) {
+    lines.push(
+      `The ${refs === 1 ? 'second image is a style reference' : `next ${refs} images are style references`} ` +
+        'only: match their rendering finish, never copy their characters.',
+    );
+  }
+  const total = Math.max(1, options.total);
+  const hint = KIT_CANDIDATE_VARIATIONS[options.idx % KIT_CANDIDATE_VARIATIONS.length];
+  lines.push(`Variation ${options.idx + 1} of ${total}: ${hint}.`);
+  if (options.adjustments?.trim()) {
+    lines.push(userAdjustmentsLine(options.adjustments.trim(), true));
+  }
+  return lines.join('\n');
+}
+
+export interface KitMouthVariantPromptOptions {
+  style: McKitStyle | null;
+  source: McKitSource;
+  backgroundColor?: string | null;
+}
+
+/**
+ * Variante com boca (gate de boca reprovado): a MESMA identidade, mudando só a
+ * boca para uma boca desenhada com abertura, articulável — tudo o mais
+ * (cores, formas, proporções, acessórios, fundo) permanece idêntico.
+ */
+export function buildMouthVariantPrompt(options: KitMouthVariantPromptOptions): string {
+  const ban =
+    options.source === 'logo'
+      ? 'no added text, no watermark (lettering that belongs to the logo itself stays as is)'
+      : 'no text, no logo, no watermark';
+  const lines = [
+    'Edit the character in the reference image so it has a clearly drawn, articulable mouth: ' +
+      'visible lips or a mouth opening, slightly open in a neutral friendly expression, suitable ' +
+      'for lip-sync animation.',
+    'Change NOTHING else: keep the exact same character, design, colors, proportions, outfit, ' +
+      'accessories, pose, framing and lighting as in the reference image.',
+    `${backgroundDirective(options.backgroundColor ?? KIT_REFERENCE_BACKGROUND_DEFAULT)}, ${ban}.`,
+  ];
+  const styleLine = styleBlockLine(options.style);
+  if (styleLine) lines.push(styleLine);
+  return lines.join('\n');
+}

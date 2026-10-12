@@ -1,10 +1,12 @@
 import {
+  isSceneType,
   legacySceneType,
   phaseOfStep,
   planSteps,
   resolveSceneType,
   scenePlan,
   sceneTypeDialogueIssue,
+  sceneUsesKeyframe,
 } from './mc-execution-plan';
 import { McStepType } from './mc-types';
 
@@ -56,5 +58,36 @@ describe('mc-execution-plan — grafo por tipo de cena (ADR §3.1)', () => {
 
   it('tipo desconhecido lança', () => {
     expect(() => scenePlan('foo' as never)).toThrow(/desconhecido/);
+  });
+});
+
+describe('mc-execution-plan — talk_tile (change video-formatos-personagem, D6/D7)', () => {
+  it('talk_tile: tts → talk; final = talk; sem keyframe em nenhuma fase', () => {
+    const plan = scenePlan('talk_tile');
+    expect(plan.preparation).toEqual([McStepType.TTS]);
+    expect(plan.production).toEqual([McStepType.TALK]);
+    expect(plan.final).toBe(McStepType.TALK);
+    expect(plan.deps[McStepType.TALK]).toEqual([McStepType.TTS]);
+    expect(plan.hasTts).toBe(true);
+    expect(plan.usesAvatar).toBe(true);
+    expect(plan.usesActionEngine).toBe(false);
+    expect(planSteps(plan)).not.toContain(McStepType.KEYFRAME);
+    expect(phaseOfStep(plan, McStepType.TTS)).toBe('preparation');
+    expect(phaseOfStep(plan, McStepType.TALK)).toBe('production');
+    expect(phaseOfStep(plan, McStepType.KEYFRAME)).toBeNull();
+  });
+
+  it('isSceneType aceita talk_tile; sceneUsesKeyframe distingue os planos com imagem gerada', () => {
+    expect(isSceneType('talk_tile')).toBe(true);
+    expect(isSceneType('talk')).toBe(false);
+    expect(sceneUsesKeyframe('talk_tile')).toBe(false);
+    expect(sceneUsesKeyframe('presenter')).toBe(true);
+    expect(sceneUsesKeyframe('action')).toBe(true);
+    expect(sceneUsesKeyframe('action_voiceover')).toBe(true);
+  });
+
+  it('talk_tile exige fala (uma fala, um clipe)', () => {
+    expect(sceneTypeDialogueIssue('talk_tile', null)).toMatch(/precisa de fala/);
+    expect(sceneTypeDialogueIssue('talk_tile', 'Olá!')).toBeNull();
   });
 });

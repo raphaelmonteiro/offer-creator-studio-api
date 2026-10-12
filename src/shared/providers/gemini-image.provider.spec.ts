@@ -149,3 +149,72 @@ describe('GeminiImageProvider — Nano Banana Pro (plano §4)', () => {
     expect(sniffImageMime(webp)).toBe('image/webp');
   });
 });
+
+/** Change video-formatos-personagem (2.6): modelo das referências configurável com o atual na cadeia de fallback. */
+describe('GeminiImageProvider — cadeia de modelos (GEMINI_IMAGE_MODEL_REFS)', () => {
+  const config = {
+    get: jest.fn((key: string) => (key === 'GEMINI_API_KEY' ? 'gemini-test-key' : undefined)),
+  } as unknown as ConfigService;
+  let provider: GeminiImageProvider;
+  let fetchSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    provider = new GeminiImageProvider(config);
+    fetchSpy = jest.spyOn(global, 'fetch');
+  });
+
+  afterEach(() => fetchSpy.mockRestore());
+
+  it('modelChain: pedido → atual → fallback, sem repetição', () => {
+    expect(GeminiImageProvider.modelChain('gemini-nano-banana-2.1')).toEqual([
+      'gemini-nano-banana-2.1',
+      GEMINI_IMAGE_MODEL,
+      GEMINI_IMAGE_FALLBACK_MODEL,
+    ]);
+    expect(GeminiImageProvider.modelChain(undefined)).toEqual([
+      GEMINI_IMAGE_MODEL,
+      GEMINI_IMAGE_FALLBACK_MODEL,
+    ]);
+    expect(GeminiImageProvider.modelChain('  ')).toEqual([
+      GEMINI_IMAGE_MODEL,
+      GEMINI_IMAGE_FALLBACK_MODEL,
+    ]);
+    expect(GeminiImageProvider.modelChain(GEMINI_IMAGE_FALLBACK_MODEL)).toEqual([
+      GEMINI_IMAGE_FALLBACK_MODEL,
+      GEMINI_IMAGE_MODEL,
+    ]);
+  });
+
+  it('modelo configurado gera e é devolvido como modelo efetivo', async () => {
+    fetchSpy.mockResolvedValue(imageResponse());
+    const result = await provider.generateImageWithModel({
+      prompt: 'p',
+      model: 'gemini-nano-banana-2.1',
+    });
+    expect(result.model).toBe('gemini-nano-banana-2.1');
+    expect(result.image).toEqual(Buffer.from('fake-png-bytes'));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0][0])).toContain('gemini-nano-banana-2.1');
+  });
+
+  it('modelo configurado 404 → cai para o modelo atual (Nano Banana Pro), que fica registrado como efetivo', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(404, { error: { message: 'not found' } }))
+      .mockResolvedValueOnce(imageResponse());
+    const result = await provider.generateImageWithModel({
+      prompt: 'p',
+      model: 'gemini-nano-banana-2.1',
+    });
+    expect(result.model).toBe(GEMINI_IMAGE_MODEL);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(String(fetchSpy.mock.calls[1][0])).toContain(GEMINI_IMAGE_MODEL);
+  });
+
+  it('cadeia inteira indisponível → o último model_not_found é propagado', async () => {
+    fetchSpy.mockResolvedValue(jsonResponse(404, {}));
+    await expect(
+      provider.generateImageWithModel({ prompt: 'p', model: 'gemini-nano-banana-2.1' }),
+    ).rejects.toMatchObject({ code: 'model_not_found' });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+});

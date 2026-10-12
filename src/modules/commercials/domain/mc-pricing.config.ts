@@ -28,6 +28,12 @@ export const MC_STEP_CREDITS: Record<McStepType, number> = {
   [McStepType.ASSEMBLY]: 0,
   /** Composição determinística (FFmpeg) — taxa própria cotada; 0 até calibração (P5). */
   [McStepType.SCENE_COMPOSE]: 0,
+  /**
+   * Clipe falado a partir do tile (change video-formatos-personagem): mesma
+   * tabela do lipsync até a calibração por tier — o custo real por segundo e
+   * motor fica em `providerCostUsd` (mcUsdPerSecondForModel).
+   */
+  [McStepType.TALK]: 56,
 };
 
 /** Kit do mascote (Ativo de Personagem, 1× por mascote): 30 cr = R$ 3 (§8). */
