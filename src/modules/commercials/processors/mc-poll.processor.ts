@@ -111,7 +111,7 @@ export class McPollProcessor {
         await this.queue.publish(
           QUEUES.MC_INGEST,
           { stepId, responseUrl: payload.responseUrl ?? this.defaultResponseUrl(step) },
-          { expireInSeconds: mcExpireForQueue(QUEUES.MC_INGEST) },
+          { expireInSeconds: mcExpireForQueue(QUEUES.MC_INGEST), manager },
         );
       });
     } catch (err) {

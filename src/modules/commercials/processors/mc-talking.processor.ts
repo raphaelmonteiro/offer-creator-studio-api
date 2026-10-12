@@ -245,6 +245,7 @@ export class McTalkingProcessor {
             startAfterSeconds: MC_FIRST_POLL_DELAY_S,
             singletonKey: `poll:${step.id}:1`, // a tentativa NA CHAVE (ver doc da classe)
             expireInSeconds: mcExpireForQueue(QUEUES.MC_POLL),
+            manager, // job na mesma transação do provider_wait
           },
         );
       });
@@ -579,6 +580,7 @@ export class McTalkingProcessor {
           startAfterSeconds: MC_FIRST_POLL_DELAY_S,
           singletonKey: `poll:${stepId}:r${Date.now()}`,
           expireInSeconds: mcExpireForQueue(QUEUES.MC_POLL),
+          manager, // job na mesma transação do provider_wait
         },
       );
     });

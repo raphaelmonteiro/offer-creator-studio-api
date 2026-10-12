@@ -647,6 +647,27 @@ describe('McPipelineService — pipeline v2 (gate do worker, retomada, liquidaç
       );
     });
 
+    it('o job vai NA MESMA transação do step (regressão e2e F2: job consumido antes do commit era descartado)', async () => {
+      project.status = McProjectStatus.GENERATING;
+      steps = [
+        prodStep({ id: 'st-talk', type: McStepType.TALK, status: McStepStatus.SUCCEEDED }),
+        prodStep({
+          id: 'st-compose',
+          type: McStepType.COMPOSE_FFMPEG,
+          phase: 'assembly',
+          sceneId: null,
+          sceneGeneration: null,
+          status: McStepStatus.PENDING,
+        }),
+      ];
+      const enqueued = await service.enqueueReadySteps(manager as unknown as EntityManager, 'p1');
+      expect(enqueued).toEqual(['st-compose']);
+      // o manager da transação viaja nas opções: a fila grava o job pelo MESMO
+      // query runner (visível ao worker só no commit), nunca pelo pool do pg-boss
+      expect(queue.publish).toHaveBeenCalledTimes(1);
+      expect(queue.publish.mock.calls[0][2]).toEqual(expect.objectContaining({ manager }));
+    });
+
     it('compose concluído (assembling) enfileira o finalize sem nova transição de projeto', async () => {
       project.status = McProjectStatus.ASSEMBLING;
       steps = [

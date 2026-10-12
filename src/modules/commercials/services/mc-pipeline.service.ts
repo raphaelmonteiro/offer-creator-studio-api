@@ -117,7 +117,8 @@ export class McPipelineService {
         // `type` viaja no payload para o dispatcher da fila mc.ffmpeg
         // (assembly × scene_compose); consumidores antigos ignoram o campo.
         { stepId: ref.id, projectId, type: ref.type },
-        { expireInSeconds: mcExpireForQueue(queueName) },
+        // job na MESMA transação do step (só visível ao worker no commit)
+        { expireInSeconds: mcExpireForQueue(queueName), manager },
       );
       enqueued.push(ref.id);
     }
@@ -824,7 +825,7 @@ export class McPipelineService {
       await this.queue.publish(
         queueName,
         { stepId: step.id, projectId: step.projectId },
-        { startAfterSeconds: delayS, expireInSeconds: mcExpireForQueue(queueName) },
+        { startAfterSeconds: delayS, expireInSeconds: mcExpireForQueue(queueName), manager },
       );
     });
   }

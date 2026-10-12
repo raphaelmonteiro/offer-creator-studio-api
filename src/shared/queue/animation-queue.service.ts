@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 // pg-boss é CJS (`module.exports =`) e o projeto não usa esModuleInterop:
 // o default import viraria `undefined` em runtime. import-equals é o formato correto aqui.
 import PgBoss = require('pg-boss');
+import type { EntityManager, QueryResult } from 'typeorm';
 
 export const QUEUES = {
   AI_GENERATE: 'ai.generate',
@@ -40,6 +41,40 @@ export interface PublishOptions {
   singletonKey?: string;
   /** Tempo máximo de execução antes do job voltar à fila (default 900s). */
   expireInSeconds?: number;
+  /**
+   * Transação TypeORM do chamador: o INSERT do job entra NA MESMA transação e
+   * só fica visível ao worker no COMMIT (enfileiramento transacional). Sem
+   * isso o pg-boss grava pela própria conexão e o worker pode consumir o job
+   * ANTES do commit — não acha o step criado/enfileirado nessa transação,
+   * descarta o job e o step fica `queued` até o reconciliador (minutos).
+   * Manager fora de transação ativa → pool do pg-boss (comportamento antigo).
+   */
+  manager?: EntityManager;
+}
+
+/** Executor de SQL do pg-boss (`send(..., { db })`). */
+export interface PgBossDb {
+  executeSql(text: string, values: unknown[]): Promise<{ rows: unknown[]; rowCount: number }>;
+}
+
+/**
+ * Executor do pg-boss sobre a transação ATIVA do `manager` (mesmo query
+ * runner, mesma conexão): o job nasce e morre com a transação. `null` quando
+ * não há transação ativa — o chamador cai no pool do pg-boss.
+ */
+export function pgBossTransactionDb(manager: EntityManager | null | undefined): PgBossDb | null {
+  const runner = manager?.queryRunner;
+  if (!runner || runner.isReleased || !runner.isTransactionActive) return null;
+  return {
+    async executeSql(text: string, values: unknown[]) {
+      const result: QueryResult = await runner.query(text, values, true);
+      const rows = Array.isArray(result.records) ? result.records : [];
+      return {
+        rows,
+        rowCount: typeof result.affected === 'number' ? result.affected : rows.length,
+      };
+    },
+  };
 }
 
 /**
@@ -98,12 +133,14 @@ export class AnimationQueueService implements QueuePort, OnModuleInit, OnModuleD
     options: PublishOptions = {},
   ): Promise<string | null> {
     if (!this.boss) throw new Error('Fila não inicializada');
+    const db = pgBossTransactionDb(options.manager);
     return this.boss.send(queue, data, {
       startAfter: options.startAfterSeconds,
       singletonKey: options.singletonKey,
       retryLimit: 3,
       retryBackoff: true,
       expireInSeconds: options.expireInSeconds ?? DEFAULT_EXPIRE_IN_SECONDS,
+      ...(db ? { db: db as PgBoss.Db } : {}),
     });
   }
 

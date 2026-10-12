@@ -449,7 +449,8 @@ export class CommercialsService {
       await this.queue.publish(
         QUEUES.MC_LLM,
         { stepId: step.id, projectId: project.id },
-        { expireInSeconds: MC_LLM_EXPIRE_S },
+        // job na MESMA transação do step de roteiro (só visível ao worker no commit)
+        { expireInSeconds: MC_LLM_EXPIRE_S, manager },
       );
 
       // v0: eventos mc_* saem no canal DEDICADO 'mc_events' (payload
