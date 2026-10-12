@@ -84,8 +84,22 @@ export class McPipelineService {
   /**
    * Roda o scheduler puro sobre o estado ATUAL (lido no manager da transação)
    * e enfileira os steps desbloqueados. Retorna os ids enfileirados.
+   *
+   * Avanço SERIALIZADO por projeto: antes de ler cenas/steps, trava a linha do
+   * projeto (`FOR UPDATE`) na transação do chamador. Sem isso, duas conclusões
+   * concorrentes (ex.: os dois últimos `talk` ingeridos ao mesmo tempo, fila
+   * mc.ingest com concorrência 2) leem, cada uma, a cena da outra ainda não
+   * commitada, nenhuma vê "todas as cenas prontas" e o step de projeto
+   * (`render_remotion`/`compose_ffmpeg`/`assembly`) fica `pending` para sempre
+   * — o watchdog só repõe queued/provider_wait/ingesting (visto no e2e mock
+   * combos: F2 premium parado em `generating`). Com a trava, a segunda espera o
+   * commit da primeira e, em READ COMMITTED, as leituras seguintes já veem a
+   * cena dela. Sem transação ativa (testes, chamadas avulsas) não trava.
    */
   async enqueueReadySteps(manager: EntityManager, projectId: string): Promise<string[]> {
+    if (manager.queryRunner?.isTransactionActive) {
+      await manager.query('SELECT "id" FROM "mc_projects" WHERE "id" = $1 FOR UPDATE', [projectId]);
+    }
     const project = await manager.findOneByOrFail(McProject, { id: projectId });
     const scenes = await manager.find(McScene, { where: { projectId } });
     const steps = await manager.find(McStep, { where: { projectId } });
