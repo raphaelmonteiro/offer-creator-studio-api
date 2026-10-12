@@ -8,7 +8,7 @@ import { MC_FINALIZE_GRAPH_VERSION, MC_FINALIZE_LOUDNESS } from '../domain/mc-fi
 import { klingActionDuration, talkEngineFor } from '../domain/mc-pipeline.config';
 import { MC_STEP_CREDITS } from '../domain/mc-pricing.config';
 import { MC_TALK_GAP_MS } from '../domain/mc-talk-conform-graph';
-import { readProjectLogoBox } from '../domain/mc-logo-face';
+import { readProjectLogoBox, resolveTalkWindowColor } from '../domain/mc-logo-face';
 import { composeHashWindow, MC_COMPOSE_GRAPH_VERSION } from '../domain/mc-talking-art-graph';
 import { compositionDimensions } from '../domain/mc-composition.config';
 import {
@@ -791,8 +791,9 @@ export class McMaterializerService {
 
   /**
    * Contexto de produção do `talk` (D1/D2): tile do kit (com dimensões, para
-   * o recorte de aspecto no ingest), cor da janela (`script.talkBackgroundColor`
-   * → `kit.tileBackgroundColor`), motor por tier × modo de identidade. Kit sem
+   * o recorte de aspecto no ingest), cor da janela (`resolveTalkWindowColor`:
+   * `script.talkBackgroundColor` → no rosto do logo, a cor da arte em volta da
+   * caixa → `kit.tileBackgroundColor`), motor por tier × modo de identidade. Kit sem
    * tile é erro de pré-condição (a aprovação já recusa com KIT_TILE_MISSING).
    */
   async talkProductionContext(
@@ -816,11 +817,13 @@ export class McMaterializerService {
     const tier = project.tier ?? 'economico';
     const identityMode = kit.identityMode ?? 'generated';
     const engine = talkEngineFor({ tier, identityMode });
-    const backgroundColor = (
-      script.talkBackgroundColor?.trim() ||
-      kit.tileBackgroundColor?.trim() ||
-      '#FFFFFF'
-    ).toUpperCase();
+    const backgroundColor = resolveTalkWindowColor({
+      scriptColor: script.talkBackgroundColor,
+      logoFace: script.logoFace === true,
+      logoBox: project.logoBox,
+      kitColor: kit.tileBackgroundColor,
+      fallback: '#FFFFFF',
+    });
     return {
       tileAssetId: kit.tileAssetId,
       tileWidth: tile?.width ?? null,
@@ -929,11 +932,13 @@ export class McMaterializerService {
   ): Promise<McStep> {
     const options = resolveProjectOptions(project.options);
     const kit = await manager.findOne(McCharacterKit, { where: { id: project.kitId } });
-    const backgroundColor = (
-      script.talkBackgroundColor?.trim() ||
-      kit?.tileBackgroundColor?.trim() ||
-      '#FFFFFF'
-    ).toUpperCase();
+    const backgroundColor = resolveTalkWindowColor({
+      scriptColor: script.talkBackgroundColor,
+      logoFace: script.logoFace === true,
+      logoBox: project.logoBox,
+      kitColor: kit?.tileBackgroundColor,
+      fallback: '#FFFFFF',
+    });
     // Janela RESOLVIDA (rosto do logo: caixa do projeto mapeada pelo contain-fit
     // da arte) — mover a caixa invalida a composição.
     const logoFace = script.logoFace === true;

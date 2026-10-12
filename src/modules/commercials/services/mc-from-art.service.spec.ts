@@ -1,4 +1,8 @@
 import { HttpException } from '@nestjs/common';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as sharp from 'sharp';
 import { DataSource } from 'typeorm';
 import { Client } from '../../clients/entities/client.entity';
 import { FlyerBuilderV2Document } from '../../flyer-builder-v2/entities/flyer-builder-v2-document.entity';
@@ -691,6 +695,7 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
         logoBoxSource: 'layout',
         logoBoxConfidence: null,
         logoBoxConfirmed: true,
+        surroundColor: null, // arte fora do disco neste teste: amostragem nunca bloqueia
       });
     });
 
@@ -715,6 +720,7 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
         logoBoxSource: 'detected',
         logoBoxConfidence: 0.92,
         logoBoxConfirmed: false,
+        surroundColor: null,
       });
     });
 
@@ -776,6 +782,7 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
         logoBoxSource: 'detected',
         logoBoxConfidence: 0.92,
         logoBoxConfirmed: false,
+        surroundColor: null,
       };
       const [criteria, patch] = updateCall();
       expect(criteria).toMatchObject({ id: PROJECT_ID, userId: 'u1' });
@@ -909,6 +916,7 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
           logoBoxSource: 'user',
           logoBoxConfidence: null,
           logoBoxConfirmed: true,
+          surroundColor: null,
         },
       });
       expect(marked).toMatchObject({
@@ -959,6 +967,74 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
         await responseOf(service.setLogoBox('u1', PROJECT_ID, { x: 0.1, y: 0.1, w: 0.2, h: 0.1 })),
       ).toMatchObject({ status: 422, body: { code: 'LOGO_BOX_ART_MISSING' } });
       expect(repos.get(McProject)!.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('rosto do logo — cor da arte em volta da caixa (surroundColor)', () => {
+    const PROJECT_ID = '88888888-8888-4888-8888-888888888888';
+    let dir: string;
+    let project: Record<string, unknown>;
+
+    /**
+     * Arte 200×100: fundo #C62828 (cabeçalho), placa branca em (20,10)-(80,70)
+     * onde está o logo, e um bloco azul longe dela (não entra no anel).
+     */
+    beforeEach(async () => {
+      dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mc-from-art-ring-'));
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">' +
+        '<rect width="200" height="100" fill="#C62828"/>' +
+        '<rect x="20" y="10" width="60" height="60" fill="#FFFFFF"/>' +
+        '<rect x="150" y="60" width="40" height="30" fill="#1565C0"/>' +
+        '</svg>';
+      await sharp(Buffer.from(svg)).png().toFile(path.join(dir, 'a.png'));
+      storage.absoluteFromUrl.mockImplementation(() => path.join(dir, 'a.png'));
+      repos.get(Flyer)!.findOne.mockResolvedValue(flyerRow(LEGACY_FLYER_CONFIGURATION));
+      project = {
+        id: PROJECT_ID,
+        userId: 'u1',
+        kitId: KIT_ID,
+        status: McProjectStatus.STORYBOARD_REVIEW,
+        format: 'talking_art',
+        backgroundArtAssetId: ASSET_ID,
+        logoBox: null,
+      };
+      repos.get(McProject)!.findOneBy.mockImplementation(() => Promise.resolve({ ...project }));
+    });
+
+    afterEach(async () => {
+      await fs.rm(dir, { recursive: true, force: true });
+    });
+
+    it('caixa do layout no F1: grava a cor da arte EM VOLTA da caixa (não a placa de dentro)', async () => {
+      await service.createFromArt(
+        'u1',
+        dto({ logoBox: { x: 0.1, y: 0.1, w: 0.3, h: 0.6 }, logoFace: true }),
+      );
+      expect(createdDto().logoBox).toMatchObject({
+        logoBoxSource: 'layout',
+        logoBoxConfirmed: true,
+        surroundColor: '#C62828',
+      });
+    });
+
+    it('PUT logo-box: mover a caixa amostra de novo (a cor acompanha a caixa)', async () => {
+      await service.setLogoBox('u1', PROJECT_ID, { x: 0.1, y: 0.1, w: 0.3, h: 0.6 });
+      expect(repos.get(McProject)!.update.mock.calls[0][1].logoBox.surroundColor).toBe('#C62828');
+      // caixa DENTRO do bloco azul: o anel em volta passa a ser azul
+      await service.setLogoBox('u1', PROJECT_ID, { x: 0.78, y: 0.66, w: 0.14, h: 0.18 });
+      expect(repos.get(McProject)!.update.mock.calls[1][1].logoBox.surroundColor).toBe('#1565C0');
+    });
+
+    it('detecção gravada também leva a cor; arte ilegível → surroundColor null sem derrubar', async () => {
+      await service.detectLogoBox('u1', PROJECT_ID);
+      expect(repos.get(McProject)!.update.mock.calls[0][1].logoBox).toMatchObject({
+        logoBoxSource: 'detected',
+        surroundColor: '#C62828',
+      });
+      await fs.writeFile(path.join(dir, 'a.png'), 'não é png');
+      await service.setLogoBox('u1', PROJECT_ID, { x: 0.1, y: 0.1, w: 0.3, h: 0.6 });
+      expect(repos.get(McProject)!.update.mock.calls[1][1].logoBox.surroundColor).toBeNull();
     });
   });
 });

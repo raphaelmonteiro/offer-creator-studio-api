@@ -12,6 +12,8 @@ import {
   parseLogoLocatorResponse,
   readProjectLogoBox,
   resolveLogoBox,
+  resolveTalkWindowColor,
+  sampleLogoBoxSurroundColor,
   validateLogoBoxInArt,
 } from './mc-logo-face';
 
@@ -314,5 +316,177 @@ describe('mc-logo-face — caixa do logo em camadas (D9b, tarefa 4.6)', () => {
         issues: [{ code: 'LOGO_BOX_REQUIRED', sceneId: null }],
       });
     });
+  });
+});
+
+describe('mc-logo-face — cor da janela no rosto do logo (spec video-talking-art)', () => {
+  /** Imagem crua W×H preenchida com `fill`, com retângulos pintados por cima. */
+  function image(
+    W: number,
+    H: number,
+    fill: number[],
+    rects: Array<{ x: number; y: number; w: number; h: number; rgba: number[] }> = [],
+    channels = 4,
+  ) {
+    const data = new Uint8Array(W * H * channels);
+    for (let y = 0; y < H; y += 1) {
+      for (let x = 0; x < W; x += 1) {
+        const rect = [...rects]
+          .reverse()
+          .find((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+        const px = rect ? rect.rgba : fill;
+        for (let c = 0; c < channels; c += 1) data[(y * W + x) * channels + c] = px[c] ?? 255;
+      }
+    }
+    return { data, width: W, height: H, channels };
+  }
+  const RED = [0xc6, 0x28, 0x28, 255];
+  const WHITE = [255, 255, 255, 255];
+
+  describe('sampleLogoBoxSurroundColor', () => {
+    it('mediana do anel POR FORA da caixa: a placa branca de dentro não conta', () => {
+      const img = image(200, 100, RED, [{ x: 20, y: 10, w: 60, h: 60, rgba: WHITE }]);
+      expect(sampleLogoBoxSurroundColor(img, { x: 0.1, y: 0.1, w: 0.3, h: 0.6 })).toBe('#C62828');
+    });
+
+    it('robusta a texto encostado: um traço escuro no anel não muda a mediana', () => {
+      const img = image(200, 100, RED, [
+        { x: 20, y: 10, w: 60, h: 60, rgba: WHITE },
+        { x: 82, y: 10, w: 1, h: 60, rgba: [0, 0, 0, 255] },
+      ]);
+      expect(sampleLogoBoxSurroundColor(img, { x: 0.1, y: 0.1, w: 0.3, h: 0.6 }, 4)).toBe(
+        '#C62828',
+      );
+    });
+
+    it('caixa na borda da arte: anel recortado à arte; RGB sem alfa também serve', () => {
+      const img = image(100, 100, [10, 20, 30], [{ x: 0, y: 0, w: 40, h: 40, rgba: WHITE }], 3);
+      expect(sampleLogoBoxSurroundColor(img, { x: 0, y: 0, w: 0.4, h: 0.4 })).toBe('#0A141E');
+    });
+
+    it('pixels transparentes ficam de fora; sem anel opaco ou caixa = arte inteira → null', () => {
+      const img = image(
+        100,
+        100,
+        [0, 0, 0, 0],
+        [
+          { x: 30, y: 30, w: 40, h: 40, rgba: WHITE },
+          { x: 70, y: 30, w: 3, h: 40, rgba: [0x1e, 0x50, 0xc8, 255] },
+        ],
+      );
+      expect(sampleLogoBoxSurroundColor(img, { x: 0.3, y: 0.3, w: 0.4, h: 0.4 })).toBe('#1E50C8');
+      expect(
+        sampleLogoBoxSurroundColor(image(50, 50, [0, 0, 0, 0]), { x: 0.2, y: 0.2, w: 0.2, h: 0.2 }),
+      ).toBeNull();
+      expect(sampleLogoBoxSurroundColor(image(50, 50, RED), { x: 0, y: 0, w: 1, h: 1 })).toBeNull();
+      expect(sampleLogoBoxSurroundColor(image(50, 50, RED), { x: 0, y: 0, w: 0, h: 1 })).toBeNull();
+    });
+
+    it('espessura do anel: 0,6% do lado maior, mínimo 3 px', () => {
+      // a 4 px da caixa há uma faixa azul: o anel de 3 px (arte 100×100) não a alcança
+      const img = image(100, 100, RED, [
+        { x: 40, y: 40, w: 20, h: 20, rgba: WHITE },
+        { x: 0, y: 0, w: 100, h: 36, rgba: [0, 0, 255, 255] },
+      ]);
+      expect(sampleLogoBoxSurroundColor(img, { x: 0.4, y: 0.4, w: 0.2, h: 0.2 })).toBe('#C62828');
+    });
+  });
+
+  describe('resolveTalkWindowColor', () => {
+    const box = {
+      ...BOX,
+      logoBoxSource: 'layout',
+      logoBoxConfidence: null,
+      logoBoxConfirmed: true,
+    };
+
+    it('roteiro → cor amostrada (só no rosto do logo) → fundo do kit → fallback, sempre maiúscula', () => {
+      const logoBox = { ...box, surroundColor: '#c62828' };
+      expect(
+        resolveTalkWindowColor({
+          scriptColor: '#f5f5f5',
+          logoFace: true,
+          logoBox,
+          kitColor: '#D32F2F',
+          fallback: '#FFFFFF',
+        }),
+      ).toBe('#F5F5F5');
+      expect(
+        resolveTalkWindowColor({
+          scriptColor: null,
+          logoFace: true,
+          logoBox,
+          kitColor: '#D32F2F',
+          fallback: '#FFFFFF',
+        }),
+      ).toBe('#C62828');
+      expect(
+        resolveTalkWindowColor({
+          scriptColor: '  ',
+          logoFace: false,
+          logoBox,
+          kitColor: '#d32f2f',
+          fallback: '#FFFFFF',
+        }),
+      ).toBe('#D32F2F');
+      expect(
+        resolveTalkWindowColor({
+          logoFace: true,
+          logoBox: { ...box, surroundColor: null },
+          kitColor: null,
+          fallback: '#ffffff',
+        }),
+      ).toBe('#FFFFFF');
+    });
+
+    it('caixa antiga (sem surroundColor) ou cor inválida → vale a cor do kit', () => {
+      expect(
+        resolveTalkWindowColor({
+          logoFace: true,
+          logoBox: box,
+          kitColor: '#D32F2F',
+          fallback: '#FFFFFF',
+        }),
+      ).toBe('#D32F2F');
+      expect(
+        resolveTalkWindowColor({
+          logoFace: true,
+          logoBox: { ...box, surroundColor: 'red' },
+          kitColor: '#D32F2F',
+          fallback: '#FFFFFF',
+        }),
+      ).toBe('#D32F2F');
+    });
+  });
+
+  it('readProjectLogoBox preserva surroundColor válida (maiúscula) e null; descarta inválida', () => {
+    const base = {
+      ...BOX,
+      logoBoxSource: 'layout',
+      logoBoxConfidence: null,
+      logoBoxConfirmed: true,
+    };
+    expect(readProjectLogoBox({ ...base, surroundColor: '#c62828' })?.surroundColor).toBe(
+      '#C62828',
+    );
+    expect(readProjectLogoBox({ ...base, surroundColor: null })).toHaveProperty(
+      'surroundColor',
+      null,
+    );
+    expect(readProjectLogoBox({ ...base, surroundColor: 'vermelho' })).not.toHaveProperty(
+      'surroundColor',
+    );
+    expect(readProjectLogoBox(base)).not.toHaveProperty('surroundColor');
+  });
+
+  it('confirmar a MESMA caixa preserva a cor; marcar outra caixa volta sem cor (o service amostra de novo)', () => {
+    const current = stored({ surroundColor: '#C62828' });
+    expect(confirmLogoBox(current, { ...BOX })).toMatchObject({
+      surroundColor: '#C62828',
+      logoBoxConfirmed: true,
+    });
+    expect(confirmLogoBox(current, { x: 0.3, y: 0.02, w: 0.25, h: 0.08 })).not.toHaveProperty(
+      'surroundColor',
+    );
   });
 });

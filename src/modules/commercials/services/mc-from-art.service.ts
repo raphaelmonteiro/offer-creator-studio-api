@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import * as sharp from 'sharp';
 import { DataSource, In } from 'typeorm';
 import { Client } from '../../clients/entities/client.entity';
 import { FlyerBuilderV2Document } from '../../flyer-builder-v2/entities/flyer-builder-v2-document.entity';
@@ -32,6 +33,7 @@ import {
   logoBoxActions,
   readProjectLogoBox,
   resolveLogoBox,
+  sampleLogoBoxSurroundColor,
   validateLogoBoxInArt,
 } from '../domain/mc-logo-face';
 import { assertFormatEnabled, assertPipelineV2ForFormat } from '../domain/mc-pipeline.config';
@@ -283,11 +285,19 @@ export class McFromArtService {
     const kitId = dto.kitId ?? (await this.suggestedKitIdOrThrow(userId, source.clientId));
     // D9b: (a) caixa do layout como está; (b/c) com `logoFace` e sem caixa,
     // UMA detecção — proposta ≥ 0,7 gravada sem confirmação, senão sem caixa.
-    const logoBox = dto.logoBox
+    // F1: a caixa leva a cor da arte em volta (cor da janela no rosto do logo).
+    const resolvedLogoBox = dto.logoBox
       ? resolveLogoBox({ layoutBox: dto.logoBox }).logoBox
       : dto.logoFace === true && format === 'talking_art'
         ? await this.proposeLogoBox(userId, kitId, asset)
         : null;
+    const logoBox =
+      format === 'talking_art'
+        ? await this.withSurroundColor(
+            resolvedLogoBox,
+            asset.fileUrl ? this.storage.absoluteFromUrl(asset.fileUrl) : null,
+          )
+        : resolvedLogoBox;
 
     const sourceArt: McSourceArt = {
       kind: dto.sourceKind,
@@ -474,7 +484,10 @@ export class McFromArtService {
     const detection = await this.locator.locate(artPath, logoPath);
     const resolution = resolveLogoBox({ detection });
     const current = readProjectLogoBox(project.logoBox);
-    const next = resolution.logoBox ?? (current?.logoBoxConfirmed ? current : null);
+    const next = await this.withSurroundColor(
+      resolution.logoBox ?? (current?.logoBoxConfirmed ? current : null),
+      artPath,
+    );
     await this.writeLogoBox(project, next);
     return McFromArtService.logoBoxView(project.id, next, detection);
   }
@@ -495,7 +508,11 @@ export class McFromArtService {
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
-    const next = confirmLogoBox(readProjectLogoBox(project.logoBox), box);
+    const artPath = await this.artPathOrThrow(userId, project.backgroundArtAssetId);
+    const next = await this.withSurroundColor(
+      confirmLogoBox(readProjectLogoBox(project.logoBox), box),
+      artPath,
+    );
     await this.writeLogoBox(project, next);
     return McFromArtService.logoBoxView(project.id, next, null);
   }
@@ -603,6 +620,33 @@ export class McFromArtService {
       );
     }
     return logoPath;
+  }
+
+  /**
+   * A caixa com a cor da arte EM VOLTA dela (`surroundColor`), amostrada a
+   * cada gravação — mover a caixa muda a cor. É a cor da janela no modo rosto
+   * do logo (spec video-talking-art). Falha de leitura nunca bloqueia: fica
+   * `null` e vale o fundo do tile do kit.
+   */
+  private async withSurroundColor(
+    box: McProjectLogoBox | null,
+    artPath: string | null,
+  ): Promise<McProjectLogoBox | null> {
+    if (!box) return null;
+    if (!artPath) return { ...box, surroundColor: null };
+    try {
+      const { data, info } = await sharp(artPath).raw().toBuffer({ resolveWithObject: true });
+      const surroundColor = sampleLogoBoxSurroundColor(
+        { data, width: info.width, height: info.height, channels: info.channels },
+        box,
+      );
+      return { ...box, surroundColor };
+    } catch (err) {
+      this.logger.warn(
+        `Rosto do logo: cor em volta da caixa não amostrada (${(err as Error)?.message ?? err}) — vale a cor do kit.`,
+      );
+      return { ...box, surroundColor: null };
+    }
   }
 
   /** Escrita condicionada ao status (CAS): mudou de fase no meio do caminho → 422 PROJECT_NOT_EDITABLE. */

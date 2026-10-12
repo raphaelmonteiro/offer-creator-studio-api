@@ -320,6 +320,32 @@ describe('McComposeFfmpegProcessor — step de projeto compose_ffmpeg (tarefas 4
     });
   });
 
+  it('rosto do logo: sem cor no roteiro, o excedente da janela usa a cor amostrada da arte em volta da caixa', async () => {
+    kit.identityMode = 'logo_as_is';
+    (project.script as Record<string, unknown>).logoFace = true;
+    (project.script as Record<string, unknown>).talkBackgroundColor = null;
+    project.logoBox = {
+      x: 0.1,
+      y: 0.05,
+      w: 0.3,
+      h: 0.1,
+      logoBoxSource: 'layout',
+      logoBoxConfidence: null,
+      logoBoxConfirmed: true,
+      surroundColor: '#C62828',
+    };
+    await processor.process({ stepId: 'cmp-1' });
+    expect(pipeline.failStep).not.toHaveBeenCalled();
+    const compose = runWith(ffmpeg, 'composed.mp4') as string[];
+    const graph = compose[compose.indexOf('-filter_complex') + 1];
+    expect(graph).toContain(
+      "scale=324:-2,crop=iw:'min(ih,136)',pad=324:136:(ow-iw)/2:(oh-ih)/2:color=0xC62828",
+    );
+    expect(saved[0]).toMatchObject({
+      metadata: expect.objectContaining({ backgroundColor: '#C62828' }),
+    });
+  });
+
   it('rosto do logo sem caixa confirmada ⇒ falha honesta (logo_box_unconfirmed), sem ffmpeg', async () => {
     (project.script as Record<string, unknown>).logoFace = true;
     project.logoBox = {

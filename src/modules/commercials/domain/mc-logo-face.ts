@@ -49,6 +49,14 @@ export interface McProjectLogoBox extends McLogoBox {
   logoBoxConfidence: number | null;
   /** Só caixa confirmada libera a produção no modo rosto do logo. */
   logoBoxConfirmed: boolean;
+  /**
+   * Cor da arte EM VOLTA da caixa (#RRGGBB), amostrada a cada gravação da
+   * caixa (`sampleLogoBoxSurroundColor`): no modo rosto do logo é a cor da
+   * janela — fundo do tile de fala e excedente vertical — quando o roteiro
+   * não escolheu outra (`resolveTalkWindowColor`). `null` = amostragem
+   * falhou; ausente = caixa gravada antes da amostragem existir.
+   */
+  surroundColor?: string | null;
 }
 
 /** Resultado do detector (services/mc-logo-locator.service.ts). Nunca lança: falha vira `error`. */
@@ -120,13 +128,122 @@ export function readProjectLogoBox(raw: unknown): McProjectLogoBox | null {
       ? meta.logoBoxSource
       : 'layout';
   const confidence = finite(meta.logoBoxConfidence);
+  const surroundColor =
+    typeof meta.surroundColor === 'string' && HEX_COLOR.test(meta.surroundColor)
+      ? meta.surroundColor.toUpperCase()
+      : meta.surroundColor === null
+        ? null
+        : undefined;
   return {
     ...box,
     logoBoxSource: source,
     logoBoxConfidence: confidence == null ? null : Math.min(1, Math.max(0, confidence)),
     logoBoxConfirmed:
       typeof meta.logoBoxConfirmed === 'boolean' ? meta.logoBoxConfirmed : source !== 'detected',
+    ...(surroundColor !== undefined ? { surroundColor } : {}),
   };
+}
+
+// ─────────────────────── cor da janela no rosto do logo ───────────────────────
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/** Espessura do anel amostrado em volta da caixa: fração do lado maior da arte (8 px em 1350). */
+export const MC_LOGO_FACE_RING_FRACTION = 0.006;
+/** Espessura mínima do anel, em px da arte. */
+export const MC_LOGO_FACE_RING_MIN_PX = 3;
+/** Pixels com alfa abaixo disso não entram na amostra (arte com transparência). */
+const RING_MIN_ALPHA = 128;
+
+/** Pixels crus da arte (sharp `.raw()`): RGB ou RGBA, linha a linha. */
+export interface McRawImage {
+  data: Uint8Array;
+  width: number;
+  height: number;
+  channels: number;
+}
+
+/**
+ * Cor da arte EM VOLTA da caixa do logo (spec video-talking-art, "Modo rosto
+ * do logo": o excedente vertical e o fundo do tile recebem a cor amostrada da
+ * arte em volta da caixa, sem borda visível): MEDIANA por canal de um anel de
+ * pixels POR FORA da caixa (espessura `MC_LOGO_FACE_RING_FRACTION` do lado
+ * maior, mínimo 3 px), recortado à arte — robusta a texto e bordas que
+ * encostam na caixa. Pixels transparentes ficam de fora. Sem anel (a caixa
+ * cobre a arte inteira) ou sem pixel opaco → null (vale a cor do kit).
+ */
+export function sampleLogoBoxSurroundColor(
+  image: McRawImage,
+  box: McLogoBox,
+  ringPx?: number,
+): string | null {
+  const { data, width: W, height: H, channels } = image;
+  const clamped = clampLogoBox(box);
+  if (!clamped || W <= 0 || H <= 0 || channels < 3) return null;
+  const left = Math.round(clamped.x * W);
+  const top = Math.round(clamped.y * H);
+  const right = Math.round((clamped.x + clamped.w) * W);
+  const bottom = Math.round((clamped.y + clamped.h) * H);
+  const ring = Math.max(
+    1,
+    Math.round(
+      ringPx ?? Math.max(MC_LOGO_FACE_RING_MIN_PX, MC_LOGO_FACE_RING_FRACTION * Math.max(W, H)),
+    ),
+  );
+  const histograms = [
+    new Array<number>(256).fill(0),
+    new Array<number>(256).fill(0),
+    new Array<number>(256).fill(0),
+  ];
+  let count = 0;
+  for (let y = Math.max(0, top - ring); y < Math.min(H, bottom + ring); y += 1) {
+    for (let x = Math.max(0, left - ring); x < Math.min(W, right + ring); x += 1) {
+      if (x >= left && x < right && y >= top && y < bottom) continue;
+      const i = (y * W + x) * channels;
+      if (channels >= 4 && data[i + 3] < RING_MIN_ALPHA) continue;
+      histograms[0][data[i]] += 1;
+      histograms[1][data[i + 1]] += 1;
+      histograms[2][data[i + 2]] += 1;
+      count += 1;
+    }
+  }
+  if (count === 0) return null;
+  const median = (histogram: number[]): number => {
+    const half = Math.floor(count / 2);
+    let seen = 0;
+    for (let v = 0; v < 256; v += 1) {
+      seen += histogram[v];
+      if (seen > half) return v;
+    }
+    return 255;
+  };
+  return `#${histograms.map((h) => median(h).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+}
+
+/**
+ * Cor da janela do F1 — fundo do tile de fala (entra no hash do `talk`) e
+ * preenchimento da janela no compose (entra no hash do `compose_ffmpeg`).
+ * Ordem: a cor escolhida no roteiro (`talkBackgroundColor`) → no modo rosto
+ * do logo, a cor amostrada da arte em volta da caixa → o fundo do tile do
+ * kit → `fallback`. Sempre `#RRGGBB` maiúsculo. Mesma regra nos três
+ * lugares (materializer: talk e hash do compose; processor do compose).
+ */
+export function resolveTalkWindowColor(input: {
+  scriptColor?: string | null;
+  logoFace?: boolean;
+  logoBox?: unknown;
+  kitColor?: string | null;
+  fallback: string;
+}): string {
+  const surround = input.logoFace
+    ? (readProjectLogoBox(input.logoBox)?.surroundColor ?? null)
+    : null;
+  return (
+    input.scriptColor?.trim() ||
+    surround ||
+    input.kitColor?.trim() ||
+    input.fallback
+  ).toUpperCase();
 }
 
 /** Ações da UI para uma caixa gravada: nada a fazer, confirmar a proposta, ou marcar. */

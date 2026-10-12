@@ -694,6 +694,64 @@ describe('McMaterializerService — cenas talk_tile (tarefas 3.3/3.4/3.8)', () =
     expect(economico.steps[0].inputHash).not.toBe(premium.steps[0].inputHash);
   });
 
+  it('rosto do logo: sem cor no roteiro, a janela usa a cor AMOSTRADA da arte em volta da caixa (talk e hash do compose); a cor do roteiro ainda vence', async () => {
+    const base = fixtureTalkTileScript();
+    const script = { ...base, talkBackgroundColor: null, logoFace: true } as McScript;
+    const manager = fakeManager({ assets: [tileAsset] });
+    manager.seed(McCharacterKit, [{ ...talkKit, identityMode: 'logo_as_is', source: 'logo' }]);
+    const box = {
+      x: 0.04,
+      y: 0.01,
+      w: 0.12,
+      h: 0.16,
+      logoBoxSource: 'layout',
+      logoBoxConfidence: null,
+      logoBoxConfirmed: true,
+    };
+    const project = {
+      ...talkProject(script),
+      logoBox: { ...box, surroundColor: '#c62828' },
+    } as unknown as McProject;
+    const scenes = await service.syncScenesV2(manager, project, script, { rearm: true });
+    for (const scene of scenes) Object.assign(scene, { audioAssetId: 'au' });
+    const sampled = await service.materializeProductionV2(manager, project, script, [scenes[0]]);
+    expect(sampled.steps[0].inputSnapshot).toMatchObject({
+      backgroundColor: '#C62828',
+      identityMode: 'logo_as_is',
+    });
+
+    // caixa antiga (sem amostra) → fundo do kit; hash diferente (o clipe muda de cor)
+    const legacy = await service.materializeProductionV2(
+      manager,
+      { ...project, revision: 2, logoBox: box } as unknown as McProject,
+      script,
+      [scenes[0]],
+    );
+    expect(legacy.steps[0].inputSnapshot).toMatchObject({ backgroundColor: '#112233' });
+    expect(legacy.steps[0].inputHash).not.toBe(sampled.steps[0].inputHash);
+
+    // a cor escolhida no roteiro vence a amostrada
+    const chosen = { ...script, talkBackgroundColor: '#F5F5F5' } as McScript;
+    const picked = await service.materializeProductionV2(
+      manager,
+      { ...project, revision: 3, script: chosen } as unknown as McProject,
+      chosen,
+      [scenes[0]],
+    );
+    expect(picked.steps[0].inputSnapshot).toMatchObject({ backgroundColor: '#F5F5F5' });
+
+    // compose: a mesma cor amostrada entra no hash (mudar a amostra refaz a composição)
+    const composeA = await service.ensureAssemblyStepV2(manager, project, script, scenes);
+    const hashA = composeA.inputHash;
+    const composeB = await service.ensureAssemblyStepV2(
+      manager,
+      { ...project, logoBox: { ...box, surroundColor: '#1565C0' } } as unknown as McProject,
+      script,
+      scenes,
+    );
+    expect(composeB.inputHash).not.toBe(hashA);
+  });
+
   it('logo_as_is usa o motor de logo em premium', async () => {
     const script = fixtureTalkTileScript();
     const manager = fakeManager({ assets: [tileAsset] });

@@ -11,7 +11,7 @@ import { buildConcatListContent } from '../domain/mc-assembly-graph';
 import { compositionDimensions } from '../domain/mc-composition.config';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import { MC_TALK_GAP_MS } from '../domain/mc-talk-conform-graph';
-import { readProjectLogoBox } from '../domain/mc-logo-face';
+import { readProjectLogoBox, resolveTalkWindowColor } from '../domain/mc-logo-face';
 import {
   buildComposeGraph,
   ComposeGraphInput,
@@ -171,11 +171,15 @@ export class McComposeFfmpegProcessor {
       const kit = await this.dataSource
         .getRepository(McCharacterKit)
         .findOneBy({ id: project.kitId });
-      const backgroundColor = (
-        script?.talkBackgroundColor?.trim() ||
-        kit?.tileBackgroundColor?.trim() ||
-        DEFAULT_WINDOW_COLOR
-      ).toUpperCase();
+      // Mesma regra do talk e do hash do compose (materializer): roteiro → cor da
+      // arte em volta da caixa no rosto do logo → fundo do tile do kit.
+      const backgroundColor = resolveTalkWindowColor({
+        scriptColor: script?.talkBackgroundColor,
+        logoFace,
+        logoBox: project.logoBox,
+        kitColor: kit?.tileBackgroundColor,
+        fallback: DEFAULT_WINDOW_COLOR,
+      });
       const window = isWindowWellFormed(script?.window)
         ? script!.window!
         : defaultCharacterWindow({
