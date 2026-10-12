@@ -46,7 +46,9 @@ export class AddCommercialsPipelineV21765600000000 implements MigrationInterface
     await queryRunner.query(
       `ALTER TABLE "mc_steps" ADD COLUMN IF NOT EXISTS "attempt" integer NOT NULL DEFAULT 1`,
     );
-    await queryRunner.query(`ALTER TABLE "mc_steps" ADD COLUMN IF NOT EXISTS "inputSnapshot" jsonb`);
+    await queryRunner.query(
+      `ALTER TABLE "mc_steps" ADD COLUMN IF NOT EXISTS "inputSnapshot" jsonb`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
