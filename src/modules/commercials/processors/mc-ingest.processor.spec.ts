@@ -476,6 +476,8 @@ describe('McIngestProcessor — step talk: conformação ao áudio, inspeção p
     );
 
     it('3ª execução (teto da classe) → NÃO é terminal: último quadro clonado até o áudio, aceito e marcado para revisão humana; inspeção ainda roda', async () => {
+      // clipe 720×960: tier econômico (no premium a garantia de 1080 px reprovaria antes — 7.2)
+      (step.inputSnapshot as Record<string, unknown>).tier = 'economico';
       step.attempts = 3;
       await processor.process({ stepId: 'st-talk' });
       expect(pipeline.failStep).not.toHaveBeenCalled();
@@ -674,30 +676,18 @@ describe('McIngestProcessor — step talk: conformação ao áudio, inspeção p
       expect(classifyMcError(err)).toBe('quality');
     });
 
-    it('premium 720×960 na 2ª execução (uma regeração) → aceito com premiumResolutionOk = false sinalizado; inspeção roda', async () => {
+    it('premium 720×960 na 2ª execução (teto esgotado) → clip_low_resolution_final terminal: nada publicado, projeto vai para precisa de atenção', async () => {
       lowRes();
       step.attempts = 2;
       await processor.process({ stepId: 'st-talk' });
-      expect(pipeline.failStep).not.toHaveBeenCalled();
-      expect(inspector.inspect).toHaveBeenCalledTimes(1);
-      expect(savedAssets[0]).toMatchObject({
-        width: 720,
-        height: 960,
-        metadata: expect.objectContaining({
-          premiumResolutionOk: false,
-          resolution: {
-            width: 720,
-            height: 960,
-            longSidePx: 960,
-            requiredLongSidePx: 1080,
-            ok: false,
-            accepted: true,
-            acceptedReason: 'clip_low_resolution',
-            executions: 2,
-          },
-        }),
-      });
-      expect(pipeline.completeStepAndAdvance).toHaveBeenCalledTimes(1);
+      expect(savedAssets).toHaveLength(0);
+      expect(inspector.inspect).not.toHaveBeenCalled();
+      expect(pipeline.completeStepAndAdvance).not.toHaveBeenCalled();
+      const err = pipeline.failStep.mock.calls[0][2] as TerminalProviderError;
+      expect(err).toBeInstanceOf(TerminalProviderError);
+      expect(err.code).toBe('clip_low_resolution_final');
+      // fora da classe quality: sem nova execução (validation tem teto 1)
+      expect(classifyMcError(err)).toBe('validation');
     });
 
     it('logo_as_is no premium → a garantia não se aplica: 720×960 segue sem premiumResolutionOk', async () => {

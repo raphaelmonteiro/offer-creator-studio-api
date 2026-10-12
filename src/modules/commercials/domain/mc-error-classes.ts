@@ -56,10 +56,19 @@ export const MC_CLIP_TOO_SHORT_ERROR_CODE = 'clip_too_short';
 /**
  * Ingest (tarefa 7.2): clipe do tier premium (exceto `logo_as_is`) com o lado
  * maior < 1080 px antes da composição. Classe `quality` com teto PRÓPRIO
- * (`MC_QUALITY_CODE_MAX_EXECUTIONS`): uma regeração; depois o clipe é aceito
- * com `premiumResolutionOk = false` registrado no asset.
+ * (`MC_QUALITY_CODE_MAX_EXECUTIONS`): uma regeração; depois o ingest lança
+ * `MC_CLIP_LOW_RESOLUTION_FINAL_ERROR_CODE`.
  */
 export const MC_CLIP_LOW_RESOLUTION_ERROR_CODE = 'clip_low_resolution';
+/**
+ * Teto de `clip_low_resolution` esgotado: o clipe premium continua abaixo de
+ * 1080 px. Spec "Tier premium": o clipe premium nasce com lado maior ≥ 1080
+ * ANTES da composição, então ele NÃO segue para a composição. Fora da classe
+ * `quality` (vira `validation`, sem nova execução): o step falha, a cena fica
+ * `failed` e o projeto vai para `needs_attention` com "refazer" e "duplicar
+ * como econômico" (mesmas ações do motor indisponível).
+ */
+export const MC_CLIP_LOW_RESOLUTION_FINAL_ERROR_CODE = 'clip_low_resolution_final';
 
 /** Todos os códigos da classe `quality`: nova geração no provider até o teto, depois aceite. */
 export const MC_QUALITY_ERROR_CODES: readonly string[] = [

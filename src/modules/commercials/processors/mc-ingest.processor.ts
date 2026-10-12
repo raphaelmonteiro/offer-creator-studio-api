@@ -45,6 +45,7 @@ import {
 } from '../services/mc-clip-inspector.service';
 import {
   MC_CLIP_LOW_RESOLUTION_ERROR_CODE,
+  MC_CLIP_LOW_RESOLUTION_FINAL_ERROR_CODE,
   MC_CLIP_TOO_SHORT_ERROR_CODE,
   mcShouldRegenerateQuality,
   mcShouldRetry,
@@ -70,8 +71,8 @@ interface TalkIngestSnapshot {
 /**
  * Resolução do clipe falado registrada no asset (7.2): medidas do arquivo que
  * vai à composição (conformado) e, no premium (exceto `logo_as_is`), o
- * veredito da garantia de 1080 px — `accepted` quando o teto do código
- * `clip_low_resolution` esgotou e o clipe seguiu assim mesmo.
+ * veredito da garantia de 1080 px (sempre `ok: true` quando se aplica: abaixo
+ * de 1080 o clipe não é publicado).
  */
 export interface TalkResolutionRecord {
   width: number | null;
@@ -80,9 +81,6 @@ export interface TalkResolutionRecord {
   /** 1080 quando a garantia do premium se aplica; null = não se aplica. */
   requiredLongSidePx: number | null;
   ok: boolean | null;
-  accepted?: true;
-  acceptedReason?: typeof MC_CLIP_LOW_RESOLUTION_ERROR_CODE;
-  executions?: number;
 }
 
 /** Resultado da conformação do clipe falado ao áudio (D7) — vai ao metadata do asset. */
@@ -126,8 +124,8 @@ interface TalkConformRecord {
  * (áudio do fornecedor descartado); a inspeção recebe origem/estilo/fundo liso
  * e as janelas de fala do alinhamento. No tier premium (exceto `logo_as_is`)
  * o clipe conformado precisa ter lado maior ≥ 1080 px (7.2): abaixo disso,
- * `clip_low_resolution` com uma regeração e depois aceite sinalizado
- * (`metadata.premiumResolutionOk = false`).
+ * `clip_low_resolution` com uma regeração e depois falha terminal
+ * (`clip_low_resolution_final`, projeto em "precisa de atenção").
  */
 @Injectable()
 export class McIngestProcessor {
@@ -537,8 +535,9 @@ export class McIngestProcessor {
    * Garantia de 1080 px do premium (7.2, spec "Tier premium"): projeto
    * premium com kit que NÃO é `logo_as_is` exige lado maior ≥ 1080 px no
    * clipe conformado. Abaixo disso: `clip_low_resolution` (classe `quality`,
-   * UMA regeração pelo teto do código); esgotado, aceita e registra
-   * `premiumResolutionOk = false`. Fora do premium só registra as medidas.
+   * UMA regeração pelo teto do código); esgotado, `clip_low_resolution_final`
+   * (sem nova execução): o clipe não vai à composição e o projeto fica em
+   * "precisa de atenção". Fora do premium só registra as medidas.
    */
   private async checkTalkResolution(
     step: McStep,
@@ -575,16 +574,11 @@ export class McIngestProcessor {
         MC_CLIP_LOW_RESOLUTION_ERROR_CODE,
       );
     }
-    this.logger.warn(
-      `Ingest ${step.id}: clipe premium ${width ?? '?'}×${height ?? '?'} abaixo de ` +
-        `${MC_PREMIUM_MIN_LONG_SIDE_PX} px após ${step.attempts} gerações — aceito e sinalizado`,
+    throw new TerminalProviderError(
+      `Clipe premium com ${width ?? '?'}×${height ?? '?'} px após ${step.attempts} gerações ` +
+        `(lado maior < ${MC_PREMIUM_MIN_LONG_SIDE_PX}) — não vai à composição`,
+      MC_CLIP_LOW_RESOLUTION_FINAL_ERROR_CODE,
     );
-    return {
-      ...record,
-      accepted: true,
-      acceptedReason: MC_CLIP_LOW_RESOLUTION_ERROR_CODE,
-      executions: step.attempts,
-    };
   }
 
   /** Validação exportável no domain (mc-pipeline.config) — aqui só o erro tipado. */
