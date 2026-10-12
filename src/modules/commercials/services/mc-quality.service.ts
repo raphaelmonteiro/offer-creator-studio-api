@@ -108,6 +108,34 @@ import { McTranslationService } from './mc-translation.service';
  * - Projetos legados (pipelineVersion 1) não entram aqui: as rotas fazem o
  *   dispatch e 422 PIPELINE_VERSION quando o executor não corresponde.
  */
+/**
+ * Texto falado anterior que mudou nesta edição (narração do F1 e falas por cena),
+ * para o histórico do evento `script_updated`. Vazio quando nada falado mudou.
+ */
+export function spokenTextHistory(
+  previous: McScript | null | undefined,
+  next: McScript,
+): {
+  previousNarration?: string;
+  previousDialogues?: Array<{ sceneId: string; dialogue: string }>;
+} {
+  if (!previous) return {};
+  const out: {
+    previousNarration?: string;
+    previousDialogues?: Array<{ sceneId: string; dialogue: string }>;
+  } = {};
+  if (typeof previous.narration === 'string' && previous.narration !== next.narration) {
+    out.previousNarration = previous.narration;
+  }
+  const nextById = new Map(next.scenes.map((sc) => [sc.sceneId, sc.dialogue ?? null]));
+  const changed = (previous.scenes ?? [])
+    .filter((sc) => sc.sceneId && typeof sc.dialogue === 'string')
+    .filter((sc) => nextById.get(sc.sceneId as string) !== sc.dialogue)
+    .map((sc) => ({ sceneId: sc.sceneId as string, dialogue: sc.dialogue as string }));
+  if (changed.length > 0) out.previousDialogues = changed;
+  return out;
+}
+
 @Injectable()
 export class McQualityService {
   private readonly logger = new Logger(McQualityService.name);
@@ -288,6 +316,9 @@ export class McQualityService {
           revision: nextRevision,
           sceneCount: script.scenes.length,
           compositionOnly,
+          // Spec video-talking-art "Edição do texto": a versão anterior do texto falado
+          // fica registrada no evento (só o que mudou: narração e falas por cena).
+          ...spokenTextHistory(previous, script),
         },
       });
       await this.transitions.notify(
