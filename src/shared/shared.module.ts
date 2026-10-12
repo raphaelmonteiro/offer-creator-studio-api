@@ -8,6 +8,7 @@ import { AiCreditLedgerEntry } from './credits/ai-credit-ledger.entity';
 import { MediaAssetsService } from './media-assets/media-assets.service';
 import { AnimationAsset } from './media-assets/animation-asset.entity';
 import { FfmpegRunner } from './ffmpeg/ffmpeg-runner';
+import { RenderPreflightService } from './ffmpeg/render-preflight.service';
 import { ResourceGuardService } from './resource-guard/resource-guard.service';
 import { AnimationEventsService } from './events/animation-events.service';
 import { UploadsGcService } from './gc/uploads-gc.service';
@@ -51,6 +52,7 @@ import { ModerationProvider } from './providers/moderation.provider';
     CreditsService,
     MediaAssetsService,
     FfmpegRunner,
+    RenderPreflightService,
     ResourceGuardService,
     AnimationEventsService,
     UploadsGcService,
@@ -69,6 +71,7 @@ import { ModerationProvider } from './providers/moderation.provider';
     CreditsService,
     MediaAssetsService,
     FfmpegRunner,
+    RenderPreflightService,
     ResourceGuardService,
     AnimationEventsService,
     UploadsGcService,

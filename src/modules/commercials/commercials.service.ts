@@ -12,7 +12,12 @@ import { CreditsService, creditsEnabled } from '../../shared/credits/credits.ser
 import { AnimationAsset } from '../../shared/media-assets/animation-asset.entity';
 import { MC_EVENTS_CHANNEL } from '../../shared/events/animation-events.service';
 import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queue.service';
+import { renderMissingFor } from '../../shared/ffmpeg/render-preflight';
 import { SystemSettingsService } from '../../shared/settings/system-settings.service';
+import {
+  WORKER_HEARTBEAT_KEY,
+  WorkerHeartbeat,
+} from '../../shared/settings/worker-heartbeat.service';
 import { TaskTransitionService } from '../../shared/state/task-transition.service';
 import { computeInputHash, MC_BUILDER_VERSIONS } from './domain/input-hash';
 import { MC_PROJECT_MINI_RESERVE_CREDITS, MC_STEP_CREDITS } from './domain/mc-pricing.config';
@@ -22,7 +27,12 @@ import {
   McProjectStatus,
   McStepStatus,
 } from './domain/mc-state-machines';
-import { McStepType, resolveProjectOptions } from './domain/mc-types';
+import {
+  MC_DEFAULT_PROJECT_FORMAT,
+  McProjectFormat,
+  McStepType,
+  resolveProjectOptions,
+} from './domain/mc-types';
 import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
 import { randomUUID } from 'crypto';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -76,6 +86,34 @@ export class CommercialsService {
   ) {}
 
   /**
+   * Gate de preflight (spec video-composition-render, "Preflight por formato"):
+   * lê o heartbeat FRESCO do worker e recusa com 422 RENDER_UNAVAILABLE quando
+   * o último preflight diz que falta requisito DESTE formato. Preflight
+   * desconhecido (worker ainda sem batimento) ou tabela indisponível não
+   * bloqueiam: o bloqueio é só por falta comprovada.
+   */
+  async assertRenderAvailable(format: McProjectFormat): Promise<void> {
+    let heartbeat: WorkerHeartbeat | null = null;
+    try {
+      heartbeat = await this.settings.getFresh<WorkerHeartbeat>(WORKER_HEARTBEAT_KEY);
+    } catch {
+      return;
+    }
+    const missing = renderMissingFor(format, heartbeat?.render);
+    if (!missing || missing.length === 0) return;
+    throw new HttpException(
+      {
+        code: 'RENDER_UNAVAILABLE',
+        message:
+          `O worker não tem o necessário para renderizar o formato "${format}": ` +
+          missing.join(', '),
+        details: { format, missing, checkedAt: heartbeat?.render?.checkedAt ?? null },
+      },
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+
+  /**
    * Criação do projeto (fatia vertical da Fase 0): valida ownership do kit,
    * cria o projeto em 'draft', CAS draft → scripting, cria o step 'script'
    * (com inputHash canônico), enfileira em mc.llm e emite evento + pg_notify —
@@ -93,6 +131,11 @@ export class CommercialsService {
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
+
+    // Preflight de render (design D14): recusa antes de qualquer gasto quando o
+    // worker publicou que falta requisito do formato. O formato chega no DTO
+    // com os formatos novos (tarefas 4.x); até lá todo projeto é 'scenes'.
+    await this.assertRenderAvailable(MC_DEFAULT_PROJECT_FORMAT);
 
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: dto.kitId });
     if (!kit) throw new NotFoundException('Kit não encontrado');

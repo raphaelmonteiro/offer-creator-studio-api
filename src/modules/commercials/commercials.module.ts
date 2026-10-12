@@ -8,7 +8,7 @@ import { EmailModule } from '../email/email.module';
 import { MascotsModule } from '../mascots/mascots.module';
 import { CommercialsController } from './commercials.controller';
 import { CommercialsService } from './commercials.service';
-import { MC_QUEUE_CONCURRENCY } from './domain/mc-pipeline.config';
+import { MC_QUEUE_CONCURRENCY, parseMcFormats } from './domain/mc-pipeline.config';
 import { McCharacterKit } from './entities/mc-character-kit.entity';
 import { McEvent } from './entities/mc-event.entity';
 import { McProject } from './entities/mc-project.entity';
@@ -110,6 +110,8 @@ export class CommercialsModule implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     if (process.env.MC_ENABLED !== 'true') return;
+    // Falha cedo com MC_FORMATS mal escrito (design D13): vale para API e worker.
+    parseMcFormats();
     if (process.env.WORKER_ONLY === 'true') {
       await this.queue.subscribe(
         QUEUES.MC_LLM,

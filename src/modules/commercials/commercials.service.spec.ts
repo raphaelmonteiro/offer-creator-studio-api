@@ -2,7 +2,9 @@ import { HttpException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { CreditsService, InsufficientCreditsError } from '../../shared/credits/credits.service';
 import { AnimationQueueService } from '../../shared/queue/animation-queue.service';
+import { summarizeRenderPreflight } from '../../shared/ffmpeg/render-preflight';
 import { SystemSettingsService } from '../../shared/settings/system-settings.service';
+import { WORKER_HEARTBEAT_KEY } from '../../shared/settings/worker-heartbeat.service';
 import { TaskTransitionService } from '../../shared/state/task-transition.service';
 import { CommercialsService, MC_PAUSED_KEY } from './commercials.service';
 import { MC_PROJECT_MINI_RESERVE_CREDITS } from './domain/mc-pricing.config';
@@ -44,7 +46,7 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
   let queue: { publish: jest.Mock };
-  let settings: { get: jest.Mock };
+  let settings: { get: jest.Mock; getFresh: jest.Mock };
   let credits: { reserve: jest.Mock; refundUnconsumed: jest.Mock };
   let service: CommercialsService;
 
@@ -59,7 +61,10 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
       notify: jest.fn().mockResolvedValue(undefined),
     };
     queue = { publish: jest.fn().mockResolvedValue(undefined) };
-    settings = { get: jest.fn().mockResolvedValue(null) };
+    settings = {
+      get: jest.fn().mockResolvedValue(null),
+      getFresh: jest.fn().mockResolvedValue(null),
+    };
     credits = {
       reserve: jest.fn().mockResolvedValue(undefined),
       refundUnconsumed: jest.fn().mockResolvedValue(0),
@@ -98,6 +103,60 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
     settings.get.mockResolvedValue(null);
     await expect(service.createProject('u1', dto)).resolves.toBeDefined();
     expect(queue.publish).toHaveBeenCalledTimes(1);
+  });
+
+  // Preflight por formato (spec video-composition-render / design D14)
+  const heartbeatWith = (checks: Array<{ id: string; ok: boolean }>) => ({
+    at: new Date().toISOString(),
+    pid: 1,
+    render: summarizeRenderPreflight(
+      checks.map((c) => ({ ...c, version: c.ok ? c.id : null })) as never,
+      '2026-10-12T00:00:00.000Z',
+    ),
+  });
+
+  it('worker sem ffmpeg → 422 RENDER_UNAVAILABLE antes de qualquer criação ou gasto', async () => {
+    settings.getFresh.mockResolvedValue(
+      heartbeatWith([
+        { id: 'ffmpeg', ok: false },
+        { id: 'ffprobe', ok: true },
+        { id: 'fonts', ok: true },
+      ]),
+    );
+    const promise = service.createProject('u1', dto);
+    await expect(promise).rejects.toThrow(HttpException);
+    await promise.catch((err: HttpException) => {
+      expect(err.getStatus()).toBe(422);
+      expect(err.getResponse()).toMatchObject({
+        code: 'RENDER_UNAVAILABLE',
+        details: { format: 'scenes', missing: ['ffmpeg'] },
+      });
+    });
+    expect(settings.getFresh).toHaveBeenCalledWith(WORKER_HEARTBEAT_KEY);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(queue.publish).not.toHaveBeenCalled();
+  });
+
+  it('só o navegador ausente não bloqueia o formato de cenas', async () => {
+    settings.getFresh.mockResolvedValue(
+      heartbeatWith([
+        { id: 'ffmpeg', ok: true },
+        { id: 'ffprobe', ok: true },
+        { id: 'fonts', ok: true },
+        { id: 'browser', ok: false },
+      ]),
+    );
+    await expect(service.createProject('u1', dto)).resolves.toBeDefined();
+    await expect(service.assertRenderAvailable('offer_carousel')).rejects.toMatchObject({
+      response: { code: 'RENDER_UNAVAILABLE', details: { missing: ['browser'] } },
+    });
+  });
+
+  it('preflight desconhecido (sem heartbeat ou sem tabela) não bloqueia', async () => {
+    settings.getFresh.mockResolvedValue({ at: new Date().toISOString(), pid: 1 });
+    await expect(service.createProject('u1', dto)).resolves.toBeDefined();
+    settings.getFresh.mockRejectedValue(new Error('relation system_settings does not exist'));
+    await expect(service.createProject('u1', dto)).resolves.toBeDefined();
   });
 
   it('família commercials LIGADA: mini-reserva de 10 cr no create, na mesma transação do enqueue', async () => {

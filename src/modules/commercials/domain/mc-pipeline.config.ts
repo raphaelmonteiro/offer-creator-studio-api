@@ -1,5 +1,6 @@
+import { HttpException, HttpStatus } from '@nestjs/common';
 import { QUEUES, QueueName } from '../../../shared/queue/animation-queue.service';
-import { McStepType } from './mc-types';
+import { MC_PROJECT_FORMATS, McProjectFormat, McStepType } from './mc-types';
 
 /**
  * Configuração das filas do pipeline de produção (plano-comerciais §6.4):
@@ -141,4 +142,53 @@ export function isAllowedFalVideoUrl(rawUrl: string): boolean {
   if (url.protocol !== 'https:') return false;
   const host = url.hostname.toLowerCase();
   return host === 'fal.media' || host.endsWith('.fal.media') || host.endsWith('.fal.run');
+}
+
+/**
+ * Admissão por formato (change video-formatos-personagem, design D13):
+ * `MC_FORMATS` é uma lista separada por vírgula dos formatos NOVOS admitidos
+ * (`talking_art`, `offer_carousel`). Vazio = nenhum formato novo. O formato
+ * `scenes` (F3, v1/v2) SEMPRE passa — ele é governado só por MC_ENABLED e
+ * MC_PIPELINE_V2. Token desconhecido é erro de configuração: o módulo chama
+ * `parseMcFormats` no boot para falhar cedo, nunca silenciar.
+ */
+export const MC_FORMATS_ALWAYS_ENABLED: readonly McProjectFormat[] = ['scenes'];
+
+export function parseMcFormats(env: NodeJS.ProcessEnv = process.env): McProjectFormat[] {
+  const tokens = (env.MC_FORMATS ?? '')
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  const unknown = tokens.filter((t) => !(MC_PROJECT_FORMATS as readonly string[]).includes(t));
+  if (unknown.length > 0) {
+    throw new Error(
+      `MC_FORMATS: formato desconhecido "${unknown.join('", "')}" ` +
+        `(aceitos: ${MC_PROJECT_FORMATS.join(', ')})`,
+    );
+  }
+  return Array.from(new Set(tokens)) as McProjectFormat[];
+}
+
+export function isFormatEnabled(
+  format: McProjectFormat,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (MC_FORMATS_ALWAYS_ENABLED.includes(format)) return true;
+  return parseMcFormats(env).includes(format);
+}
+
+/** 422 FORMAT_NOT_ENABLED antes de qualquer gasto (criação, ponte e duplicação). */
+export function assertFormatEnabled(
+  format: McProjectFormat,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (isFormatEnabled(format, env)) return;
+  throw new HttpException(
+    {
+      code: 'FORMAT_NOT_ENABLED',
+      message: `O formato de vídeo "${format}" não está habilitado neste ambiente`,
+      details: { format, enabled: parseMcFormats(env) },
+    },
+    HttpStatus.UNPROCESSABLE_ENTITY,
+  );
 }

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { RenderPreflight } from '../../shared/ffmpeg/render-preflight';
 import { SystemSettingsService } from '../../shared/settings/system-settings.service';
 import {
   WORKER_HEARTBEAT_KEY,
@@ -9,6 +10,9 @@ import {
 
 /** Worker "saudável" = batimento há menos de 60s (4× o intervalo de 15s). */
 export const WORKER_HEARTBEAT_STALE_MS = 60_000;
+
+/** Recorte do preflight de render exposto no health (sem a lista bruta de checagens). */
+export type HealthRenderStatus = Pick<RenderPreflight, 'checkedAt' | 'versions' | 'formats'>;
 
 @Injectable()
 export class HealthService {
@@ -54,16 +58,31 @@ export class HealthService {
    * é exatamente o lugar que NÃO pode servir cache velho. Qualquer erro
    * (tabela ainda sem migration, banco fora) degrada para healthy=false em vez
    * de derrubar o endpoint.
+   *
+   * `render` expõe o preflight por formato publicado pelo worker (design D14):
+   * `{ checkedAt, versions, formats: { scenes|talking_art|offer_carousel:
+   * { available, missing[] } } }`, ou null enquanto o worker não o publicou.
    */
-  private async checkWorker(): Promise<{ lastSeenAt: string | null; healthy: boolean }> {
+  private async checkWorker(): Promise<{
+    lastSeenAt: string | null;
+    healthy: boolean;
+    render: HealthRenderStatus | null;
+  }> {
     try {
       const heartbeat = await this.settings.getFresh<WorkerHeartbeat>(WORKER_HEARTBEAT_KEY);
       const lastSeenAt = heartbeat?.at ?? null;
       const healthy =
         lastSeenAt !== null && Date.now() - Date.parse(lastSeenAt) < WORKER_HEARTBEAT_STALE_MS;
-      return { lastSeenAt, healthy };
+      const render = heartbeat?.render
+        ? {
+            checkedAt: heartbeat.render.checkedAt,
+            versions: heartbeat.render.versions,
+            formats: heartbeat.render.formats,
+          }
+        : null;
+      return { lastSeenAt, healthy, render };
     } catch {
-      return { lastSeenAt: null, healthy: false };
+      return { lastSeenAt: null, healthy: false, render: null };
     }
   }
 }

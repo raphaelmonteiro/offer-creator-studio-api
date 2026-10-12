@@ -65,6 +65,21 @@ EAN_IMPORT_RUNNER_ENABLED / EAN_IMPORT_DEFAULT_CAP_CREDITS
 EAN_FLYER_RESOLVE_ENABLED / EAN_FLYER_RESOLVE_TIMEOUT_MS
 EAN_ANCHOR_LINKER_MODE        # fase 2 (off | measure | write), default off
 EAN_JOB_RUNNER_ENABLED        # pipeline antigo de vínculo EAN por juízes — default false
+
+# Comerciais com mascote (módulo commercials) — bloco completo em .env.example
+MC_ENABLED                    # liga rotas e consumers; sem isso as rotas respondem 404 MC_DISABLED
+MC_PIPELINE_V2                # off | all | cohort — executor v2 (ADR-001) congelado por projeto na criação
+MC_SCRIPT_PROVIDER / MC_KIT_PROVIDER / MC_PIPELINE_PROVIDER / MC_TRANSLATION_PROVIDER
+                              # mock (default) | openai / gemini / real
+MC_FORMATS                    # formatos novos admitidos (talking_art, offer_carousel); vazio = nenhum;
+                              # 'scenes' sempre passa; token desconhecido derruba o boot (parseMcFormats)
+MC_TALK_ENGINE_ECONOMICO / _PREMIUM / _LOGO
+                              # "modelo fal | US$/s | máx. s por chamada" — motor de fala por tier e origem
+GEMINI_IMAGE_MODEL_REFS       # modelo das referências do kit (default GEMINI_IMAGE_MODEL)
+MC_RENDER_BROWSER             # navegador do render Remotion (só offer_carousel)
+FAL_API_KEY / ELEVENLABS_API_KEY / GEMINI_API_KEY
+                              # pipeline real (vídeo, TTS, imagens)
+FFMPEG_PATH / FFPROBE_PATH    # binários do ffmpeg (worker); o preflight do worker reporta no /v1/health
 ```
 
 ## Architecture

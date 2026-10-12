@@ -20,6 +20,17 @@ export const MC_ASPECT_RATIOS = ['9:16', '1:1', '16:9'] as const;
 export type McAspectRatio = (typeof MC_ASPECT_RATIOS)[number];
 
 /**
+ * Formatos de projeto (change video-formatos-personagem, design D6):
+ * - scenes: comercial de cenas geradas (F3, o formato original; v1 e v2);
+ * - talking_art: arte estática do Chroma + personagem falando numa janela (F1);
+ * - offer_carousel: personagem apresentador + cards de oferta sincronizados (F2).
+ * A admissão dos formatos novos é por configuração (`MC_FORMATS`, mc-pipeline.config).
+ */
+export const MC_PROJECT_FORMATS = ['scenes', 'talking_art', 'offer_carousel'] as const;
+export type McProjectFormat = (typeof MC_PROJECT_FORMATS)[number];
+export const MC_DEFAULT_PROJECT_FORMAT: McProjectFormat = 'scenes';
+
+/**
  * Tipos de cena do pipeline v2 (ADR-001 §3.1) — o TIPO determina o grafo de
  * execução; a presença de diálogo deixa de ser o único critério.
  * - presenter: mascote fala para a câmera → keyframe + TTS → Avatar.
