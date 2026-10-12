@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, MoreThan } from 'typeorm';
 import OpenAI from 'openai';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
@@ -25,13 +25,13 @@ import {
   KIT_CANDIDATES_MAX,
   KIT_CANDIDATES_MIN,
 } from '../domain/kit-prompts';
-import { McKitStyle } from '../domain/mc-kit-identity';
+import { McKitIdentityMode, McKitStyle } from '../domain/mc-kit-identity';
 import { decideMouthGate, McKitMouthGate } from '../domain/mc-mouth-gate';
 import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McKitCandidate, McKitCandidateKind } from '../entities/mc-kit-candidate.entity';
 import { McKitTileService } from './mc-kit-tile.service';
-import { McKitView, McKitViewService } from './mc-kit-view.service';
+import { kitUseAsIsAvailable, McKitView, McKitViewService } from './mc-kit-view.service';
 import { McStorageService } from './mc-storage.service';
 
 /** Geração do kit (4 imagens + descrição) leva minutos, não 15 — expiração própria da fila mc.image. */
@@ -44,6 +44,23 @@ export interface McKitCandidatesJob {
   kitId: string;
   candidates: true;
   roundId: string;
+}
+
+/**
+ * Payload do job de referências ({kitId}) na fila mc.image. `fromReview` marca
+ * o job publicado por `choose` com o kit JÁ em revisão (referências/ficha
+ * existentes): se a geração falhar, o McKitProcessor volta o kit a `review`
+ * restaurando `previous` em vez de falhar o kit (M3).
+ */
+export interface McKitReferencesJob {
+  kitId: string;
+  slot?: number;
+  fromReview?: boolean;
+  previous?: {
+    identityAssetId: string | null;
+    identityMode: McKitIdentityMode;
+    mouthGate: McKitMouthGate | null;
+  };
 }
 
 export interface KitCandidateView {
@@ -127,9 +144,11 @@ export class McKitCandidatesService {
   /**
    * Abre uma rodada DENTRO da transação de quem chama (criação do kit ou
    * nova rodada): candidatos pré-inseridos com `assetId` nulo (a UI vê a
-   * rodada em andamento e os ajustes sobrevivem a um job perdido), kit com
-   * `candidateRoundId` apontando para ela, e o job na mc.image. O processor
-   * preenche os assets e leva o kit a `candidates`.
+   * rodada em andamento e os ajustes sobrevivem a um job perdido) e kit com
+   * `candidateRoundId` apontando para ela. O job NÃO é publicado aqui: o
+   * pg-boss usa a própria conexão, e um consumer que pegasse o job antes do
+   * commit não veria a rodada (e, com a cerca de rodada, a abandonaria) —
+   * quem chama publica `job` com `publishRound` DEPOIS do commit (L1).
    */
   async openRound(
     manager: EntityManager,
@@ -142,7 +161,7 @@ export class McKitCandidatesService {
       adjustments?: string | null;
       adjustmentsEn?: string | null;
     },
-  ): Promise<{ roundId: string; count: number }> {
+  ): Promise<{ roundId: string; count: number; job: McKitCandidatesJob }> {
     const roundId = randomUUID();
     const count = options.kind === 'mouth_variant' ? 1 : candidateCount();
     const styleRefs = options.kind === 'mascotization' ? await listStyleReferences(kit.style) : [];
@@ -185,15 +204,31 @@ export class McKitCandidatesService {
         styleReferences: styleRefs.length,
       },
     });
+    return { roundId, count, job: { kitId: kit.id, candidates: true, roundId } };
+  }
+
+  /** Publica o job da rodada — chamar DEPOIS do commit da transação que a abriu. */
+  async publishRound(job: McKitCandidatesJob): Promise<void> {
     await this.queue.publish(
       QUEUES.MC_IMAGE,
-      { kitId: kit.id, candidates: true, roundId },
+      { kitId: job.kitId, candidates: true, roundId: job.roundId },
       {
         expireInSeconds: MC_CANDIDATES_EXPIRE_S,
-        singletonKey: `kit-candidates:${kit.id}:${roundId}`,
+        singletonKey: `kit-candidates:${job.kitId}:${job.roundId}`,
       },
     );
-    return { roundId, count };
+  }
+
+  /** Publica o job de referências ({kitId}) — DEPOIS do commit, pelo mesmo motivo. */
+  private async publishReferences(job: McKitReferencesJob, singletonKey: string): Promise<void> {
+    await this.queue.publish(
+      QUEUES.MC_IMAGE,
+      { ...job },
+      {
+        expireInSeconds: MC_IMAGE_EXPIRE_S,
+        singletonKey,
+      },
+    );
   }
 
   /** POST /kits/:id/candidates — nova rodada com ajustes; só com a rodada anterior pronta. */
@@ -205,7 +240,7 @@ export class McKitCandidatesService {
     const adjustmentsEn = text ? await this.translateAdjustments(text) : null;
 
     assertKitTransition(McKitStatus.CANDIDATES, McKitStatus.GENERATING);
-    await this.dataSource.transaction(async (manager) => {
+    const job = await this.dataSource.transaction(async (manager) => {
       const won = await this.transitions.casTransition(
         manager,
         McCharacterKit,
@@ -229,7 +264,9 @@ export class McKitCandidatesService {
         detail: { roundId: round.roundId, adjustments: text },
       });
       await this.notify(manager, kit, McKitStatus.GENERATING);
+      return round.job;
     });
+    await this.publishRound(job);
     return this.view.findOne(userId, id);
   }
 
@@ -259,6 +296,20 @@ export class McKitCandidatesService {
 
     const from = kit.status;
     assertKitTransition(from, McKitStatus.GENERATING);
+    // Kit já em revisão (referências/ficha existentes): a falha das novas
+    // referências volta a revisão restaurando a identidade anterior (M3).
+    const job: McKitReferencesJob =
+      from === McKitStatus.REVIEW
+        ? {
+            kitId: kit.id,
+            fromReview: true,
+            previous: {
+              identityAssetId: kit.identityAssetId ?? null,
+              identityMode: kit.identityMode,
+              mouthGate: kit.mouthGate ?? null,
+            },
+          }
+        : { kitId: kit.id };
     await this.dataSource.transaction(async (manager) => {
       const won = await this.transitions.casTransition(
         manager,
@@ -270,6 +321,8 @@ export class McKitCandidatesService {
           identityAssetId: candidate.assetId,
           identityMode: 'generated',
           tileAssetId: null,
+          // a rodada fecha: um job de rodada atrasado/duplicado vira no-op (M2)
+          candidateRoundId: null,
           mouthGate: this.withoutIdentityVerdict(kit.mouthGate),
         },
       );
@@ -291,15 +344,12 @@ export class McKitCandidatesService {
           identityAssetId: candidate.assetId,
           previousIdentityAssetId: kit.identityAssetId ?? null,
           tileDiscarded: kit.tileAssetId ?? null,
+          fromReview: from === McKitStatus.REVIEW,
         },
       });
-      await this.queue.publish(
-        QUEUES.MC_IMAGE,
-        { kitId: kit.id },
-        { expireInSeconds: MC_IMAGE_EXPIRE_S, singletonKey: `kit-refs:${kit.id}:${candidate.id}` },
-      );
       await this.notify(manager, kit, McKitStatus.GENERATING);
     });
+    await this.publishReferences(job, `kit-refs:${kit.id}:${candidate.id}`);
     return this.view.findOne(userId, id);
   }
 
@@ -307,6 +357,10 @@ export class McKitCandidatesService {
    * POST /kits/:id/use-as-is — só quando o gate de boca passou no logo cru:
    * os pixels originais do logo viram a identidade (`logo_as_is`), sem
    * mascotização nem referências; o kit vai direto à revisão (voz + tile).
+   * Vale em `candidates` e também em `generating` com a rodada em voo (L2):
+   * o CAS da rodada vira no-op. O veredito do logo cru É o veredito da
+   * identidade (mesmos pixels): fica gravado em `mouthGate.identity` e a
+   * aprovação não repete a visão (M1).
    */
   async useAsIs(userId: string, id: string): Promise<McKitView> {
     const kit = await this.view.findOwned(userId, id);
@@ -316,8 +370,8 @@ export class McKitCandidatesService {
         message: '"Usar como está" só vale para kits criados a partir de um logo.',
       });
     }
-    if (kit.status !== McKitStatus.CANDIDATES) throw this.notInCandidates(kit);
-    if (decideMouthGate(kit.mouthGate?.logo) !== 'passed') {
+    const logoVerdict = kit.mouthGate?.logo;
+    if (!logoVerdict || decideMouthGate(logoVerdict) !== 'passed') {
       throw new UnprocessableEntityException({
         code: 'LOGO_MOUTH_NOT_LEGIBLE',
         message:
@@ -325,37 +379,56 @@ export class McKitCandidatesService {
           'mascotização (ou peça uma nova rodada).',
       });
     }
+    if (!kitUseAsIsAvailable(kit)) throw this.notInCandidates(kit);
     const asset = await this.copyLogoAsIdentity(userId, kit);
 
-    assertKitTransition(McKitStatus.CANDIDATES, McKitStatus.REVIEW);
-    await this.dataSource.transaction(async (manager) => {
-      const won = await this.transitions.casTransition(
+    const from = kit.status;
+    assertKitTransition(from, McKitStatus.REVIEW);
+    const won = await this.dataSource.transaction(async (manager) => {
+      const casWon = await this.transitions.casTransition(
         manager,
         McCharacterKit,
         kit.id,
-        McKitStatus.CANDIDATES,
+        from,
         McKitStatus.REVIEW,
         {
           identityMode: 'logo_as_is',
           identityAssetId: asset.id,
           candidateRoundId: null,
           tileAssetId: null,
-          mouthGate: this.withoutIdentityVerdict(kit.mouthGate),
+          mouthGate: {
+            ...(this.withoutIdentityVerdict(kit.mouthGate) ?? {}),
+            identity: { ...logoVerdict, identityAssetId: asset.id },
+          },
         },
+        // Em `generating` só vale com a RODADA em voo: se nesse meio-tempo um
+        // candidato foi escolhido (referências em voo, rodada fechada), a
+        // identidade escolhida não pode ser atropelada.
+        from === McKitStatus.GENERATING ? { sql: '"candidateRoundId" IS NOT NULL' } : undefined,
       );
-      if (!won) throw this.notInCandidates(kit, true);
+      if (!casWon) return false;
       await this.tile.discard(manager, kit.tileAssetId);
       await this.commercials.appendEvent(manager, {
         userId,
         refKind: 'kit',
         refId: kit.id,
         kind: 'transition',
-        fromStatus: McKitStatus.CANDIDATES,
+        fromStatus: from,
         toStatus: McKitStatus.REVIEW,
-        detail: { identityMode: 'logo_as_is', identityAssetId: asset.id },
+        detail: {
+          identityMode: 'logo_as_is',
+          identityAssetId: asset.id,
+          abandonedRoundId: from === McKitStatus.GENERATING ? kit.candidateRoundId : null,
+        },
       });
       await this.notify(manager, kit, McKitStatus.REVIEW);
+      return true;
     });
+    if (!won) {
+      // a cópia do logo feita para esta tentativa não é identidade de ninguém
+      await this.dataSource.getRepository(AnimationAsset).softDelete(asset.id);
+      throw this.notInCandidates(kit, true);
+    }
     return this.view.findOne(userId, id);
   }
 
@@ -373,6 +446,8 @@ export class McKitCandidatesService {
         message: `O kit está em '${kit.status}' — a variante com boca só pode ser gerada na revisão.`,
       });
     }
+    // A variante é gerada no estilo do kit (spec "Estilo não escolhido").
+    if (!kit.style) throw this.styleRequired();
     const identity = await this.view.resolveIdentityAsset(kit);
     if (!identity) {
       throw new UnprocessableEntityException({
@@ -382,7 +457,31 @@ export class McKitCandidatesService {
           'ou escolha um candidato.',
       });
     }
-    await this.dataSource.transaction(async (manager) => {
+    // Uma variante por vez (L3): a rodada CORRENTE do kit sendo uma
+    // mouth_variant ainda sem imagem e dentro da janela de expiração do job é
+    // "em andamento". A variante que falhou fecha a rodada (candidateRoundId
+    // nulo, McKitCandidatesProcessor) e libera o novo pedido na hora; job
+    // expirado sem desfecho libera depois da janela.
+    const pending = kit.candidateRoundId
+      ? await this.dataSource.getRepository(McKitCandidate).findOne({
+          where: {
+            kitId: kit.id,
+            roundId: kit.candidateRoundId,
+            kind: 'mouth_variant',
+            assetId: IsNull(),
+            createdAt: MoreThan(new Date(Date.now() - MC_CANDIDATES_EXPIRE_S * 1000)),
+          },
+        })
+      : null;
+    if (pending) {
+      throw new UnprocessableEntityException({
+        code: 'MOUTH_VARIANT_IN_PROGRESS',
+        message:
+          'Já existe uma variante com boca sendo gerada para este kit. Aguarde ela terminar.',
+        details: { roundId: pending.roundId },
+      });
+    }
+    const job = await this.dataSource.transaction(async (manager) => {
       const round = await this.openRound(manager, kit, { kind: 'mouth_variant' });
       await this.commercials.appendEvent(manager, {
         userId,
@@ -392,7 +491,9 @@ export class McKitCandidatesService {
         detail: { roundId: round.roundId, identityAssetId: identity.id },
       });
       await this.notify(manager, kit, McKitStatus.REVIEW, 'mouth_variant_requested');
+      return round.job;
     });
+    await this.publishRound(job);
     return this.view.findOne(userId, id);
   }
 

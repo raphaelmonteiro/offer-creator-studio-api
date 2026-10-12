@@ -71,7 +71,13 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
     toView: jest.Mock;
     resolveIdentityAsset: jest.Mock;
   };
-  let candidates: { openRound: jest.Mock; translateAdjustments: jest.Mock };
+  let candidates: {
+    openRound: jest.Mock;
+    publishRound: jest.Mock;
+    translateAdjustments: jest.Mock;
+  };
+  /** Marca o COMMIT da transação simulada: a fila só pode ser tocada depois dele (L1). */
+  let committed: jest.Mock;
   let mouthGate: { inspect: jest.Mock };
   let tile: { build: jest.Mock; discard: jest.Mock };
   let service: McKitsService;
@@ -115,9 +121,11 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       getRepository: jest.fn((entity: unknown) =>
         entity === AnimationAsset ? assetRepo : kitRepo,
       ),
-      transaction: jest.fn((cb: (m: EntityManager) => Promise<unknown>) =>
-        cb(manager as unknown as EntityManager),
-      ),
+      transaction: jest.fn(async (cb: (m: EntityManager) => Promise<unknown>) => {
+        const result = await cb(manager as unknown as EntityManager);
+        committed();
+        return result;
+      }),
     };
     transitions = {
       casTransition: jest.fn().mockResolvedValue(true),
@@ -160,9 +168,15 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       }),
     };
     candidates = {
-      openRound: jest.fn().mockResolvedValue({ roundId: 'round-1', count: 4 }),
+      openRound: jest.fn().mockResolvedValue({
+        roundId: 'round-1',
+        count: 4,
+        job: { kitId: 'kit-1', candidates: true, roundId: 'round-1' },
+      }),
+      publishRound: jest.fn().mockResolvedValue(undefined),
       translateAdjustments: jest.fn((text: string) => Promise.resolve(text)),
     };
+    committed = jest.fn();
     mouthGate = { inspect: jest.fn().mockResolvedValue(passedVerdict) };
     tile = {
       build: jest.fn().mockResolvedValue({
@@ -267,6 +281,10 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       { expireInSeconds: MC_IMAGE_EXPIRE_S },
     );
     expect(MC_IMAGE_EXPIRE_S).toBe(300);
+    // o job sai DEPOIS do commit (L1): consumido antes, não acharia o kit
+    expect(committed.mock.invocationCallOrder[0]).toBeLessThan(
+      queue.publish.mock.invocationCallOrder[0],
+    );
     // evento + notify no canal DEDICADO mc_events
     expect(transitions.notify).toHaveBeenCalledWith(
       manager,
@@ -391,6 +409,15 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         { kind: 'mascotization' },
       );
       expect(queue.publish).not.toHaveBeenCalled();
+      // o job da rodada é publicado DEPOIS do commit (L1)
+      expect(candidates.publishRound).toHaveBeenCalledWith({
+        kitId: 'kit-1',
+        candidates: true,
+        roundId: 'round-1',
+      });
+      expect(committed.mock.invocationCallOrder[0]).toBeLessThan(
+        candidates.publishRound.mock.invocationCallOrder[0],
+      );
       expect(transitions.notify).toHaveBeenCalledWith(
         manager,
         'u1',
@@ -423,20 +450,32 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
     it('cliente sem logo cadastrado → 422 CLIENT_LOGO_REQUIRED', async () => {
       clients.findOne.mockResolvedValue({ id: 'c1', name: 'Mercado', logoUrl: null });
       await expect(
-        service.createKit('u1', { source: 'logo', clientId: 'c1' }),
+        service.createKit('u1', { source: 'logo', clientId: 'c1', style: 'cartoon_2d' }),
       ).rejects.toMatchObject({ response: { code: 'CLIENT_LOGO_REQUIRED' } });
       expect(mascots.createFromUrl).not.toHaveBeenCalled();
+    });
+
+    it('logo por clientId SEM estilo → 422 STYLE_REQUIRED antes de registrar o logo (nenhum efeito colateral) (L4)', async () => {
+      clients.findOne.mockResolvedValue({ id: 'c1', name: 'Mercado', logoUrl: '/uploads/l.png' });
+      await expect(
+        service.createKit('u1', { source: 'logo', clientId: 'c1', rightsConfirmed: true }),
+      ).rejects.toMatchObject({ status: 422, response: { code: 'STYLE_REQUIRED' } });
+      expect(clients.findOne).not.toHaveBeenCalled();
+      expect(mascots.createFromUrl).not.toHaveBeenCalled();
+      expect(mascots.findOne).not.toHaveBeenCalled();
+      expect(moderation.moderate).not.toHaveBeenCalled();
+      expect(kitRepo.save).not.toHaveBeenCalled();
     });
 
     it('logoMascotId: precisa ser kind logo (422 MASCOT_KIND_MISMATCH) e ter direitos (LOGO_RIGHTS_REQUIRED)', async () => {
       mascots.findOne.mockResolvedValue({ ...mascotBase, kind: 'mascot' });
       await expect(
-        service.createKit('u1', { source: 'logo', logoMascotId: 'mascot-1' }),
+        service.createKit('u1', { source: 'logo', logoMascotId: 'mascot-1', style: 'cartoon_2d' }),
       ).rejects.toMatchObject({ response: { code: 'MASCOT_KIND_MISMATCH' } });
 
       mascots.findOne.mockResolvedValue({ ...logoBase, rightsConfirmedAt: null });
       await expect(
-        service.createKit('u1', { source: 'logo', logoMascotId: 'logo-1' }),
+        service.createKit('u1', { source: 'logo', logoMascotId: 'logo-1', style: 'cartoon_2d' }),
       ).rejects.toMatchObject({ response: { code: 'LOGO_RIGHTS_REQUIRED', mascotId: 'logo-1' } });
 
       mascots.findOne.mockResolvedValue({ ...logoBase });
@@ -453,9 +492,16 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
 
     it('logo: clientId e logoMascotId juntos → LOGO_SOURCE_AMBIGUOUS; nenhum → LOGO_SOURCE_REQUIRED', async () => {
       await expect(
-        service.createKit('u1', { source: 'logo', clientId: 'c1', logoMascotId: 'logo-1' }),
+        service.createKit('u1', {
+          source: 'logo',
+          clientId: 'c1',
+          logoMascotId: 'logo-1',
+          style: 'cartoon_2d',
+        }),
       ).rejects.toMatchObject({ status: 422, response: { code: 'LOGO_SOURCE_AMBIGUOUS' } });
-      await expect(service.createKit('u1', { source: 'logo' })).rejects.toMatchObject({
+      await expect(
+        service.createKit('u1', { source: 'logo', style: 'cartoon_2d' }),
+      ).rejects.toMatchObject({
         status: 422,
         response: { code: 'LOGO_SOURCE_REQUIRED' },
       });
@@ -499,6 +545,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         McKitStatus.REVIEW,
         McKitStatus.APPROVED,
         expect.objectContaining({ voiceId: 'voice-3', approvedAt: expect.any(Date) }),
+        expect.objectContaining({ sql: expect.any(String) }),
       );
       expect(transitions.notify).toHaveBeenCalledWith(
         manager,
@@ -521,6 +568,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         McKitStatus.REVIEW,
         McKitStatus.APPROVED,
         expect.objectContaining({ voiceDelivery: { speed: 1.2, style: 0.8 } }),
+        expect.objectContaining({ sql: expect.any(String) }),
       );
     });
 
@@ -534,6 +582,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         McKitStatus.REVIEW,
         McKitStatus.APPROVED,
         expect.objectContaining({ voiceDelivery: { speed: 1.0 } }),
+        expect.objectContaining({ sql: expect.any(String) }),
       );
       await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3', delivery: {} });
       expect(transitions.casTransition).toHaveBeenLastCalledWith(
@@ -543,6 +592,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         McKitStatus.REVIEW,
         McKitStatus.APPROVED,
         expect.objectContaining({ voiceDelivery: null }),
+        expect.objectContaining({ sql: expect.any(String) }),
       );
     });
 
@@ -578,6 +628,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
             tileBackgroundColor: '#E5E7EB',
             mouthGate: { identity: { ...passedVerdict, identityAssetId: 'front-1' } },
           }),
+          expect.objectContaining({ sql: expect.any(String) }),
         );
       });
 
@@ -624,6 +675,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
             identityAssetId: 'variant-1',
             mouthGate: { identity: { ...passedVerdict, identityAssetId: 'variant-1' } },
           }),
+          expect.objectContaining({ sql: expect.any(String) }),
         );
       });
 
@@ -695,6 +747,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
           McKitStatus.REVIEW,
           McKitStatus.APPROVED,
           expect.objectContaining({ tileAssetId: 'tile-old', tileBackgroundColor: '#ABCDEF' }),
+          expect.objectContaining({ sql: expect.any(String) }),
         );
 
         // tile antigo pertence a outra identidade (trocada em revisão): regera
@@ -716,6 +769,172 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
           response: { code: 'KIT_IDENTITY_MISSING' },
         });
         expect(mouthGate.inspect).not.toHaveBeenCalled();
+      });
+
+      /** M1: o veredito do logo cru gravado por "usar como está" é o da identidade — sem segunda visão. */
+      it('logo como está: veredito já gravado em mouthGate.identity é reaproveitado (sem visão) e o tile usa a caixa dele', async () => {
+        const logoGate = {
+          logo: passedVerdict,
+          identity: { ...passedVerdict, identityAssetId: 'asset-logo' },
+        };
+        kitRepo.findOneBy.mockResolvedValue({
+          ...reviewKit,
+          source: 'logo',
+          identityMode: 'logo_as_is',
+          identityAssetId: 'asset-logo',
+          mouthGate: logoGate,
+        });
+        view.resolveIdentityAsset.mockResolvedValue({
+          id: 'asset-logo',
+          fileUrl: '/uploads/mascots/cutout.png',
+        });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+        expect(mouthGate.inspect).not.toHaveBeenCalled();
+        expect(tile.build).toHaveBeenCalledWith(
+          expect.objectContaining({ identityMode: 'logo_as_is' }),
+          expect.objectContaining({ id: 'asset-logo' }),
+          passedVerdict.bbox,
+        );
+        expect(transitions.casTransition).toHaveBeenCalledWith(
+          manager,
+          McCharacterKit,
+          'kit-r',
+          McKitStatus.REVIEW,
+          McKitStatus.APPROVED,
+          expect.objectContaining({ identityAssetId: 'asset-logo', mouthGate: logoGate }),
+          { sql: '"identityAssetId" = :identityId', params: { identityId: 'asset-logo' } },
+        );
+      });
+
+      /** M4: identidade gerada sem caixa do rosto → o tile recusa; kit fica em revisão com o veredito. */
+      it('tile sem rosto localizável → 422 TILE_FACE_NOT_FOUND com as ações; veredito gravado; nada aprovado', async () => {
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        tile.build.mockRejectedValue(
+          new UnprocessableEntityException({
+            code: 'TILE_FACE_NOT_FOUND',
+            message: 'x',
+            details: { actions: ['mouth_variant', 'choose_candidate'] },
+          }),
+        );
+        await expect(
+          service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+        ).rejects.toMatchObject({
+          status: 422,
+          response: {
+            code: 'TILE_FACE_NOT_FOUND',
+            details: { actions: ['mouth_variant', 'choose_candidate'] },
+          },
+        });
+        expect(transitions.casTransition).not.toHaveBeenCalled();
+        expect(kitRepo.update).toHaveBeenCalledWith(
+          { id: 'kit-r', status: McKitStatus.REVIEW },
+          { mouthGate: { identity: { ...passedVerdict, identityAssetId: 'front-1' } } },
+        );
+      });
+
+      /** M4: a fração do rosto medida no tile fica auditada no evento de aprovação. */
+      it('evento de aprovação leva faceFraction do tile (gerado agora ou reaproveitado)', async () => {
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+        expect(commercials.appendEvent).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({
+            toStatus: McKitStatus.APPROVED,
+            detail: expect.objectContaining({ faceFraction: 0.6, tileAssetId: 'tile-1' }),
+          }),
+        );
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit, tileAssetId: 'tile-old' });
+        assetRepo.findOneBy.mockResolvedValue({
+          id: 'tile-old',
+          metadata: { identityAssetId: 'front-1', backgroundColor: '#ABCDEF', faceFraction: 0.55 },
+        });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+        expect(commercials.appendEvent).toHaveBeenLastCalledWith(
+          manager,
+          expect.objectContaining({
+            detail: expect.objectContaining({ faceFraction: 0.55, tileAssetId: 'tile-old' }),
+          }),
+        );
+      });
+
+      /** M5: a aprovação assina a identidade vista pelo gate/tile na MESMA UPDATE do CAS. */
+      describe('corrida da identidade (M5)', () => {
+        it('kit de mascote (identidade = frontal): a condição extra exige identityAssetId nulo e a frontal ainda nas referências', async () => {
+          kitRepo.findOneBy.mockResolvedValue({ ...reviewKit, referenceAssetIds: ['front-1'] });
+          await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+          const extra = transitions.casTransition.mock.calls[0][6] as {
+            sql: string;
+            params: unknown;
+          };
+          expect(extra.sql).toMatch(/"identityAssetId" IS NULL/);
+          expect(extra.sql).toMatch(/ANY\("referenceAssetIds"\)/);
+          expect(extra.params).toEqual({ identityId: 'front-1' });
+        });
+
+        it('kit com identityAssetId (candidato): a condição extra exige o mesmo identityAssetId', async () => {
+          kitRepo.findOneBy.mockResolvedValue({ ...reviewKit, identityAssetId: 'cand-1' });
+          view.resolveIdentityAsset.mockResolvedValue({
+            id: 'cand-1',
+            fileUrl: '/uploads/mascots/cutout.png',
+          });
+          await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+          const extra = transitions.casTransition.mock.calls[0][6] as {
+            sql: string;
+            params: unknown;
+          };
+          expect(extra).toEqual({
+            sql: '"identityAssetId" = :identityId',
+            params: { identityId: 'cand-1' },
+          });
+        });
+
+        it('CAS perdido com o kit ainda em review (identidade trocada) → 422 KIT_IDENTITY_CHANGED e o tile recém-gerado é descartado', async () => {
+          kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+          transitions.casTransition.mockResolvedValue(false);
+          await expect(
+            service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+          ).rejects.toMatchObject({
+            status: 422,
+            response: { code: 'KIT_IDENTITY_CHANGED' },
+          });
+          expect(tile.build).toHaveBeenCalledTimes(1);
+          expect(tile.discard).toHaveBeenCalledWith(manager, 'tile-1');
+          // descarte numa transação PRÓPRIA, depois da perdedora: descartar dentro
+          // dela e lançar o 422 desfaria o descarte junto (rollback)
+          expect(committed).toHaveBeenCalledTimes(2);
+          expect(committed.mock.invocationCallOrder[0]).toBeLessThan(
+            tile.discard.mock.invocationCallOrder[0],
+          );
+          expect(commercials.appendEvent).not.toHaveBeenCalledWith(
+            manager,
+            expect.objectContaining({ toStatus: McKitStatus.APPROVED }),
+          );
+        });
+
+        it('CAS perdido com o kit fora de review → 422 KIT_NOT_IN_REVIEW (tile novo descartado; tile reaproveitado fica)', async () => {
+          kitRepo.findOneBy
+            .mockResolvedValueOnce({ ...reviewKit }) // leitura inicial (findOwned)
+            .mockResolvedValue({ ...reviewKit, status: McKitStatus.GENERATING }); // releitura no CAS perdido
+          transitions.casTransition.mockResolvedValue(false);
+          await expect(
+            service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+          ).rejects.toMatchObject({ response: { code: 'KIT_NOT_IN_REVIEW' } });
+          expect(tile.discard).toHaveBeenCalledWith(manager, 'tile-1');
+
+          // tile reaproveitado (já pertencia ao kit) NÃO é descartado na corrida perdida
+          tile.discard.mockClear();
+          kitRepo.findOneBy
+            .mockResolvedValueOnce({ ...reviewKit, tileAssetId: 'tile-old' })
+            .mockResolvedValue({ ...reviewKit, status: McKitStatus.GENERATING });
+          assetRepo.findOneBy.mockResolvedValue({
+            id: 'tile-old',
+            metadata: { identityAssetId: 'front-1', backgroundColor: '#ABCDEF' },
+          });
+          await expect(
+            service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+          ).rejects.toMatchObject({ response: { code: 'KIT_NOT_IN_REVIEW' } });
+          expect(tile.discard).not.toHaveBeenCalled();
+        });
       });
     });
   });

@@ -35,6 +35,8 @@ import { McKitMouthGate } from '../domain/mc-mouth-gate';
 import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
 import { computeKitReferenceHash } from '../domain/mc-step-hashes';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+import { McKitCandidate } from '../entities/mc-kit-candidate.entity';
+import { McKitReferencesJob } from '../services/mc-kit-candidates.service';
 import { McKitViewService } from '../services/mc-kit-view.service';
 
 /** Identidade do kit resolvida para prompt e hash (kits anteriores: mascote, sem estilo, cinza claro). */
@@ -68,6 +70,12 @@ const MOCK_SLOT_COLORS = ['#4F86C6', '#6BAA75', '#C68C4F', '#A05FB5'] as const;
  * Regeneração ({kitId, slot}): re-gera só a célula pedida; kit precisa estar
  * em review e permanece em review.
  *
+ * Referências refeitas a partir de uma identidade escolhida em REVISÃO
+ * ({kitId, fromReview, previous}, publicado por `choose`): a falha NÃO é
+ * terminal — o kit volta a `review` com a identidade anterior restaurada,
+ * referências e ficha intactas, evento `references_regeneration_failed` (M3).
+ * `failed` terminal fica só para a primeira geração.
+ *
  * MC_KIT_PROVIDER=mock (default em dev): descrição fixa + 4 PNGs sintéticos
  * via sharp — pipeline inteiro sem gastar API. 'gemini' liga o real.
  *
@@ -92,7 +100,8 @@ export class McKitProcessor {
     this.openai = apiKey ? new OpenAI({ apiKey }) : null;
   }
 
-  async process({ kitId, slot }: { kitId: string; slot?: number }): Promise<void> {
+  async process(job: McKitReferencesJob): Promise<void> {
+    const { kitId, slot } = job;
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: kitId });
     if (!kit) return;
     if (slot != null) {
@@ -120,7 +129,7 @@ export class McKitProcessor {
     try {
       mascotImage = await this.loadIdentityImage(kit);
     } catch (err) {
-      await this.failKit(kit, 'mascot_image_unavailable', (err as Error).message);
+      await this.failGeneration(kit, job, 'mascot_image_unavailable', (err as Error).message);
       return;
     }
 
@@ -131,7 +140,7 @@ export class McKitProcessor {
       desc = await this.generateCanonicalDesc(mascotImage);
     } catch (err) {
       this.logger.error(`Kit ${kit.id}: descrição canônica falhou: ${(err as Error).message}`);
-      await this.failKit(kit, 'canonical_desc_failed', (err as Error).message);
+      await this.failGeneration(kit, job, 'canonical_desc_failed', (err as Error).message);
       return;
     }
 
@@ -159,11 +168,13 @@ export class McKitProcessor {
     }
 
     if (okAssetIds.length < MIN_KIT_REFERENCES) {
-      await this.failKit(
+      await this.failGeneration(
         kit,
+        job,
         'kit_generation_failed',
         `Apenas ${okAssetIds.length} de ${KIT_REFERENCE_SLOT_COUNT} referências geradas (mínimo ${MIN_KIT_REFERENCES})`,
         { failures },
+        okAssetIds,
       );
       return;
     }
@@ -528,6 +539,100 @@ export class McKitProcessor {
 
   private parseCanonicalDesc(raw: string | null): KitCanonicalDesc | null {
     return parseCanonicalDesc(raw);
+  }
+
+  /** Falha da geração: terminal (`failed`) na primeira; rollback a `review` quando veio de `choose` em revisão. */
+  private async failGeneration(
+    kit: McCharacterKit,
+    job: McKitReferencesJob,
+    code: string,
+    message: string,
+    detail: Record<string, unknown> = {},
+    generatedAssetIds: string[] = [],
+  ): Promise<void> {
+    if (job.fromReview) {
+      await this.rollbackToReview(kit, job, code, message, detail, generatedAssetIds);
+      return;
+    }
+    await this.failKit(kit, code, message, detail);
+  }
+
+  /**
+   * generating → review restaurando a identidade anterior (`previous`):
+   * referências e ficha não entram no patch e seguem como estavam; o
+   * candidato marcado como escolhido volta a ser o da identidade anterior;
+   * as referências parciais desta tentativa são descartadas. O tile tinha
+   * sido descartado na escolha — a aprovação o refaz para a identidade
+   * restaurada (o veredito de boca restaurado evita nova visão).
+   */
+  private async rollbackToReview(
+    kit: McCharacterKit,
+    job: McKitReferencesJob,
+    code: string,
+    message: string,
+    detail: Record<string, unknown>,
+    generatedAssetIds: string[],
+  ): Promise<void> {
+    const previous = job.previous ?? {
+      identityAssetId: null,
+      identityMode: 'generated' as const,
+      mouthGate: null,
+    };
+    assertKitTransition(McKitStatus.GENERATING, McKitStatus.REVIEW);
+    await this.dataSource.transaction(async (manager) => {
+      const won = await this.transitions.casTransition(
+        manager,
+        McCharacterKit,
+        kit.id,
+        McKitStatus.GENERATING,
+        McKitStatus.REVIEW,
+        {
+          identityAssetId: previous.identityAssetId,
+          identityMode: previous.identityMode,
+          mouthGate: previous.mouthGate,
+        },
+      );
+      if (!won) return;
+      await manager.update(McKitCandidate, { kitId: kit.id, chosen: true }, { chosen: false });
+      if (previous.identityAssetId) {
+        await manager.update(
+          McKitCandidate,
+          { kitId: kit.id, assetId: previous.identityAssetId },
+          { chosen: true },
+        );
+      }
+      if (generatedAssetIds.length > 0) {
+        await manager.softDelete(AnimationAsset, generatedAssetIds);
+      }
+      await this.commercials.appendEvent(manager, {
+        userId: kit.userId,
+        refKind: 'kit',
+        refId: kit.id,
+        kind: 'references_regeneration_failed',
+        fromStatus: McKitStatus.GENERATING,
+        toStatus: McKitStatus.REVIEW,
+        detail: {
+          errorCode: code,
+          errorMessage: message.slice(0, 300),
+          attemptedIdentityAssetId: kit.identityAssetId ?? null,
+          restoredIdentityAssetId: previous.identityAssetId,
+          restoredIdentityMode: previous.identityMode,
+          discardedAssets: generatedAssetIds.length,
+          ...detail,
+        },
+      });
+      await this.transitions.notify(
+        manager,
+        kit.userId,
+        {
+          kind: 'mc_kit',
+          kitId: kit.id,
+          status: McKitStatus.REVIEW,
+          event: 'references_regeneration_failed',
+        },
+        MC_EVENTS_CHANNEL,
+      );
+    });
   }
 
   private async failKit(

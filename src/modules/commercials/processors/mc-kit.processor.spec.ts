@@ -10,6 +10,7 @@ import { TerminalProviderError } from '../../../shared/providers/provider-errors
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
+import { McKitMouthGate, McMouthVerdict } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McKitViewService } from '../services/mc-kit-view.service';
@@ -351,6 +352,160 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       );
       const saved = assetRepo.save.mock.calls[0][0] as { metadata: { model: string } };
       expect(saved.metadata.model).toBe('nano-banana-pro-preview');
+    });
+  });
+
+  /** M3: referências refeitas a partir de uma identidade escolhida em REVISÃO não falham o kit. */
+  describe('regeneração a partir de review ({kitId, fromReview, previous})', () => {
+    const verdict: McMouthVerdict = {
+      hasMouth: true,
+      mouthOpenPossible: true,
+      confidence: 0.9,
+      bbox: { x: 0.3, y: 0.2, w: 0.4, h: 0.4 },
+      model: 'mock',
+      at: '2026-10-12T00:00:00.000Z',
+    };
+    const previous = {
+      identityAssetId: 'old-identity',
+      identityMode: 'generated' as const,
+      mouthGate: {
+        logo: verdict,
+        identity: { ...verdict, identityAssetId: 'old-identity' },
+      } as McKitMouthGate,
+    };
+    const reviewOrigin = {
+      ...baseKit,
+      source: 'logo',
+      identityAssetId: 'new-cand',
+      canonicalDesc: JSON.stringify({ traits: ['t'], colors: [], style: 's', doNots: [] }),
+      referenceAssetIds: ['a1', 'a2', 'a3', 'a4'],
+    };
+
+    it('falha da descrição canônica → generating → review restaurando a identidade anterior; referências e ficha intactas; evento + SSE references_regeneration_failed', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...reviewOrigin });
+      assetRepo.findOneBy.mockResolvedValue({
+        id: 'new-cand',
+        fileUrl: '/uploads/mascots/cutout.png',
+      });
+      process.env.MC_KIT_PROVIDER = 'gemini'; // sem OPENAI_API_KEY → descrição falha
+
+      await processor.process({ kitId: 'kit-1', fromReview: true, previous });
+
+      expect(transitions.casTransition).toHaveBeenCalledTimes(1);
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-1',
+        McKitStatus.GENERATING,
+        McKitStatus.REVIEW,
+        {
+          identityAssetId: 'old-identity',
+          identityMode: 'generated',
+          mouthGate: previous.mouthGate,
+        },
+      );
+      // referências/ficha NÃO entram no patch: seguem como estavam
+      const patch = transitions.casTransition.mock.calls[0][5] as Record<string, unknown>;
+      expect(patch).not.toHaveProperty('referenceAssetIds');
+      expect(patch).not.toHaveProperty('canonicalDesc');
+      // o candidato "escolhido" volta a ser o da identidade anterior
+      expect(manager.update).toHaveBeenCalledWith(
+        expect.anything(),
+        { kitId: 'kit-1', chosen: true },
+        { chosen: false },
+      );
+      expect(manager.update).toHaveBeenCalledWith(
+        expect.anything(),
+        { kitId: 'kit-1', assetId: 'old-identity' },
+        { chosen: true },
+      );
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          kind: 'references_regeneration_failed',
+          fromStatus: McKitStatus.GENERATING,
+          toStatus: McKitStatus.REVIEW,
+          detail: expect.objectContaining({
+            errorCode: 'canonical_desc_failed',
+            attemptedIdentityAssetId: 'new-cand',
+            restoredIdentityAssetId: 'old-identity',
+          }),
+        }),
+      );
+      expect(transitions.notify).toHaveBeenCalledWith(
+        manager,
+        'u1',
+        {
+          kind: 'mc_kit',
+          kitId: 'kit-1',
+          status: McKitStatus.REVIEW,
+          event: 'references_regeneration_failed',
+        },
+        MC_EVENTS_CHANNEL,
+      );
+    });
+
+    it('menos de 2 referências → volta a review e descarta as referências parciais desta tentativa; identidade anterior nula (frontal do mascote) não marca candidato', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...reviewOrigin, source: 'mascot' });
+      assetRepo.findOneBy.mockResolvedValue({
+        id: 'new-cand',
+        fileUrl: '/uploads/mascots/cutout.png',
+      });
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      jest
+        .spyOn(
+          processor as unknown as { generateCanonicalDesc: () => Promise<unknown> },
+          'generateCanonicalDesc',
+        )
+        .mockResolvedValue({ traits: ['t'], colors: [], style: 's', doNots: [] });
+      gemini.generateImageWithModel
+        .mockResolvedValueOnce({ image: Buffer.from('img-0'), model: 'm' })
+        .mockRejectedValue(new TerminalProviderError('bloqueada', 'content_policy'));
+
+      await processor.process({
+        kitId: 'kit-1',
+        fromReview: true,
+        previous: { identityAssetId: null, identityMode: 'generated', mouthGate: null },
+      });
+
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-1',
+        McKitStatus.GENERATING,
+        McKitStatus.REVIEW,
+        { identityAssetId: null, identityMode: 'generated', mouthGate: null },
+      );
+      expect(manager.softDelete).toHaveBeenCalledWith(AnimationAsset, ['asset-1']);
+      expect(manager.update).toHaveBeenCalledTimes(1); // só o "desmarcar"
+      expect(transitions.casTransition).not.toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-1',
+        McKitStatus.GENERATING,
+        McKitStatus.FAILED,
+      );
+    });
+
+    it('sem fromReview (primeira geração) a mesma falha continua terminal: failed', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...reviewOrigin, referenceAssetIds: [] });
+      assetRepo.findOneBy.mockResolvedValue({
+        id: 'new-cand',
+        fileUrl: '/uploads/mascots/cutout.png',
+      });
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      await processor.process({ kitId: 'kit-1' });
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-1',
+        McKitStatus.GENERATING,
+        McKitStatus.FAILED,
+      );
+      expect(commercials.appendEvent).not.toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ kind: 'references_regeneration_failed' }),
+      );
     });
   });
 

@@ -20,6 +20,15 @@ export enum McStepType {
    */
   TALK = 'talk',
   ASSEMBLY = 'assembly',
+  /**
+   * Steps de PROJETO dos formatos novos (change video-formatos-personagem,
+   * D6; `sceneId = null`, fase `assembly`, fila mc.ffmpeg), agendados depois
+   * do último `talk` no lugar da montagem 720p (`assembly`, só do F3):
+   * - compose_ffmpeg (F1): arte de fundo + clipes falados na janela → vídeo composto;
+   * - finalize (F1/F2): legendas, trilha com ducking, loudness e perfil do canal → entrega.
+   */
+  COMPOSE_FFMPEG = 'compose_ffmpeg',
+  FINALIZE = 'finalize',
 }
 
 /**
@@ -73,6 +82,8 @@ export const MC_DEFAULT_PROJECT_TIER: McProjectTier = 'economico';
 /** Canal de entrega (design D13): define perfil de encode e limites de tamanho. NULL = sem perfil. */
 export const MC_PROJECT_CHANNELS = ['instagram', 'whatsapp'] as const;
 export type McProjectChannel = (typeof MC_PROJECT_CHANNELS)[number];
+/** Canal gravado quando o DTO omite (projetos novos); linhas antigas seguem NULL. */
+export const MC_DEFAULT_PROJECT_CHANNEL: McProjectChannel = 'instagram';
 
 /**
  * Caixa do logo na arte de origem (design D9b), em FRAÇÕES 0..1 da largura/
@@ -197,6 +208,12 @@ export interface McSealProduct {
   imageUrl?: string | null;
   name: string;
   price: string;
+  /**
+   * Preço anterior ("de"), já formatado como `price`, quando a oferta da arte
+   * o traz (ponte arte → projeto, design D9; o F2 o mostra riscado no card).
+   * Ausente/null = oferta sem preço anterior.
+   */
+  originalPrice?: string | null;
 }
 
 /**
@@ -217,11 +234,48 @@ export interface McScriptEndcard {
   storeName: string;
 }
 
+/**
+ * Janela do personagem na arte que fala (F1, D6): em FRAÇÕES 0..1 do QUADRO DE
+ * SAÍDA (não da arte), com o aspecto travado ao do tile do kit. A prévia do
+ * frontend usa exatamente este objeto (spec "Prévia da janela").
+ */
+export interface McCharacterWindow {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Limites do formato F1 (spec video-talking-art "Duração pela fala" / "Fala a partir das ofertas"). */
+export const MC_TALKING_ART_MIN_S = 6;
+export const MC_TALKING_ART_MAX_S = 25;
+export const MC_TALKING_ART_NARRATION_MIN_CHARS = 90;
+export const MC_TALKING_ART_NARRATION_MAX_CHARS = 375;
+export const MC_TALKING_ART_MAX_CITED_OFFERS = 3;
+/** Ofertas da arte que o roteiro F1 congela em `products[]` (o diretor cita ≤ 3 delas). */
+export const MC_TALKING_ART_MAX_OFFERS = 12;
+/** O diretor divide a narração em até 3 falas (D6) — cada uma vira uma cena `talk_tile`. */
+export const MC_TALKING_ART_MAX_SCENES = 3;
+
 export interface McScript {
   /** Versão editorial histórica (incrementa a cada edição), independente do schema. */
   version: number;
   /** 2 = roteiro do pipeline v2. Ausente = legado (nunca inferir de `version`). */
   schemaVersion?: number;
+  /**
+   * Formato do roteiro (D6): ausente = `scenes` (F3). `talking_art` (F1) e
+   * `offer_carousel` (F2) mantêm `schemaVersion = 2` e `scenes[]` de tipo
+   * `talk_tile`; os campos abaixo só existem nos formatos novos.
+   */
+  format?: McProjectFormat;
+  /** F1: texto da apresentação em pt-BR (90–375 caracteres); as cenas são a divisão dele por frase. */
+  narration?: string;
+  /** F1: janela do personagem no quadro de saída (frações 0..1, aspecto do tile). */
+  window?: McCharacterWindow;
+  /** F1: modo "rosto do logo" — a janela é a caixa do logo na arte (kit `logo_as_is`). */
+  logoFace?: boolean;
+  /** F1: ofertas citadas na fala (≤ 3 ids de `products[]`). */
+  citedOfferIds?: string[];
   /** v2: snapshot congelado dos produtos anunciados (chave estável `id`). */
   products?: McSealProduct[];
   environments?: McScriptEnvironment[];

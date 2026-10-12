@@ -4,7 +4,10 @@ import * as path from 'path';
 import { DataSource } from 'typeorm';
 import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
 import { ElevenLabsProvider } from '../../../shared/providers/elevenlabs.provider';
-import { fixtureTalkTileScript } from '../domain/__fixtures__/mc-script-v2.fixtures';
+import {
+  fixtureCommercialScript,
+  fixtureTalkTileScript,
+} from '../domain/__fixtures__/mc-script-v2.fixtures';
 import { McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -38,17 +41,16 @@ describe('TTS por fala com prosódia (change video-formatos-personagem, D7, tare
     });
   });
 
-  it('neighbourDialogues: legado pela posição; vizinha muda conta como ausente; sem roteiro, nada', () => {
-    const legacy = {
+  it('neighbourDialogues: vizinha talk_tile sem fala conta como ausente; sem roteiro ou cena desconhecida, nada', () => {
+    const muted = {
       scenes: [
-        { idx: 0, actionPrompt: 'a', dialogue: null, durationS: 5 },
-        { idx: 1, actionPrompt: 'b', dialogue: 'Fala do meio', durationS: 5 },
-        { idx: 2, actionPrompt: 'c', dialogue: '  ', durationS: 5 },
+        { ...script.scenes[0], dialogue: null },
+        script.scenes[1],
+        { ...script.scenes[2], dialogue: '  ' },
       ],
     };
-    expect(neighbourDialogues(legacy, { idx: 1 })).toEqual({ previousText: null, nextText: null });
-    expect(neighbourDialogues(legacy, { idx: 2 })).toEqual({
-      previousText: 'Fala do meio',
+    expect(neighbourDialogues(muted, { scriptSceneId: 'fx-talk-2', idx: 1 })).toEqual({
+      previousText: null,
       nextText: null,
     });
     expect(neighbourDialogues(null, { idx: 0 })).toEqual({ previousText: null, nextText: null });
@@ -56,6 +58,28 @@ describe('TTS por fala com prosódia (change video-formatos-personagem, D7, tare
       previousText: null,
       nextText: null,
     });
+  });
+
+  it('neighbourDialogues: SÓ cenas talk_tile recebem contexto — presenter/action_voiceover do F3 e o legado seguem sem (L2)', () => {
+    const f3 = fixtureCommercialScript();
+    // presenter com vizinha falada (action_voiceover): nada de contexto
+    expect(neighbourDialogues(f3, { scriptSceneId: 'fx-scene-presenter', idx: 0 })).toEqual({
+      previousText: null,
+      nextText: null,
+    });
+    expect(neighbourDialogues(f3, { scriptSceneId: 'fx-scene-voiceover', idx: 1 })).toEqual({
+      previousText: null,
+      nextText: null,
+    });
+    // legado (sem sceneType, localizado pela posição): também sem contexto
+    const legacy = {
+      scenes: [
+        { idx: 0, actionPrompt: 'a', dialogue: 'Primeira fala', durationS: 5 },
+        { idx: 1, actionPrompt: 'b', dialogue: 'Fala do meio', durationS: 5 },
+        { idx: 2, actionPrompt: 'c', dialogue: 'Última fala', durationS: 5 },
+      ],
+    };
+    expect(neighbourDialogues(legacy, { idx: 1 })).toEqual({ previousText: null, nextText: null });
   });
 
   it('mock de TTS: 15 chars/s com teto configurável por MC_MOCK_TTS_MAX_S', () => {
@@ -81,6 +105,8 @@ describe('TTS por fala com prosódia (change video-formatos-personagem, D7, tare
     let elevenLabs: { synthesizeWithTimestamps: jest.Mock };
     let pipeline: Record<string, jest.Mock>;
     let savedAssets: Array<Record<string, unknown>>;
+    let scene: Record<string, unknown>;
+    let project: Record<string, unknown>;
     let processor: McTtsProcessor;
 
     beforeEach(async () => {
@@ -101,7 +127,7 @@ describe('TTS por fala com prosódia (change video-formatos-personagem, D7, tare
         costCredits: 4,
         attempts: 1,
       };
-      const scene = {
+      scene = {
         id: 'sc2',
         projectId: 'p1',
         idx: 1,
@@ -111,7 +137,7 @@ describe('TTS por fala com prosódia (change video-formatos-personagem, D7, tare
         dialogue: script.scenes[1].dialogue,
         durationS: 7,
       };
-      const project = { id: 'p1', userId: 'u1', kitId: 'k1', script };
+      project = { id: 'p1', userId: 'u1', kitId: 'k1', script };
       const kit = { id: 'k1', userId: 'u1', voiceId: 'voice-row', voiceDelivery: null };
       elevenLabs = {
         synthesizeWithTimestamps: jest
@@ -187,6 +213,29 @@ describe('TTS por fala com prosódia (change video-formatos-personagem, D7, tare
         expect.anything(),
         expect.objectContaining({ id: 'st-tts' }),
         expect.objectContaining({ outputAssetId: 'asset-tts', consumeOnSuccess: true }),
+      );
+    });
+
+    it('cena presenter do F3 (vizinha falada) → TTS de sempre: SEM previous_text/next_text (L2)', async () => {
+      const f3 = fixtureCommercialScript();
+      project = { ...project, script: f3 };
+      scene = {
+        ...scene,
+        id: 'sc0',
+        idx: 0,
+        scriptSceneId: 'fx-scene-presenter',
+        sceneType: 'presenter',
+        dialogue: f3.scenes[0].dialogue,
+      };
+      await processor.process({ stepId: 'st-tts' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(elevenLabs.synthesizeWithTimestamps).toHaveBeenCalledTimes(1);
+      expect(elevenLabs.synthesizeWithTimestamps).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: f3.scenes[0].dialogue,
+          previousText: null,
+          nextText: null,
+        }),
       );
     });
   });

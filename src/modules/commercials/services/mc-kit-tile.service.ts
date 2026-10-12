@@ -9,6 +9,9 @@ import {
   computeTileCrop,
   dominantOpaqueColor,
   edgeUniformity,
+  keyEdgeBackground,
+  MC_TILE_EDGE_TOLERANCE,
+  McEdgeKeyResult,
   McEdgeUniformity,
   McTileCropPlan,
 } from '../domain/mc-tile';
@@ -36,6 +39,12 @@ const EDGE_SAMPLE_SIZE = 256;
  * da borda ANTES de aceitar: fundo não liso (gradiente, cenário) reprova com
  * 422 TILE_BORDER_NOT_UNIFORM e o kit fica em revisão. Em `logo_as_is` o
  * recorte é dos pixels originais do logo — nenhuma regeneração.
+ *
+ * O fundo liso detectado na borda vira TRANSPARÊNCIA real (inundação a
+ * partir das bordas, domain/mc-tile `keyEdgeBackground`): o tile de fala
+ * recolore o fundo com `flatten`, que só enxerga alfa — um tile opaco cinza
+ * ficaria cinza em qualquer janela. `backgroundColor` segue como a cor de
+ * exibição padrão; `detectedBackgroundColor` guarda a cor que foi removida.
  */
 @Injectable()
 export class McKitTileService {
@@ -67,6 +76,18 @@ export class McKitTileService {
         message: 'A imagem da identidade do kit não pôde ser lida.',
       });
     }
+    // Identidade gerada sem caixa do rosto: a imagem inteira não é um tile
+    // (rosto ≥ 60% da altura é a regra) — só o logo como está pode cair
+    // para o logo inteiro, porque ali o "personagem" É a marca.
+    if (!bbox && kit.identityMode !== 'logo_as_is') {
+      throw new UnprocessableEntityException({
+        code: 'TILE_FACE_NOT_FOUND',
+        message:
+          'O gate de boca não localizou o rosto da identidade — sem a caixa do rosto o tile ' +
+          'não pode ser recortado. Gere uma variante com boca ou escolha outro candidato.',
+        details: { actions: ['mouth_variant', 'choose_candidate'] },
+      });
+    }
     let plan = computeTileCrop({ width: meta.width, height: meta.height, bbox });
     let uniformity = await this.inspectBorder(source, plan);
     // Logo como está: se o recorte pelo rosto corta o próprio logo (marca,
@@ -87,14 +108,24 @@ export class McKitTileService {
       });
     }
 
-    const background = uniformity.transparent
-      ? { r: 0, g: 0, b: 0, alpha: 0 }
-      : { ...uniformity.background, alpha: 1 };
-    const png = await sharp(source)
+    // Raster do tile: extract → extend transparente → resize → RGBA cru. O
+    // fundo opaco detectado é inundado para alfa 0 a partir das bordas (os
+    // pixels da mesma cor no interior do personagem sobrevivem).
+    const { data, info } = await sharp(source)
       .ensureAlpha()
       .extract(plan.extract)
-      .extend({ ...plan.extend, background })
+      .extend({ ...plan.extend, background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .resize(plan.output.width, plan.output.height, { fit: 'fill', kernel: 'lanczos3' })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const keying: McEdgeKeyResult | null = uniformity.transparent
+      ? null
+      : keyEdgeBackground(
+          { data, width: info.width, height: info.height, channels: 4 },
+          uniformity.background,
+          MC_TILE_EDGE_TOLERANCE,
+        );
+    const png = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
       .png()
       .toBuffer();
     const backgroundColor = await this.resolveBackgroundColor(kit, uniformity, source);
@@ -114,7 +145,8 @@ export class McKitTileService {
       mimeType: 'image/png',
       width: plan.output.width,
       height: plan.output.height,
-      hasAlpha: uniformity.transparent,
+      // sempre com alfa: já transparente na origem, ou com o fundo liso inundado
+      hasAlpha: true,
       fileSize: String(png.length),
       metadata: {
         kitId: kit.id,
@@ -124,13 +156,17 @@ export class McKitTileService {
         faceFraction: plan.faceFraction,
         ratio: Number(plan.ratio.toFixed(4)),
         backgroundColor,
+        detectedBackgroundColor: uniformity.hex,
+        keyedBackground: keying ? { keyed: keying.keyed, ramped: keying.ramped } : null,
         edge: uniformity.fractions,
       },
     });
     this.logger.log(
       `Kit ${kit.id}: tile ${plan.output.width}×${plan.output.height} (rosto ${
         plan.faceFraction == null ? 'n/d' : `${Math.round(plan.faceFraction * 100)}%`
-      }, fundo ${backgroundColor})`,
+      }, fundo ${backgroundColor}${
+        keying ? `, ${uniformity.hex} removido em ${keying.keyed} px` : ', origem transparente'
+      })`,
     );
     return {
       assetId: asset.id,
@@ -140,7 +176,7 @@ export class McKitTileService {
       ratio: plan.ratio,
       faceFraction: plan.faceFraction,
       backgroundColor,
-      hasAlpha: uniformity.transparent,
+      hasAlpha: true,
     };
   }
 

@@ -1,6 +1,6 @@
-import { scenePlan } from './mc-execution-plan';
+import { projectAssemblySteps, scenePlan } from './mc-execution-plan';
 import { McPhase, McPhaseQuote, McQuoteItem } from './mc-quality';
-import { McSceneType, McScript, McScriptScene, McStepType } from './mc-types';
+import { McProjectFormat, McSceneType, McScript, McScriptScene, McStepType } from './mc-types';
 
 /**
  * Tabela de créditos por tipo de step (plano-comerciais §8).
@@ -34,6 +34,9 @@ export const MC_STEP_CREDITS: Record<McStepType, number> = {
    * motor fica em `providerCostUsd` (mcUsdPerSecondForModel).
    */
   [McStepType.TALK]: 56,
+  /** Composição e finalização determinísticas (ffmpeg) dos formatos novos — inclusas (0), como o assembly. */
+  [McStepType.COMPOSE_FFMPEG]: 0,
+  [McStepType.FINALIZE]: 0,
 };
 
 /** Kit do mascote (Ativo de Personagem, 1× por mascote): 30 cr = R$ 3 (§8). */
@@ -84,13 +87,16 @@ export interface McQuoteSceneInput {
 /**
  * Cotação de uma FASE pelo grafo executável (ADR §4.3): só os steps realmente
  * necessários entram com preço; reuso de asset já pago entra com 0 e
- * `cached: true` (não é uma segunda linha de geração). `assembly` entra na
- * fase de produção (e sozinho na fase `assembly` de uma revisão editorial).
+ * `cached: true` (não é uma segunda linha de geração). Os steps de PROJETO da
+ * fase assembly (`assembly` no F3; `compose_ffmpeg` + `finalize` no F1 — D6)
+ * entram na fase de produção (e sozinhos na fase `assembly` de uma revisão
+ * editorial); `opts.format` escolhe a cadeia (ausente = `scenes`).
  */
 export function quotePhase(
   phase: McPhase,
   revision: number,
   scenes: McQuoteSceneInput[],
+  opts: { format?: McProjectFormat | null } = {},
 ): McPhaseQuote {
   const items: McQuoteItem[] = [];
   for (const scene of scenes) {
@@ -109,13 +115,15 @@ export function quotePhase(
     }
   }
   if (phase === 'production' || phase === 'assembly') {
-    items.push({
-      sceneId: null,
-      stepType: McStepType.ASSEMBLY,
-      attempt: 1,
-      credits: MC_STEP_CREDITS[McStepType.ASSEMBLY],
-      cached: false,
-    });
+    for (const stepType of projectAssemblySteps(opts.format)) {
+      items.push({
+        sceneId: null,
+        stepType,
+        attempt: 1,
+        credits: MC_STEP_CREDITS[stepType],
+        cached: false,
+      });
+    }
   }
   return {
     phase,

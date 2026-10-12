@@ -34,8 +34,8 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
   let assetSeq: number;
   let kitRepo: { findOneBy: jest.Mock };
   let candidateRepo: { find: jest.Mock; update: jest.Mock; findOne: jest.Mock };
-  let assetRepo: { save: jest.Mock };
-  let manager: { insert: jest.Mock };
+  let assetRepo: { save: jest.Mock; softDelete: jest.Mock };
+  let manager: { insert: jest.Mock; update: jest.Mock };
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
   let commercials: { appendEvent: jest.Mock };
@@ -90,15 +90,16 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
     kitRepo = { findOneBy: jest.fn().mockResolvedValue({ ...kit }) };
     candidateRepo = {
       find: jest.fn().mockResolvedValue(rows(4)),
-      update: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
       findOne: jest.fn().mockResolvedValue(null),
     };
     assetRepo = {
       save: jest.fn((obj: Record<string, unknown>) =>
         Promise.resolve({ id: `asset-${++assetSeq}`, ...obj }),
       ),
+      softDelete: jest.fn().mockResolvedValue(undefined),
     };
-    manager = { insert: jest.fn() };
+    manager = { insert: jest.fn(), update: jest.fn().mockResolvedValue({ affected: 1 }) };
     dataSource = {
       getRepository: jest.fn((entity: unknown) => {
         if (entity === McCharacterKit) return kitRepo;
@@ -163,8 +164,13 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       expect(meta.width).toBe(768); // 3:4, fundo liso — serve ao tile de ponta a ponta
     }
     expect(candidateRepo.update).toHaveBeenCalledTimes(4);
-    expect(candidateRepo.update).toHaveBeenCalledWith({ id: 'cand-0' }, { assetId: 'asset-1' });
-    expect(candidateRepo.update).toHaveBeenCalledWith({ id: 'cand-3' }, { assetId: 'asset-4' });
+    // CAS na linha: só preenche se ainda estiver vazia (`assetId IS NULL`)
+    expect(candidateRepo.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'cand-0' }), {
+      assetId: 'asset-1',
+    });
+    expect(candidateRepo.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'cand-3' }), {
+      assetId: 'asset-4',
+    });
 
     expect(transitions.casTransition).toHaveBeenCalledWith(
       manager,
@@ -173,6 +179,7 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       McKitStatus.GENERATING,
       McKitStatus.CANDIDATES,
       { candidateRoundId: 'round-1' },
+      { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-1' } },
     );
     expect(transitions.notify).toHaveBeenCalledWith(
       manager,
@@ -214,6 +221,7 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       McKitStatus.GENERATING,
       McKitStatus.CANDIDATES,
       { candidateRoundId: 'round-1' },
+      { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-1' } },
     );
   });
 
@@ -234,6 +242,7 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
         McKitStatus.GENERATING,
         McKitStatus.FAILED,
         {},
+        { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-1' } },
       );
       expect(commercials.appendEvent).toHaveBeenCalledWith(
         manager,
@@ -255,6 +264,7 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
         McKitStatus.GENERATING,
         McKitStatus.CANDIDATES,
         { candidateRoundId: 'round-0' },
+        { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-1' } },
       );
       expect(transitions.notify).toHaveBeenCalledWith(
         manager,
@@ -277,6 +287,7 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
         McKitStatus.GENERATING,
         McKitStatus.CANDIDATES,
         { candidateRoundId: null },
+        { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-1' } },
       );
     });
   });
@@ -286,6 +297,7 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       ...kit,
       status: McKitStatus.REVIEW,
       identityAssetId: 'asset-identity',
+      candidateRoundId: 'round-mv', // requestMouthVariant aponta o kit para a rodada da variante
     });
     candidateRepo.find.mockResolvedValue(rows(1, 'mouth_variant', 'round-mv'));
     view.resolveIdentityAsset.mockResolvedValue({
@@ -309,6 +321,8 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
         detail: { roundId: 'round-mv', ready: 1 },
       }),
     );
+    // variante pronta: a rodada segue corrente (o usuário a escolhe com `choose`)
+    expect(manager.update).not.toHaveBeenCalled();
     expect(transitions.notify).toHaveBeenCalledWith(
       manager,
       'u1',
@@ -337,6 +351,7 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       McKitStatus.GENERATING,
       McKitStatus.CANDIDATES,
       { candidateRoundId: 'round-1' },
+      { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-1' } },
     );
   });
 
@@ -351,6 +366,120 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       McKitStatus.GENERATING,
       McKitStatus.FAILED,
       {},
+      { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-1' } },
     );
+  });
+
+  /** M2: idempotência por rodada — cerca na entrada, a cada imagem e no CAS terminal. */
+  describe('idempotência por rodada (M2)', () => {
+    it('job de rodada velha (kit já em outra rodada ou com a rodada fechada pela escolha) é no-op', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...kit, candidateRoundId: 'round-2' });
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+      kitRepo.findOneBy.mockResolvedValue({
+        ...kit,
+        status: McKitStatus.GENERATING,
+        candidateRoundId: null, // `choose` fechou a rodada; referências em voo
+        identityAssetId: 'asset-chosen',
+      });
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+
+      expect(candidateRepo.find).not.toHaveBeenCalled();
+      expect(assetRepo.save).not.toHaveBeenCalled();
+      expect(candidateRepo.update).not.toHaveBeenCalled();
+      expect(transitions.casTransition).not.toHaveBeenCalled();
+      expect(transitions.notify).not.toHaveBeenCalled();
+    });
+
+    it('rodada fechada NO MEIO ("usar como está"): as imagens restantes não são geradas e nada transiciona', async () => {
+      let reads = 0;
+      kitRepo.findOneBy.mockImplementation(() => {
+        reads += 1;
+        // 1ª leitura (entrada) com a rodada aberta; depois do 1º candidato o kit já foi a review
+        return Promise.resolve(
+          reads === 1
+            ? { ...kit }
+            : {
+                ...kit,
+                status: McKitStatus.REVIEW,
+                candidateRoundId: null,
+                identityMode: 'logo_as_is',
+              },
+        );
+      });
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+      expect(assetRepo.save).toHaveBeenCalledTimes(1);
+      expect(candidateRepo.update).toHaveBeenCalledTimes(1);
+      expect(transitions.casTransition).not.toHaveBeenCalled();
+    });
+
+    it('execuções sobrepostas da MESMA rodada no worker (retry após expiração): uma imagem por linha', async () => {
+      await Promise.all([
+        processor.process({ kitId: 'kit-1', roundId: 'round-1' }),
+        processor.process({ kitId: 'kit-1', roundId: 'round-1' }),
+      ]);
+      expect(assetRepo.save).toHaveBeenCalledTimes(4);
+      expect(candidateRepo.update).toHaveBeenCalledTimes(4);
+      expect(transitions.casTransition).toHaveBeenCalledTimes(1);
+      // terminada a primeira, o claim é liberado: um job novo da rodada volta a rodar
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+      expect(candidateRepo.find).toHaveBeenCalledTimes(2);
+    });
+
+    it('linha já preenchida por outra execução (CAS `assetId IS NULL` perdido): a imagem perdedora é descartada', async () => {
+      candidateRepo.update
+        .mockResolvedValueOnce({ affected: 1 })
+        .mockResolvedValueOnce({ affected: 0 }) // cand-1 preenchido por outro processo
+        .mockResolvedValue({ affected: 1 });
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+      expect(candidateRepo.update).toHaveBeenNthCalledWith(
+        2,
+        { id: 'cand-1', assetId: expect.anything() },
+        { assetId: 'asset-2' },
+      );
+      expect(assetRepo.softDelete).toHaveBeenCalledTimes(1);
+      expect(assetRepo.softDelete).toHaveBeenCalledWith('asset-2');
+      // a linha TEM imagem (a do vencedor): a rodada conta 4 e transiciona
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ detail: expect.objectContaining({ ready: 4, requested: 4 }) }),
+      );
+    });
+  });
+
+  it('variante com boca que falhou fecha a própria rodada (cercada) para o usuário poder pedir outra (L3)', async () => {
+    process.env.MC_KIT_PROVIDER = 'gemini';
+    gemini.generateImageWithModel.mockRejectedValue(
+      new TerminalProviderError('bloqueada', 'content_policy'),
+    );
+    kitRepo.findOneBy.mockResolvedValue({
+      ...kit,
+      status: McKitStatus.REVIEW,
+      identityAssetId: 'asset-identity',
+      candidateRoundId: 'round-mv',
+    });
+    candidateRepo.find.mockResolvedValue(rows(1, 'mouth_variant', 'round-mv'));
+    view.resolveIdentityAsset.mockResolvedValue({
+      id: 'asset-identity',
+      fileUrl: '/uploads/mascots/logo.png',
+    });
+
+    await processor.process({ kitId: 'kit-1', roundId: 'round-mv' });
+
+    expect(manager.update).toHaveBeenCalledWith(
+      McCharacterKit,
+      { id: 'kit-1', candidateRoundId: 'round-mv' },
+      { candidateRoundId: null },
+    );
+    expect(commercials.appendEvent).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({ kind: 'mouth_variant_failed' }),
+    );
+    expect(transitions.notify).toHaveBeenCalledWith(
+      manager,
+      'u1',
+      expect.objectContaining({ status: McKitStatus.REVIEW, event: 'mouth_variant_failed' }),
+      MC_EVENTS_CHANNEL,
+    );
+    expect(transitions.casTransition).not.toHaveBeenCalled();
   });
 });

@@ -73,8 +73,13 @@ async function probe(file: string): Promise<Probe> {
   };
 }
 
-/** Clipe sintético de cor com áudio PRÓPRIO (o "áudio do fornecedor", que deve ser descartado). */
-async function makeClip(file: string, size: string, durationS: number): Promise<void> {
+/**
+ * Clipe sintético de cor com áudio PRÓPRIO (o "áudio do fornecedor", que deve
+ * ser descartado). `odd` simula um motor que devolve dimensões ÍMPARES: a
+ * fonte lavfi `color` arredonda para par, então o tamanho ímpar entra por
+ * `scale` depois dela, em 4:4:4 (o 4:2:0 exige dimensões pares).
+ */
+async function makeClip(file: string, size: string, durationS: number, odd = false): Promise<void> {
   await run(FFMPEG, [
     '-y',
     '-hide_banner',
@@ -83,7 +88,7 @@ async function makeClip(file: string, size: string, durationS: number): Promise<
     '-f',
     'lavfi',
     '-i',
-    `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`,
+    `color=c=0x2E5E9E:s=${odd ? '720x960' : size}:r=30:d=${durationS}`,
     '-f',
     'lavfi',
     '-t',
@@ -94,10 +99,11 @@ async function makeClip(file: string, size: string, durationS: number): Promise<
     '0:v',
     '-map',
     '1:a',
+    ...(odd ? ['-vf', `scale=${size.replace('x', ':')}`] : []),
     '-c:v',
     'libx264',
     '-pix_fmt',
-    'yuv420p',
+    odd ? 'yuv444p' : 'yuv420p',
     '-c:a',
     'aac',
     file,
@@ -142,9 +148,15 @@ describeIf('conformação do clipe falado — ffmpeg real (MC_TEST_FFMPEG=1)', (
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  function conformedPath(clip: string): string {
+    return path.join(dir, `${path.basename(clip, '.mp4')}-conformed.mp4`);
+  }
+
+  /** `padMaxMs` opcional = o replanejamento do ingest no teto esgotado (H1: clone ilimitado). */
   async function conform(
     clip: string,
     tile: { width: number; height: number },
+    padMaxMs?: number,
   ): Promise<{ plan: ReturnType<typeof planTalkConform>; out: Probe }> {
     const raw = await probe(clip);
     const audio = await probe(voice);
@@ -155,8 +167,9 @@ describeIf('conformação do clipe falado — ffmpeg real (MC_TEST_FFMPEG=1)', (
       videoHeight: raw.height,
       tileWidth: tile.width,
       tileHeight: tile.height,
+      ...(padMaxMs === undefined ? {} : { padMaxMs }),
     });
-    const output = path.join(dir, `${path.basename(clip, '.mp4')}-conformed.mp4`);
+    const output = conformedPath(clip);
     await run(
       FFMPEG,
       buildTalkConformArgs({
@@ -191,7 +204,7 @@ describeIf('conformação do clipe falado — ffmpeg real (MC_TEST_FFMPEG=1)', (
     expect(conformedOutputIssue(out, AUDIO_MS)).toBeNull();
   }, 90_000);
 
-  it('clipe 1,2 s mais curto → too_short (classe quality), nenhum arquivo é gerado', async () => {
+  it('clipe 1,2 s mais curto → too_short (classe quality): nenhum comando nem arquivo; no teto esgotado (H1) o último quadro é clonado até o áudio', async () => {
     const clip = path.join(dir, 'shorter-1200.mp4');
     await makeClip(clip, '720x960', 4.8);
     const raw = await probe(clip);
@@ -205,7 +218,43 @@ describeIf('conformação do clipe falado — ffmpeg real (MC_TEST_FFMPEG=1)', (
     });
     expect(plan.durationAction).toBe('too_short');
     expect(plan.deltaMs).toBeGreaterThan(300);
-  }, 60_000);
+    // reprovação: o grafo se recusa a montar o comando e nada é gravado
+    const output = conformedPath(clip);
+    expect(() =>
+      buildTalkConformArgs({
+        videoPath: clip,
+        audioPath: voice,
+        output,
+        plan,
+        audioDurationS: AUDIO_MS / 1000,
+      }),
+    ).toThrow(/too_short/);
+    await expect(fs.access(output)).rejects.toThrow();
+
+    // teto da classe `quality` esgotado: o ingest replaneja com clone
+    // ilimitado e o arquivo sai com a duração do ÁUDIO (1,2 s de último quadro)
+    const accepted = await conform(clip, { width: 720, height: 960 }, Infinity);
+    expect(accepted.plan.durationAction).toBe('pad');
+    expect(accepted.plan.deltaMs).toBeGreaterThan(300);
+    expect(accepted.out.hasVideo && accepted.out.hasAudio).toBe(true);
+    expect(accepted.out.audioStreams).toBe(1);
+    expect(Math.abs((accepted.out.durationMs as number) - AUDIO_MS)).toBeLessThanOrEqual(120);
+    expect(conformedOutputIssue(accepted.out, AUDIO_MS)).toBeNull();
+    expect([accepted.out.width, accepted.out.height]).toEqual([720, 960]);
+  }, 120_000);
+
+  it('motor devolve dimensões ÍMPARES (721×961) sem desvio de aspecto → saída par 720×960 (L1)', async () => {
+    const clip = path.join(dir, 'odd-dims.mp4');
+    await makeClip(clip, '721x961', 6, true);
+    const raw = await probe(clip);
+    expect([raw.width, raw.height]).toEqual([721, 961]);
+    const { plan, out } = await conform(clip, { width: 720, height: 960 });
+    expect(plan.crop).toBeNull();
+    expect(plan.forceEvenDims).toBe(true);
+    expect([out.width, out.height]).toEqual([720, 960]);
+    expect(Math.abs((out.durationMs as number) - AUDIO_MS)).toBeLessThanOrEqual(120);
+    expect(conformedOutputIssue(out, AUDIO_MS)).toBeNull();
+  }, 90_000);
 
   it('tile 3:4 e motor devolve 9:16 → recorte centralizado para 3:4 (720×960), sem barras', async () => {
     const clip = path.join(dir, 'aspect-916.mp4');

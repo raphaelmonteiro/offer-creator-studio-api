@@ -29,7 +29,18 @@ export type AnimationAssetKind =
   /** Clipe de cena falada já sincronizado (audio-driven, plano-comerciais §6.1). */
   | 'scene_synced'
   /** Vídeo final montado do comercial (plano-comerciais §6.1). */
-  | 'commercial_final';
+  | 'commercial_final'
+  /**
+   * Arte do Chroma (social ou página do encarte) rasterizada no cliente e
+   * enviada por `POST /commercials/art` — fundo congelado dos formatos F1/F2
+   * (change video-formatos-personagem, design D9). `origin: 'imported'`.
+   */
+  | 'video_art'
+  /**
+   * Vídeo COMPOSTO dos formatos novos (saída do `compose_ffmpeg`, design D6):
+   * entrada do `finalize`; a entrega continua sendo `commercial_final`.
+   */
+  | 'commercial_composed';
 
 export type AnimationAssetStatus =
   | 'draft'

@@ -28,8 +28,8 @@ import {
   McStepStatus,
 } from '../domain/mc-state-machines';
 import { assertAspectSupportedForFormat } from '../domain/mc-composition.config';
-import { assertFormatEnabled } from '../domain/mc-pipeline.config';
-import { isPipelineV2, MC_EMPTY_QUALITY } from '../domain/mc-quality';
+import { assertFormatEnabled, assertPipelineV2ForFormat } from '../domain/mc-pipeline.config';
+import { isPipelineV2, MC_EMPTY_QUALITY, MC_PIPELINE_V2 } from '../domain/mc-quality';
 import {
   MC_DEFAULT_PROJECT_FORMAT,
   MC_DEFAULT_PROJECT_TIER,
@@ -301,11 +301,16 @@ export class McProjectActionsService {
     const tier = dto.tier ?? source.tier ?? MC_DEFAULT_PROJECT_TIER;
     const aspectRatio = dto.aspectRatio ?? source.aspectRatio;
     assertFormatEnabled(format);
+    // F1/F2 nascem SEMPRE no executor v2 (D6) e exigem MC_PIPELINE_V2=all —
+    // mesma regra da criação (422 PIPELINE_V2_REQUIRED antes de escrever).
+    assertPipelineV2ForFormat(format);
     assertAspectSupportedForFormat(format, aspectRatio);
 
     const kit = await this.getKit(source.kitId);
     const title = await this.nextCopyTitle(userId, source.title);
-    const v2 = isPipelineV2(source);
+    const newFormat = format !== MC_DEFAULT_PROJECT_FORMAT;
+    const pipelineVersion = newFormat ? MC_PIPELINE_V2 : (source.pipelineVersion ?? 1);
+    const v2 = newFormat || isPipelineV2(source);
 
     const created = await this.dataSource.transaction(async (manager) => {
       const copy = manager.create(McProject, {
@@ -313,7 +318,7 @@ export class McProjectActionsService {
         kitId: kit.id,
         title,
         briefing: source.briefing,
-        pipelineVersion: source.pipelineVersion ?? 1,
+        pipelineVersion,
         format,
         tier,
         channel: source.channel ?? null,

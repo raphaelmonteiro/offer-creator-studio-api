@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
@@ -16,7 +17,60 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
-import { MC_ASPECT_RATIOS, McAspectRatio, MC_MAX_SEAL_PRODUCTS } from '../domain/mc-types';
+import {
+  MC_ASPECT_RATIOS,
+  MC_MAX_SEAL_PRODUCTS,
+  MC_PROJECT_CHANNELS,
+  MC_PROJECT_FORMATS,
+  MC_PROJECT_TIERS,
+  MC_SOURCE_ART_KINDS,
+  McAspectRatio,
+  McProjectChannel,
+  McProjectFormat,
+  McProjectTier,
+  McSourceArtKind,
+} from '../domain/mc-types';
+
+/** Caixa do logo na arte (D9b) em frações 0..1 — forma validada aqui; regra de área no service. */
+export class LogoBoxDto {
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  x: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  y: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  w: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  h: number;
+}
+
+/** Origem da arte (D9): documento do Chroma + página + hash do snapshot rasterizado. */
+export class SourceArtDto {
+  @IsIn(MC_SOURCE_ART_KINDS as readonly string[])
+  kind: McSourceArtKind;
+
+  @IsString()
+  @Length(1, 64)
+  id: string;
+
+  @IsInt()
+  @Min(0)
+  pageIndex: number;
+
+  @IsString()
+  @Length(1, 128)
+  snapshotHash: string;
+}
 
 /**
  * Produto do catálogo escolhido para o comercial (contrato v1-B1): o FRONT
@@ -100,4 +154,47 @@ export class CreateProjectDto {
   @IsOptional()
   @IsBoolean()
   lowerThirdBlur?: boolean;
+
+  // ── formatos novos (change video-formatos-personagem, D6/D9/D13) ──
+
+  /** `scenes` (default, F3) · `talking_art` (F1) · `offer_carousel` (F2). Admissão por MC_FORMATS no service (422). */
+  @IsOptional()
+  @IsIn(MC_PROJECT_FORMATS as readonly string[])
+  format?: McProjectFormat;
+
+  /** `economico` (default) | `premium` — motor de fala dos formatos novos; rótulo no F3. */
+  @IsOptional()
+  @IsIn(MC_PROJECT_TIERS as readonly string[])
+  tier?: McProjectTier;
+
+  /** `instagram` (default) | `whatsapp` — perfil de encode da entrega. */
+  @IsOptional()
+  @IsIn(MC_PROJECT_CHANNELS as readonly string[])
+  channel?: McProjectChannel;
+
+  /**
+   * Arte de fundo (asset `video_art` do usuário, criado por `POST /commercials/art`).
+   * OBRIGATÓRIA no formato `talking_art` (forma → 400 aqui; kind/dono → 422 no service).
+   */
+  @ValidateIf((o: CreateProjectDto) => o.format === 'talking_art' || o.backgroundArtAssetId != null)
+  @IsUUID()
+  backgroundArtAssetId?: string;
+
+  /** Preset de layout da composição (janela do personagem / cards). */
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  layoutPreset?: string;
+
+  /** Caixa do logo na arte, em frações 0..1 (D9b). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LogoBoxDto)
+  logoBox?: LogoBoxDto;
+
+  /** Origem da arte que virou projeto (D9). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SourceArtDto)
+  sourceArt?: SourceArtDto;
 }

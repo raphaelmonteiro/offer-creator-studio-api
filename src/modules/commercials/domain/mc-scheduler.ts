@@ -1,4 +1,4 @@
-import { planSteps, scenePlan } from './mc-execution-plan';
+import { planSteps, projectAssemblySteps, scenePlan } from './mc-execution-plan';
 import { isPipelineV2 } from './mc-quality';
 import {
   DONE_STEP_STATUSES,
@@ -6,7 +6,7 @@ import {
   McSceneStatus,
   McStepStatus,
 } from './mc-state-machines';
-import { McSceneType, McStepType } from './mc-types';
+import { McProjectFormat, McSceneType, McStepType } from './mc-types';
 
 /**
  * Scheduler do grafo de dependências (plano-comerciais §6.2) — FUNÇÃO PURA:
@@ -45,6 +45,8 @@ export interface SchedulerProject {
   status: McProjectStatus;
   pipelineVersion?: number | null;
   revision?: number | null;
+  /** Formato (D6): escolhe a cadeia de steps de projeto da fase assembly; ausente = `scenes`. */
+  format?: McProjectFormat | null;
 }
 
 export interface SchedulerScene {
@@ -244,27 +246,48 @@ function readyStepsV2(
   }
 
   if (generating || assembling) {
-    const assembly = steps.find(
-      (s) =>
-        s.type === McStepType.ASSEMBLY &&
-        s.sceneId === null &&
-        s.status === McStepStatus.PENDING &&
-        (s.projectRevision == null || revision == null || s.projectRevision === revision),
-    );
-    if (assembly) {
-      const liveScenes = scenes.filter((s) => s.status !== McSceneStatus.CANCELED);
-      // Cena `ready` já tem o clipe final (finalAssetId) — inclusive de uma
-      // revisão ANTERIOR: a remontagem `assembly_only` reutiliza os clipes
-      // aprovados sem novos steps de produção (ADR §4.1), então a prontidão
-      // não pode depender de steps da revisão corrente.
-      const allFinalsDone =
-        liveScenes.length > 0 &&
-        liveScenes.every((scene) => {
-          if (scene.status === McSceneStatus.READY) return true;
-          const plan = scenePlan(sceneTypeOf(scene));
-          return isDone(currentGenerationSteps(scene, steps, revision)[plan.final]);
-        });
-      if (allFinalsDone) ready.push(toRef(assembly));
+    // Steps de PROJETO da fase assembly, por formato (D6): `assembly` (F3) ou
+    // `compose_ffmpeg → finalize` (F1). O PRIMEIRO da cadeia destrava quando
+    // todas as cenas vivas têm final; cada seguinte, quando o anterior (da
+    // mesma revisão) concluiu. Nunca keyframe/assembly num projeto F1.
+    const chain = projectAssemblySteps(project.format);
+    const projectStep = (type: McStepType, status: McStepStatus, attempt?: number) =>
+      steps.find(
+        (s) =>
+          s.type === type &&
+          s.sceneId === null &&
+          s.status === status &&
+          (attempt == null || (s.attempt ?? 1) === attempt) &&
+          (s.projectRevision == null || revision == null || s.projectRevision === revision),
+      );
+    for (const [position, type] of chain.entries()) {
+      const pending = projectStep(type, McStepStatus.PENDING);
+      if (!pending) continue;
+      if (position === 0) {
+        const liveScenes = scenes.filter((s) => s.status !== McSceneStatus.CANCELED);
+        // Cena `ready` já tem o clipe final (finalAssetId) — inclusive de uma
+        // revisão ANTERIOR: a remontagem `assembly_only` reutiliza os clipes
+        // aprovados sem novos steps de produção (ADR §4.1), então a prontidão
+        // não pode depender de steps da revisão corrente.
+        const allFinalsDone =
+          liveScenes.length > 0 &&
+          liveScenes.every((scene) => {
+            if (scene.status === McSceneStatus.READY) return true;
+            const plan = scenePlan(sceneTypeOf(scene));
+            return isDone(currentGenerationSteps(scene, steps, revision)[plan.final]);
+          });
+        if (allFinalsDone) ready.push(toRef(pending));
+        continue;
+      }
+      // A cadeia de UMA entrega compartilha o `attempt` (materializer): um
+      // compose concluído de uma entrega anterior da mesma revisão nunca
+      // destrava o finalize da entrega nova.
+      const previousType = chain[position - 1];
+      const attempt = pending.attempt ?? 1;
+      const previousDone =
+        projectStep(previousType, McStepStatus.SUCCEEDED, attempt) ??
+        projectStep(previousType, McStepStatus.SKIPPED_CACHED, attempt);
+      if (previousDone) ready.push(toRef(pending));
     }
   }
   return ready;

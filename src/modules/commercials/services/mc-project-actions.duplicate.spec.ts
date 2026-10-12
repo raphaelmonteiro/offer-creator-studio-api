@@ -50,6 +50,7 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
   let sourceScenes: Row[];
   let sourceSteps: Row[];
   const originalFormats = process.env.MC_FORMATS;
+  const originalPipelineV2 = process.env.MC_PIPELINE_V2;
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
   let commercials: { appendEvent: jest.Mock };
@@ -95,6 +96,8 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
       }),
     };
     delete process.env.MC_FORMATS;
+    // F1/F2 exigem o executor v2 para todos (D6); os testes de formato novo partem daqui.
+    process.env.MC_PIPELINE_V2 = 'all';
     projectCount = jest.fn().mockResolvedValue(0);
     dataSource = {
       getRepository: jest.fn((entity: unknown) => ({
@@ -134,6 +137,8 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
   afterEach(() => {
     if (originalFormats === undefined) delete process.env.MC_FORMATS;
     else process.env.MC_FORMATS = originalFormats;
+    if (originalPipelineV2 === undefined) delete process.env.MC_PIPELINE_V2;
+    else process.env.MC_PIPELINE_V2 = originalPipelineV2;
   });
 
   it('cria projeto NOVO em storyboard_review, mesmo kit, no formato pedido', async () => {
@@ -239,6 +244,27 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
     expect(saved[0]).toMatchObject({ pipelineVersion: 1, quality: null, revision: 0 });
     expect(manager.find).not.toHaveBeenCalled();
     expect(saved).toHaveLength(1);
+  });
+
+  it('formato novo com MC_PIPELINE_V2=off → 422 PIPELINE_V2_REQUIRED (tarefa 4.2); ligado, a cópia nasce v2 mesmo de origem legada', async () => {
+    process.env.MC_FORMATS = 'talking_art';
+    process.env.MC_PIPELINE_V2 = 'off';
+    source.format = 'talking_art';
+    await expect(service.duplicateProject(userId, 'p1', {})).rejects.toMatchObject({
+      status: 422,
+      response: expect.objectContaining({ code: 'PIPELINE_V2_REQUIRED' }),
+    });
+    expect(saved).toHaveLength(0);
+
+    process.env.MC_PIPELINE_V2 = 'all';
+    source.pipelineVersion = 1; // origem anterior à change: a cópia F1 é SEMPRE v2 com quality vazio
+    await service.duplicateProject(userId, 'p1', {});
+    expect(saved[0]).toMatchObject({
+      format: 'talking_art',
+      pipelineVersion: MC_PIPELINE_V2,
+      revision: 0,
+      quality: MC_EMPTY_QUALITY,
+    });
   });
 
   it('formato novo fora de MC_FORMATS → 422 FORMAT_NOT_ENABLED antes de qualquer escrita', async () => {

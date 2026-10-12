@@ -1,4 +1,5 @@
 import {
+  MC_TILE_EDGE_TOLERANCE,
   MC_TILE_MAX_RATIO,
   MC_TILE_MIN_FACE_FRACTION,
   MC_TILE_MIN_RATIO,
@@ -7,6 +8,7 @@ import {
   computeTileCrop,
   dominantOpaqueColor,
   edgeUniformity,
+  keyEdgeBackground,
   parseHexColor,
 } from './mc-tile';
 
@@ -186,5 +188,59 @@ describe('mc-tile — cor dominante dos pixels opacos (cor de marca do logo tran
   it('imagem toda transparente → null; imagem opaca → cor dominante', () => {
     expect(dominantOpaqueColor(raw(4, 4, () => [255, 255, 255, 0]))).toBeNull();
     expect(dominantOpaqueColor(raw(4, 4, (x) => (x < 3 ? BLUE : GRAY)))).toBe('#1E50C8');
+  });
+});
+
+describe('mc-tile — fundo liso da borda → alfa (keyEdgeBackground)', () => {
+  const alphaAt = (image: McRawImage, x: number, y: number) =>
+    image.data[(y * image.width + x) * 4 + 3];
+  const GRAY_RGB = { r: 0xe5, g: 0xe7, b: 0xeb };
+
+  it('inunda o fundo a partir das bordas: fundo vira alfa 0, personagem fica opaco', () => {
+    const image = raw(40, 40, (x, y) => (x >= 10 && x < 30 && y >= 10 && y < 30 ? BLUE : GRAY));
+    const result = keyEdgeBackground(image, GRAY_RGB);
+    expect(result.keyed).toBe(40 * 40 - 20 * 20);
+    expect(alphaAt(image, 0, 0)).toBe(0);
+    expect(alphaAt(image, 39, 39)).toBe(0);
+    expect(alphaAt(image, 5, 20)).toBe(0);
+    expect(alphaAt(image, 20, 20)).toBe(255);
+    expect(alphaAt(image, 10, 10)).toBe(255); // borda do personagem intacta
+  });
+
+  it('pixel da MESMA cor do fundo no interior do personagem sobrevive (não é replace color)', () => {
+    const image = raw(40, 40, (x, y) => {
+      const inside = x >= 10 && x < 30 && y >= 10 && y < 30;
+      const eye = x >= 18 && x < 22 && y >= 15 && y < 19; // "olho" cinza dentro do rosto azul
+      return inside ? (eye ? GRAY : BLUE) : GRAY;
+    });
+    keyEdgeBackground(image, GRAY_RGB);
+    expect(alphaAt(image, 20, 17)).toBe(255);
+    expect(alphaAt(image, 2, 2)).toBe(0);
+  });
+
+  it('rampa suave: cor entre a tolerância e 1,5× fica com alfa parcial; além disso, opaco', () => {
+    const t = MC_TILE_EDGE_TOLERANCE;
+    const image = raw(30, 10, (x) => {
+      if (x < 10) return GRAY; // fundo exato
+      if (x < 20) return [0xe5 - Math.round(t * 1.25), 0xe7, 0xeb, 255]; // meio da rampa
+      return [0xe5 - t * 2, 0xe7, 0xeb, 255]; // fora: personagem
+    });
+    const result = keyEdgeBackground(image, GRAY_RGB, t);
+    expect(alphaAt(image, 5, 5)).toBe(0);
+    const mid = alphaAt(image, 15, 5);
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan(255);
+    expect(alphaAt(image, 25, 5)).toBe(255);
+    expect(result.ramped).toBe(10 * 10);
+  });
+
+  it('pixels já transparentes contam como fundo (a inundação os atravessa) e não são recontados', () => {
+    const image = raw(20, 20, (x) => (x < 5 ? [0, 0, 0, 0] : x < 10 ? GRAY : BLUE));
+    const result = keyEdgeBackground(image, GRAY_RGB);
+    expect(result.keyed).toBe(5 * 20); // só os cinzas viraram alfa 0
+    expect(alphaAt(image, 7, 10)).toBe(0);
+    expect(alphaAt(image, 15, 10)).toBe(255);
+    // sem canal alfa não há onde gravar
+    expect(() => keyEdgeBackground({ ...image, channels: 3 }, GRAY_RGB)).toThrow(/RGBA/);
   });
 });

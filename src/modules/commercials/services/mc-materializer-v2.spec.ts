@@ -721,6 +721,70 @@ describe('McMaterializerService — cenas talk_tile (tarefas 3.3/3.4/3.8)', () =
     expect(manager.steps()).toHaveLength(0);
   });
 
+  it('ensureAssemblyStepV2 no F1: cria a cadeia compose_ffmpeg → finalize (sceneId null, fase assembly, mesmo attempt); repetir só atualiza o hash; nova entrega abre attempt 2', async () => {
+    const script = fixtureTalkTileScript({ backgroundColor: '#ABCDEF' });
+    const { manager, project, scenes } = await prepared(script);
+    scenes.forEach((s, i) => {
+      s.status = McSceneStatus.READY;
+      s.finalAssetId = `clip-${i}`;
+    });
+    const first = await service.ensureAssemblyStepV2(manager, project, script, scenes);
+    const chain = () =>
+      manager
+        .steps()
+        .filter((s) => s.sceneId === null)
+        .map((s) => ({
+          type: s.type,
+          status: s.status,
+          phase: s.phase,
+          attempt: s.attempt,
+          hash: s.inputHash,
+          rev: s.projectRevision,
+        }));
+    expect(first.type).toBe(McStepType.COMPOSE_FFMPEG);
+    expect(chain()).toEqual([
+      expect.objectContaining({
+        type: McStepType.COMPOSE_FFMPEG,
+        status: McStepStatus.PENDING,
+        phase: 'assembly',
+        attempt: 1,
+        rev: 1,
+      }),
+      expect.objectContaining({
+        type: McStepType.FINALIZE,
+        status: McStepStatus.PENDING,
+        phase: 'assembly',
+        attempt: 1,
+        rev: 1,
+      }),
+    ]);
+    expect(manager.steps().some((s) => s.type === McStepType.ASSEMBLY)).toBe(false);
+    const composeHash = chain()[0].hash;
+
+    // mesma composição ⇒ mesmo hash, sem duplicar; cor da janela diferente ⇒ hash novo
+    await service.ensureAssemblyStepV2(manager, project, script, scenes);
+    expect(chain()).toHaveLength(2);
+    expect(chain()[0].hash).toBe(composeHash);
+    await service.ensureAssemblyStepV2(
+      manager,
+      project,
+      { ...script, talkBackgroundColor: '#000000' },
+      scenes,
+    );
+    expect(chain()).toHaveLength(2);
+    expect(chain()[0].hash).not.toBe(composeHash);
+
+    // cadeia entregue ⇒ a próxima remontagem nasce com attempt 2 (o scheduler liga finalize ao compose da MESMA cadeia)
+    for (const s of manager.steps().filter((x) => x.sceneId === null))
+      s.status = McStepStatus.SUCCEEDED;
+    await service.ensureAssemblyStepV2(manager, project, script, scenes);
+    const pending = chain().filter((s) => s.status === McStepStatus.PENDING);
+    expect(pending.map((s) => [s.type, s.attempt])).toEqual([
+      [McStepType.COMPOSE_FFMPEG, 2],
+      [McStepType.FINALIZE, 2],
+    ]);
+  });
+
   it('duplicar premium → econômico: tts clonado como skipped_cached é reaproveitado (selectedAssetMatches) e SÓ os talk executam', async () => {
     const script = fixtureTalkTileScript();
     const manager = fakeManager({ assets: [tileAsset] });

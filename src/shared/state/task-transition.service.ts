@@ -14,6 +14,17 @@ import {
 export const EVENTS_CHANNEL = 'animation_events';
 
 /**
+ * Condição extra do CAS (opcional): SQL cru com parâmetros nomeados, para o
+ * chamador fixar mais do que o status — por exemplo "a rodada ainda é esta"
+ * (`"candidateRoundId" = :roundId`) ou "a identidade não mudou". Colunas em
+ * camelCase precisam de aspas duplas, como em qualquer SQL cru do Postgres.
+ */
+export interface CasExtraWhere {
+  sql: string;
+  params?: Record<string, unknown>;
+}
+
+/**
  * Transições CAS (TDD §3.6): `UPDATE ... WHERE id AND status = from`.
  * Um webhook duplicado ou um poll que perde a corrida afeta 0 linhas e vira
  * no-op — idempotência por construção, sem lock pessimista.
@@ -28,7 +39,9 @@ export const EVENTS_CHANNEL = 'animation_events';
 @Injectable()
 export class TaskTransitionService {
   /**
-   * Núcleo genérico do CAS: atualiza a entidade apenas se `status = from`.
+   * Núcleo genérico do CAS: atualiza a entidade apenas se `status = from`
+   * (e, quando informada, se a condição extra também vale — a mesma UPDATE,
+   * sem segunda leitura: quem perde a corrida afeta 0 linhas).
    * @returns true se ESTA chamada venceu a transição; false = alguém já transicionou.
    */
   async casTransition<Entity extends ObjectLiteral>(
@@ -38,12 +51,16 @@ export class TaskTransitionService {
     from: string,
     to: string,
     patch: Record<string, unknown> = {},
+    extraWhere?: CasExtraWhere,
   ): Promise<boolean> {
+    const where = extraWhere
+      ? `id = :id AND status = :from AND (${extraWhere.sql})`
+      : 'id = :id AND status = :from';
     const result = await manager
       .createQueryBuilder()
       .update(entity)
       .set({ ...patch, status: to })
-      .where('id = :id AND status = :from', { id, from })
+      .where(where, { ...(extraWhere?.params ?? {}), id, from })
       .execute();
     return (result.affected ?? 0) === 1;
   }

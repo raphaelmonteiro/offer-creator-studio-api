@@ -117,7 +117,7 @@ describe('fixtures v2 (P0) — roteiros utilizáveis', () => {
 describe('fixture talk_tile (change video-formatos-personagem, D6/D7)', () => {
   it('três falas talk_tile válidas SEM initialFrame/cenário/referências; gesto opcional', () => {
     const script = fixtureTalkTileScript();
-    expect(validateScriptV2(script)).toEqual([]);
+    expect(validateScriptV2(script, { format: 'talking_art' })).toEqual([]);
     expect(script.scenes.map((s) => s.sceneType)).toEqual(['talk_tile', 'talk_tile', 'talk_tile']);
     expect(script.scenes.every((s) => s.initialFrame === undefined)).toBe(true);
     expect(script.scenes.every((s) => s.environmentId === null)).toBe(true);
@@ -134,7 +134,7 @@ describe('fixture talk_tile (change video-formatos-personagem, D6/D7)', () => {
       products: FIXTURE_PRODUCTS,
       backgroundColor: '#FF8800',
     });
-    expect(validateScriptV2(script)).toEqual([]);
+    expect(validateScriptV2(script, { format: 'talking_art' })).toEqual([]);
     expect(script.talkBackgroundColor).toBe('#FF8800');
     expect(script.scenes[1].productRef).toBe('prod-arroz');
     expect(fixtureTalkTileScript().talkBackgroundColor).toBeUndefined();

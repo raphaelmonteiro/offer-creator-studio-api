@@ -248,38 +248,48 @@ export function fixtureTalkTileScene(
 }
 
 /**
- * Roteiro F1/F2 de três falas (6 s, 7 s e 5 s planejados — o caso "três
- * falas" da spec video-talking-clip): o diretor (4.1/6.6) emite cenas assim;
- * aqui só o backend que as executa é exercitado. `talkBackgroundColor` é a
- * cor da janela (D1); ausente = cor do tile do kit.
+ * Roteiro F1 de três falas (6 s, 7 s e 5 s planejados — o caso "três falas"
+ * da spec video-talking-clip), com os campos do formato "arte que fala" (D6,
+ * tarefa 4.1): `format`, `narration` (as três falas em sequência), janela
+ * default do canto inferior direito em 9:16, `logoFace` e ofertas citadas.
+ * O diretor (4.1) emite roteiros assim; aqui o backend que os executa é
+ * exercitado. `talkBackgroundColor` é a cor da janela (D1); ausente = cor do
+ * tile do kit.
  */
 export function fixtureTalkTileScript(
   opts: { products?: McSealProduct[]; backgroundColor?: string | null } = {},
 ): McScript {
+  const scenes = [
+    fixtureTalkTileScene('fx-talk-1', 0, {
+      dialogue: 'Olá! Chegaram as ofertas da semana no nosso mercado.',
+      durationS: 6,
+      motion: 'Acena no início.',
+      motionEn: 'Waves at the start.',
+    }),
+    fixtureTalkTileScene('fx-talk-2', 1, {
+      dialogue: 'Arroz integral cinco quilos por vinte e quatro e noventa, só até domingo!',
+      durationS: 7,
+      productRef: opts.products?.[0]?.id ?? null,
+    }),
+    fixtureTalkTileScene('fx-talk-3', 2, {
+      dialogue: 'Corre pra cá e aproveite!',
+      durationS: 5,
+    }),
+  ];
+  const citedId = opts.products?.[0]?.id;
   return {
     version: 1,
     schemaVersion: MC_SCRIPT_SCHEMA_V2,
+    format: 'talking_art',
     products: opts.products ?? [],
     environments: [],
-    scenes: [
-      fixtureTalkTileScene('fx-talk-1', 0, {
-        dialogue: 'Olá! Chegaram as ofertas da semana no nosso mercado.',
-        durationS: 6,
-        motion: 'Acena no início.',
-        motionEn: 'Waves at the start.',
-      }),
-      fixtureTalkTileScene('fx-talk-2', 1, {
-        dialogue: 'Arroz integral cinco quilos por vinte e quatro e noventa, só até domingo!',
-        durationS: 7,
-        productRef: opts.products?.[0]?.id ?? null,
-      }),
-      fixtureTalkTileScene('fx-talk-3', 2, {
-        dialogue: 'Corre pra cá e aproveite!',
-        durationS: 5,
-      }),
-    ],
+    scenes,
     seal: null,
     endcard: null,
+    narration: scenes.map((s) => s.dialogue).join(' '),
+    window: { x: 0.5398, y: 0.4357, w: 0.4, h: 0.2143 },
+    logoFace: false,
+    citedOfferIds: citedId ? [citedId] : [],
     ...(opts.backgroundColor === undefined ? {} : { talkBackgroundColor: opts.backgroundColor }),
   };
 }

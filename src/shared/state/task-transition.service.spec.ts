@@ -25,19 +25,26 @@ function fakeManager(initialStatus: string) {
     createQueryBuilder: jest.fn(() => {
       let setPatch: Record<string, unknown>;
       let fromStatus: string;
+      let extraHolds = true;
       const qb = {
         update: () => qb,
         set: (patch: Record<string, unknown>) => {
           setPatch = patch;
           return qb;
         },
-        where: (_sql: string, params: { from: string }) => {
-          fromStatus = params.from;
+        where: (sql: string, params: Record<string, unknown>) => {
+          fromStatus = params.from as string;
+          // condição extra (`AND ("col" = :p)`): avaliada sobre o registro,
+          // como o Postgres faria na MESMA UPDATE
+          const extra = sql.match(/AND \("(\w+)" = :(\w+)\)$/);
+          extraHolds = extra
+            ? (record as Record<string, unknown>)[extra[1]] === params[extra[2]]
+            : true;
           return qb;
         },
         execute: () => {
           // CAS: só atualiza se o status atual é o esperado
-          if (record.status === fromStatus) {
+          if (record.status === fromStatus && extraHolds) {
             Object.assign(record, setPatch);
             return Promise.resolve({ affected: 1 });
           }
@@ -126,6 +133,40 @@ describe('TaskTransitionService — CAS e idempotência (TDD §3.6)', () => {
     ).rejects.toThrow(InvalidTransitionError);
     expect(manager.record.status).toBe(TaskStatus.QUEUED);
     expect(manager.events).toHaveLength(0);
+  });
+
+  /** Condição extra do CAS (change video-formatos-personagem): fixa mais que o status na MESMA UPDATE. */
+  it('casTransition com extraWhere: vence só quando a condição extra também vale', async () => {
+    const manager = fakeManager('generating');
+    (manager.record as Record<string, unknown>).candidateRoundId = 'round-1';
+    const lost = await service.casTransition(
+      manager,
+      class Kit {},
+      't1',
+      'generating',
+      'candidates',
+      {},
+      { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-0' } },
+    );
+    expect(lost).toBe(false);
+    expect(manager.record.status).toBe('generating');
+
+    const won = await service.casTransition(
+      manager,
+      class Kit {},
+      't1',
+      'generating',
+      'candidates',
+      { extra: 1 },
+      { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-1' } },
+    );
+    expect(won).toBe(true);
+    expect(manager.record.status).toBe('candidates');
+    expect((manager.record as Record<string, unknown>).extra).toBe(1);
+    // sem extraWhere o comportamento é o de sempre (compatível)
+    expect(await service.casTransition(manager, class Kit {}, 't1', 'candidates', 'review')).toBe(
+      true,
+    );
   });
 
   it('render: cancel em compositing vence; em encoding não existe', async () => {

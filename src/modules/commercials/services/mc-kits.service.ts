@@ -100,13 +100,15 @@ export class McKitsService {
    */
   async createKit(userId: string, dto: CreateKitDto): Promise<McCharacterKit> {
     const source: McKitSource = dto.source ?? 'mascot';
+    // Estilo é exigido para GERAR (spec "Estilo não escolhido"): referências
+    // na origem mascote, candidatos na origem logo — ambos começam aqui.
+    // ANTES de qualquer efeito colateral (registrar o logo do cliente copia
+    // arquivo e cria linha em `mascots`): sem estilo, nada é tocado (L4).
+    if (!dto.style) throw this.styleRequired();
     const mascot =
       source === 'logo'
         ? await this.resolveLogoSource(userId, dto)
         : await this.resolveMascotSource(userId, dto);
-    // Estilo é exigido para GERAR (spec "Estilo não escolhido"): referências
-    // na origem mascote, candidatos na origem logo — ambos começam aqui.
-    if (!dto.style) throw this.styleRequired();
 
     const imageUrl = mascot.cutoutUrl ?? mascot.sourceImageUrl;
     if (!imageUrl) {
@@ -148,9 +150,10 @@ export class McKitsService {
     // opção "usar como está" aparece ao lado dos candidatos.
     if (source === 'logo') base.mouthGate = { logo: await this.mouthGate.inspect(imageBuffer) };
 
-    // Criação + enqueue na MESMA transação (pg-boss é Postgres): se o publish
-    // falhar, o kit não fica órfão em 'generating' para sempre.
-    return this.dataSource.transaction(async (manager) => {
+    // Fila só DEPOIS do commit (L1): o pg-boss usa a própria conexão, e o
+    // consumer lê o kit/rodada pelo banco — um job consumido antes do commit
+    // não encontraria o kit (job perdido, kit órfão em 'generating').
+    const { kit, publish } = await this.dataSource.transaction(async (manager) => {
       const kit = await manager
         .getRepository(McCharacterKit)
         .save({ ...base, status: McKitStatus.GENERATING });
@@ -168,15 +171,18 @@ export class McKitsService {
           logoMouthGate: base.mouthGate?.logo ? decideMouthGate(base.mouthGate.logo) : null,
         },
       });
+      let publish: () => Promise<unknown>;
       if (source === 'mascot') {
-        await this.queue.publish(
-          QUEUES.MC_IMAGE,
-          { kitId: kit.id },
-          { expireInSeconds: MC_IMAGE_EXPIRE_S },
-        );
+        publish = () =>
+          this.queue.publish(
+            QUEUES.MC_IMAGE,
+            { kitId: kit.id },
+            { expireInSeconds: MC_IMAGE_EXPIRE_S },
+          );
       } else {
         const round = await this.candidates.openRound(manager, kit, { kind: 'mascotization' });
         kit.candidateRoundId = round.roundId;
+        publish = () => this.candidates.publishRound(round.job);
       }
       await this.transitions.notify(
         manager,
@@ -184,8 +190,10 @@ export class McKitsService {
         { kind: 'mc_kit', kitId: kit.id, status: McKitStatus.GENERATING },
         MC_EVENTS_CHANNEL,
       );
-      return kit;
+      return { kit, publish };
     });
+    await publish();
+    return kit;
   }
 
   /** Origem `mascot`: mascote do usuário (404/403 pelo MascotsService), do tipo certo e com direitos. */
@@ -416,8 +424,17 @@ export class McKitsService {
     const tile = await this.ensureTile(kit, identity, verdict, gateRecord);
 
     assertKitTransition(McKitStatus.REVIEW, McKitStatus.APPROVED);
-    await this.dataSource.transaction(async (manager) => {
-      const won = await this.transitions.casTransition(
+    // A aprovação assina a identidade que o gate e o tile viram: a MESMA
+    // UPDATE exige que ela não tenha mudado (candidato/variante escolhido ou
+    // referência frontal regerada entre a leitura e o commit) — M5.
+    const identityUnchanged = kit.identityAssetId
+      ? { sql: '"identityAssetId" = :identityId', params: { identityId: identity.id } }
+      : {
+          sql: '"identityAssetId" IS NULL AND CAST(:identityId AS uuid) = ANY("referenceAssetIds")',
+          params: { identityId: identity.id },
+        };
+    const won = await this.dataSource.transaction(async (manager) => {
+      const casWon = await this.transitions.casTransition(
         manager,
         McCharacterKit,
         kit.id,
@@ -432,13 +449,9 @@ export class McKitsService {
           tileBackgroundColor: tile.backgroundColor,
           mouthGate: gateRecord,
         },
+        identityUnchanged,
       );
-      if (!won) {
-        throw new UnprocessableEntityException({
-          code: 'KIT_NOT_IN_REVIEW',
-          message: 'O kit mudou de estado durante a aprovação. Recarregue e tente de novo.',
-        });
-      }
+      if (!casWon) return false;
       await this.commercials.appendEvent(manager, {
         userId,
         refKind: 'kit',
@@ -452,6 +465,7 @@ export class McKitsService {
           identityAssetId: identity.id,
           tileAssetId: tile.assetId,
           tileBackgroundColor: tile.backgroundColor,
+          faceFraction: tile.faceFraction,
           mouthGate: decision,
           riskAccepted: decision === 'undecided',
         },
@@ -462,8 +476,37 @@ export class McKitsService {
         { kind: 'mc_kit', kitId: kit.id, status: McKitStatus.APPROVED },
         MC_EVENTS_CHANNEL,
       );
+      return true;
     });
+    if (!won) await this.approvalLost(kit, tile);
     return this.dataSource.getRepository(McCharacterKit).findOneByOrFail({ id: kit.id });
+  }
+
+  /**
+   * CAS da aprovação perdido: o tile gerado NESTA chamada não pertence a
+   * ninguém e é descartado — numa transação própria, DEPOIS da perdedora
+   * (descartar dentro dela e lançar desfaria o descarte junto). Kit ainda em
+   * revisão = a condição extra falhou (identidade trocada); fora de revisão =
+   * outra ação mudou o estado.
+   */
+  private async approvalLost(
+    kit: McCharacterKit,
+    tile: { assetId: string; built: boolean },
+  ): Promise<never> {
+    if (tile.built) {
+      await this.dataSource.transaction((manager) => this.tile.discard(manager, tile.assetId));
+    }
+    const fresh = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: kit.id });
+    if (fresh?.status === McKitStatus.REVIEW) {
+      throw new UnprocessableEntityException({
+        code: 'KIT_IDENTITY_CHANGED',
+        message: 'A identidade do kit mudou durante a aprovação. Recarregue e aprove de novo.',
+      });
+    }
+    throw new UnprocessableEntityException({
+      code: 'KIT_NOT_IN_REVIEW',
+      message: 'O kit mudou de estado durante a aprovação. Recarregue e tente de novo.',
+    });
   }
 
   /** Identidade efetiva (candidato escolhido / logo como está / referência frontal) ou 422. */
@@ -512,22 +555,36 @@ export class McKitsService {
     identity: AnimationAsset,
     verdict: McMouthVerdict,
     gateRecord: McKitMouthGate,
-  ): Promise<{ assetId: string; backgroundColor: string | null }> {
+  ): Promise<{
+    assetId: string;
+    backgroundColor: string | null;
+    faceFraction: number | null;
+    /** true = gerado NESTA chamada (descartável se a aprovação perder a corrida). */
+    built: boolean;
+  }> {
     if (kit.tileAssetId) {
       const existing = await this.dataSource
         .getRepository(AnimationAsset)
         .findOneBy({ id: kit.tileAssetId });
       if (existing && existing.metadata?.identityAssetId === identity.id) {
         const color = existing.metadata?.backgroundColor;
+        const fraction = existing.metadata?.faceFraction;
         return {
           assetId: existing.id,
           backgroundColor: typeof color === 'string' ? color : kit.tileBackgroundColor,
+          faceFraction: typeof fraction === 'number' ? fraction : null,
+          built: false,
         };
       }
     }
     try {
       const built = await this.tile.build(kit, identity, verdict.bbox);
-      return { assetId: built.assetId, backgroundColor: built.backgroundColor };
+      return {
+        assetId: built.assetId,
+        backgroundColor: built.backgroundColor,
+        faceFraction: built.faceFraction,
+        built: true,
+      };
     } catch (err) {
       await this.persistMouthGate(kit.id, gateRecord);
       throw err;
@@ -775,7 +832,7 @@ export class McKitsService {
       order: { createdAt: 'DESC' },
       take: 100,
     });
-    return Promise.all(kits.map((kit) => this.view.toView(kit)));
+    return this.view.toViewMany(kits);
   }
 
   async findOne(userId: string, id: string): Promise<McKitView> {

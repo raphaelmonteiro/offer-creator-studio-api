@@ -330,6 +330,68 @@ export interface AssemblyHashInputV2 {
   aspectRatio: string;
 }
 
+// ───────────────── steps de projeto do F1 (compose_ffmpeg → finalize) ─────────────────
+
+export interface ComposeFfmpegHashInput {
+  /** Clipes conformados das falas, na ordem de montagem, por identidade de cena. */
+  clips: Array<{ sceneId: string; finalAssetId: string }>;
+  backgroundArtAssetId: string | null;
+  aspectRatio: string;
+  window: { x: number; y: number; w: number; h: number } | null;
+  logoFace: boolean;
+  backgroundColor: string;
+  gapMs: number;
+  captionsEnabled: boolean;
+  endcard: string | null;
+  /** Versão do grafo de composição (`MC_COMPOSE_GRAPH_VERSION`): bump = render refeito. */
+  graphVersion: number;
+}
+
+/**
+ * Hash do `compose_ffmpeg` (spec "Render determinístico"): clipes + arte +
+ * janela + cor + silêncio + legendas + cartela + versão do grafo. Mesmas
+ * entradas ⇒ mesmo hash ⇒ render reaproveitado.
+ */
+export function computeComposeFfmpegHash(input: ComposeFfmpegHashInput): string {
+  return computeInputHash(McStepType.COMPOSE_FFMPEG, MC_BUILDER_VERSIONS_V2.compose_ffmpeg, {
+    clips: input.clips.map((c) => ({ sceneId: c.sceneId, finalAssetId: c.finalAssetId })),
+    backgroundArtAssetId: input.backgroundArtAssetId,
+    aspectRatio: input.aspectRatio,
+    window: input.window
+      ? { x: input.window.x, y: input.window.y, w: input.window.w, h: input.window.h }
+      : null,
+    logoFace: input.logoFace,
+    backgroundColor: input.backgroundColor.trim().toUpperCase(),
+    gapMs: input.gapMs,
+    captionsEnabled: input.captionsEnabled,
+    endcard: input.endcard,
+    graphVersion: input.graphVersion,
+  });
+}
+
+export interface FinalizeHashInput {
+  /** Hash do compose de que a finalização parte (o vídeo composto é a entrada). */
+  composeHash: string;
+  channel: string | null;
+  musicEnabled: boolean;
+  captionsEnabled: boolean;
+  loudness: { I: number; TP: number };
+  /** Versão do grafo de finalização (`MC_FINALIZE_GRAPH_VERSION`). */
+  graphVersion: number;
+}
+
+/** Hash do `finalize`: trocar a música/legenda/canal refaz só a finalização (os clipes e o compose ficam). */
+export function computeFinalizeHash(input: FinalizeHashInput): string {
+  return computeInputHash(McStepType.FINALIZE, MC_BUILDER_VERSIONS_V2.finalize, {
+    composeHash: input.composeHash,
+    channel: input.channel,
+    musicEnabled: input.musicEnabled,
+    captionsEnabled: input.captionsEnabled,
+    loudness: input.loudness,
+    graphVersion: input.graphVersion,
+  });
+}
+
 /** Hash da montagem v2 (ADR §4.2): não depende de {idx, generation} — conteúdo renderizado é o que conta. */
 export function computeAssemblyHashV2(input: AssemblyHashInputV2): string {
   return computeInputHash(McStepType.ASSEMBLY, MC_BUILDER_VERSIONS_V2.assembly, {

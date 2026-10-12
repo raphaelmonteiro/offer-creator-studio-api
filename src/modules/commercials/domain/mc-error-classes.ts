@@ -46,7 +46,12 @@ export const MC_CLIP_TEXT_ERROR_CODE = 'clip_text_detected';
 export const MC_CLIP_DEFORMED_ERROR_CODE = 'clip_deformed';
 /** Inspeção: boca parada dentro das janelas de fala (D11). */
 export const MC_CLIP_MOUTH_STILL_ERROR_CODE = 'clip_mouth_still';
-/** Conformação: clipe mais curto que o áudio além dos 300 ms clonáveis (D7 — "boca parada"). */
+/**
+ * Conformação: clipe mais curto que o áudio além dos 300 ms clonáveis (D7 —
+ * "boca parada"). Mesma política da classe: `mcShouldRetry('quality', attempts)`
+ * decide regerar; esgotado o teto, o ingest ACEITA o último clipe (último
+ * quadro clonado até o áudio) e sinaliza a cena para revisão humana.
+ */
 export const MC_CLIP_TOO_SHORT_ERROR_CODE = 'clip_too_short';
 
 /** Todos os códigos da classe `quality`: nova geração no provider até o teto, depois aceite. */

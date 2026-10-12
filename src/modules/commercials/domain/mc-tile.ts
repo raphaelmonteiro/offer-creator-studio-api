@@ -217,6 +217,91 @@ export function edgeUniformity(
   };
 }
 
+// ───────────────────────── fundo liso → alfa (chroma key pela borda) ─────────────────────────
+
+/** Fator da rampa suave: pixels entre `tolerance` e `tolerance × MC_TILE_KEY_RAMP` ganham alfa parcial. */
+export const MC_TILE_KEY_RAMP = 1.5;
+
+export interface McEdgeKeyResult {
+  /** Pixels que viraram totalmente transparentes. */
+  keyed: number;
+  /** Pixels na rampa (alfa parcial — borda suave do personagem). */
+  ramped: number;
+}
+
+/**
+ * Converte o fundo liso detectado na borda em transparência, IN PLACE sobre
+ * o buffer RGBA: inundação (4-conexa) a partir das quatro bordas sobre os
+ * pixels cuja cor fica a até `tolerance × MC_TILE_KEY_RAMP` da referência
+ * (distância máxima por canal). Dentro de `tolerance` o alfa vai a 0; na
+ * rampa cai linearmente (anti-serrilhado do contorno). Pixels da MESMA cor
+ * no interior do personagem (olho cinza num rosto cinza-claro) não são
+ * alcançados pela inundação e sobrevivem — por isso não é um "replace color".
+ * Pixels já transparentes contam como fundo (a inundação os atravessa).
+ *
+ * É o que torna `hasAlpha = true` real para a identidade gerada com fundo
+ * opaco: o tile de fala recolore o fundo com `flatten`, que só enxerga alfa.
+ */
+export function keyEdgeBackground(
+  image: McRawImage,
+  reference: { r: number; g: number; b: number },
+  tolerance: number = MC_TILE_EDGE_TOLERANCE,
+): McEdgeKeyResult {
+  if (image.channels !== 4) throw new Error('keyEdgeBackground exige buffer RGBA');
+  const { data, width, height } = image;
+  const outer = tolerance * MC_TILE_KEY_RAMP;
+  const ramp = Math.max(1, outer - tolerance);
+  const visited = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  let head = 0;
+  let tail = 0;
+  const distanceAt = (index: number): number => {
+    const i = index * 4;
+    if (data[i + 3] < TRANSPARENT_ALPHA) return 0;
+    return Math.max(
+      Math.abs(data[i] - reference.r),
+      Math.abs(data[i + 1] - reference.g),
+      Math.abs(data[i + 2] - reference.b),
+    );
+  };
+  const push = (index: number): void => {
+    if (visited[index]) return;
+    visited[index] = 1;
+    if (distanceAt(index) <= outer) queue[tail++] = index;
+  };
+  for (let x = 0; x < width; x++) {
+    push(x);
+    push((height - 1) * width + x);
+  }
+  for (let y = 1; y < height - 1; y++) {
+    push(y * width);
+    push(y * width + width - 1);
+  }
+  let keyed = 0;
+  let ramped = 0;
+  while (head < tail) {
+    const index = queue[head++];
+    const i = index * 4;
+    const distance = distanceAt(index);
+    if (distance <= tolerance) {
+      if (data[i + 3] !== 0) keyed += 1;
+      data[i + 3] = 0;
+    } else {
+      // rampa: alfa proporcional à distância além da tolerância, nunca acima do original
+      const factor = Math.min(1, (distance - tolerance) / ramp);
+      data[i + 3] = Math.round(data[i + 3] * factor);
+      ramped += 1;
+    }
+    const x = index % width;
+    const y = (index - x) / width;
+    if (x > 0) push(index - 1);
+    if (x < width - 1) push(index + 1);
+    if (y > 0) push(index - width);
+    if (y < height - 1) push(index + width);
+  }
+  return { keyed, ramped };
+}
+
 /** `#RRGGBB`/`#RRGGBBAA` → canais 0..255 (alpha 0..1 como o sharp espera); null se inválido. */
 export function parseHexColor(
   value: string | null | undefined,

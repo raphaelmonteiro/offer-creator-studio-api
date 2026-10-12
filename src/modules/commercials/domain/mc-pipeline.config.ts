@@ -53,6 +53,9 @@ export const MC_STEP_QUEUE: Record<McStepType, QueueName> = {
   [McStepType.SCENE_COMPOSE]: QUEUES.MC_FFMPEG,
   /** Clipe falado a partir do tile: submit assíncrono no fal (mc.submit → mc.poll → mc.ingest). */
   [McStepType.TALK]: QUEUES.MC_SUBMIT,
+  /** Steps de projeto dos formatos novos (D6): composição e finalização no ffmpeg (gate ResourceGuard). */
+  [McStepType.COMPOSE_FFMPEG]: QUEUES.MC_FFMPEG,
+  [McStepType.FINALIZE]: QUEUES.MC_FFMPEG,
 };
 
 /**
@@ -322,6 +325,38 @@ export function isFormatEnabled(
 ): boolean {
   if (MC_FORMATS_ALWAYS_ENABLED.includes(format)) return true;
   return parseMcFormats(env).includes(format);
+}
+
+/**
+ * Formatos novos exigem o executor v2 para TODOS os projetos (design D6:
+ * "`MC_FORMATS` não vazio exige `MC_PIPELINE_V2=all`"): F1/F2 gravam
+ * `pipelineVersion = 2` explicitamente, sem passar pela coorte. Com a flag em
+ * `off`/`cohort`, a admissão recusa com 422 PIPELINE_V2_REQUIRED antes de
+ * qualquer escrita. `scenes` nunca é afetado (segue a coorte).
+ */
+export function isPipelineV2RequiredSatisfied(
+  format: McProjectFormat,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (format === 'scenes') return true;
+  return (env.MC_PIPELINE_V2 ?? 'off').toLowerCase() === 'all';
+}
+
+export function assertPipelineV2ForFormat(
+  format: McProjectFormat,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (isPipelineV2RequiredSatisfied(format, env)) return;
+  throw new HttpException(
+    {
+      code: 'PIPELINE_V2_REQUIRED',
+      message:
+        `O formato de vídeo "${format}" exige o executor v2 para todos os projetos ` +
+        '(MC_PIPELINE_V2=all)',
+      details: { format, pipelineV2: env.MC_PIPELINE_V2 ?? 'off' },
+    },
+    HttpStatus.UNPROCESSABLE_ENTITY,
+  );
 }
 
 /** 422 FORMAT_NOT_ENABLED antes de qualquer gasto (criação, ponte e duplicação). */

@@ -18,7 +18,12 @@ import {
   MaxLength,
 } from 'class-validator';
 import { MC_MAX_SCENES, MC_SCENE_MAX_S, MC_SCENE_MIN_S } from '../domain/mc-director';
-import { MC_MAX_SEAL_PRODUCTS, MC_SAFE_AREAS, MC_SCENE_TYPES } from '../domain/mc-types';
+import {
+  MC_MAX_SEAL_PRODUCTS,
+  MC_SAFE_AREAS,
+  MC_SCENE_TYPES,
+  MC_TALKING_ART_MAX_CITED_OFFERS,
+} from '../domain/mc-types';
 
 /**
  * DTOs do pipeline v2 (ADR-001 §4 / plano §4 "contrato de API sugerido").
@@ -169,6 +174,33 @@ export class ScriptEndcardV2Dto {
   storeName: string;
 }
 
+/**
+ * Janela do personagem (F1, change video-formatos-personagem D6): frações 0..1
+ * do quadro de saída. A FORMA (números no intervalo) é validada aqui; a regra
+ * "inteira no quadro / área segura / aspecto do tile" é do service (422).
+ */
+export class CharacterWindowDto {
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  x: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  y: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  w: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  h: number;
+}
+
 /** PATCH /commercials/projects/:id/script (pipeline v2). */
 export class UpdateScriptV2Dto {
   @IsInt()
@@ -202,6 +234,39 @@ export class UpdateScriptV2Dto {
   @ValidateNested()
   @Type(() => ScriptEndcardV2Dto)
   endcard?: ScriptEndcardV2Dto | null;
+
+  // ── formato F1 "arte que fala" (D6): omitidos preservam o valor atual do roteiro ──
+
+  /** Texto da apresentação (pt-BR). As cenas enviadas são a divisão dele em falas. */
+  @IsOptional()
+  @IsString()
+  @Length(1, 1000)
+  narration?: string;
+
+  /** Janela do personagem em frações 0..1 do quadro de saída. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CharacterWindowDto)
+  window?: CharacterWindowDto;
+
+  /** Modo "rosto do logo" (kit `logo_as_is`). */
+  @IsOptional()
+  @IsBoolean()
+  logoFace?: boolean;
+
+  /** Ofertas citadas na fala (ids de `products[]`, no máximo 3). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MC_TALKING_ART_MAX_CITED_OFFERS)
+  @IsString({ each: true })
+  citedOfferIds?: string[];
+
+  /** Cor da janela (#RRGGBB) para a qual o fundo do tile é recolorido; `null` volta à cor do kit. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'talkBackgroundColor precisa ser #RRGGBB' })
+  talkBackgroundColor?: string | null;
 }
 
 export class RevisionDto {
@@ -246,6 +311,14 @@ export class ApproveProductionDto extends RevisionDto {
   @IsOptional()
   @IsBoolean()
   acceptMissingCaptions?: boolean;
+
+  /**
+   * F1 (spec "Duração pela fala"): aceite explícito da soma das falas fora de
+   * 6–25 s — persistido em `quality.speechDurationAccepted`.
+   */
+  @IsOptional()
+  @IsBoolean()
+  acceptSpeechDuration?: boolean;
 }
 
 export class CompositionSceneDto {

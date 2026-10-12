@@ -10,6 +10,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { CreditsService, creditsEnabled } from '../../shared/credits/credits.service';
 import { AnimationAsset } from '../../shared/media-assets/animation-asset.entity';
+import { MediaAssetsService } from '../../shared/media-assets/media-assets.service';
 import { MC_EVENTS_CHANNEL } from '../../shared/events/animation-events.service';
 import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queue.service';
 import { renderMissingFor } from '../../shared/ffmpeg/render-preflight';
@@ -28,11 +29,14 @@ import {
   McStepStatus,
 } from './domain/mc-state-machines';
 import { assertAspectSupportedForFormat } from './domain/mc-composition.config';
+import { assertFormatEnabled, assertPipelineV2ForFormat } from './domain/mc-pipeline.config';
 import {
+  MC_DEFAULT_PROJECT_CHANNEL,
   MC_DEFAULT_PROJECT_FORMAT,
   MC_DEFAULT_PROJECT_TIER,
   McAspectRatio,
   McProjectFormat,
+  McSourceArtKind,
   McStepType,
   resolveProjectOptions,
 } from './domain/mc-types';
@@ -87,7 +91,45 @@ export class CommercialsService {
     private readonly queue: AnimationQueueService,
     private readonly settings: SystemSettingsService,
     private readonly credits: CreditsService,
+    private readonly mediaAssets: MediaAssetsService,
   ) {}
+
+  /**
+   * Gate de admissão por formato e versão (change video-formatos-personagem,
+   * D6/D13), reutilizado por `createProject`, `createFromArt` e pela
+   * duplicação: 422 FORMAT_NOT_ENABLED quando o formato novo está fora de
+   * `MC_FORMATS`; 422 PIPELINE_V2_REQUIRED quando F1/F2 nascem sem
+   * `MC_PIPELINE_V2=all`. Devolve o `pipelineVersion` a gravar: os formatos
+   * novos são SEMPRE v2 (explícito, sem passar pela coorte); `scenes` segue a
+   * configuração/coorte.
+   */
+  admitProjectFormat(userId: string, format: McProjectFormat): number {
+    assertFormatEnabled(format);
+    assertPipelineV2ForFormat(format);
+    return format === MC_DEFAULT_PROJECT_FORMAT
+      ? pipelineVersionForNewProject(userId)
+      : MC_PIPELINE_V2;
+  }
+
+  /**
+   * Arte de fundo do F1/F2 (D9): precisa ser um asset `video_art` DO USUÁRIO
+   * com arquivo (404/403 vêm do `findOwned`; kind/arquivo errados → 422
+   * BACKGROUND_ART_INVALID). Devolve o asset para quem precisar das dimensões.
+   */
+  async assertBackgroundArt(userId: string, assetId: string): Promise<AnimationAsset> {
+    const asset = await this.mediaAssets.findOwned(userId, assetId);
+    if (asset.kind !== 'video_art' || !asset.fileUrl) {
+      throw new HttpException(
+        {
+          code: 'BACKGROUND_ART_INVALID',
+          message: 'A arte de fundo precisa ser uma arte enviada por POST /commercials/art.',
+          details: { assetId, kind: asset.kind },
+        },
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    return asset;
+  }
 
   /**
    * Gate de preflight (spec video-composition-render, "Preflight por formato"):
@@ -141,20 +183,35 @@ export class CommercialsService {
       );
     }
 
-    // O formato chega no DTO com os formatos novos (tarefas 4.x); até lá todo
-    // projeto é 'scenes' (F3), que monta em 720p e NÃO aceita 4:5 (design D12):
-    // regra de negócio → 422 ASPECT_NOT_SUPPORTED_FOR_FORMAT antes de qualquer
-    // leitura ou gasto (a forma do DTO, '4:5' incluído, já passou pelo pipe).
-    const format: McProjectFormat = MC_DEFAULT_PROJECT_FORMAT;
+    // Formato do DTO (default 'scenes', F3). Regras de negócio ANTES de qualquer
+    // leitura ou gasto (D13: forma → 400 pelo pipe; regra → 422 com código):
+    // 1) `scenes` monta em 720p e NÃO aceita 4:5 (D12) — os formatos novos
+    //    aceitam os quatro aspectos; 2) formato novo fora de MC_FORMATS →
+    //    FORMAT_NOT_ENABLED; sem MC_PIPELINE_V2=all → PIPELINE_V2_REQUIRED.
+    const format: McProjectFormat = dto.format ?? MC_DEFAULT_PROJECT_FORMAT;
     // Contrato v1-B1: aspectRatio default 9:16 — o front pode omitir.
     const aspectRatio: McAspectRatio = dto.aspectRatio ?? '9:16';
     assertAspectSupportedForFormat(format, aspectRatio);
+    const pipelineVersion = this.admitProjectFormat(userId, format);
 
     // Preflight de render (design D14): recusa antes de qualquer gasto quando o
     // worker publicou que falta requisito do formato. O formato de cenas (F3)
     // NÃO é gated — "F3 não muda nesta change" (proposal); o health continua
     // informando o estado dele.
     if (format !== MC_DEFAULT_PROJECT_FORMAT) await this.assertRenderAvailable(format);
+
+    // F1 exige a arte de fundo (asset `video_art` do usuário, D9). A forma
+    // (uuid obrigatório no formato) já passou pelo DTO; aqui é a regra.
+    if (format === 'talking_art' && !dto.backgroundArtAssetId) {
+      throw new HttpException(
+        {
+          code: 'BACKGROUND_ART_REQUIRED',
+          message: 'O formato "arte que fala" precisa da arte de fundo (backgroundArtAssetId).',
+        },
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    if (dto.backgroundArtAssetId) await this.assertBackgroundArt(userId, dto.backgroundArtAssetId);
 
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: dto.kitId });
     if (!kit) throw new NotFoundException('Kit não encontrado');
@@ -176,9 +233,9 @@ export class CommercialsService {
       // Contrato v1-B1: música/legendas default on; produtos (máx. 6) chegam
       // prontos do front (name+price) e viram os selos determinísticos do
       // roteiro/montagem (plano §5.4).
-      // Executor congelado na criação (ADR-001 §5): configuração/coorte decide;
+      // Executor congelado na criação (ADR-001 §5): configuração/coorte decide
+      // no F3; os formatos novos são sempre v2 (`admitProjectFormat`);
       // desligar a flag depois NÃO muda projetos em andamento.
-      const pipelineVersion = pipelineVersionForNewProject(userId);
       const options = resolveProjectOptions({
         musicEnabled: dto.musicEnabled,
         captionsEnabled: dto.captionsEnabled,
@@ -201,11 +258,18 @@ export class CommercialsService {
         status: McProjectStatus.DRAFT,
         reservedCredits,
         pipelineVersion,
-        // Formato/tier explícitos (design D6): o F3 é 'scenes' + 'economico'
-        // (rótulo, sem troca de motor) — os mesmos defaults da migration.
+        // Formato/tier/canal explícitos (design D6/D13): o F3 é 'scenes' +
+        // 'economico' (rótulo, sem troca de motor) — os mesmos defaults da
+        // migration; F1/F2 carregam arte, preset, caixa do logo e origem (D9).
         format,
-        tier: MC_DEFAULT_PROJECT_TIER,
+        tier: dto.tier ?? MC_DEFAULT_PROJECT_TIER,
+        channel: dto.channel ?? MC_DEFAULT_PROJECT_CHANNEL,
+        backgroundArtAssetId: dto.backgroundArtAssetId ?? null,
+        layoutPreset: dto.layoutPreset ?? null,
+        logoBox: dto.logoBox ? { ...dto.logoBox } : null,
+        sourceArt: dto.sourceArt ? { ...dto.sourceArt } : null,
         revision: 0,
+        // F1/F2 gravam `quality` vazio EXPLICITAMENTE (D6), como o v2 do F3.
         quality: pipelineVersion === MC_PIPELINE_V2 ? { ...MC_EMPTY_QUALITY } : null,
       });
       await manager.save(project);
@@ -250,6 +314,11 @@ export class CommercialsService {
         // Produtos entram no hash: mudar a oferta muda o roteiro (as falas
         // citam os produtos), então o roteiro antigo não pode ser reusado.
         products: options.products,
+        // Formatos novos (D6): o diretor F1/F2 é outro — o roteiro do F3 com o
+        // mesmo briefing nunca serve. Ausente no F3 para preservar os hashes.
+        ...(format !== MC_DEFAULT_PROJECT_FORMAT
+          ? { format, backgroundArtAssetId: dto.backgroundArtAssetId ?? null }
+          : {}),
       });
       const step = manager.create(McStep, {
         projectId: project.id,
@@ -304,14 +373,33 @@ export class CommercialsService {
     });
   }
 
+  /**
+   * Lista do usuário (100 mais recentes). `filter.sourceKind`/`sourceId`
+   * restringem aos projetos nascidos de uma arte (ponte D9, tarefa 5.5):
+   * "vídeos desta arte" — o filtro lê o jsonb `sourceArt`.
+   */
   async findAllProjects(
     userId: string,
+    filter?: { sourceKind?: McSourceArtKind; sourceId?: string },
   ): Promise<Array<McProject & { finalUrl: string | null; posterUrl: string | null }>> {
-    const projects = await this.dataSource.getRepository(McProject).find({
-      where: { userId },
-      order: { createdAt: 'DESC' },
-      take: 100,
-    });
+    const repo = this.dataSource.getRepository(McProject);
+    let projects: McProject[];
+    if (filter?.sourceKind || filter?.sourceId) {
+      const qb = repo.createQueryBuilder('p').where('p."userId" = :userId', { userId });
+      if (filter.sourceKind) {
+        qb.andWhere(`p."sourceArt"->>'kind' = :sourceKind`, { sourceKind: filter.sourceKind });
+      }
+      if (filter.sourceId) {
+        qb.andWhere(`p."sourceArt"->>'id' = :sourceId`, { sourceId: filter.sourceId });
+      }
+      projects = await qb.orderBy('p."createdAt"', 'DESC').take(100).getMany();
+    } else {
+      projects = await repo.find({
+        where: { userId },
+        order: { createdAt: 'DESC' },
+        take: 100,
+      });
+    }
     const urls = await this.resolveAssetUrls(projects.map((p) => p.finalAssetId));
     return projects.map((p) => ({
       ...p,

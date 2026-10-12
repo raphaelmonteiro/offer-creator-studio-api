@@ -22,8 +22,13 @@ import {
 import { SystemSettingsService } from '../../../shared/settings/system-settings.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { CommercialsService, MC_PAUSED_KEY } from '../commercials.service';
-import { scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
-import { klingActionDuration, talkEngineFor } from '../domain/mc-pipeline.config';
+import { projectAssemblySteps, scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
+import {
+  klingActionDuration,
+  mcTalkEngines,
+  talkEngineFor,
+  talkFallbackEngineKey,
+} from '../domain/mc-pipeline.config';
 import { custoProducaoDaCena, MC_STEP_CREDITS, quotePhase } from '../domain/mc-pricing.config';
 import {
   approvalAuthorizes,
@@ -41,6 +46,7 @@ import {
   resolveQuality,
   upsertPhaseBudget,
 } from '../domain/mc-quality';
+import { assertLogoFaceReady } from '../domain/mc-logo-face';
 import { voiceoverPlanExcessMs } from '../domain/mc-scene-compose-graph';
 import { preparationComplete } from '../domain/mc-scheduler';
 import {
@@ -49,6 +55,7 @@ import {
   dialogueMentionsPrice,
   isCompositionOnlyChange,
   isScriptV2,
+  McScriptWindowContext,
   normalizeScriptV2,
   validateScriptV2,
 } from '../domain/mc-script-v2';
@@ -60,6 +67,8 @@ import {
   McStepStatus,
 } from '../domain/mc-state-machines';
 import {
+  MC_TALKING_ART_MAX_S,
+  MC_TALKING_ART_MIN_S,
   McScript,
   McScriptScene,
   McSceneType,
@@ -192,9 +201,30 @@ export class McQualityService {
       }),
       seal: null,
       endcard: dto.endcard === undefined ? (previous?.endcard ?? null) : dto.endcard,
+      // Formato e campos do F1 (D6): o formato vem do PROJETO (nunca do DTO);
+      // os demais, do DTO quando enviados, senão preservados do roteiro atual.
+      ...(project.format && project.format !== 'scenes' ? { format: project.format } : {}),
+      ...(dto.narration !== undefined || previous?.narration !== undefined
+        ? { narration: dto.narration?.trim() || previous?.narration }
+        : {}),
+      ...((dto.window ?? previous?.window) ? { window: dto.window ?? previous?.window } : {}),
+      ...(dto.logoFace !== undefined || previous?.logoFace !== undefined
+        ? { logoFace: dto.logoFace ?? previous?.logoFace }
+        : {}),
+      ...((dto.citedOfferIds ?? previous?.citedOfferIds)
+        ? { citedOfferIds: dto.citedOfferIds ?? previous?.citedOfferIds }
+        : {}),
+      ...(dto.talkBackgroundColor !== undefined
+        ? { talkBackgroundColor: dto.talkBackgroundColor }
+        : previous?.talkBackgroundColor !== undefined
+          ? { talkBackgroundColor: previous.talkBackgroundColor }
+          : {}),
     };
     const script = normalizeScriptV2(draft, () => randomUUID());
-    const issues = validateScriptV2(script);
+    const issues = validateScriptV2(script, {
+      format: project.format ?? 'scenes',
+      ...(await this.windowContext(project)),
+    });
     if (issues.length > 0) {
       throw new UnprocessableEntityException({
         code: 'SCRIPT_INVALID',
@@ -346,7 +376,10 @@ export class McQualityService {
   > {
     const project = await this.getV2Project(userId, projectId);
     const script = project.script as McScript;
-    const issues = validateScriptV2(script);
+    const issues = validateScriptV2(script, {
+      format: project.format ?? 'scenes',
+      ...(await this.windowContext(project)),
+    });
     const scenes = await this.dataSource
       .getRepository(McScene)
       .find({ where: { projectId: project.id } });
@@ -358,7 +391,7 @@ export class McQualityService {
       if (phase === 'preparation' && row?.audioAssetId) cached.push(McStepType.TTS);
       return { sceneId: s.sceneId as string, sceneType: s.sceneType as McSceneType, cached };
     });
-    return { ...quotePhase(phase, project.revision, inputs), issues };
+    return { ...quotePhase(phase, project.revision, inputs, { format: project.format }), issues };
   }
 
   // ──────────────────────────── preparação (P3) ────────────────────────────
@@ -786,10 +819,19 @@ export class McQualityService {
       });
     }
     // kit precisa estar aprovado; no talk_tile ele também define o tile e o
-    // motor (tier × identidade), cujo `maxChunkS` limita cada fala (D7).
+    // motor (tier × identidade), cujo `maxChunkS` limita cada fala (D7). O
+    // motor de logo pode cair no motor do TIER no submit (indisponibilidade,
+    // D2), então o limite efetivo é o MENOR entre o escolhido e o fallback.
     const kit = await this.getApprovedKit(project.kitId);
     const talkEngine = talkEngineFor({ tier: project.tier, identityMode: kit.identityMode });
-    const script = this.validatedScript(project);
+    const fallbackKey = talkFallbackEngineKey(talkEngine.key, project.tier);
+    const fallbackEngine = fallbackKey ? mcTalkEngines()[fallbackKey] : null;
+    const talkLimitS = Math.min(
+      talkEngine.maxChunkS,
+      fallbackEngine?.maxChunkS ?? Number.POSITIVE_INFINITY,
+    );
+    const script = this.validatedScript(project, await this.windowContext(project));
+    assertLogoFaceReady(project, script); // 4.6 (D9b): rosto do logo exige caixa confirmada
     const scenes = (
       await this.dataSource
         .getRepository(McScene)
@@ -825,11 +867,15 @@ export class McQualityService {
           });
         }
       } else if (talkTile && !kit.tileAssetId) {
-        // A imagem do clipe falado é o tile do kit (D1) — sem ele não há produção.
+        // A imagem do clipe falado é o tile do kit (D1) — sem ele não há
+        // produção. Kit aprovado é IMUTÁVEL: a saída é um kit novo.
         problems.push({
           code: 'KIT_TILE_MISSING',
           sceneId,
-          message: `Cena ${scriptScene.idx + 1}: o kit não tem tile de fala — reaprove o kit para gerá-lo.`,
+          message:
+            `Cena ${scriptScene.idx + 1}: o kit não tem tile de fala — crie um novo kit ` +
+            '(ou escolha um kit aprovado depois da atualização).',
+          detail: { sceneId, kitId: kit.id, actions: ['create_kit'] },
         });
       }
       if (plan.hasTts) {
@@ -858,13 +904,20 @@ export class McQualityService {
           // usuário divide ou encurta a fala.
           if (talkTile && audio.durationMs != null) {
             const measuredS = Number((audio.durationMs / 1000).toFixed(2));
-            const limitS = talkEngine.maxChunkS;
+            const limitS = talkLimitS;
             if (measuredS > limitS) {
               problems.push({
                 code: 'SPEECH_SENTENCE_TOO_LONG',
                 sceneId,
                 message: `Cena ${scriptScene.idx + 1}: a fala mede ${measuredS.toFixed(1)}s e o motor aceita até ${limitS}s por chamada. Divida a fala em duas ou encurte o texto.`,
-                detail: { sceneId, measuredS, limitS, engine: talkEngine.model },
+                detail: {
+                  sceneId,
+                  measuredS,
+                  limitS,
+                  engine: talkEngine.model,
+                  fallbackEngine: fallbackEngine?.model ?? null,
+                  actions: ['split_speech', 'shorten_speech'],
+                },
               });
             }
           }
@@ -882,6 +935,36 @@ export class McQualityService {
               message: `Cena ${scriptScene.idx + 1}: a voz não tem alinhamento para legenda. Regenere a voz ou aceite entregar sem legenda nesta cena.`,
             });
           }
+        }
+      }
+    }
+    // F1 (spec "Duração pela fala"): a SOMA das falas medidas fica entre 6 e
+    // 25 s; fora disso bloqueia com SPEECH_DURATION_OUT_OF_RANGE até o texto
+    // mudar ou o usuário aceitar explicitamente (aceite persistido, como as
+    // legendas). Só com todas as falas medidas — AUDIO_MISSING já cobre o resto.
+    if (project.format === 'talking_art') {
+      const measured = scenes
+        .map((scene) => assets.find((a) => a.id === scene.audioAssetId)?.durationMs ?? null)
+        .filter((ms): ms is number => ms != null);
+      if (measured.length === scenes.length && scenes.length > 0) {
+        const totalS = Number((measured.reduce((sum, ms) => sum + ms, 0) / 1000).toFixed(2));
+        const outOfRange = totalS < MC_TALKING_ART_MIN_S || totalS > MC_TALKING_ART_MAX_S;
+        const accepted = dto.acceptSpeechDuration === true || quality.speechDurationAccepted;
+        if (outOfRange && !accepted) {
+          problems.push({
+            code: 'SPEECH_DURATION_OUT_OF_RANGE',
+            sceneId: scenes[0].scriptSceneId as string,
+            message:
+              totalS < MC_TALKING_ART_MIN_S
+                ? `As falas somam ${totalS.toFixed(1)}s — o vídeo precisa de ${MC_TALKING_ART_MIN_S} a ${MC_TALKING_ART_MAX_S}s. Acrescente o convite ou cite mais uma oferta, ou aceite a duração.`
+                : `As falas somam ${totalS.toFixed(1)}s — o vídeo precisa de ${MC_TALKING_ART_MIN_S} a ${MC_TALKING_ART_MAX_S}s. Reduza o texto ou aceite a duração.`,
+            detail: {
+              totalS,
+              minS: MC_TALKING_ART_MIN_S,
+              maxS: MC_TALKING_ART_MAX_S,
+              actions: ['adjust_text', 'accept_duration'],
+            },
+          });
         }
       }
     }
@@ -908,21 +991,20 @@ export class McQualityService {
         script,
         scenes,
       );
+      // Steps de projeto da fase assembly por formato (D6): `assembly` no F3;
+      // `compose_ffmpeg` + `finalize` no F1 — cotados junto da produção.
+      const projectItems: McQuoteItem[] = projectAssemblySteps(project.format).map((stepType) => ({
+        sceneId: null,
+        stepType,
+        attempt: 1,
+        credits: MC_STEP_CREDITS[stepType],
+        cached: false,
+      }));
       const quote: McPhaseQuote = {
         phase: 'production',
         revision: project.revision,
-        items: [
-          ...items,
-          {
-            sceneId: null,
-            stepType: McStepType.ASSEMBLY,
-            attempt: 1,
-            credits: MC_STEP_CREDITS[McStepType.ASSEMBLY],
-            cached: false,
-          },
-        ],
-        totalCredits:
-          items.reduce((s, i) => s + i.credits, 0) + MC_STEP_CREDITS[McStepType.ASSEMBLY],
+        items: [...items, ...projectItems],
+        totalCredits: [...items, ...projectItems].reduce((s, i) => s + i.credits, 0),
       };
       if (dto.budgetCredits != null && quote.totalCredits > dto.budgetCredits) {
         throw new UnprocessableEntityException({
@@ -949,6 +1031,8 @@ export class McQualityService {
           resumePhase: null,
           captionsMissingAccepted:
             quality.captionsMissingAccepted || dto.acceptMissingCaptions === true,
+          speechDurationAccepted:
+            quality.speechDurationAccepted || dto.acceptSpeechDuration === true,
         },
         budget,
       );
@@ -1307,7 +1391,7 @@ export class McQualityService {
     }
     await this.dataSource.transaction(async (manager) => {
       const from = project.status;
-      const quote = quotePhase('assembly', project.revision, []);
+      const quote = quotePhase('assembly', project.revision, [], { format: project.format });
       const budget = await this.reservePhase(manager, project, quality, quote);
       const approval: McApprovalManifest = {
         scope: 'assembly_only',
@@ -1546,7 +1630,7 @@ export class McQualityService {
     }
   }
 
-  private validatedScript(project: McProject): McScript {
+  private validatedScript(project: McProject, windowCtx: McScriptWindowContext = {}): McScript {
     const script = project.script;
     if (!script || !isScriptV2(script)) {
       throw new UnprocessableEntityException({
@@ -1554,7 +1638,13 @@ export class McQualityService {
         message: 'O roteiro deste projeto não está no formato do pipeline v2.',
       });
     }
-    const issues = validateScriptV2(script);
+    // 4.7: a janela do F1 é validada contra a área segura do aspecto do projeto
+    // e, quando o tile é conhecido, contra o aspecto dele (±2%).
+    const issues = validateScriptV2(script, {
+      format: project.format ?? 'scenes',
+      aspectRatio: project.aspectRatio,
+      ...windowCtx,
+    });
     if (issues.length > 0) {
       throw new UnprocessableEntityException({
         code: 'SCRIPT_INVALID',
@@ -1629,6 +1719,29 @@ export class McQualityService {
     return kit;
   }
 
+  /**
+   * Contexto da validação da janela do F1 (tarefa 4.7): aspecto de saída do
+   * projeto + razão largura/altura do tile do kit. Fora do F1 (ou sem tile
+   * ainda) devolve só o aspecto — a trava de aspecto fica para quando o tile existir.
+   */
+  private async windowContext(project: McProject): Promise<McScriptWindowContext> {
+    const ctx: McScriptWindowContext = { aspectRatio: project.aspectRatio };
+    if (project.format !== 'talking_art' || !project.kitId) return ctx;
+    try {
+      const kit = await this.dataSource
+        .getRepository(McCharacterKit)
+        .findOneBy({ id: project.kitId });
+      if (!kit?.tileAssetId) return ctx;
+      const tile = await this.dataSource
+        .getRepository(AnimationAsset)
+        .findOneBy({ id: kit.tileAssetId });
+      if (tile?.width && tile?.height) ctx.tileRatio = tile.width / tile.height;
+    } catch {
+      // contexto só refina a validação da janela: sem tile legível, valida só a área segura
+    }
+    return ctx;
+  }
+
   private async getOwnedProject(userId: string, id: string): Promise<McProject> {
     const project = await this.dataSource.getRepository(McProject).findOneBy({ id });
     if (!project) throw new NotFoundException('Projeto não encontrado');
@@ -1670,6 +1783,7 @@ export class McQualityService {
       s.actionPrompt,
       s.dialogue ?? '',
     ]);
+    if (script.narration) parts.push(script.narration);
     for (const product of script.products ?? []) parts.push(product.name);
     if (script.endcard?.storeName) parts.push(script.endcard.storeName);
     return parts.filter(Boolean).join('\n');

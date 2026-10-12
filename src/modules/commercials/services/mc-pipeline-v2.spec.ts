@@ -1,6 +1,6 @@
 import { DataSource, EntityManager } from 'typeorm';
 import { CreditsService } from '../../../shared/credits/credits.service';
-import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
+import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { EmailService } from '../../email/email.service';
 import { CommercialsService } from '../commercials.service';
@@ -589,6 +589,139 @@ describe('McPipelineService — pipeline v2 (gate do worker, retomada, liquidaç
         100,
         0,
       );
+    });
+  });
+
+  describe('steps de projeto do F1 — compose_ffmpeg → finalize (tarefa 4.3, D6)', () => {
+    beforeEach(() => {
+      project.format = 'talking_art';
+      scene = {
+        ...scene,
+        sceneType: 'talk_tile',
+        dialogue: 'fala',
+        status: McSceneStatus.READY,
+        finalAssetId: 'clip',
+      };
+    });
+
+    it('todos os finais prontos: compose_ffmpeg vai para mc.ffmpeg com o type no payload e o projeto entra em assembling', async () => {
+      project.status = McProjectStatus.GENERATING;
+      steps = [
+        prodStep({ id: 'st-talk', type: McStepType.TALK, status: McStepStatus.SUCCEEDED }),
+        prodStep({
+          id: 'st-compose',
+          type: McStepType.COMPOSE_FFMPEG,
+          phase: 'assembly',
+          sceneId: null,
+          sceneGeneration: null,
+          status: McStepStatus.PENDING,
+        }),
+        prodStep({
+          id: 'st-finalize',
+          type: McStepType.FINALIZE,
+          phase: 'assembly',
+          sceneId: null,
+          sceneGeneration: null,
+          status: McStepStatus.PENDING,
+        }),
+      ];
+      const enqueued = await service.enqueueReadySteps(manager as unknown as EntityManager, 'p1');
+      expect(enqueued).toEqual(['st-compose']);
+      expect(queue.publish).toHaveBeenCalledWith(
+        QUEUES.MC_FFMPEG,
+        { stepId: 'st-compose', projectId: 'p1', type: McStepType.COMPOSE_FFMPEG },
+        expect.objectContaining({ expireInSeconds: 600 }),
+      );
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        expect.anything(),
+        McProject,
+        'p1',
+        McProjectStatus.GENERATING,
+        McProjectStatus.ASSEMBLING,
+      );
+      // o finalize só depois do compose; nunca um assembly
+      expect(queue.publish).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ stepId: 'st-finalize' }),
+        expect.anything(),
+      );
+    });
+
+    it('compose concluído (assembling) enfileira o finalize sem nova transição de projeto', async () => {
+      project.status = McProjectStatus.ASSEMBLING;
+      steps = [
+        prodStep({
+          id: 'st-compose',
+          type: McStepType.COMPOSE_FFMPEG,
+          phase: 'assembly',
+          sceneId: null,
+          sceneGeneration: null,
+          status: McStepStatus.SUCCEEDED,
+        }),
+        prodStep({
+          id: 'st-finalize',
+          type: McStepType.FINALIZE,
+          phase: 'assembly',
+          sceneId: null,
+          sceneGeneration: null,
+          status: McStepStatus.PENDING,
+        }),
+      ];
+      const enqueued = await service.enqueueReadySteps(manager as unknown as EntityManager, 'p1');
+      expect(enqueued).toEqual(['st-finalize']);
+      expect(queue.publish).toHaveBeenCalledWith(
+        QUEUES.MC_FFMPEG,
+        expect.objectContaining({ stepId: 'st-finalize', type: McStepType.FINALIZE }),
+        expect.anything(),
+      );
+      expect(transitions.casTransition).not.toHaveBeenCalledWith(
+        expect.anything(),
+        McProject,
+        'p1',
+        McProjectStatus.GENERATING,
+        McProjectStatus.ASSEMBLING,
+      );
+    });
+
+    it('falha terminal do compose_ffmpeg/finalize ⇒ needs_attention com resumePhase=assembly (clipes e reservas ficam)', async () => {
+      project.status = McProjectStatus.ASSEMBLING;
+      for (const type of [McStepType.COMPOSE_FFMPEG, McStepType.FINALIZE]) {
+        transitions.casTransition.mockClear();
+        const step = prodStep({
+          id: `st-${type}`,
+          type,
+          phase: 'assembly',
+          sceneId: null,
+          sceneGeneration: null,
+          status: McStepStatus.RUNNING,
+          attempts: 5,
+        });
+        steps = [step];
+        await service.failStep(
+          step as unknown as McStep,
+          McStepStatus.RUNNING,
+          new Error('ffmpeg saiu com código 1'),
+          { errorClass: 'internal' },
+        );
+        expect(transitions.casTransition).toHaveBeenCalledWith(
+          expect.anything(),
+          McProject,
+          'p1',
+          McProjectStatus.ASSEMBLING,
+          McProjectStatus.NEEDS_ATTENTION,
+          expect.objectContaining({
+            quality: expect.objectContaining({ resumePhase: 'assembly' }),
+          }),
+        );
+        expect(transitions.casTransition).not.toHaveBeenCalledWith(
+          expect.anything(),
+          McProject,
+          'p1',
+          McProjectStatus.ASSEMBLING,
+          McProjectStatus.FAILED,
+          expect.anything(),
+        );
+      }
     });
   });
 

@@ -39,8 +39,10 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
   const originalCount = process.env.MC_KIT_CANDIDATE_COUNT;
   let tmpDir: string;
   let kitRepo: { findOneBy: jest.Mock };
-  let candidateRepo: { findOneBy: jest.Mock; find: jest.Mock };
-  let assetRepo: { save: jest.Mock; find: jest.Mock };
+  let candidateRepo: { findOneBy: jest.Mock; find: jest.Mock; findOne: jest.Mock };
+  /** Marca o COMMIT da transação simulada: a fila só pode ser tocada depois dele (L1). */
+  let committed: jest.Mock;
+  let assetRepo: { save: jest.Mock; find: jest.Mock; softDelete: jest.Mock };
   let manager: { insert: jest.Mock; update: jest.Mock; softDelete: jest.Mock };
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
@@ -90,12 +92,18 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
   beforeEach(() => {
     delete process.env.MC_KIT_CANDIDATE_COUNT;
     kitRepo = { findOneBy: jest.fn().mockResolvedValue({ ...logoKit }) };
-    candidateRepo = { findOneBy: jest.fn(), find: jest.fn().mockResolvedValue([]) };
+    candidateRepo = {
+      findOneBy: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+    committed = jest.fn();
     assetRepo = {
       save: jest.fn((obj: Record<string, unknown>) =>
         Promise.resolve({ id: 'asset-logo', ...obj }),
       ),
       find: jest.fn().mockResolvedValue([]),
+      softDelete: jest.fn().mockResolvedValue(undefined),
     };
     manager = {
       insert: jest.fn().mockResolvedValue(undefined),
@@ -109,9 +117,11 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
         if (entity === AnimationAsset) return assetRepo;
         throw new Error('repo inesperado');
       }),
-      transaction: jest.fn((cb: (m: EntityManager) => Promise<unknown>) =>
-        cb(manager as unknown as EntityManager),
-      ),
+      transaction: jest.fn(async (cb: (m: EntityManager) => Promise<unknown>) => {
+        const result = await cb(manager as unknown as EntityManager);
+        committed();
+        return result;
+      }),
     };
     transitions = {
       casTransition: jest.fn().mockResolvedValue(true),
@@ -163,8 +173,17 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
     );
   });
 
+  /** O publish aconteceu DEPOIS do commit (nunca dentro da transação). */
+  const expectPublishedAfterCommit = () => {
+    expect(queue.publish).toHaveBeenCalled();
+    expect(committed).toHaveBeenCalled();
+    expect(committed.mock.invocationCallOrder[0]).toBeLessThan(
+      queue.publish.mock.invocationCallOrder[0],
+    );
+  };
+
   describe('openRound — rodada pré-inserida + job na mc.image', () => {
-    it('insere 4 candidatos (default) com prompt de mascotização no estilo do kit e publica {kitId, candidates, roundId}', async () => {
+    it('insere 4 candidatos (default) com prompt de mascotização no estilo do kit e devolve o job {kitId, candidates, roundId} (publicado só após o commit)', async () => {
       const round = await service.openRound(manager as unknown as EntityManager, logoKit, {
         kind: 'mascotization',
       });
@@ -193,6 +212,10 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
         { id: 'kit-1' },
         { candidateRoundId: round.roundId },
       );
+      // openRound NÃO publica (está dentro da transação de quem chama)
+      expect(queue.publish).not.toHaveBeenCalled();
+      expect(round.job).toEqual({ kitId: 'kit-1', candidates: true, roundId: round.roundId });
+      await service.publishRound(round.job);
       expect(queue.publish).toHaveBeenCalledWith(
         QUEUES.MC_IMAGE,
         { kitId: 'kit-1', candidates: true, roundId: round.roundId },
@@ -260,6 +283,21 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
         { kind: 'mc_kit', kitId: 'kit-1', status: McKitStatus.GENERATING },
         MC_EVENTS_CHANNEL,
       );
+      // o job da rodada sai DEPOIS do commit (L1): o consumer precisa ver as linhas
+      expectPublishedAfterCommit();
+      expect(queue.publish).toHaveBeenCalledWith(
+        QUEUES.MC_IMAGE,
+        expect.objectContaining({ kitId: 'kit-1', candidates: true }),
+        expect.objectContaining({ expireInSeconds: MC_CANDIDATES_EXPIRE_S }),
+      );
+    });
+
+    it('CAS perdido (kit mudou entre a leitura e a transação) → 422 e NADA publicado', async () => {
+      transitions.casTransition.mockResolvedValue(false);
+      await expect(service.startRound('u1', 'kit-1', 'x')).rejects.toMatchObject({
+        response: { code: 'KIT_NOT_IN_CANDIDATES' },
+      });
+      expect(queue.publish).not.toHaveBeenCalled();
     });
   });
 
@@ -304,6 +342,8 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
           identityAssetId: 'asset-cand-2',
           identityMode: 'generated',
           tileAssetId: null,
+          // a rodada fecha: job de rodada atrasado vira no-op (M2)
+          candidateRoundId: null,
           // veredito da identidade anterior cai; o do logo fica
           mouthGate: { logo: passed },
         },
@@ -319,11 +359,13 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
         { chosen: true },
       );
       expect(tile.discard).toHaveBeenCalledWith(manager, 'tile-old');
+      // primeira geração: job simples, publicado DEPOIS do commit
       expect(queue.publish).toHaveBeenCalledWith(
         QUEUES.MC_IMAGE,
         { kitId: 'kit-1' },
         expect.objectContaining({ expireInSeconds: MC_IMAGE_EXPIRE_S }),
       );
+      expectPublishedAfterCommit();
       expect(transitions.notify).toHaveBeenCalledWith(
         manager,
         'u1',
@@ -332,8 +374,14 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
       );
     });
 
-    it('em review (troca de identidade / variante com boca): review → generating', async () => {
-      kitRepo.findOneBy.mockResolvedValue({ ...logoKit, status: McKitStatus.REVIEW });
+    it('em review (troca de identidade / variante com boca): review → generating e o job leva fromReview + identidade anterior (M3)', async () => {
+      const gate = { logo: passed, identity: { ...passed, identityAssetId: 'old-identity' } };
+      kitRepo.findOneBy.mockResolvedValue({
+        ...logoKit,
+        status: McKitStatus.REVIEW,
+        identityAssetId: 'old-identity',
+        mouthGate: gate,
+      });
       candidateRepo.findOneBy.mockResolvedValue({ ...candidate, kind: 'mouth_variant' });
       await service.choose('u1', 'kit-1', 'cand-2');
       expect(transitions.casTransition).toHaveBeenCalledWith(
@@ -344,6 +392,16 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
         McKitStatus.GENERATING,
         expect.objectContaining({ identityAssetId: 'asset-cand-2' }),
       );
+      expect(queue.publish).toHaveBeenCalledWith(
+        QUEUES.MC_IMAGE,
+        {
+          kitId: 'kit-1',
+          fromReview: true,
+          previous: { identityAssetId: 'old-identity', identityMode: 'generated', mouthGate: gate },
+        },
+        expect.objectContaining({ singletonKey: 'kit-refs:kit-1:cand-2' }),
+      );
+      expectPublishedAfterCommit();
     });
 
     it('kit aprovado (imutável) ou gerando → 422 KIT_NOT_IN_CANDIDATES', async () => {
@@ -409,7 +467,11 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
           identityAssetId: 'asset-logo',
           candidateRoundId: null,
           tileAssetId: null,
+          // o veredito do logo cru É o da identidade (mesmos pixels): a
+          // aprovação reaproveita e não gasta visão de novo (M1)
+          mouthGate: { logo: passed, identity: { ...passed, identityAssetId: 'asset-logo' } },
         }),
+        undefined, // em candidates não há condição extra
       );
       expect(queue.publish).not.toHaveBeenCalled(); // nenhuma referência é gerada
       expect(transitions.notify).toHaveBeenCalledWith(
@@ -420,11 +482,67 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
       );
     });
 
-    it('rodada ainda gerando → 422 KIT_NOT_IN_CANDIDATES', async () => {
-      kitRepo.findOneBy.mockResolvedValue({ ...logoKit, status: McKitStatus.GENERATING });
+    it('rodada ainda gerando (generating com candidateRoundId) → permitido: generating → review, a rodada em voo é abandonada (L2)', async () => {
+      kitRepo.findOneBy.mockResolvedValue({
+        ...logoKit,
+        status: McKitStatus.GENERATING,
+        candidateRoundId: 'round-0',
+      });
+      await service.useAsIs('u1', 'kit-1');
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-1',
+        McKitStatus.GENERATING,
+        McKitStatus.REVIEW,
+        expect.objectContaining({ identityMode: 'logo_as_is', candidateRoundId: null }),
+        // a MESMA UPDATE exige a rodada ainda em voo: uma escolha feita nesse
+        // meio-tempo (referências em voo) não é atropelada
+        { sql: '"candidateRoundId" IS NOT NULL' },
+      );
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          fromStatus: McKitStatus.GENERATING,
+          detail: expect.objectContaining({ abandonedRoundId: 'round-0' }),
+        }),
+      );
+    });
+
+    it('CAS perdido (kit mudou entre a leitura e a transação) → 422 e a cópia do logo é descartada', async () => {
+      transitions.casTransition.mockResolvedValue(false);
       await expect(service.useAsIs('u1', 'kit-1')).rejects.toMatchObject({
         response: { code: 'KIT_NOT_IN_CANDIDATES' },
       });
+      expect(assetRepo.save).toHaveBeenCalledTimes(1);
+      // fora da transação perdedora (o rollback não desfaz o descarte)
+      expect(assetRepo.softDelete).toHaveBeenCalledWith('asset-logo');
+      expect(committed.mock.invocationCallOrder[0]).toBeLessThan(
+        assetRepo.softDelete.mock.invocationCallOrder[0],
+      );
+      expect(commercials.appendEvent).not.toHaveBeenCalled();
+      expect(tile.discard).not.toHaveBeenCalled();
+    });
+
+    it('generating SEM rodada (referências em voo após a escolha) ou já logo_as_is → 422 KIT_NOT_IN_CANDIDATES', async () => {
+      kitRepo.findOneBy.mockResolvedValue({
+        ...logoKit,
+        status: McKitStatus.GENERATING,
+        candidateRoundId: null,
+        identityAssetId: 'asset-cand',
+      });
+      await expect(service.useAsIs('u1', 'kit-1')).rejects.toMatchObject({
+        response: { code: 'KIT_NOT_IN_CANDIDATES' },
+      });
+      kitRepo.findOneBy.mockResolvedValue({
+        ...logoKit,
+        status: McKitStatus.REVIEW,
+        identityMode: 'logo_as_is',
+      });
+      await expect(service.useAsIs('u1', 'kit-1')).rejects.toMatchObject({
+        response: { code: 'KIT_NOT_IN_CANDIDATES' },
+      });
+      expect(assetRepo.save).not.toHaveBeenCalled();
     });
   });
 
@@ -442,6 +560,7 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
         expect.objectContaining({ kitId: 'kit-1', candidates: true }),
         expect.anything(),
       );
+      expectPublishedAfterCommit();
       expect(transitions.casTransition).not.toHaveBeenCalled();
       expect(transitions.notify).toHaveBeenCalledWith(
         manager,
@@ -466,6 +585,49 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
         response: { code: 'KIT_IDENTITY_MISSING' },
       });
       expect(queue.publish).not.toHaveBeenCalled();
+    });
+
+    it('sem estilo → 422 STYLE_REQUIRED; variante ainda em andamento → 422 MOUTH_VARIANT_IN_PROGRESS (L3)', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...logoKit, status: McKitStatus.REVIEW, style: null });
+      await expect(service.requestMouthVariant('u1', 'kit-1')).rejects.toMatchObject({
+        status: 422,
+        response: { code: 'STYLE_REQUIRED' },
+      });
+
+      kitRepo.findOneBy.mockResolvedValue({
+        ...logoKit,
+        status: McKitStatus.REVIEW,
+        candidateRoundId: 'round-mv',
+      });
+      candidateRepo.findOne.mockResolvedValue({ id: 'mv-0', roundId: 'round-mv', assetId: null });
+      await expect(service.requestMouthVariant('u1', 'kit-1')).rejects.toMatchObject({
+        status: 422,
+        response: { code: 'MOUTH_VARIANT_IN_PROGRESS', details: { roundId: 'round-mv' } },
+      });
+      // só a rodada CORRENTE, mouth_variant, SEM imagem e recente conta como "em andamento"
+      expect(candidateRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            kitId: 'kit-1',
+            roundId: 'round-mv',
+            kind: 'mouth_variant',
+          }),
+        }),
+      );
+      expect(manager.insert).not.toHaveBeenCalled();
+      expect(queue.publish).not.toHaveBeenCalled();
+    });
+
+    it('variante anterior que falhou (rodada fechada: candidateRoundId nulo) não bloqueia um novo pedido (L3)', async () => {
+      kitRepo.findOneBy.mockResolvedValue({
+        ...logoKit,
+        status: McKitStatus.REVIEW,
+        candidateRoundId: null,
+      });
+      await service.requestMouthVariant('u1', 'kit-1');
+      expect(candidateRepo.findOne).not.toHaveBeenCalled();
+      expect(manager.insert).toHaveBeenCalled();
+      expectPublishedAfterCommit();
     });
   });
 

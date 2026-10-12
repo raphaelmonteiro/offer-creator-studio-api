@@ -1023,6 +1023,7 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
 
     beforeEach(() => {
       project.status = McProjectStatus.VISUAL_REVIEW;
+      project.format = 'talking_art';
       project.script = fixtureTalkTileScript();
       project.tier = 'economico';
       project.quality = resolveQuality({
@@ -1084,6 +1085,8 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
     });
 
     it('fala de 18 s com motor de 15 s/chamada → 422 SPEECH_SENTENCE_TOO_LONG com {sceneId, measuredS, limitS}, nada reservado', async () => {
+      assets[0].durationMs = 3000; // soma 24 s: dentro de 6–25 (só a fala longa bloqueia)
+      assets[2].durationMs = 3000;
       assets[1].durationMs = 18000;
       await expect(approve()).rejects.toMatchObject({
         status: 422,
@@ -1126,6 +1129,223 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
     it('voz selecionada indisponível continua bloqueando (AUDIO_MISSING)', async () => {
       assets[2].fileUrl = null;
       await expect(approve()).rejects.toMatchObject({ response: { code: 'AUDIO_MISSING' } });
+    });
+
+    // ── tarefa 4.3 + revisão: limite com fallback, ações, duração total, steps de projeto ──
+
+    it('SPEECH_SENTENCE_TOO_LONG carrega actions e os dois motores; o limite é o MENOR entre o escolhido e o fallback', async () => {
+      assets[0].durationMs = 3000;
+      assets[2].durationMs = 3000;
+      assets[1].durationMs = 18000;
+      await expect(approve()).rejects.toMatchObject({
+        response: {
+          details: {
+            sceneId: TALK_2,
+            limitS: 15,
+            engine: expect.any(String),
+            fallbackEngine: null, // kit gerado: sem fallback
+            actions: ['split_speech', 'shorten_speech'],
+          },
+        },
+      });
+      // logo_as_is: motor de logo aceita 20 s, mas o fallback (motor do tier, 15 s) limita
+      process.env.MC_TALK_ENGINE_LOGO = 'minimax/h3-max/lip-sync/image-to-video|0.08|20';
+      kit.identityMode = 'logo_as_is';
+      assets[1].durationMs = 16000;
+      await expect(approve()).rejects.toMatchObject({
+        response: {
+          code: 'SPEECH_SENTENCE_TOO_LONG',
+          details: expect.objectContaining({
+            limitS: 15,
+            engine: 'minimax/h3-max/lip-sync/image-to-video',
+            fallbackEngine: expect.stringContaining('kling'),
+          }),
+        },
+      });
+    });
+
+    it('KIT_TILE_MISSING: kit aprovado é imutável — a saída é criar um kit novo (actions: create_kit)', async () => {
+      kit.tileAssetId = null;
+      await expect(approve()).rejects.toMatchObject({
+        response: {
+          code: 'KIT_TILE_MISSING',
+          message: expect.stringMatching(
+            /crie um novo kit \(ou escolha um kit aprovado depois da atualização\)/,
+          ),
+          details: { kitId: 'k1', actions: ['create_kit'] },
+        },
+      });
+    });
+
+    it('soma das falas fora de 6–25 s ⇒ 422 SPEECH_DURATION_OUT_OF_RANGE com actions; aceite explícito libera e fica persistido', async () => {
+      assets.forEach((a) => (a.durationMs = 1500)); // 4,5 s no total
+      await expect(approve()).rejects.toMatchObject({
+        status: 422,
+        response: {
+          code: 'SPEECH_DURATION_OUT_OF_RANGE',
+          message: expect.stringMatching(/4\.5s.*6 a 25s.*Acrescente o convite/),
+          details: { totalS: 4.5, minS: 6, maxS: 25, actions: ['adjust_text', 'accept_duration'] },
+        },
+      });
+      expect(credits.reserve).not.toHaveBeenCalled();
+      // 32 s também bloqueia (mensagem de reduzir)
+      assets.forEach((a) => (a.durationMs = 12000));
+      assets[2].durationMs = 8000;
+      await expect(approve()).rejects.toMatchObject({
+        response: {
+          code: 'SPEECH_DURATION_OUT_OF_RANGE',
+          message: expect.stringMatching(/32\.0s.*Reduza o texto/),
+        },
+      });
+      // aceite explícito: aprova e grava speechDurationAccepted
+      await service.approveProduction(userId, 'p1', {
+        expectedRevision: 1,
+        manifestHash: 'manifest-talk',
+        acceptSpeechDuration: true,
+      });
+      expect(project.status).toBe(McProjectStatus.GENERATING);
+      expect((project.quality as McQualityState).speechDurationAccepted).toBe(true);
+    });
+
+    it('aceite persistido numa aprovação anterior dispensa o novo aceite; 14 s não exige nada', async () => {
+      project.quality = resolveQuality({
+        ...(project.quality as McQualityState),
+        speechDurationAccepted: true,
+      });
+      assets.forEach((a) => (a.durationMs = 1000));
+      await approve();
+      expect(project.status).toBe(McProjectStatus.GENERATING);
+      project.status = McProjectStatus.VISUAL_REVIEW;
+      project.quality = resolveQuality({ ...(project.quality as McQualityState), approval: null });
+      assets.forEach((a) => (a.durationMs = 4667));
+      await approve();
+      expect(project.status).toBe(McProjectStatus.GENERATING);
+    });
+
+    it('a cotação da produção F1 fecha com compose_ffmpeg + finalize (nunca assembly) e a cadeia de projeto é materializada', async () => {
+      await approve();
+      const budget = (project.quality as McQualityState).budgets.find(
+        (b) => b.phase === 'production',
+      );
+      const projectSteps = (budget?.items ?? [])
+        .filter((i) => i.sceneId === null)
+        .map((i) => i.stepType);
+      expect(projectSteps).toEqual([McStepType.COMPOSE_FFMPEG, McStepType.FINALIZE]);
+      expect(materializer.ensureAssemblyStepV2).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ format: 'talking_art' }),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('assembly_only no F1: approveAssembly com os clipes prontos refaz só a cadeia compose → finalize', async () => {
+      project.quality = resolveQuality({
+        ...(project.quality as McQualityState),
+        pendingScope: 'assembly_only',
+      });
+      scenes.forEach((s, i) => {
+        s.status = McSceneStatus.READY;
+        s.finalAssetId = `talk-final-${i}`;
+      });
+      await service.approveAssembly(userId, 'p1', 1);
+      expect(project.status).toBe(McProjectStatus.ASSEMBLING);
+      const budget = (project.quality as McQualityState).budgets.find(
+        (b) => b.phase === 'assembly',
+      );
+      expect(budget?.items.map((i) => i.stepType)).toEqual([
+        McStepType.COMPOSE_FFMPEG,
+        McStepType.FINALIZE,
+      ]);
+      expect(materializer.ensureAssemblyStepV2).toHaveBeenCalled();
+      expect(materializer.materializeProductionV2).not.toHaveBeenCalled();
+    });
+
+    it('validação FORMAT-AWARE no service: cena gerada num projeto F1 e fala do tile num projeto scenes ⇒ 422 SCENE_TYPE_NOT_ALLOWED_FOR_FORMAT', async () => {
+      project.status = McProjectStatus.STORYBOARD_REVIEW;
+      await expect(
+        service.updateScript(userId, 'p1', {
+          expectedRevision: 1,
+          scenes: [
+            {
+              sceneType: 'presenter',
+              initialFrame: 'frente',
+              actionPrompt: 'acena para a câmera',
+              dialogue: 'Oi!',
+              durationS: 5,
+              productRef: null,
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        status: 422,
+        response: {
+          code: 'SCRIPT_INVALID',
+          issues: expect.arrayContaining([
+            expect.objectContaining({ code: 'SCENE_TYPE_NOT_ALLOWED_FOR_FORMAT' }),
+          ]),
+        },
+      });
+      project.format = 'scenes';
+      project.script = scriptV2();
+      await expect(
+        service.updateScript(userId, 'p1', {
+          expectedRevision: 1,
+          scenes: [{ sceneType: 'talk_tile', dialogue: 'Oi!', durationS: 5, productRef: null }],
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              code: 'SCENE_TYPE_NOT_ALLOWED_FOR_FORMAT',
+              message:
+                'Cena 1: o tipo "fala do tile" só existe nos formatos arte que fala e ofertas em sequência.',
+            }),
+          ]),
+        },
+      });
+    });
+
+    it('updateScript preserva narração/janela/ofertas citadas do roteiro F1 quando o DTO as omite, e aceita as enviadas', async () => {
+      project.status = McProjectStatus.STORYBOARD_REVIEW;
+      const previous = project.script as McScript;
+      await service.updateScript(userId, 'p1', {
+        expectedRevision: 1,
+        scenes: previous.scenes.map((s) => ({
+          sceneId: s.sceneId,
+          sceneType: 'talk_tile',
+          dialogue: s.dialogue,
+          durationS: s.durationS,
+          productRef: null,
+        })),
+      });
+      const kept = project.script as McScript;
+      expect(kept).toMatchObject({
+        format: 'talking_art',
+        narration: previous.narration,
+        window: previous.window,
+        logoFace: false,
+        citedOfferIds: [],
+      });
+      project.status = McProjectStatus.STORYBOARD_REVIEW;
+      await service.updateScript(userId, 'p1', {
+        expectedRevision: 2,
+        scenes: kept.scenes.map((s) => ({
+          sceneId: s.sceneId,
+          sceneType: 'talk_tile',
+          dialogue: s.dialogue,
+          durationS: s.durationS,
+          productRef: null,
+        })),
+        window: { x: 0.1, y: 0.2, w: 0.3, h: 0.3 },
+        logoFace: true,
+        talkBackgroundColor: '#ABCDEF',
+      });
+      expect(project.script).toMatchObject({
+        window: { x: 0.1, y: 0.2, w: 0.3, h: 0.3 },
+        logoFace: true,
+        talkBackgroundColor: '#ABCDEF',
+      });
     });
   });
 });

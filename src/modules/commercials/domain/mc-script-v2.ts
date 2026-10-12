@@ -1,9 +1,17 @@
 import { createHash } from 'crypto';
 import { legacySceneType, isSceneType, sceneTypeDialogueIssue } from './mc-execution-plan';
 import { MC_SCRIPT_SCHEMA_V2 } from './mc-quality';
+import { MC_COMPOSITION_DIMENSIONS } from './mc-composition.config';
+import { isWindowWellFormed, validateCharacterWindow } from './mc-talking-art-window';
 import {
+  McAspectRatio,
   MC_MAX_SEAL_PRODUCTS,
   MC_SAFE_AREAS,
+  MC_TALKING_ART_MAX_CITED_OFFERS,
+  MC_TALKING_ART_MAX_OFFERS,
+  MC_TALKING_ART_MAX_SCENES,
+  McProjectFormat,
+  McSceneType,
   McScript,
   McScriptScene,
   McSealCue,
@@ -30,7 +38,20 @@ import {
 export interface McScriptIssue {
   code: string;
   sceneId?: string;
+  /** Elemento recusado (ex.: `character_window` — "apontando o elemento", D13). */
+  element?: string;
   message: string;
+}
+
+/**
+ * Quadro e tile para validar a janela do F1 contra a área segura e o aspecto
+ * do tile (tarefa 4.7). Ausentes = a janela só é checada quanto à forma.
+ */
+export interface McScriptWindowContext {
+  /** Aspecto de saída do projeto (define o tamanho e a área segura). */
+  aspectRatio?: string | null;
+  /** Razão largura/altura do tile do kit (trava o aspecto da janela, ±2%). */
+  tileRatio?: number | null;
 }
 
 export function isScriptV2(script: Pick<McScript, 'schemaVersion'> | null | undefined): boolean {
@@ -105,12 +126,28 @@ export function productById(script: McScript, productId: string | null | undefin
   return (script.products ?? []).find((p) => p.id === productId) ?? null;
 }
 
+/** Tipos de cena admitidos por formato (D6): F3 = cenas geradas; F1/F2 = só falas do tile. */
+export const MC_SCENE_TYPES_BY_FORMAT: Record<McProjectFormat, readonly McSceneType[]> = {
+  scenes: ['presenter', 'action', 'action_voiceover'],
+  talking_art: ['talk_tile'],
+  offer_carousel: ['talk_tile'],
+};
+
 /**
  * Validação do roteiro v2 antes de preparar/aprovar. Devolve TODOS os
  * problemas (a UI mostra por cena) em vez de lançar no primeiro.
+ * FORMAT-AWARE (D6): `opts.format` (default `scenes` — chamadores legados
+ * mantêm o comportamento) decide os tipos de cena admissíveis; os campos do
+ * F1 (narração, janela, ofertas citadas) são checados quando o roteiro se
+ * declara `talking_art`.
  */
-export function validateScriptV2(script: McScript): McScriptIssue[] {
+export function validateScriptV2(
+  script: McScript,
+  opts: { format?: McProjectFormat | null } & McScriptWindowContext = {},
+): McScriptIssue[] {
   const issues: McScriptIssue[] = [];
+  const format: McProjectFormat = opts.format ?? 'scenes';
+  const allowedTypes = MC_SCENE_TYPES_BY_FORMAT[format] ?? MC_SCENE_TYPES_BY_FORMAT.scenes;
   if (!isScriptV2(script)) {
     issues.push({
       code: 'SCRIPT_NOT_V2',
@@ -139,10 +176,12 @@ export function validateScriptV2(script: McScript): McScriptIssue[] {
       });
     }
   }
-  if ((script.products ?? []).length > MC_MAX_SEAL_PRODUCTS) {
+  // Teto de produtos por formato: selos do F3 (6); os formatos novos congelam as ofertas da arte (12).
+  const maxProducts = format === 'scenes' ? MC_MAX_SEAL_PRODUCTS : MC_TALKING_ART_MAX_OFFERS;
+  if ((script.products ?? []).length > maxProducts) {
     issues.push({
       code: 'TOO_MANY_PRODUCTS',
-      message: `Máximo de ${MC_MAX_SEAL_PRODUCTS} produtos.`,
+      message: `Máximo de ${maxProducts} produtos.`,
     });
   }
   const environmentIds = new Set((script.environments ?? []).map((e) => e.id));
@@ -171,6 +210,16 @@ export function validateScriptV2(script: McScript): McScriptIssue[] {
         message: `Cena ${sceneId}: tipo inválido.`,
       });
     } else {
+      if (!allowedTypes.includes(scene.sceneType)) {
+        issues.push({
+          code: 'SCENE_TYPE_NOT_ALLOWED_FOR_FORMAT',
+          sceneId,
+          message:
+            scene.sceneType === 'talk_tile'
+              ? `Cena ${position + 1}: o tipo "fala do tile" só existe nos formatos arte que fala e ofertas em sequência.`
+              : `Cena ${position + 1}: cenas geradas (${scene.sceneType}) não existem no formato "${format}" — toda cena é uma fala do tile.`,
+        });
+      }
       const dialogueIssue = sceneTypeDialogueIssue(scene.sceneType, scene.dialogue);
       if (dialogueIssue) {
         issues.push({ code: 'SCENE_DIALOGUE_TYPE', sceneId, message: dialogueIssue });
@@ -228,6 +277,88 @@ export function validateScriptV2(script: McScript): McScriptIssue[] {
       });
     }
   });
+  issues.push(...validateTalkingArtFields(script, productIds, opts));
+  return issues;
+}
+
+/**
+ * Campos do formato F1 "arte que fala" (change video-formatos-personagem, D6):
+ * narração presente, janela em frações 0..1 inteira no quadro, `logoFace`
+ * booleano, ofertas citadas ⊆ produtos (≤ 3, sem repetição) e cenas SÓ do
+ * tipo `talk_tile` (1 a 3 — cada frase da narração vira uma fala).
+ */
+export function validateTalkingArtFields(
+  script: McScript,
+  productIds: Set<string> = new Set((script.products ?? []).map((p) => p.id as string)),
+  windowContext: McScriptWindowContext = {},
+): McScriptIssue[] {
+  const issues: McScriptIssue[] = [];
+  if (script.format !== 'talking_art') return issues;
+  if (!canon(script.narration)) {
+    issues.push({
+      code: 'NARRATION_MISSING',
+      message: 'O roteiro "arte que fala" precisa do texto da apresentação.',
+    });
+  }
+  if (!isWindowWellFormed(script.window)) {
+    issues.push({
+      code: 'WINDOW_INVALID',
+      message:
+        'A janela do personagem precisa de x, y, w e h em frações de 0 a 1, com tamanho positivo e inteira dentro do quadro.',
+    });
+  } else {
+    // Tarefa 4.7: área segura do tamanho de saída + aspecto do tile, quando o
+    // chamador informa o quadro (WINDOW_OUTSIDE_SAFE_AREA / WINDOW_ASPECT_MISMATCH).
+    const frame = windowContext.aspectRatio
+      ? MC_COMPOSITION_DIMENSIONS[windowContext.aspectRatio as McAspectRatio]
+      : undefined;
+    if (frame) {
+      for (const issue of validateCharacterWindow({
+        window: script.window,
+        width: frame.width,
+        height: frame.height,
+        tileRatio: windowContext.tileRatio ?? null,
+        logoFace: script.logoFace === true,
+      })) {
+        issues.push({ code: issue.code, element: issue.element, message: issue.message });
+      }
+    }
+  }
+  if (script.logoFace !== undefined && typeof script.logoFace !== 'boolean') {
+    issues.push({
+      code: 'LOGO_FACE_INVALID',
+      message: 'logoFace precisa ser verdadeiro ou falso.',
+    });
+  }
+  const cited = script.citedOfferIds ?? [];
+  if (!Array.isArray(cited)) {
+    issues.push({ code: 'CITED_OFFERS_INVALID', message: 'citedOfferIds precisa ser uma lista.' });
+  } else {
+    if (cited.length > MC_TALKING_ART_MAX_CITED_OFFERS) {
+      issues.push({
+        code: 'CITED_OFFERS_TOO_MANY',
+        message: `No máximo ${MC_TALKING_ART_MAX_CITED_OFFERS} ofertas citadas na fala.`,
+      });
+    }
+    if (new Set(cited).size !== cited.length) {
+      issues.push({ code: 'CITED_OFFER_DUPLICATE', message: 'Oferta citada repetida.' });
+    }
+    for (const id of cited) {
+      if (!productIds.has(id)) {
+        issues.push({
+          code: 'CITED_OFFER_UNKNOWN',
+          message: `A oferta citada ${id} não existe nos produtos do roteiro.`,
+        });
+      }
+    }
+  }
+  const scenes = Array.isArray(script.scenes) ? script.scenes : [];
+  if (scenes.length > MC_TALKING_ART_MAX_SCENES) {
+    issues.push({
+      code: 'TOO_MANY_TALK_SCENES',
+      message: `A apresentação é dividida em no máximo ${MC_TALKING_ART_MAX_SCENES} falas.`,
+    });
+  }
   return issues;
 }
 

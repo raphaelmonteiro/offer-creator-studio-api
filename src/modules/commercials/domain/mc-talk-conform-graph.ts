@@ -7,9 +7,13 @@
  * - clipe mais LONGO que o áudio → aparado no fim (`-t áudio`);
  * - clipe mais CURTO em até 300 ms → último quadro clonado (`tpad=stop_mode=clone`);
  * - clipe mais curto além disso → `clip_too_short` (classe `quality`: "boca
- *   parada"), regeração até o teto da classe;
+ *   parada"), regeração até o teto da classe; esgotado o teto, o ingest aceita
+ *   o último clipe replanejando com `padMaxMs: Infinity` (último quadro
+ *   clonado até o áudio) e sinaliza a cena para revisão humana;
  * - aspecto do clipe ≠ aspecto do tile (tolerância 2%) → recorte CENTRALIZADO
- *   para o aspecto do tile; nunca barras;
+ *   para o aspecto do tile; nunca barras; sem recorte, largura/altura ímpares
+ *   são aparadas para pares (`crop=trunc(iw/2)*2:trunc(ih/2)*2`) — yuv420p
+ *   exige dimensões pares;
  * - o áudio do fornecedor é DESCARTADO e o TTS original é muxado (mesma
  *   política `replace_clip_audio` do scene_compose). Nunca `-shortest`, nunca
  *   `atempo`.
@@ -44,9 +48,22 @@ export interface TalkConformPlan {
   padS: number;
   /** Recorte centralizado para o aspecto do tile; null = aspecto já casa. */
   crop: TalkCropBox | null;
+  /**
+   * Sem recorte de aspecto mas com largura ou altura ÍMPAR: o filtro
+   * `crop=trunc(iw/2)*2:trunc(ih/2)*2` apara 1 px para que a saída (yuv420p)
+   * tenha dimensões pares — as medidas registradas são sempre pares.
+   */
+  forceEvenDims: boolean;
   /** Dimensões da saída (após o recorte, pares). */
   outputWidth: number | null;
   outputHeight: number | null;
+}
+
+/** Filtro ffmpeg que apara largura/altura ímpares para pares (sem recorte de aspecto). */
+export const MC_TALK_EVEN_DIMS_FILTER = 'crop=trunc(iw/2)*2:trunc(ih/2)*2';
+
+function isOdd(n: number | null): boolean {
+  return n != null && n % 2 !== 0;
 }
 
 export interface TalkConformInput {
@@ -118,6 +135,8 @@ export function planTalkConform(input: TalkConformInput): TalkConformPlan {
     padS:
       durationAction === 'pad' ? Number((deltaMs / 1000 + 1 / MC_TALK_CONFORM_FPS).toFixed(3)) : 0,
     crop,
+    // o recorte de aspecto já sai par (`even`); sem ele, ímpar precisa do filtro
+    forceEvenDims: crop == null && (isOdd(input.videoWidth) || isOdd(input.videoHeight)),
     outputWidth,
     outputHeight,
   };
@@ -145,6 +164,7 @@ export function buildTalkConformArgs(opts: TalkConformArgsOptions): string[] {
   const filters: string[] = [];
   const crop = opts.plan.crop;
   if (crop) filters.push(`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`);
+  else if (opts.plan.forceEvenDims) filters.push(MC_TALK_EVEN_DIMS_FILTER);
   filters.push(`fps=${MC_TALK_CONFORM_FPS}`, 'format=yuv420p');
   if (opts.plan.durationAction === 'pad' && opts.plan.padS > 0) {
     filters.push(`tpad=stop_mode=clone:stop_duration=${opts.plan.padS.toFixed(3)}`);

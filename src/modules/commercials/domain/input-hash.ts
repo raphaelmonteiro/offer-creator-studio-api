@@ -15,6 +15,8 @@ export const MC_BUILDER_VERSIONS: Record<McStepType, number> = {
   [McStepType.ASSEMBLY]: 1,
   [McStepType.SCENE_COMPOSE]: 1,
   [McStepType.TALK]: 1,
+  [McStepType.COMPOSE_FFMPEG]: 1,
+  [McStepType.FINALIZE]: 1,
 };
 
 /**
@@ -33,6 +35,14 @@ export const MC_BUILDER_VERSIONS_V2: Record<McStepType, number> = {
   [McStepType.SCENE_COMPOSE]: 1,
   /** Clipe falado a partir do tile (change video-formatos-personagem): só existe no v2. */
   [McStepType.TALK]: 1,
+  /**
+   * Steps de projeto do F1 (D6): a versão do GRAFO de cada um vive no próprio
+   * builder (`MC_COMPOSE_GRAPH_VERSION`, `MC_FINALIZE_GRAPH_VERSION`) e entra
+   * no hash junto desta versão — trocar o stub pelo grafo real (4.4/4.5) é um
+   * bump lá, que invalida o cache sem varrer o banco.
+   */
+  [McStepType.COMPOSE_FFMPEG]: 1,
+  [McStepType.FINALIZE]: 1,
 };
 
 /**

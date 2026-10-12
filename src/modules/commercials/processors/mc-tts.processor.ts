@@ -11,6 +11,11 @@ import {
 } from '../../../shared/providers/elevenlabs.provider';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { syntheticAlignment } from '../domain/mc-captions';
+import {
+  estimateSpeechSeconds,
+  MC_MOCK_TTS_MAX_S_DEFAULT,
+  mockTtsMaxS,
+} from '../domain/mc-speech-estimate';
 import { McStepStatus } from '../domain/mc-state-machines';
 import { McScript, McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -38,28 +43,20 @@ export const MC_TTS_FALLBACK_MODEL = 'eleven_v3';
 /** Duração do mp3 de silêncio do provider mock (segundos) — legado. */
 const MOCK_TTS_DURATION_S = 2;
 
-/** Teto padrão (s) da duração do TTS mock — `MC_MOCK_TTS_MAX_S` sobrescreve. */
-export const MC_MOCK_TTS_MAX_S_DEFAULT = 20;
-
-/** Cap do mock configurável (change video-formatos-personagem, 3.6): testar SPEECH_SENTENCE_TOO_LONG sem API. */
-export function mockTtsMaxS(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = Number(env.MC_MOCK_TTS_MAX_S);
-  return Number.isFinite(raw) && raw > 0 ? raw : MC_MOCK_TTS_MAX_S_DEFAULT;
-}
-
 /**
- * Mock v2: a duração acompanha o texto (15 chars/s, mesma taxa do diretor),
- * para que a validação "locução cabe no clipe" e o manifesto exercitem
- * números realistas sem gastar API. Faixa 1–`maxS` (default 20 s).
+ * A estimativa de duração da fala (15 chars/s) e o cap do mock mudaram-se para
+ * `domain/mc-speech-estimate` (o diretor F1 divide a narração com a mesma
+ * régua); o reexport preserva os imports existentes.
  */
-export function estimateSpeechSeconds(text: string, maxS: number = mockTtsMaxS()): number {
-  return Math.min(maxS, Math.max(1, Math.round((text.trim().length / 15) * 10) / 10));
-}
+export { estimateSpeechSeconds, MC_MOCK_TTS_MAX_S_DEFAULT, mockTtsMaxS };
 
 /**
  * Falas VIZINHAS da cena no roteiro (D7: prosódia de uma fala por chamada —
- * `previous_text`/`next_text` da ElevenLabs). Localiza a cena pela identidade
- * (v2) ou pela posição (legado); vizinhas sem fala contam como ausentes.
+ * `previous_text`/`next_text` da ElevenLabs). SÓ para cenas `talk_tile`
+ * (formatos novos, uma fala = um clipe): presenter/action_voiceover do F3 e o
+ * legado seguem sem contexto, com o TTS de sempre. Localiza a cena pela
+ * identidade (v2) ou pela posição (legado); vizinhas sem fala contam como
+ * ausentes.
  */
 export function neighbourDialogues(
   script: Pick<McScript, 'scenes'> | null | undefined,
@@ -69,7 +66,9 @@ export function neighbourDialogues(
   const position = scene.scriptSceneId
     ? scenes.findIndex((s) => s.sceneId === scene.scriptSceneId)
     : scenes.findIndex((s) => s.idx === scene.idx);
-  if (position < 0) return { previousText: null, nextText: null };
+  if (position < 0 || scenes[position].sceneType !== 'talk_tile') {
+    return { previousText: null, nextText: null };
+  }
   const text = (value: string | null | undefined) => (value?.trim() ? value.trim() : null);
   return {
     previousText: text(scenes[position - 1]?.dialogue),

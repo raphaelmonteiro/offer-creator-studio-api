@@ -1,6 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { CreditsService, InsufficientCreditsError } from '../../shared/credits/credits.service';
+import { MediaAssetsService } from '../../shared/media-assets/media-assets.service';
 import { AnimationQueueService } from '../../shared/queue/animation-queue.service';
 import { summarizeRenderPreflight } from '../../shared/ffmpeg/render-preflight';
 import { SystemSettingsService } from '../../shared/settings/system-settings.service';
@@ -33,6 +34,8 @@ function fakeManager() {
 
 describe('CommercialsService.createProject — kill-switch + mini-reserva (plano §6.7)', () => {
   const originalMc = process.env.MC_CREDITS_ENABLED;
+  const originalFormats = process.env.MC_FORMATS;
+  const originalPipelineV2 = process.env.MC_PIPELINE_V2;
   const kit = { id: 'kit-1', userId: 'u1', status: McKitStatus.APPROVED, version: 1 };
   const dto: CreateProjectDto = {
     kitId: 'kit-1',
@@ -48,6 +51,7 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
   let queue: { publish: jest.Mock };
   let settings: { get: jest.Mock; getFresh: jest.Mock };
   let credits: { reserve: jest.Mock; refundUnconsumed: jest.Mock };
+  let mediaAssets: { findOwned: jest.Mock };
   let service: CommercialsService;
 
   beforeEach(() => {
@@ -69,18 +73,131 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
       reserve: jest.fn().mockResolvedValue(undefined),
       refundUnconsumed: jest.fn().mockResolvedValue(0),
     };
+    mediaAssets = {
+      findOwned: jest.fn((_userId: string, id: string) =>
+        Promise.resolve({ id, userId: 'u1', kind: 'video_art', fileUrl: '/uploads/art.png' }),
+      ),
+    };
     service = new CommercialsService(
       dataSource as unknown as DataSource,
       transitions as unknown as TaskTransitionService,
       queue as unknown as AnimationQueueService,
       settings as unknown as SystemSettingsService,
       credits as unknown as CreditsService,
+      mediaAssets as unknown as MediaAssetsService,
     );
+    delete process.env.MC_FORMATS;
+    delete process.env.MC_PIPELINE_V2;
   });
 
   afterEach(() => {
     if (originalMc === undefined) delete process.env.MC_CREDITS_ENABLED;
     else process.env.MC_CREDITS_ENABLED = originalMc;
+    if (originalFormats === undefined) delete process.env.MC_FORMATS;
+    else process.env.MC_FORMATS = originalFormats;
+    if (originalPipelineV2 === undefined) delete process.env.MC_PIPELINE_V2;
+    else process.env.MC_PIPELINE_V2 = originalPipelineV2;
+  });
+
+  // ── admissão por formato e versão (change video-formatos-personagem, D6/D13, tarefa 4.2) ──
+  describe('admissão dos formatos novos (MC_FORMATS × MC_PIPELINE_V2)', () => {
+    const ART = '11111111-1111-4111-8111-111111111111';
+    const f1 = { ...dto, format: 'talking_art' as const, backgroundArtAssetId: ART };
+
+    it('formato desligado (MC_FORMATS vazio) → 422 FORMAT_NOT_ENABLED sem ler o kit, sem TTS, sem publish', async () => {
+      process.env.MC_PIPELINE_V2 = 'all';
+      await expect(service.createProject('u1', f1)).rejects.toMatchObject({
+        status: 422,
+        response: { code: 'FORMAT_NOT_ENABLED', details: { format: 'talking_art' } },
+      });
+      expect(dataSource.getRepository).not.toHaveBeenCalled();
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(queue.publish).not.toHaveBeenCalled();
+      expect(mediaAssets.findOwned).not.toHaveBeenCalled();
+    });
+
+    it('formato ligado → projeto criado no executor v2 com format/tier/canal/arte explícitos e quality vazio', async () => {
+      process.env.MC_FORMATS = 'talking_art';
+      process.env.MC_PIPELINE_V2 = 'all';
+      const project = await service.createProject('u1', {
+        ...f1,
+        aspectRatio: '4:5',
+        tier: 'premium',
+        channel: 'whatsapp',
+        layoutPreset: 'canto_inferior_direito',
+        logoBox: { x: 0.1, y: 0.8, w: 0.2, h: 0.1 },
+        sourceArt: { kind: 'social', id: 'fl-1', pageIndex: 0, snapshotHash: 'h' },
+      });
+      expect(project).toMatchObject({
+        pipelineVersion: 2,
+        format: 'talking_art',
+        tier: 'premium',
+        channel: 'whatsapp',
+        aspectRatio: '4:5',
+        backgroundArtAssetId: ART,
+        layoutPreset: 'canto_inferior_direito',
+        logoBox: { x: 0.1, y: 0.8, w: 0.2, h: 0.1 },
+        sourceArt: { kind: 'social', id: 'fl-1', pageIndex: 0, snapshotHash: 'h' },
+        revision: 0,
+        quality: expect.objectContaining({ budgets: [], timeline: null }),
+      });
+      expect(mediaAssets.findOwned).toHaveBeenCalledWith('u1', ART);
+      expect(queue.publish).toHaveBeenCalledTimes(1);
+    });
+
+    it('`scenes` passa sempre, mesmo com MC_FORMATS vazio e MC_PIPELINE_V2=off (legado)', async () => {
+      const project = await service.createProject('u1', { ...dto, format: 'scenes' });
+      expect(project).toMatchObject({ format: 'scenes', pipelineVersion: 1, channel: 'instagram' });
+    });
+
+    it('MC_PIPELINE_V2=off + talking_art → 422 PIPELINE_V2_REQUIRED antes de qualquer escrita', async () => {
+      process.env.MC_FORMATS = 'talking_art';
+      process.env.MC_PIPELINE_V2 = 'off';
+      await expect(service.createProject('u1', f1)).rejects.toMatchObject({
+        status: 422,
+        response: { code: 'PIPELINE_V2_REQUIRED', details: { format: 'talking_art' } },
+      });
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(queue.publish).not.toHaveBeenCalled();
+    });
+
+    it('4:5 é aceito no talking_art (só o F3 recusa)', async () => {
+      process.env.MC_FORMATS = 'talking_art';
+      process.env.MC_PIPELINE_V2 = 'all';
+      await expect(
+        service.createProject('u1', { ...f1, aspectRatio: '4:5' }),
+      ).resolves.toMatchObject({ aspectRatio: '4:5', format: 'talking_art' });
+    });
+
+    it('arte de fundo que não é `video_art` do usuário → 422 BACKGROUND_ART_INVALID; ausente → BACKGROUND_ART_REQUIRED', async () => {
+      process.env.MC_FORMATS = 'talking_art';
+      process.env.MC_PIPELINE_V2 = 'all';
+      mediaAssets.findOwned.mockResolvedValueOnce({
+        id: ART,
+        kind: 'image',
+        fileUrl: '/uploads/x',
+      });
+      await expect(service.createProject('u1', f1)).rejects.toMatchObject({
+        status: 422,
+        response: { code: 'BACKGROUND_ART_INVALID', details: { assetId: ART, kind: 'image' } },
+      });
+      const { backgroundArtAssetId: _omit, ...withoutArt } = f1;
+      await expect(
+        service.createProject('u1', withoutArt as CreateProjectDto),
+      ).rejects.toMatchObject({ status: 422, response: { code: 'BACKGROUND_ART_REQUIRED' } });
+      expect(queue.publish).not.toHaveBeenCalled();
+    });
+
+    it('admitProjectFormat é reutilizável (createFromArt): devolve v2 para os formatos novos e a coorte para scenes', () => {
+      process.env.MC_FORMATS = 'talking_art';
+      process.env.MC_PIPELINE_V2 = 'all';
+      expect(service.admitProjectFormat('u1', 'talking_art')).toBe(2);
+      process.env.MC_PIPELINE_V2 = 'cohort';
+      process.env.MC_PIPELINE_V2_USERS = 'u9';
+      expect(service.admitProjectFormat('u1', 'scenes')).toBe(1);
+      expect(() => service.admitProjectFormat('u1', 'talking_art')).toThrow(HttpException);
+      delete process.env.MC_PIPELINE_V2_USERS;
+    });
   });
 
   it('mc_paused=true → 503 MC_PAUSED, nada criado nem enfileirado', async () => {

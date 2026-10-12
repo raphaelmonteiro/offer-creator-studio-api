@@ -1,5 +1,5 @@
 import { McPhase } from './mc-quality';
-import { McSceneType, McStepType } from './mc-types';
+import { McProjectFormat, McSceneType, McStepType } from './mc-types';
 
 /**
  * Plano de execução por TIPO DE CENA (ADR-001 §3.1/§4.2) — a fonte única do
@@ -116,6 +116,36 @@ export function resolveSceneType(scene: {
 /** Todos os steps de cena do plano, na ordem preparação → produção. */
 export function planSteps(plan: McScenePlan): McStepType[] {
   return [...plan.preparation, ...plan.production];
+}
+
+/**
+ * Steps de PROJETO da fase `assembly`, por formato (change video-formatos-
+ * personagem, D6), na ordem de execução depois do último final de cena:
+ * - scenes (F3): `assembly` (montagem 720p, selos/legendas/trilha);
+ * - talking_art (F1): `compose_ffmpeg` (arte + janela) → `finalize`;
+ * - offer_carousel (F2): `render_remotion` (tarefa 6.5, ainda não existe) → `finalize`.
+ * Cada um depende do anterior; o primeiro depende de todas as cenas prontas.
+ * Fonte única para scheduler, materializer, cotação e transição assembling.
+ */
+export const MC_PROJECT_ASSEMBLY_STEPS: Record<McProjectFormat, readonly McStepType[]> = {
+  scenes: [McStepType.ASSEMBLY],
+  talking_art: [McStepType.COMPOSE_FFMPEG, McStepType.FINALIZE],
+  offer_carousel: [McStepType.FINALIZE],
+};
+
+export function projectAssemblySteps(
+  format: McProjectFormat | null | undefined,
+): readonly McStepType[] {
+  return MC_PROJECT_ASSEMBLY_STEPS[format ?? 'scenes'] ?? MC_PROJECT_ASSEMBLY_STEPS.scenes;
+}
+
+/** Step de projeto da fase assembly (sceneId null): assembly, compose_ffmpeg ou finalize. */
+export function isProjectAssemblyStep(type: McStepType): boolean {
+  return (
+    type === McStepType.ASSEMBLY ||
+    type === McStepType.COMPOSE_FFMPEG ||
+    type === McStepType.FINALIZE
+  );
 }
 
 export function phaseOfStep(plan: McScenePlan, stepType: McStepType): McPhase | null {

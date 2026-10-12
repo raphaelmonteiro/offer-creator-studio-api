@@ -2,11 +2,20 @@ import {
   TerminalProviderError,
   TransientProviderError,
 } from '../../../shared/providers/provider-errors';
+import { McKitIdentityMode } from './mc-kit-identity';
 import {
   KLING_AVATAR_MODEL,
   KLING_AVATAR_PRO_MODEL,
+  MC_TALK_ENGINE_KEYS,
+  McTalkEngine,
+  McTalkEngineKey,
+  mcTalkEngines,
+  mcUsdPerSecondForModel,
   MINIMAX_H3_LIPSYNC_MODEL,
+  talkEngineFor,
+  talkFallbackEngineKey,
 } from './mc-pipeline.config';
+import { McProjectTier } from './mc-types';
 
 /**
  * Adapters de SUBMIT dos motores de fala (change video-formatos-personagem,
@@ -74,4 +83,93 @@ export function isTalkEngineAvailabilityError(err: unknown): boolean {
     return /HTTP (404|410|501|503)\b/.test(err.message);
   }
   return false;
+}
+
+// ───────────────── motor escolhido × motor efetivo (snapshot do step) ─────────────────
+
+/** Motor escolhido para o step: config do tier/origem + a chave que o identificou. */
+export type McTalkEngineChoice = McTalkEngine & { key: McTalkEngineKey };
+
+/** Motor que de fato recebeu o submit; `fallbackFrom` = modelo escolhido quando houve fallback. */
+export type McTalkEffectiveEngine = McTalkEngineChoice & { fallbackFrom?: string };
+
+/** Forma (possivelmente parcial) do motor gravado no snapshot pelo materializer ou por uma execução anterior. */
+export type McTalkEngineSnapshot = Partial<McTalkEngine> & { key?: string | null };
+
+export function isTalkEngineKey(value: unknown): value is McTalkEngineKey {
+  return typeof value === 'string' && (MC_TALK_ENGINE_KEYS as readonly string[]).includes(value);
+}
+
+/**
+ * Motor ESCOLHIDO do step: o do snapshot prevalece (o hash assinou aquele
+ * modelo), completado pela config quando veio parcial — tarifa pelo modelo
+ * (`mcUsdPerSecondForModel`) e `maxChunkS` da chave, nunca `0` gravado como
+ * tarifa. Sem snapshot (ou snapshot inválido), a regra D2 (`talkEngineFor`).
+ */
+export function resolveTalkEngine(
+  snapshotEngine: McTalkEngineSnapshot | null | undefined,
+  input: {
+    tier: McProjectTier | null | undefined;
+    identityMode: McKitIdentityMode | null | undefined;
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): McTalkEngineChoice {
+  const model = snapshotEngine?.model?.trim();
+  const key = snapshotEngine?.key;
+  if (!model || !isTalkEngineKey(key)) return talkEngineFor(input, env);
+  const configured = mcTalkEngines(env)[key];
+  return {
+    key,
+    model,
+    usdPerSecond:
+      snapshotEngine?.usdPerSecond ?? mcUsdPerSecondForModel(model, env) ?? configured.usdPerSecond,
+    maxChunkS: snapshotEngine?.maxChunkS ?? configured.maxChunkS,
+  };
+}
+
+/**
+ * Motor de FALLBACK por indisponibilidade (D2): só o motor de logo cai no
+ * motor do tier; o efetivo carrega `fallbackFrom` = modelo escolhido, para
+ * que `engine` (planejado) e `effectiveEngine` (submetido) fiquem ligados no
+ * snapshot. `null` quando o escolhido não tem fallback.
+ */
+export function talkFallbackEngine(
+  chosen: McTalkEngineChoice,
+  tier: McProjectTier | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): McTalkEffectiveEngine | null {
+  const key = talkFallbackEngineKey(chosen.key, tier);
+  if (!key) return null;
+  return { key, ...mcTalkEngines(env)[key], fallbackFrom: chosen.model };
+}
+
+/**
+ * Registro do par no snapshot do step: `engine` = planejado (o que o hash
+ * assinou), `effectiveEngine` = o que foi submetido. Invariante: sem fallback
+ * os dois são iguais e `fallbackFrom` NÃO existe (um `effectiveEngine` velho
+ * de execução anterior nunca sobrevive); com fallback,
+ * `effectiveEngine.fallbackFrom === engine.model`.
+ */
+export function talkEngineSnapshot(
+  chosen: McTalkEngineChoice,
+  effective: McTalkEffectiveEngine | null = null,
+): { engine: McTalkEngineChoice; effectiveEngine: McTalkEffectiveEngine } {
+  const engine: McTalkEngineChoice = {
+    key: chosen.key,
+    model: chosen.model,
+    usdPerSecond: chosen.usdPerSecond,
+    maxChunkS: chosen.maxChunkS,
+  };
+  if (!effective || effective.model === chosen.model)
+    return { engine, effectiveEngine: { ...engine } };
+  return {
+    engine,
+    effectiveEngine: {
+      key: effective.key,
+      model: effective.model,
+      usdPerSecond: effective.usdPerSecond,
+      maxChunkS: effective.maxChunkS,
+      fallbackFrom: effective.fallbackFrom ?? chosen.model,
+    },
+  };
 }

@@ -1,6 +1,21 @@
+import { precoPorExtenso } from './mc-preco-extenso';
 import { MC_SCRIPT_SCHEMA_V2 } from './mc-quality';
 import { defaultSealCue, sceneSourceHash } from './mc-script-v2';
+import { estimateSpeechSecondsRaw } from './mc-speech-estimate';
 import {
+  artBoxToOutputWindow,
+  defaultCharacterWindow,
+  windowPxToFractions,
+} from './mc-talking-art-window';
+import {
+  MC_TALKING_ART_MAX_CITED_OFFERS,
+  MC_TALKING_ART_MAX_S,
+  MC_TALKING_ART_MAX_SCENES,
+  MC_TALKING_ART_MIN_S,
+  MC_TALKING_ART_NARRATION_MAX_CHARS,
+  MC_TALKING_ART_NARRATION_MIN_CHARS,
+  McCharacterWindow,
+  McLogoBox,
   McScript,
   McScriptEndcard,
   McScriptScene,
@@ -331,7 +346,10 @@ export function buildDirectorJsonSchemaV2(): Record<string, unknown> {
             type: 'object',
             additionalProperties: false,
             properties: {
-              sceneType: { type: 'string', enum: ['presenter', 'action', 'action_voiceover'] },
+              sceneType: {
+                type: 'string',
+                enum: ['presenter', 'action', 'action_voiceover', 'talk_tile'],
+              },
               initialFrame: { type: 'string' },
               initialFrameEn: { type: 'string' },
               actionPrompt: { type: 'string' },
@@ -370,6 +388,11 @@ export interface RawDirectorSceneV2 extends RawDirectorScene {
  * cena, tipo validado (fala × tipo corrigida: action com fala vira
  * action_voiceover; presenter/voiceover sem fala vira action), produto por
  * índice → id do snapshot, derivação EN gravada com o hash da intenção.
+ *
+ * `talk_tile` (D6/D7) NÃO é coagido pela fala: é uma fala = um clipe a partir
+ * do tile — sem keyframe (`initialFrame`/cenário/selo ausentes), gesto
+ * opcional em `actionPrompt` (vazio permitido) e fala obrigatória (item sem
+ * fala é descartado).
  */
 export function normalizeDirectorScenesV2(
   raw: RawDirectorSceneV2[],
@@ -381,17 +404,20 @@ export function normalizeDirectorScenesV2(
   for (const item of raw ?? []) {
     if (scenes.length >= MC_MAX_SCENES) break;
     const actionPrompt = (item?.actionPrompt ?? '').trim();
-    if (!actionPrompt) continue;
+    const talkTile = item?.sceneType === 'talk_tile';
+    if (!actionPrompt && !talkTile) continue;
     const durationS = Math.min(
       MC_SCENE_MAX_S,
       Math.max(MC_SCENE_MIN_S, Math.round(Number(item?.durationS) || MC_SCENE_MIN_S)),
     );
     const dialogueRaw = (item?.dialogue ?? '').trim();
+    if (talkTile && !dialogueRaw) continue;
     let sceneType: McSceneType =
       item?.sceneType === 'presenter' ||
       item?.sceneType === 'action' ||
-      item?.sceneType === 'action_voiceover'
-        ? item.sceneType
+      item?.sceneType === 'action_voiceover' ||
+      talkTile
+        ? (item.sceneType as McSceneType)
         : dialogueRaw
           ? 'presenter'
           : 'action';
@@ -404,20 +430,34 @@ export function normalizeDirectorScenesV2(
       typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < products.length
         ? (products[index].id ?? null)
         : null;
-    const scene: McScriptScene = {
-      idx: scenes.length,
-      sceneId: idFactory(),
-      sceneType,
-      initialFrame: (item?.initialFrame ?? '').trim() || undefined,
-      camera: null,
-      environmentId: null,
-      productRef,
-      sealCue: defaultSealCue(durationS),
-      safeArea: 'lower_third',
-      actionPrompt,
-      dialogue,
-      durationS,
-    };
+    const scene: McScriptScene = talkTile
+      ? {
+          idx: scenes.length,
+          sceneId: idFactory(),
+          sceneType,
+          camera: null,
+          environmentId: null,
+          productRef,
+          sealCue: null,
+          safeArea: null,
+          actionPrompt,
+          dialogue,
+          durationS,
+        }
+      : {
+          idx: scenes.length,
+          sceneId: idFactory(),
+          sceneType,
+          initialFrame: (item?.initialFrame ?? '').trim() || undefined,
+          camera: null,
+          environmentId: null,
+          productRef,
+          sealCue: defaultSealCue(durationS),
+          safeArea: 'lower_third',
+          actionPrompt,
+          dialogue,
+          durationS,
+        };
     const actionPromptEn = (item?.actionPromptEn ?? '').trim();
     const initialFrameEn = (item?.initialFrameEn ?? '').trim();
     if (actionPromptEn) {
@@ -438,14 +478,20 @@ export function normalizeDirectorScenesV2(
   return scenes;
 }
 
-/** Snapshot de produtos do roteiro v2 a partir das opções do projeto (ids já atribuídos na criação). */
+/**
+ * Snapshot de produtos do roteiro v2 a partir das opções do projeto (ids já
+ * atribuídos na criação). O teto default é o dos selos do F3 (6); o F1 recebe
+ * TODAS as ofertas da arte (até `MC_TALKING_ART_MAX_OFFERS`) para o diretor
+ * escolher quais citar.
+ */
 export function buildProductsSnapshot(
   products: McSealProduct[],
   idFactory: () => string,
+  max: number = MC_MAX_SEAL_PRODUCTS,
 ): McSealProduct[] {
   return products
     .filter((p) => p?.name?.trim() && p?.price?.trim())
-    .slice(0, MC_MAX_SEAL_PRODUCTS)
+    .slice(0, max)
     .map((p) => ({
       id: p.id ?? idFactory(),
       catalogId: p.catalogId ?? null,
@@ -512,4 +558,351 @@ export function buildMockScriptV2(
     seal: null,
     endcard: endcard ?? null,
   };
+}
+
+// ─────────────────── F1: arte que fala (change video-formatos-personagem, D6) ───────────────────
+
+/**
+ * Contexto do diretor F1 — o que o roteiro precisa além do briefing: snapshot
+ * de produtos (ofertas da arte), cartela, limite do motor por fala
+ * (`maxChunkS`), quadro de saída e tile do kit (aspecto da janela), e o modo
+ * rosto do logo (kit `logo_as_is` com a caixa do logo resolvida na ponte).
+ */
+export interface DirectorF1Context {
+  products: McSealProduct[];
+  storeName: string | null;
+  maxChunkS: number;
+  frame: { width: number; height: number };
+  tile: { width: number | null; height: number | null };
+  /** Dimensões da arte de fundo (a caixa do logo vem em frações da ARTE, não do quadro). */
+  art?: { width: number | null; height: number | null } | null;
+  logoFace: boolean;
+  logoBox: McLogoBox | null;
+}
+
+/**
+ * System prompt do diretor F1 (spec "Fala a partir das ofertas da arte"):
+ * apresentação de 6 a 25 s (mira 10–20 s), cita no máximo 3 ofertas com preço
+ * por extenso, convida a ver as demais, 90–375 caracteres. O diretor devolve
+ * SÓ o texto e os índices das ofertas citadas — a divisão em falas (cenas
+ * `talk_tile`) é determinística aqui (`buildTalkingArtScenes`), por fronteira
+ * de frase sob o limite do motor.
+ */
+export function buildDirectorSystemPromptF1(opts: {
+  products: McSealProduct[];
+  storeName: string | null;
+  maxChunkS: number;
+}): string {
+  const productList =
+    opts.products.length > 0
+      ? opts.products
+          .map((p, i) => `[${i}] ${p.name} (R$ ${p.price}${p.unit ? ` / ${p.unit}` : ''})`)
+          .join('; ')
+      : null;
+  const lines = [
+    'Você escreve a fala de um personagem (mascote ou logo animado) que apresenta uma arte ' +
+      'promocional de supermercado já pronta — a arte aparece inteira no vídeo e o personagem ' +
+      'fala numa janela sobre ela.',
+    `Escreva UMA apresentação em pt-BR de varejo, natural e entusiasmada, de ${MC_TALKING_ART_MIN_S} a ` +
+      `${MC_TALKING_ART_MAX_S} segundos falados (mire entre 10 e 20 segundos; ~${MC_CHARS_PER_SECOND} ` +
+      `caracteres por segundo, ou seja, entre ${MC_TALKING_ART_NARRATION_MIN_CHARS} e ` +
+      `${MC_TALKING_ART_NARRATION_MAX_CHARS} caracteres).`,
+    '',
+    'Regras obrigatórias:',
+    `- Cite NO MÁXIMO ${MC_TALKING_ART_MAX_CITED_OFFERS} ofertas da lista, com o preço SEMPRE por ` +
+      'extenso (ex.: "vinte e quatro reais e noventa centavos", nunca "24,90" ou "R$ 24,90").',
+    '- Convide o público a ver as demais ofertas na arte/na loja (a arte tem mais ofertas do que você cita).',
+    '- Frases curtas e completas, separadas por ponto final: cada frase vira um trecho falado ' +
+      `de no máximo ${opts.maxChunkS} segundos (~${Math.floor(opts.maxChunkS * MC_CHARS_PER_SECOND)} caracteres).`,
+    '- Nada de texto escrito, placas, hashtags, emojis ou instruções de câmera — só a fala.',
+    '- Não invente ofertas, preços ou condições fora da lista.',
+    '- "citedOfferIndexes": os índices das ofertas que você citou (na ordem em que aparecem na fala), ' +
+      `no máximo ${MC_TALKING_ART_MAX_CITED_OFFERS}; vazio se não citou nenhuma.`,
+  ];
+  if (productList)
+    lines.push(`- Ofertas da arte (use o índice em citedOfferIndexes): ${productList}.`);
+  else lines.push('- A arte não tem ofertas cadastradas: citedOfferIndexes é sempre vazio.');
+  if (opts.storeName) lines.push(`- A loja se chama "${opts.storeName}" — pode citá-la uma vez.`);
+  return lines.join('\n');
+}
+
+/** json_schema ESTRITO da resposta do diretor F1: narração + índices citados. */
+export function buildDirectorJsonSchemaF1(): Record<string, unknown> {
+  return {
+    name: 'fala_arte_que_fala',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        narration: { type: 'string' },
+        citedOfferIndexes: {
+          type: 'array',
+          maxItems: MC_TALKING_ART_MAX_CITED_OFFERS,
+          items: { type: 'integer' },
+        },
+      },
+      required: ['narration', 'citedOfferIndexes'],
+    },
+  };
+}
+
+export interface RawDirectorF1 {
+  narration?: string | null;
+  citedOfferIndexes?: number[] | null;
+}
+
+/** Frases do texto (pontuação final preservada), sem vazios. */
+export function splitSentences(text: string): string[] {
+  const normalized = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  const matches = normalized.match(/[^.!?…]+[.!?…]+["”)]?|[^.!?…]+$/g) ?? [normalized];
+  return matches.map((s) => s.trim()).filter(Boolean);
+}
+
+/** Divide uma frase longa demais em pedaços ≤ maxChunkS (vírgulas/ponto e vírgula; senão por palavra). */
+function splitLongSentence(sentence: string, maxChunkS: number): string[] {
+  if (estimateSpeechSecondsRaw(sentence) <= maxChunkS) return [sentence];
+  const parts = sentence.split(/(?<=[,;:])\s+/).filter(Boolean);
+  const units = parts.length > 1 ? parts : sentence.split(/\s+/);
+  const chunks: string[] = [];
+  let current = '';
+  for (const unit of units) {
+    const candidate = current ? `${current} ${unit}` : unit;
+    if (current && estimateSpeechSecondsRaw(candidate) > maxChunkS) {
+      chunks.push(current);
+      current = unit;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+/**
+ * Divisão da narração em 1 a `maxScenes` falas por FRONTEIRA DE FRASE, cada
+ * uma com estimativa ≤ `maxChunkS` (D6/D7). Frase isolada acima do limite é
+ * quebrada em vírgulas (ou palavras). Mais pedaços que `maxScenes` são
+ * fundidos no último — a revisão então bloqueia com SPEECH_SENTENCE_TOO_LONG
+ * (duração medida), nunca corta texto em silêncio.
+ */
+export function chunkNarration(
+  narration: string,
+  maxChunkS: number,
+  maxScenes: number = MC_TALKING_ART_MAX_SCENES,
+): string[] {
+  const pieces = splitSentences(narration).flatMap((s) => splitLongSentence(s, maxChunkS));
+  if (pieces.length === 0) return [];
+  const chunks: string[] = [];
+  let current = '';
+  for (const piece of pieces) {
+    const candidate = current ? `${current} ${piece}` : piece;
+    if (current && estimateSpeechSecondsRaw(candidate) > maxChunkS) {
+      chunks.push(current);
+      current = piece;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) chunks.push(current);
+  if (chunks.length > maxScenes) {
+    const head = chunks.slice(0, maxScenes - 1);
+    const tail = chunks.slice(maxScenes - 1).join(' ');
+    return [...head, tail];
+  }
+  return chunks;
+}
+
+function foldText(text: string): string {
+  return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+/** Palavras "fortes" do nome do produto (≥ 3 letras, sem unidades/números). */
+function productKeywords(name: string): string[] {
+  return foldText(name)
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 3 && !/^\d/.test(w))
+    .slice(0, 3);
+}
+
+/** Oferta citada cujo nome aparece no trecho (primeira palavra forte do nome); null = trecho sem oferta. */
+export function matchCitedOffer(text: string, cited: McSealProduct[]): string | null {
+  const folded = foldText(text);
+  for (const product of cited) {
+    if (!product.id) continue;
+    const keywords = productKeywords(product.name);
+    if (keywords.length > 0 && folded.includes(keywords[0])) return product.id;
+  }
+  return null;
+}
+
+/** Duração planejada (s) de uma fala, dentro da forma aceita pelo DTO (3..30). */
+function plannedTalkDurationS(text: string): number {
+  return Math.min(
+    MC_SCENE_MAX_S + 18,
+    Math.max(MC_SCENE_MIN_S - 1, Math.round(estimateSpeechSecondsRaw(text))),
+  );
+}
+
+/**
+ * Cenas `talk_tile` do F1 (contrato do grupo 3): identidade estável, `idx`,
+ * fala, duração estimada, gesto opcional (só na primeira, quando informado),
+ * `productRef` = oferta citada no trecho ou null; sem initialFrame/cenário/selo.
+ */
+export function buildTalkingArtScenes(
+  narration: string,
+  opts: {
+    maxChunkS: number;
+    idFactory: () => string;
+    citedProducts: McSealProduct[];
+    gesture?: string | null;
+  },
+): McScriptScene[] {
+  return chunkNarration(narration, opts.maxChunkS).map((dialogue, idx) => ({
+    idx,
+    sceneId: opts.idFactory(),
+    sceneType: 'talk_tile' as const,
+    camera: null,
+    environmentId: null,
+    productRef: matchCitedOffer(dialogue, opts.citedProducts),
+    sealCue: null,
+    safeArea: null,
+    actionPrompt: idx === 0 ? (opts.gesture ?? '').trim() : '',
+    dialogue,
+    durationS: plannedTalkDurationS(dialogue),
+  }));
+}
+
+/** Corta a narração no fim de frase mais próximo do teto quando o diretor passa do limite. */
+export function clampNarration(
+  narration: string,
+  maxChars: number = MC_TALKING_ART_NARRATION_MAX_CHARS,
+): string {
+  const text = (narration ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxChars) return text;
+  const sentences = splitSentences(text);
+  let out = '';
+  for (const sentence of sentences) {
+    const candidate = out ? `${out} ${sentence}` : sentence;
+    if (candidate.length > maxChars) break;
+    out = candidate;
+  }
+  return out.length >= MC_TALKING_ART_NARRATION_MIN_CHARS ? out : text.slice(0, maxChars).trim();
+}
+
+/** Janela do roteiro F1: a caixa do logo no modo rosto do logo; senão o preset default (canto inferior direito). */
+export function talkingArtWindow(ctx: DirectorF1Context): McCharacterWindow {
+  if (ctx.logoFace && ctx.logoBox) {
+    // A caixa está em frações da arte; a janela do roteiro é em frações do quadro de
+    // saída. Converte pela mesma transformação contain-fit do compose (faixas de
+    // preenchimento incluídas). Sem as dimensões da arte, cai na caixa como está.
+    const artW = ctx.art?.width;
+    const artH = ctx.art?.height;
+    if (artW && artH) {
+      const px = artBoxToOutputWindow(ctx.logoBox, artW, artH, ctx.frame.width, ctx.frame.height);
+      return windowPxToFractions(px, ctx.frame.width, ctx.frame.height);
+    }
+    return { x: ctx.logoBox.x, y: ctx.logoBox.y, w: ctx.logoBox.w, h: ctx.logoBox.h };
+  }
+  return defaultCharacterWindow({
+    width: ctx.frame.width,
+    height: ctx.frame.height,
+    tileWidth: ctx.tile.width,
+    tileHeight: ctx.tile.height,
+  });
+}
+
+/**
+ * Roteiro F1 a partir da resposta do diretor (LLM ou mock): narração aparada
+ * ao teto, ofertas citadas por índice (válidas, únicas, ≤ 3), cenas por
+ * frase sob `maxChunkS`, janela e modo rosto do logo. `schemaVersion = 2`.
+ */
+export function buildTalkingArtScript(
+  raw: RawDirectorF1,
+  ctx: DirectorF1Context,
+  idFactory: () => string,
+  opts: { gesture?: string | null } = {},
+): McScript {
+  const narration = clampNarration(raw?.narration ?? '');
+  if (!narration) throw new Error('script_failed: diretor devolveu narração vazia');
+  const citedOfferIds: string[] = [];
+  for (const index of raw?.citedOfferIndexes ?? []) {
+    if (citedOfferIds.length >= MC_TALKING_ART_MAX_CITED_OFFERS) break;
+    if (!Number.isInteger(index) || index < 0 || index >= ctx.products.length) continue;
+    const id = ctx.products[index].id;
+    if (id && !citedOfferIds.includes(id)) citedOfferIds.push(id);
+  }
+  const citedProducts = ctx.products.filter((p) => p.id && citedOfferIds.includes(p.id));
+  const scenes = buildTalkingArtScenes(narration, {
+    maxChunkS: ctx.maxChunkS,
+    idFactory,
+    citedProducts,
+    gesture: opts.gesture ?? null,
+  });
+  if (scenes.length === 0) throw new Error('script_failed: narração sem frases utilizáveis');
+  const endcard = buildEndcard(ctx.storeName);
+  return {
+    version: 1,
+    schemaVersion: MC_SCRIPT_SCHEMA_V2,
+    format: 'talking_art',
+    products: ctx.products,
+    environments: [],
+    scenes,
+    seal: null,
+    endcard: endcard ?? null,
+    narration,
+    window: talkingArtWindow(ctx),
+    logoFace: ctx.logoFace && !!ctx.logoBox,
+    citedOfferIds,
+  };
+}
+
+/** Nome curto do produto para a fala mock (até 4 palavras, sem gramatura solta). */
+function shortProductName(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 4).join(' ');
+}
+
+/**
+ * Narração MOCK do F1 (MC_SCRIPT_PROVIDER=mock): abertura, até 3 ofertas com
+ * preço por extenso, convite — dentro de 90–375 caracteres (descarta ofertas
+ * do fim enquanto passar do teto). Determinística: o e2e de custo zero
+ * atravessa TTS → talk → compose → finalize com números realistas.
+ */
+export function buildMockNarrationF1(input: {
+  products: McSealProduct[];
+  storeName: string | null;
+}): { narration: string; citedOfferIndexes: number[] } {
+  const opening = `Olá! Chegaram as ofertas da semana${input.storeName ? ` no ${input.storeName.trim()}` : ''}.`;
+  const closing = 'Corra e aproveite, tem muito mais oferta esperando por você na arte!';
+  const valid = input.products
+    .map((p, index) => ({ p, index }))
+    .filter(({ p }) => p?.name?.trim() && p?.price?.trim());
+  for (
+    let count = Math.min(MC_TALKING_ART_MAX_CITED_OFFERS, valid.length);
+    count >= 0;
+    count -= 1
+  ) {
+    const chosen = valid.slice(0, count);
+    const offers = chosen.map(
+      ({ p }) => `${shortProductName(p.name)} por ${precoPorExtenso(p.price)}`,
+    );
+    const offerSentence =
+      offers.length === 0
+        ? 'Vem conferir os preços baixos que preparamos para você.'
+        : offers.length === 1
+          ? `${offers[0]}.`
+          : `${offers.slice(0, -1).join(', ')} e ${offers[offers.length - 1]}.`;
+    const narration = `${opening} ${offerSentence} ${closing}`;
+    if (narration.length <= MC_TALKING_ART_NARRATION_MAX_CHARS || count === 0) {
+      return { narration, citedOfferIndexes: chosen.map(({ index }) => index) };
+    }
+  }
+  return { narration: `${opening} ${closing}`, citedOfferIndexes: [] };
+}
+
+/** Roteiro MOCK F1: narração determinística + cenas por frase sob o limite do motor. */
+export function buildMockScriptF1(ctx: DirectorF1Context, idFactory: () => string): McScript {
+  const raw = buildMockNarrationF1({ products: ctx.products, storeName: ctx.storeName });
+  return buildTalkingArtScript(raw, ctx, idFactory, { gesture: 'Acena no início.' });
 }

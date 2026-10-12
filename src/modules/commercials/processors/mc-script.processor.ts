@@ -6,29 +6,45 @@ import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.servi
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { CommercialsService } from '../commercials.service';
 import { randomUUID } from 'crypto';
+import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import {
   buildDirectorJsonSchema,
+  buildDirectorJsonSchemaF1,
   buildDirectorJsonSchemaV2,
   buildDirectorSystemPrompt,
+  buildDirectorSystemPromptF1,
   buildDirectorSystemPromptV2,
   buildEndcard,
   buildMockScript,
+  buildMockScriptF1,
   buildMockScriptV2,
   buildProductsSnapshot,
   buildScriptSeal,
+  buildTalkingArtScript,
+  DirectorF1Context,
   normalizeDirectorScenes,
   normalizeDirectorScenesV2,
+  RawDirectorF1,
   RawDirectorScene,
   RawDirectorSceneV2,
 } from '../domain/mc-director';
+import { compositionDimensions } from '../domain/mc-composition.config';
+import { talkEngineFor } from '../domain/mc-pipeline.config';
 import { isPipelineV2, MC_SCRIPT_SCHEMA_V2 } from '../domain/mc-quality';
+import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import {
   assertProjectTransition,
   assertStepTransition,
   McProjectStatus,
   McStepStatus,
 } from '../domain/mc-state-machines';
-import { McScript, McSealProduct, McStepType, resolveProjectOptions } from '../domain/mc-types';
+import {
+  MC_TALKING_ART_MAX_OFFERS,
+  McScript,
+  McSealProduct,
+  McStepType,
+  resolveProjectOptions,
+} from '../domain/mc-types';
 import { McProject } from '../entities/mc-project.entity';
 import { McStep } from '../entities/mc-step.entity';
 
@@ -205,6 +221,14 @@ export class McScriptProcessor {
     const options = resolveProjectOptions(project.options);
     const storeName = await this.storeNameOf(project.userId);
     const v2 = isPipelineV2(project);
+    // F1 "arte que fala" (change video-formatos-personagem, D6): diretor
+    // próprio — narração + ofertas citadas, dividida em falas `talk_tile`.
+    if (project.format === 'talking_art') {
+      const ctx = await this.talkingArtContext(project, options.products, storeName);
+      if (provider === 'mock') return buildMockScriptF1(ctx, () => randomUUID());
+      if (provider === 'openai') return this.generateScriptOpenAiF1(project, ctx);
+      throw new Error(`not_implemented: MC_SCRIPT_PROVIDER desconhecido '${provider}'`);
+    }
     if (provider === 'mock') {
       // Roteiro MOCK multi-cena — atravessa o pipeline inteiro sem chamar LLM
       // nem gastar um centavo. Legado: 2 faladas + 1 muda; v2: presenter +
@@ -219,6 +243,96 @@ export class McScriptProcessor {
         : this.generateScriptOpenAi(project, options.products, storeName);
     }
     throw new Error(`not_implemented: MC_SCRIPT_PROVIDER desconhecido '${provider}'`);
+  }
+
+  /**
+   * Contexto do diretor F1: snapshot das ofertas (chave estável desde a
+   * criação), limite do motor por fala (tier × identidade do kit), quadro de
+   * saída (`compositionDimensions`) e dimensões do tile do kit (aspecto da
+   * janela, D6); modo rosto do logo quando o kit é `logo_as_is` e a ponte
+   * trouxe a caixa do logo (D9b).
+   */
+  private async talkingArtContext(
+    project: McProject,
+    optionProducts: McSealProduct[],
+    storeName: string | null,
+  ): Promise<DirectorF1Context> {
+    const kit = await this.dataSource
+      .getRepository(McCharacterKit)
+      .findOneBy({ id: project.kitId });
+    const tile = kit?.tileAssetId
+      ? await this.dataSource.getRepository(AnimationAsset).findOneBy({ id: kit.tileAssetId })
+      : null;
+    const art = project.backgroundArtAssetId
+      ? await this.dataSource
+          .getRepository(AnimationAsset)
+          .findOneBy({ id: project.backgroundArtAssetId })
+      : null;
+    const engine = talkEngineFor({
+      tier: project.tier ?? 'economico',
+      identityMode: kit?.identityMode ?? 'generated',
+    });
+    const frame = compositionDimensions(project.aspectRatio);
+    return {
+      products: buildProductsSnapshot(
+        optionProducts,
+        () => randomUUID(),
+        MC_TALKING_ART_MAX_OFFERS,
+      ),
+      storeName,
+      maxChunkS: engine.maxChunkS,
+      frame: { width: frame.width, height: frame.height },
+      tile: { width: tile?.width ?? null, height: tile?.height ?? null },
+      art: art ? { width: art.width ?? null, height: art.height ?? null } : null,
+      logoFace: kit?.identityMode === 'logo_as_is' && !!project.logoBox,
+      logoBox: project.logoBox ?? null,
+    };
+  }
+
+  /**
+   * Diretor F1 real: UMA chamada com json_schema estrito (narração + índices
+   * das ofertas citadas); a divisão em falas, a janela e o modo rosto do logo
+   * são determinísticos (`buildTalkingArtScript`). O briefing do usuário
+   * entra como contexto adicional da arte.
+   */
+  private async generateScriptOpenAiF1(
+    project: McProject,
+    ctx: DirectorF1Context,
+  ): Promise<McScript> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('script_failed: OPENAI_API_KEY ausente');
+    const model = process.env.MC_DIRECTOR_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o';
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.7,
+        response_format: { type: 'json_schema', json_schema: buildDirectorJsonSchemaF1() },
+        messages: [
+          {
+            role: 'system',
+            content: buildDirectorSystemPromptF1({
+              products: ctx.products,
+              storeName: ctx.storeName,
+              maxChunkS: ctx.maxChunkS,
+            }),
+          },
+          { role: 'user', content: `Briefing da arte: ${project.briefing}` },
+        ],
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      throw new Error(`script_failed: OpenAI HTTP ${res.status}: ${body?.error?.message ?? ''}`);
+    }
+    const content = body.choices?.[0]?.message?.content;
+    if (!content) throw new Error('script_failed: resposta do OpenAI sem conteúdo');
+    const parsed = JSON.parse(content) as RawDirectorF1;
+    return buildTalkingArtScript(parsed, ctx, () => randomUUID());
   }
 
   /**

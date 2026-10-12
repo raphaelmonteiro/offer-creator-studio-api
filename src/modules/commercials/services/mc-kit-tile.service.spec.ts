@@ -16,6 +16,8 @@ import { McStorageService } from './mc-storage.service';
  * transparente e um fundo em gradiente (reprovado).
  */
 describe('McKitTileService — tile do personagem na aprovação (D1)', () => {
+  // sharp real sobre PNGs de 1200×1600: folga para a máquina carregada (suíte inteira em paralelo)
+  jest.setTimeout(60_000);
   let tmpDir: string;
   let assetRepo: { save: jest.Mock };
   let service: McKitTileService;
@@ -75,12 +77,33 @@ describe('McKitTileService — tile do personagem na aprovação (D1)', () => {
     expect(result.ratio).toBeLessThanOrEqual(1);
     expect(Math.min(result.width, result.height)).toBeGreaterThanOrEqual(MC_TILE_MIN_SHORT_SIDE);
     expect(result.backgroundColor).toBe('#E5E7EB');
-    expect(result.hasAlpha).toBe(false);
+    // o fundo cinza detectado virou transparência REAL (H1): o tile de fala
+    // recolore com flatten, que só enxerga alfa
+    expect(result.hasAlpha).toBe(true);
 
     // o PNG gravado tem exatamente as dimensões planejadas
     const file = await fs.readFile(path.join(tmpDir, result.url.replace(/^\/uploads\//, '')));
     const meta = await sharp(file).metadata();
     expect([meta.width, meta.height]).toEqual([result.width, result.height]);
+    expect(meta.hasAlpha).toBe(true);
+    const { data, info } = await sharp(file).raw().toBuffer({ resolveWithObject: true });
+    expect(info.channels).toBe(4);
+    const px = (x: number, y: number) => {
+      const i = (y * info.width + x) * 4;
+      return [data[i], data[i + 1], data[i + 2], data[i + 3]];
+    };
+    expect(px(0, 0)[3]).toBe(0); // canto: fundo removido
+    expect(px(info.width - 1, 0)[3]).toBe(0);
+    const centre = px(Math.round(info.width / 2), Math.round(info.height / 2));
+    expect(centre).toEqual([0x1e, 0x50, 0xc8, 255]); // rosto: opaco e com a cor original
+
+    // o que o McTalkingProcessor faz (recolorTileBackground = flatten): fundo vira a cor da janela
+    const flat = await sharp(file).flatten({ background: '#FF0000' }).raw().toBuffer({
+      resolveWithObject: true,
+    });
+    expect([flat.data[0], flat.data[1], flat.data[2]]).toEqual([255, 0, 0]);
+    const c = (Math.round(info.height / 2) * flat.info.width + Math.round(info.width / 2)) * 3;
+    expect([flat.data[c], flat.data[c + 1], flat.data[c + 2]]).toEqual([0x1e, 0x50, 0xc8]);
 
     expect(assetRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -88,14 +111,29 @@ describe('McKitTileService — tile do personagem na aprovação (D1)', () => {
         status: 'ready',
         userId: 'u1',
         origin: 'ai_generated',
+        hasAlpha: true,
         metadata: expect.objectContaining({
           kitId: 'kit-1',
           identityAssetId: 'asset-identity.png',
           backgroundColor: '#E5E7EB',
+          detectedBackgroundColor: '#E5E7EB',
+          keyedBackground: expect.objectContaining({ keyed: expect.any(Number) }),
         }),
       }),
     );
     expect(result.assetId).toBe('tile-1');
+  });
+
+  it('identidade gerada SEM caixa do rosto → 422 TILE_FACE_NOT_FOUND com as ações, nada gravado (M4)', async () => {
+    const identity = await writePng('identity-noface.png', CHARACTER_SVG);
+    await expect(service.build(kit, identity, null)).rejects.toMatchObject({
+      status: 422,
+      response: {
+        code: 'TILE_FACE_NOT_FOUND',
+        details: { actions: ['mouth_variant', 'choose_candidate'] },
+      },
+    });
+    expect(assetRepo.save).not.toHaveBeenCalled();
   });
 
   it('identidade pequena (512 px, como a referência mock) é ampliada até 720 no lado menor', async () => {
@@ -154,6 +192,20 @@ describe('McKitTileService — tile do personagem na aprovação (D1)', () => {
     expect([result.width, result.height]).toEqual([720, 720]);
     expect(result.faceFraction).toBeNull();
     expect(result.backgroundColor).toBe('#FFFFFF');
+    // logo com borda OPACA (branca) também é inundado: canto transparente, marca opaca
+    expect(result.hasAlpha).toBe(true);
+    const file = await fs.readFile(path.join(tmpDir, result.url.replace(/^\/uploads\//, '')));
+    const { data, info } = await sharp(file).raw().toBuffer({ resolveWithObject: true });
+    expect(data[3]).toBe(0);
+    const centre = (360 * info.width + 360) * 4;
+    expect([data[centre], data[centre + 1], data[centre + 2], data[centre + 3]]).toEqual([
+      0xd3, 0x2f, 0x2f, 255,
+    ]);
+    expect(assetRepo.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ detectedBackgroundColor: '#FFFFFF' }),
+      }),
+    );
     // identidade GERADA não tem esse fallback: o recorte sujo é recusado
     await expect(
       service.build(kit, identity, { x: 0.3, y: 0.15, w: 0.4, h: 0.4 }),

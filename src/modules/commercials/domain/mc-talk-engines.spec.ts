@@ -24,7 +24,11 @@ import {
 import {
   buildTalkSubmitInput,
   isTalkEngineAvailabilityError,
+  isTalkEngineKey,
+  resolveTalkEngine,
   talkEngineFamily,
+  talkEngineSnapshot,
+  talkFallbackEngine,
 } from './mc-talk-engines';
 import { buildTalkPrompt, TALK_PROMPT_SUFFIX } from './mc-talk-prompts';
 import { McStepType } from './mc-types';
@@ -205,6 +209,85 @@ describe('motores de fala por tier e origem (design D2, tarefa 3.2)', () => {
         isTalkEngineAvailabilityError(new TerminalProviderError('HTTP 422: x', 'content_policy')),
       ).toBe(false);
       expect(isTalkEngineAvailabilityError(new Error('boom'))).toBe(false);
+    });
+  });
+
+  describe('motor escolhido × motor efetivo no snapshot do step (L4: consistência após fallback)', () => {
+    const env = {};
+    const premium = { tier: 'premium' as const, identityMode: 'logo_as_is' as const };
+
+    it('resolveTalkEngine: sem snapshot cai na regra D2; snapshot completo prevalece tal qual', () => {
+      expect(resolveTalkEngine(null, premium, env)).toMatchObject({
+        key: 'logo',
+        model: MINIMAX_H3_LIPSYNC_MODEL,
+        usdPerSecond: 0.08,
+        maxChunkS: 15,
+      });
+      const full = { key: 'premium', model: 'fal-ai/x/custom', usdPerSecond: 0.2, maxChunkS: 30 };
+      expect(resolveTalkEngine(full, premium, env)).toEqual(full);
+    });
+
+    it('resolveTalkEngine: snapshot PARCIAL ({key, model}) é completado pela config — nunca tarifa 0', () => {
+      expect(
+        resolveTalkEngine({ key: 'premium', model: KLING_AVATAR_PRO_MODEL }, premium, env),
+      ).toEqual({
+        key: 'premium',
+        model: KLING_AVATAR_PRO_MODEL,
+        usdPerSecond: 0.115,
+        maxChunkS: 15,
+      });
+      // modelo fora da config: tarifa/limite da CHAVE (melhor estimativa), modelo preservado
+      expect(resolveTalkEngine({ key: 'logo', model: 'fal-ai/outro/logo' }, premium, env)).toEqual({
+        key: 'logo',
+        model: 'fal-ai/outro/logo',
+        usdPerSecond: 0.08,
+        maxChunkS: 15,
+      });
+      // chave inválida ou modelo em branco: regra D2
+      expect(resolveTalkEngine({ key: 'x', model: 'm' }, premium, env).key).toBe('logo');
+      expect(resolveTalkEngine({ key: 'premium', model: '  ' }, premium, env).key).toBe('logo');
+      expect(isTalkEngineKey('logo')).toBe(true);
+      expect(isTalkEngineKey('x')).toBe(false);
+    });
+
+    it('talkFallbackEngine: logo → motor do tier com fallbackFrom = modelo de logo; motores de tier não têm fallback', () => {
+      const logo = resolveTalkEngine(null, premium, env);
+      expect(talkFallbackEngine(logo, 'premium', env)).toEqual({
+        key: 'premium',
+        model: KLING_AVATAR_PRO_MODEL,
+        usdPerSecond: 0.115,
+        maxChunkS: 15,
+        fallbackFrom: MINIMAX_H3_LIPSYNC_MODEL,
+      });
+      expect(talkFallbackEngine(logo, 'economico', env)?.model).toBe(KLING_AVATAR_MODEL);
+      expect(talkFallbackEngine(logo, null, env)?.key).toBe('economico');
+      const tierEngine = resolveTalkEngine(
+        null,
+        { tier: 'premium', identityMode: 'generated' },
+        env,
+      );
+      expect(talkFallbackEngine(tierEngine, 'premium', env)).toBeNull();
+    });
+
+    it('talkEngineSnapshot: sem fallback engine === effectiveEngine (sem fallbackFrom); com fallback, fallbackFrom === engine.model', () => {
+      const logo = resolveTalkEngine(null, premium, env);
+      const same = talkEngineSnapshot(logo);
+      expect(same.effectiveEngine).toEqual(same.engine);
+      expect(same.effectiveEngine).not.toHaveProperty('fallbackFrom');
+      // efetivo com o MESMO modelo (ex.: registro velho) também não ganha fallbackFrom
+      expect(
+        talkEngineSnapshot(logo, { ...logo, fallbackFrom: 'lixo' }).effectiveEngine,
+      ).not.toHaveProperty('fallbackFrom');
+      const fallback = talkFallbackEngine(logo, 'premium', env)!;
+      const after = talkEngineSnapshot(logo, fallback);
+      expect(after.engine).toMatchObject({ key: 'logo', model: MINIMAX_H3_LIPSYNC_MODEL });
+      expect(after.effectiveEngine).toEqual({
+        key: 'premium',
+        model: KLING_AVATAR_PRO_MODEL,
+        usdPerSecond: 0.115,
+        maxChunkS: 15,
+        fallbackFrom: after.engine.model,
+      });
     });
   });
 

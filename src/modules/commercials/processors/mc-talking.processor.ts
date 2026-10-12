@@ -21,15 +21,18 @@ import {
   MC_DATA_URI_MAX_BYTES,
   MC_FIRST_POLL_DELAY_S,
   mcExpireForQueue,
-  mcTalkEngines,
-  McTalkEngine,
-  McTalkEngineKey,
-  talkEngineFor,
-  talkFallbackEngineKey,
 } from '../domain/mc-pipeline.config';
 import { buildActionVideoPrompt, buildAvatarVideoPrompt } from '../domain/mc-scene-prompts';
 import { assertStepTransition, McStepStatus } from '../domain/mc-state-machines';
-import { buildTalkSubmitInput, isTalkEngineAvailabilityError } from '../domain/mc-talk-engines';
+import {
+  buildTalkSubmitInput,
+  isTalkEngineAvailabilityError,
+  McTalkEffectiveEngine,
+  McTalkEngineSnapshot,
+  resolveTalkEngine,
+  talkEngineSnapshot,
+  talkFallbackEngine,
+} from '../domain/mc-talk-engines';
 import { buildTalkPrompt } from '../domain/mc-talk-prompts';
 import { McStepType, sceneActionPromptEn } from '../domain/mc-types';
 import { McKitIdentityMode } from '../domain/mc-kit-identity';
@@ -95,6 +98,19 @@ export function normalizeHexColor(value: string | null | undefined): string | nu
 export async function recolorTileBackground(buffer: Buffer, hex: string): Promise<Buffer> {
   const color = normalizeHexColor(hex) ?? MC_TALK_DEFAULT_BACKGROUND;
   return sharp(buffer).flatten({ background: color }).png().toBuffer();
+}
+
+/** Sobra do clipe `talk` mock sobre o áudio medido (s) — o ingest apara (D7: `trim`). */
+export const MC_MOCK_TALK_MARGIN_S = 0.1;
+
+/**
+ * Duração (s, fracionária — o `d=` do lavfi aceita decimais) do clipe `talk`
+ * mock: áudio MEDIDO + margem, com piso de 1 s. Nunca arredonda para inteiro:
+ * arredondar para baixo deixaria o clipe mais curto que o áudio (boca parada
+ * falsa); para cima, o ingest conforma do mesmo jeito que um clipe real.
+ */
+export function mockTalkClipDurationS(audioDurationMs: number): number {
+  return Math.max(1, Number((audioDurationMs / 1000 + MC_MOCK_TALK_MARGIN_S).toFixed(3)));
 }
 
 /**
@@ -374,7 +390,7 @@ export class McTalkingProcessor {
       backgroundColor?: string | null;
       motion?: string | null;
       prompt?: string | null;
-      engine?: Partial<McTalkEngine> & { key?: McTalkEngineKey };
+      engine?: McTalkEngineSnapshot | null;
       tier?: string | null;
       identityMode?: McKitIdentityMode | null;
     };
@@ -400,29 +416,22 @@ export class McTalkingProcessor {
     const prompt = snapshot.prompt?.trim() || buildTalkPrompt(snapshot.motion);
     const tier = (snapshot.tier ?? project.tier ?? 'economico') as 'economico' | 'premium';
     const identityMode = snapshot.identityMode ?? kit?.identityMode ?? 'generated';
-    const chosen: McTalkEngine & { key: McTalkEngineKey } =
-      snapshot.engine?.model && snapshot.engine.key
-        ? {
-            key: snapshot.engine.key,
-            model: snapshot.engine.model,
-            usdPerSecond: snapshot.engine.usdPerSecond ?? 0,
-            maxChunkS: snapshot.engine.maxChunkS ?? 0,
-          }
-        : talkEngineFor({ tier, identityMode });
+    // Motor ESCOLHIDO: o do snapshot (o hash assinou aquele modelo; completado
+    // pela config se veio parcial) ou a regra D2. Nunca o `effectiveEngine` de
+    // uma execução anterior — cada execução tenta o motor planejado de novo.
+    const chosen = resolveTalkEngine(snapshot.engine, { tier, identityMode });
     const ingredients = {
       imageUrl: toDataUri(speakingTile, sniffImageMime(speakingTile)),
       audioUrl: toDataUri(audio, 'audio/mpeg'),
       prompt,
     };
-    let effective = chosen;
-    let fallbackFrom: string | null = null;
+    let effective: McTalkEffectiveEngine | null = null;
     let result: Awaited<ReturnType<FalQueueClient['submit']>>;
     try {
       result = await this.fal.submit(chosen.model, buildTalkSubmitInput(chosen.model, ingredients));
     } catch (err) {
-      const fallbackKey = talkFallbackEngineKey(chosen.key, tier);
-      if (!fallbackKey || !isTalkEngineAvailabilityError(err)) throw err;
-      const fallback = { key: fallbackKey, ...mcTalkEngines()[fallbackKey] };
+      const fallback = talkFallbackEngine(chosen, tier);
+      if (!fallback || !isTalkEngineAvailabilityError(err)) throw err;
       this.logger.warn(
         `Motor ${chosen.model} indisponível (${(err as Error).message}) — ` +
           `fallback para o motor do tier (${fallback.model})`,
@@ -432,10 +441,12 @@ export class McTalkingProcessor {
         buildTalkSubmitInput(fallback.model, ingredients),
       );
       effective = fallback;
-      fallbackFrom = chosen.model;
     }
+    // `engine` = planejado, `effectiveEngine` = submetido (com `fallbackFrom`
+    // só quando houve fallback) — o ingest lê o efetivo para motor/tarifa.
+    const engines = talkEngineSnapshot(chosen, effective);
     return {
-      provider: effective.model,
+      provider: engines.effectiveEngine.model,
       providerJobId: result.requestId,
       statusUrl: result.statusUrl,
       responseUrl: result.responseUrl,
@@ -446,30 +457,26 @@ export class McTalkingProcessor {
         prompt,
         tier,
         identityMode,
-        engine: {
-          key: chosen.key,
-          model: chosen.model,
-          usdPerSecond: chosen.usdPerSecond,
-          maxChunkS: chosen.maxChunkS,
-        },
-        effectiveEngine: {
-          key: effective.key,
-          model: effective.model,
-          usdPerSecond: effective.usdPerSecond,
-          maxChunkS: effective.maxChunkS,
-          ...(fallbackFrom ? { fallbackFrom } : {}),
-        },
+        ...engines,
       },
     };
   }
 
-  /** Clipe sintético (cor + áudio muxado quando houver) em mock-jobs/{jobId}.mp4 — custo zero. */
+  /**
+   * Clipe sintético (cor + áudio muxado quando houver) em mock-jobs/{jobId}.mp4 — custo zero.
+   *
+   * talk (D7): a duração do clipe é a do ÁUDIO MEDIDO mais `MC_MOCK_TALK_MARGIN_S`,
+   * sem `-shortest` (nunca, D7) — o ingest conforma esse clipe exatamente como
+   * conformaria um clipe real (aparar os 100 ms de sobra). O lipsync legado
+   * segue com segundos inteiros + `-shortest` (executor antigo preservado).
+   */
   private async mockSubmit(
     step: McStep,
     scene: McScene,
   ): Promise<{ provider: string; providerJobId: string; statusUrl: string; responseUrl: string }> {
     const jobId = randomUUID();
-    const spoken = step.type === McStepType.LIPSYNC || step.type === McStepType.TALK;
+    const talk = step.type === McStepType.TALK;
+    const spoken = step.type === McStepType.LIPSYNC || talk;
     const snapshot = (step.inputSnapshot ?? null) as {
       audioAssetId?: string;
       providerDuration?: string;
@@ -488,17 +495,23 @@ export class McTalkingProcessor {
       audioPath = path.join(dir, 'voice.mp3');
       await fs.writeFile(audioPath, audio);
       const probe = await this.ffmpeg.probe(audioPath).catch(() => null);
-      if (probe?.durationMs) durationS = Math.max(1, Math.round(probe.durationMs / 1000));
+      if (probe?.durationMs) {
+        durationS = talk
+          ? mockTalkClipDurationS(probe.durationMs)
+          : Math.max(1, Math.round(probe.durationMs / 1000));
+      }
     }
 
     await fs.mkdir(this.storage.mockJobsAbsDir(), { recursive: true });
     const outPath = this.storage.mockJobAbsPath(jobId);
     const args = ['-y', '-hide_banner', '-loglevel', 'error'];
     // talk: tile 3:4 (proporção típica do tile do kit); demais: 9:16 da cena
-    const size = step.type === McStepType.TALK ? '720x960' : '720x1280';
+    const size = talk ? '720x960' : '720x1280';
     args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`);
-    if (audioPath)
-      args.push('-i', audioPath, '-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-shortest');
+    if (audioPath) {
+      args.push('-i', audioPath, '-map', '0:v', '-map', '1:a', '-c:a', 'aac');
+      if (!talk) args.push('-shortest');
+    }
     // -f mp4 explícito: o sufixo .part (escrita atômica) impede o ffmpeg de
     // inferir o muxer pela extensão.
     args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-f', 'mp4', `${outPath}.part`);

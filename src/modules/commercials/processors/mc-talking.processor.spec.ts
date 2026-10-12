@@ -1,4 +1,8 @@
+import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
 import * as sharp from 'sharp';
 import { DataSource } from 'typeorm';
 import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
@@ -25,7 +29,9 @@ import { McPipelineService } from '../services/mc-pipeline.service';
 import { McStorageService } from '../services/mc-storage.service';
 import {
   ensureImageUnderCap,
+  MC_MOCK_TALK_MARGIN_S,
   McTalkingProcessor,
+  mockTalkClipDurationS,
   normalizeHexColor,
   recolorTileBackground,
   toDataUri,
@@ -671,16 +677,86 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
     expect(fal.submit.mock.calls[0][0]).toBe(MINIMAX_H3_LIPSYNC_MODEL);
     expect(fal.submit.mock.calls[1][0]).toBe(KLING_AVATAR_PRO_MODEL);
     expect(pipeline.failStep).not.toHaveBeenCalled();
-    expect(transitions.casTransition.mock.calls[0][5]).toMatchObject({
+    const written = transitions.casTransition.mock.calls[0][5] as {
+      provider: string;
+      inputSnapshot: {
+        engine: Record<string, unknown>;
+        effectiveEngine: Record<string, unknown>;
+      };
+    };
+    expect(written).toMatchObject({
       provider: KLING_AVATAR_PRO_MODEL,
       providerJobId: 'req-fb',
       inputSnapshot: expect.objectContaining({
-        engine: expect.objectContaining({ key: 'logo', model: MINIMAX_H3_LIPSYNC_MODEL }),
-        effectiveEngine: expect.objectContaining({
+        // planejado = motor de logo com a TARIFA de logo; efetivo = motor do
+        // tier com a tarifa do tier — nunca a tarifa de um no modelo do outro
+        engine: { key: 'logo', model: MINIMAX_H3_LIPSYNC_MODEL, usdPerSecond: 0.08, maxChunkS: 15 },
+        effectiveEngine: {
           key: 'premium',
           model: KLING_AVATAR_PRO_MODEL,
+          usdPerSecond: 0.115,
+          maxChunkS: 15,
           fallbackFrom: MINIMAX_H3_LIPSYNC_MODEL,
-        }),
+        },
+      }),
+    });
+    // consistência (L4): provider do step = modelo efetivo; fallbackFrom = modelo planejado
+    expect(written.provider).toBe(written.inputSnapshot.effectiveEngine.model);
+    expect(written.inputSnapshot.effectiveEngine.fallbackFrom).toBe(
+      written.inputSnapshot.engine.model,
+    );
+  });
+
+  it('retry depois de um fallback: o motor PLANEJADO é tentado de novo e, funcionando, effectiveEngine volta a ser igual a engine (sem fallbackFrom velho) (L4)', async () => {
+    project.tier = 'premium';
+    kit.identityMode = 'logo_as_is';
+    Object.assign(step.inputSnapshot as Record<string, unknown>, {
+      tier: 'premium',
+      identityMode: 'logo_as_is',
+      engine: { key: 'logo', model: MINIMAX_H3_LIPSYNC_MODEL, usdPerSecond: 0.08, maxChunkS: 15 },
+      // registro da execução anterior, que caiu no motor do tier
+      effectiveEngine: {
+        key: 'premium',
+        model: KLING_AVATAR_PRO_MODEL,
+        usdPerSecond: 0.115,
+        maxChunkS: 15,
+        fallbackFrom: MINIMAX_H3_LIPSYNC_MODEL,
+      },
+    });
+    await processor.process({ stepId: 'st-talk' });
+    expect(fal.submit).toHaveBeenCalledTimes(1);
+    expect(fal.submit.mock.calls[0][0]).toBe(MINIMAX_H3_LIPSYNC_MODEL);
+    const written = transitions.casTransition.mock.calls[0][5] as {
+      provider: string;
+      inputSnapshot: { engine: Record<string, unknown>; effectiveEngine: Record<string, unknown> };
+    };
+    expect(written.provider).toBe(MINIMAX_H3_LIPSYNC_MODEL);
+    expect(written.inputSnapshot.effectiveEngine).toEqual(written.inputSnapshot.engine);
+    expect(written.inputSnapshot.effectiveEngine).not.toHaveProperty('fallbackFrom');
+  });
+
+  it('motor PARCIAL no snapshot ({key, model}) → tarifa e limite completados pela config, nunca 0 gravado (L4)', async () => {
+    (step.inputSnapshot as Record<string, unknown>).engine = {
+      key: 'premium',
+      model: KLING_AVATAR_PRO_MODEL,
+    };
+    await processor.process({ stepId: 'st-talk' });
+    expect(submitted().model).toBe(KLING_AVATAR_PRO_MODEL);
+    expect(transitions.casTransition.mock.calls[0][5]).toMatchObject({
+      provider: KLING_AVATAR_PRO_MODEL,
+      inputSnapshot: expect.objectContaining({
+        engine: {
+          key: 'premium',
+          model: KLING_AVATAR_PRO_MODEL,
+          usdPerSecond: 0.115,
+          maxChunkS: 15,
+        },
+        effectiveEngine: {
+          key: 'premium',
+          model: KLING_AVATAR_PRO_MODEL,
+          usdPerSecond: 0.115,
+          maxChunkS: 15,
+        },
       }),
     });
   });
@@ -722,4 +798,261 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
     const err = pipeline.failStep.mock.calls[0][2] as TerminalProviderError;
     expect(err.code).toBe('missing_input_asset');
   });
+});
+
+/**
+ * Provider mock do step `talk` (H2, D7): o clipe sintético tem a duração do
+ * ÁUDIO MEDIDO mais a margem, SEM `-shortest` — assim o ingest conforma o mock
+ * exatamente como um clipe real (sempre `trim`/`pad`, nunca `clip_too_short`
+ * por arredondamento). O lipsync legado mantém segundos inteiros + `-shortest`.
+ */
+describe('McTalkingProcessor — provider mock: clipe talk com a duração do áudio medido (H2)', () => {
+  const originalProvider = process.env.MC_PIPELINE_PROVIDER;
+  const AUDIO_MS = 12_434;
+  let dir: string;
+  let step: Record<string, unknown>;
+  let ffmpeg: Record<string, jest.Mock>;
+  let transitions: { casTransition: jest.Mock };
+  let processor: McTalkingProcessor;
+
+  beforeEach(async () => {
+    process.env.MC_PIPELINE_PROVIDER = 'mock';
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mc-talking-mock-spec-'));
+    step = {
+      id: 'st-mock',
+      projectId: 'p1',
+      sceneId: 'sc1',
+      sceneGeneration: 1,
+      type: McStepType.TALK,
+      status: McStepStatus.RUNNING,
+      phase: 'production',
+      projectRevision: 1,
+      costCredits: 56,
+      attempts: 1,
+      providerJobId: null,
+      inputSnapshot: { audioAssetId: 'a-audio', tileAssetId: 'a-tile' },
+    };
+    ffmpeg = {
+      createTempDir: jest.fn(() => fs.mkdtemp(path.join(dir, 'tmp-'))),
+      removeTempDir: jest.fn().mockResolvedValue(undefined),
+      probe: jest.fn().mockResolvedValue({ hasVideo: false, hasAudio: true, durationMs: AUDIO_MS }),
+      run: jest.fn().mockResolvedValue(undefined),
+      finalizeOutput: jest.fn().mockResolvedValue(undefined),
+    };
+    transitions = { casTransition: jest.fn().mockResolvedValue(true) };
+    const scene = {
+      id: 'sc1',
+      projectId: 'p1',
+      idx: 0,
+      generation: 1,
+      durationS: 6,
+      audioAssetId: 'a-audio',
+    };
+    const project = { id: 'p1', userId: 'u1', kitId: 'kit-1', title: 'T', tier: 'economico' };
+    const dataSource = {
+      getRepository: jest.fn((entity: unknown) => ({
+        findOneBy: jest.fn((where: { id: string }) => {
+          if (entity === McScene) return Promise.resolve(scene);
+          if (entity === McProject) return Promise.resolve(project);
+          if (entity === McStep) return Promise.resolve(step);
+          if (entity === AnimationAsset)
+            return Promise.resolve({ id: where.id, fileUrl: `/uploads/${where.id}.bin` });
+          return Promise.resolve(null);
+        }),
+      })),
+      transaction: jest.fn((cb: (m: unknown) => Promise<unknown>) =>
+        cb({ findOneByOrFail: jest.fn().mockResolvedValue(project) }),
+      ),
+    };
+    processor = new McTalkingProcessor(
+      dataSource as unknown as DataSource,
+      {
+        claimStep: jest.fn(() => Promise.resolve({ ...step })),
+        failStep: jest.fn().mockResolvedValue(undefined),
+        consumeStepCredits: jest.fn().mockResolvedValue(undefined),
+        notifyStep: jest.fn().mockResolvedValue(undefined),
+        assertSubmitAllowed: jest.fn().mockResolvedValue(true),
+      } as unknown as McPipelineService,
+      transitions as unknown as TaskTransitionService,
+      { appendEvent: jest.fn().mockResolvedValue(undefined) } as unknown as CommercialsService,
+      { publish: jest.fn().mockResolvedValue(undefined) } as unknown as AnimationQueueService,
+      { submit: jest.fn() } as unknown as FalQueueClient,
+      ffmpeg as unknown as FfmpegRunner,
+      {
+        readUploadsFile: jest.fn().mockResolvedValue(Buffer.from('mp3-bytes')),
+        mockJobsAbsDir: jest.fn().mockReturnValue(path.join(dir, 'mock-jobs')),
+        mockJobAbsPath: jest.fn((jobId: string) => path.join(dir, 'mock-jobs', `${jobId}.mp4`)),
+      } as unknown as McStorageService,
+    );
+  });
+
+  afterEach(async () => {
+    if (originalProvider === undefined) delete process.env.MC_PIPELINE_PROVIDER;
+    else process.env.MC_PIPELINE_PROVIDER = originalProvider;
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  function lavfiInput(args: string[]): string {
+    return args[args.indexOf('lavfi') + 2];
+  }
+
+  it('mockTalkClipDurationS: áudio medido + 100 ms, fracionário, com piso de 1 s', () => {
+    expect(MC_MOCK_TALK_MARGIN_S).toBe(0.1);
+    expect(mockTalkClipDurationS(12_434)).toBe(12.534);
+    expect(mockTalkClipDurationS(6400)).toBe(6.5);
+    expect(mockTalkClipDurationS(300)).toBe(1);
+  });
+
+  it('talk: d= é o áudio medido (12,434 s) + margem = 12.534, SEM -shortest; provider mock agendado', async () => {
+    await processor.process({ stepId: 'st-mock' });
+    expect(ffmpeg.run).toHaveBeenCalledTimes(1);
+    const args = ffmpeg.run.mock.calls[0][0] as string[];
+    expect(lavfiInput(args)).toBe('color=c=0x2E5E9E:s=720x960:r=30:d=12.534');
+    const d = Number(/:d=([\d.]+)$/.exec(lavfiInput(args))![1]);
+    expect(d).toBeGreaterThanOrEqual(AUDIO_MS / 1000);
+    expect(args).not.toContain('-shortest');
+    expect(args).toEqual(expect.arrayContaining(['-map', '0:v', '-map', '1:a', '-c:a', 'aac']));
+    expect(transitions.casTransition).toHaveBeenCalledWith(
+      expect.anything(),
+      McStep,
+      'st-mock',
+      McStepStatus.RUNNING,
+      McStepStatus.PROVIDER_WAIT,
+      expect.objectContaining({ provider: 'mock' }),
+    );
+  });
+
+  it('lipsync legado mantém segundos inteiros (12) e -shortest', async () => {
+    step.type = McStepType.LIPSYNC;
+    await processor.process({ stepId: 'st-mock' });
+    const args = ffmpeg.run.mock.calls[0][0] as string[];
+    expect(lavfiInput(args)).toBe('color=c=0x2E5E9E:s=720x1280:r=30:d=12');
+    expect(args).toContain('-shortest');
+  });
+});
+
+/**
+ * Mock `talk` com FFmpeg REAL (gate MC_TEST_FFMPEG=1, como as fixtures de
+ * mídia): o clipe gravado em mock-jobs/ fica a ≤ 300 ms de um áudio de 6,4 s —
+ * e nunca mais curto que ele (o ingest apara a sobra; nunca "boca parada").
+ */
+const describeIfFfmpeg = process.env.MC_TEST_FFMPEG === '1' ? describe : describe.skip;
+
+describeIfFfmpeg('McTalkingProcessor — mock talk com ffmpeg real (MC_TEST_FFMPEG=1)', () => {
+  const originalProvider = process.env.MC_PIPELINE_PROVIDER;
+  const AUDIO_S = 6.4;
+  let dir: string;
+  let runner: FfmpegRunner;
+  let voice: Buffer;
+
+  beforeAll(async () => {
+    runner = new FfmpegRunner({
+      get: (key: string, fallback?: string) => process.env[key] ?? fallback,
+    } as unknown as ConfigService);
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mc-talking-mock-real-'));
+    const voicePath = path.join(dir, 'voice.mp3');
+    await runner.run(
+      [
+        '-y',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=440:sample_rate=44100',
+        '-af',
+        'volume=0.1',
+        '-t',
+        String(AUDIO_S),
+        '-codec:a',
+        'libmp3lame',
+        '-q:a',
+        '6',
+        voicePath,
+      ],
+      { durationMs: AUDIO_S * 1000, timeoutMs: 60_000 },
+    );
+    voice = await fs.readFile(voicePath);
+  }, 60_000);
+
+  afterAll(async () => {
+    if (originalProvider === undefined) delete process.env.MC_PIPELINE_PROVIDER;
+    else process.env.MC_PIPELINE_PROVIDER = originalProvider;
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('clipe mock do talk mede o áudio (6,4 s) + margem: ≤ 300 ms de diferença, nunca mais curto', async () => {
+    process.env.MC_PIPELINE_PROVIDER = 'mock';
+    const step = {
+      id: 'st-real',
+      projectId: 'p1',
+      sceneId: 'sc1',
+      sceneGeneration: 1,
+      type: McStepType.TALK,
+      status: McStepStatus.RUNNING,
+      phase: 'production',
+      projectRevision: 1,
+      costCredits: 56,
+      attempts: 1,
+      providerJobId: null,
+      inputSnapshot: { audioAssetId: 'a-audio' },
+    };
+    const scene = {
+      id: 'sc1',
+      projectId: 'p1',
+      idx: 0,
+      generation: 1,
+      durationS: 6,
+      audioAssetId: 'a-audio',
+    };
+    const project = { id: 'p1', userId: 'u1', kitId: 'kit-1', title: 'T', tier: 'economico' };
+    const transitions = { casTransition: jest.fn().mockResolvedValue(true) };
+    const jobs = path.join(dir, 'mock-jobs');
+    const processor = new McTalkingProcessor(
+      {
+        getRepository: jest.fn((entity: unknown) => ({
+          findOneBy: jest.fn((where: { id: string }) => {
+            if (entity === McScene) return Promise.resolve(scene);
+            if (entity === McProject) return Promise.resolve(project);
+            if (entity === McStep) return Promise.resolve(step);
+            if (entity === AnimationAsset)
+              return Promise.resolve({ id: where.id, fileUrl: `/uploads/${where.id}.mp3` });
+            return Promise.resolve(null);
+          }),
+        })),
+        transaction: jest.fn((cb: (m: unknown) => Promise<unknown>) =>
+          cb({ findOneByOrFail: jest.fn().mockResolvedValue(project) }),
+        ),
+      } as unknown as DataSource,
+      {
+        claimStep: jest.fn(() => Promise.resolve({ ...step })),
+        failStep: jest.fn((_s: unknown, _f: unknown, err: Error) => {
+          throw err;
+        }),
+        consumeStepCredits: jest.fn().mockResolvedValue(undefined),
+        notifyStep: jest.fn().mockResolvedValue(undefined),
+        assertSubmitAllowed: jest.fn().mockResolvedValue(true),
+      } as unknown as McPipelineService,
+      transitions as unknown as TaskTransitionService,
+      { appendEvent: jest.fn().mockResolvedValue(undefined) } as unknown as CommercialsService,
+      { publish: jest.fn().mockResolvedValue(undefined) } as unknown as AnimationQueueService,
+      { submit: jest.fn() } as unknown as FalQueueClient,
+      runner,
+      {
+        readUploadsFile: jest.fn().mockResolvedValue(voice),
+        mockJobsAbsDir: jest.fn().mockReturnValue(jobs),
+        mockJobAbsPath: jest.fn((jobId: string) => path.join(jobs, `${jobId}.mp4`)),
+      } as unknown as McStorageService,
+    );
+    await processor.process({ stepId: 'st-real' });
+    const written = transitions.casTransition.mock.calls[0][5] as { providerJobId: string };
+    const clip = path.join(jobs, `${written.providerJobId}.mp4`);
+    const probe = await runner.probe(clip);
+    expect(probe.hasVideo && probe.hasAudio).toBe(true);
+    expect([probe.width, probe.height]).toEqual([720, 960]);
+    const audioMs = (await runner.probe(path.join(dir, 'voice.mp3'))).durationMs as number;
+    expect(probe.durationMs as number).toBeGreaterThanOrEqual(audioMs);
+    expect(Math.abs((probe.durationMs as number) - AUDIO_S * 1000)).toBeLessThanOrEqual(300);
+  }, 90_000);
 });

@@ -428,27 +428,120 @@ describe('McIngestProcessor — step talk: conformação ao áudio, inspeção p
     expect(savedAssets[0]).toMatchObject({
       durationMs: 6000,
       metadata: expect.objectContaining({
-        conform: expect.objectContaining({ durationAction: 'pad', deltaMs: 200 }),
+        conform: expect.objectContaining({
+          durationAction: 'pad',
+          executedAction: 'pad',
+          deltaMs: 200,
+        }),
       }),
+    });
+    // dentro dos 300 ms não é aceite por teto: sem marcador de revisão
+    expect((savedAssets[0].metadata as { conform: object }).conform).not.toHaveProperty('accepted');
+  });
+
+  describe('clipe 1,2 s mais curto (boca parada) — classe quality até o teto, depois aceite (H1)', () => {
+    beforeEach(() => {
+      probes['video.mp4'] = {
+        hasVideo: true,
+        hasAudio: true,
+        width: 720,
+        height: 960,
+        durationMs: 4800,
+      };
+      probes['conformed.mp4'] = {
+        hasVideo: true,
+        hasAudio: true,
+        width: 720,
+        height: 960,
+        durationMs: 6000,
+      };
+    });
+
+    it.each([1, 2])(
+      'execução %i → clip_too_short (regera); nada conformado nem publicado',
+      async (attempts) => {
+        step.attempts = attempts;
+        await processor.process({ stepId: 'st-talk' });
+        expect(conformArgs()).toBeUndefined();
+        expect(savedAssets).toHaveLength(0);
+        expect(inspector.inspect).not.toHaveBeenCalled();
+        const err = pipeline.failStep.mock.calls[0][2] as TerminalProviderError;
+        expect(err).toBeInstanceOf(TerminalProviderError);
+        expect(err.code).toBe('clip_too_short');
+        expect(classifyMcError(err)).toBe('quality');
+        expect(pipeline.completeStepAndAdvance).not.toHaveBeenCalled();
+      },
+    );
+
+    it('3ª execução (teto da classe) → NÃO é terminal: último quadro clonado até o áudio, aceito e marcado para revisão humana; inspeção ainda roda', async () => {
+      step.attempts = 3;
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      const args = conformArgs();
+      expect(args).toBeDefined();
+      const vf = args![args!.indexOf('-vf') + 1];
+      // clone ilimitado: 1,2 s + 1 quadro, preso ao -t do áudio
+      expect(vf).toContain('tpad=stop_mode=clone:stop_duration=1.233');
+      expect(args).toEqual(expect.arrayContaining(['-t', '6.000']));
+      expect(args!.join(' ')).not.toContain('-shortest');
+      expect(inspector.inspect).toHaveBeenCalledTimes(1);
+      expect(savedAssets).toHaveLength(1);
+      expect(savedAssets[0]).toMatchObject({
+        kind: 'scene_synced',
+        durationMs: 6000,
+        metadata: expect.objectContaining({
+          conform: expect.objectContaining({
+            durationAction: 'too_short',
+            executedAction: 'pad',
+            deltaMs: 1200,
+            padS: 1.233,
+            rawDurationMs: 4800,
+            accepted: true,
+            acceptedReason: 'clip_too_short',
+            executions: 3,
+          }),
+        }),
+      });
+      expect(pipeline.completeStepAndAdvance).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ id: 'st-talk' }),
+        expect.objectContaining({ outputAssetId: 'asset-1' }),
+      );
     });
   });
 
-  it('clipe 1,2 s mais curto → clip_too_short (classe quality: boca parada, regera); nada conformado nem publicado', async () => {
+  it('motor devolve largura/altura ÍMPAR (721×961) sem desvio de aspecto → filtro de paridade, medidas pares gravadas (L1)', async () => {
     probes['video.mp4'] = {
+      hasVideo: true,
+      hasAudio: true,
+      width: 721,
+      height: 961,
+      durationMs: 6000,
+    };
+    probes['conformed.mp4'] = {
       hasVideo: true,
       hasAudio: true,
       width: 720,
       height: 960,
-      durationMs: 4800,
+      durationMs: 6000,
     };
     await processor.process({ stepId: 'st-talk' });
-    expect(conformArgs()).toBeUndefined();
-    expect(savedAssets).toHaveLength(0);
-    expect(inspector.inspect).not.toHaveBeenCalled();
-    const err = pipeline.failStep.mock.calls[0][2] as TerminalProviderError;
-    expect(err).toBeInstanceOf(TerminalProviderError);
-    expect(err.code).toBe('clip_too_short');
-    expect(classifyMcError(err)).toBe('quality');
+    expect(pipeline.failStep).not.toHaveBeenCalled();
+    const vf = conformArgs()![conformArgs()!.indexOf('-vf') + 1];
+    expect(vf).toContain('crop=trunc(iw/2)*2:trunc(ih/2)*2');
+    expect(vf).not.toMatch(/crop=\d/);
+    expect(savedAssets[0]).toMatchObject({
+      width: 720,
+      height: 960,
+      metadata: expect.objectContaining({
+        conform: expect.objectContaining({
+          durationAction: 'keep',
+          crop: null,
+          rawWidth: 721,
+          rawHeight: 961,
+        }),
+      }),
+    });
   });
 
   it('inspeção recebe origem/estilo do kit, fundo liso e as janelas de fala do alinhamento do áudio', async () => {

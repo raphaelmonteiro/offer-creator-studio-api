@@ -3,6 +3,7 @@ import {
   buildTalkConformArgs,
   centerCropToAspect,
   conformedOutputIssue,
+  MC_TALK_EVEN_DIMS_FILTER,
   MC_TALK_GAP_MS,
   planTalkConform,
 } from './mc-talk-conform-graph';
@@ -75,6 +76,29 @@ describe('mc-talk-conform-graph — clipe conformado ao áudio (design D7, taref
       ).toThrow(/too_short/);
     });
 
+    it('teto da classe quality esgotado (H1): replanejar com padMaxMs infinito clona o último quadro até o áudio', () => {
+      const plan = planTalkConform({
+        videoMs: 4800,
+        audioMs: 6000,
+        ...geometry,
+        padMaxMs: Infinity,
+      });
+      expect(plan.durationAction).toBe('pad');
+      expect(plan.deltaMs).toBe(1200);
+      expect(plan.padS).toBeCloseTo(1.2 + 1 / 30, 3);
+      const args = buildTalkConformArgs({
+        videoPath: 'v.mp4',
+        audioPath: 'a.mp3',
+        output: 'out.mp4',
+        plan,
+        audioDurationS: 6,
+      });
+      const vf = args[args.indexOf('-vf') + 1];
+      expect(vf).toContain('tpad=stop_mode=clone:stop_duration=1.233');
+      expect(args).toEqual(expect.arrayContaining(['-t', '6.000']));
+      expect(args).not.toContain('-shortest');
+    });
+
     it('duração igual → keep (ainda assim -t do áudio e TTS original muxado)', () => {
       const plan = planTalkConform({ videoMs: 6000, audioMs: 6000, ...geometry });
       expect(plan.durationAction).toBe('keep');
@@ -127,6 +151,64 @@ describe('mc-talk-conform-graph — clipe conformado ao áudio (design D7, taref
         y: 0,
       });
       expect(centerCropToAspect(1281, 721, 3, 4)).toMatchObject({ width: 540, height: 720 });
+    });
+
+    it('sem recorte de aspecto, largura/altura ÍMPAR → crop=trunc(iw/2)*2:trunc(ih/2)*2 e medidas pares', () => {
+      const vfOf = (plan: ReturnType<typeof planTalkConform>) => {
+        const args = buildTalkConformArgs({
+          videoPath: 'v.mp4',
+          audioPath: 'a.mp3',
+          output: 'out.mp4',
+          plan,
+          audioDurationS: 6,
+        });
+        return args[args.indexOf('-vf') + 1];
+      };
+      // 721×961 vs 3:4: dentro da tolerância (sem recorte de aspecto), mas ímpar
+      const odd = planTalkConform({
+        videoMs: 6000,
+        audioMs: 6000,
+        videoWidth: 721,
+        videoHeight: 961,
+        tileWidth: 720,
+        tileHeight: 960,
+      });
+      expect(odd.crop).toBeNull();
+      expect(odd.forceEvenDims).toBe(true);
+      expect([odd.outputWidth, odd.outputHeight]).toEqual([720, 960]);
+      expect(vfOf(odd).startsWith(`${MC_TALK_EVEN_DIMS_FILTER},fps=30,`)).toBe(true);
+      // só uma das dimensões ímpar também apara
+      expect(
+        planTalkConform({ ...geometry, videoMs: 6000, audioMs: 6000, videoHeight: 961 })
+          .forceEvenDims,
+      ).toBe(true);
+      // dimensões pares: sem o filtro
+      const evenPlan = planTalkConform({ videoMs: 6000, audioMs: 6000, ...geometry });
+      expect(evenPlan.forceEvenDims).toBe(false);
+      expect(vfOf(evenPlan)).not.toContain('trunc');
+      // recorte de aspecto já sai par: o filtro de paridade não entra
+      const cropped = planTalkConform({
+        videoMs: 6000,
+        audioMs: 6000,
+        videoWidth: 721,
+        videoHeight: 1281,
+        tileWidth: 720,
+        tileHeight: 960,
+      });
+      expect(cropped.crop).toEqual({ width: 720, height: 960, x: 0, y: 160 });
+      expect(cropped.forceEvenDims).toBe(false);
+      expect(vfOf(cropped)).not.toContain('trunc');
+      // dimensões desconhecidas: nada a aparar
+      expect(
+        planTalkConform({
+          videoMs: 6000,
+          audioMs: 6000,
+          videoWidth: null,
+          videoHeight: null,
+          tileWidth: null,
+          tileHeight: null,
+        }).forceEvenDims,
+      ).toBe(false);
     });
 
     it('dentro da tolerância de 2% não recorta; sem dimensões do tile não checa', () => {

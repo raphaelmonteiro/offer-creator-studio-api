@@ -15,6 +15,7 @@ import {
   mcRetryDelayS,
   mcShouldRetry,
 } from '../domain/mc-error-classes';
+import { isProjectAssemblyStep, projectAssemblySteps } from '../domain/mc-execution-plan';
 import { mcExpireForQueue, mcQueueForStep } from '../domain/mc-pipeline.config';
 import {
   approvalAuthorizes,
@@ -121,8 +122,11 @@ export class McPipelineService {
       enqueued.push(ref.id);
     }
 
-    // Assembly destravou ⇒ o projeto entra em montagem (generating → assembling).
-    if (ready.some((r) => r.type === McStepType.ASSEMBLY)) {
+    // O PRIMEIRO step de projeto da fase assembly destravou (assembly no F3;
+    // compose_ffmpeg no F1 — D6) ⇒ o projeto entra em montagem
+    // (generating → assembling). O finalize nunca é o primeiro.
+    const firstAssemblyStep = projectAssemblySteps(project.format)[0];
+    if (ready.some((r) => r.type === firstAssemblyStep)) {
       const won = await this.transitions.casTransition(
         manager,
         McProject,
@@ -622,9 +626,10 @@ export class McPipelineService {
         );
       }
 
-      if (step.type === McStepType.ASSEMBLY && isPipelineV2(project)) {
-        // v2 (ADR §4.1): falha recuperável da montagem pausa em needs_attention
-        // com fase de retomada persistida — clipes aprovados e reservas ficam.
+      if (isProjectAssemblyStep(step.type) && isPipelineV2(project)) {
+        // v2 (ADR §4.1): falha recuperável da montagem (assembly, ou
+        // compose_ffmpeg/finalize do F1 — D6) pausa em needs_attention com
+        // fase de retomada persistida — clipes aprovados e reservas ficam.
         const wonProject = await this.transitions.casTransition(
           manager,
           McProject,

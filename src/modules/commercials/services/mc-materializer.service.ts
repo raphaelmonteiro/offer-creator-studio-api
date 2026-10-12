@@ -3,9 +3,14 @@ import { EntityManager, In } from 'typeorm';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { CommercialsService } from '../commercials.service';
 import { computeContentHash } from '../domain/input-hash';
-import { scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
+import { projectAssemblySteps, scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
+import { MC_FINALIZE_GRAPH_VERSION, MC_FINALIZE_LOUDNESS } from '../domain/mc-finalize-graph';
 import { klingActionDuration, talkEngineFor } from '../domain/mc-pipeline.config';
 import { MC_STEP_CREDITS } from '../domain/mc-pricing.config';
+import { MC_TALK_GAP_MS } from '../domain/mc-talk-conform-graph';
+import { readProjectLogoBox } from '../domain/mc-logo-face';
+import { composeHashWindow, MC_COMPOSE_GRAPH_VERSION } from '../domain/mc-talking-art-graph';
+import { compositionDimensions } from '../domain/mc-composition.config';
 import {
   McPhase,
   McPreparationManifest,
@@ -21,6 +26,8 @@ import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import {
   computeAssemblyHash,
   computeAssemblyHashV2,
+  computeComposeFfmpegHash,
+  computeFinalizeHash,
   computeKeyframeHashV2,
   computeLipsyncHashV2,
   computeSceneComposeHash,
@@ -824,8 +831,116 @@ export class McMaterializerService {
     };
   }
 
-  /** Assembly v2: hash do CONTEÚDO renderizado (identidade de cena, finais, selos, cartela, opções). */
+  /**
+   * Steps de PROJETO da fase assembly da revisão corrente, por formato (D6):
+   * `scenes` → um `assembly` (montagem 720p); `talking_art` → a cadeia
+   * `compose_ffmpeg → finalize`. Devolve o PRIMEIRO step da cadeia (o que o
+   * scheduler destrava quando todas as cenas estão prontas).
+   */
   async ensureAssemblyStepV2(
+    manager: EntityManager,
+    project: McProject,
+    script: McScript,
+    scenes: McScene[],
+  ): Promise<McStep> {
+    if (project.format === 'talking_art') {
+      return this.ensureTalkingArtProjectStepsV2(manager, project, script, scenes);
+    }
+    return this.ensureSceneAssemblyStepV2(manager, project, script, scenes);
+  }
+
+  /**
+   * F1 (D6/D7): `compose_ffmpeg` (hash dos clipes conformados + arte + janela +
+   * cor + silêncio + legendas + cartela + versão do grafo) e `finalize` (hash
+   * do compose + canal + trilha/legendas + loudness + versão do grafo). Os dois
+   * nascem pendentes com o MESMO `attempt` (uma entrega = uma cadeia; o
+   * scheduler só destrava o finalize pelo compose da mesma cadeia). Pendentes
+   * existentes só têm o hash atualizado.
+   */
+  async ensureTalkingArtProjectStepsV2(
+    manager: EntityManager,
+    project: McProject,
+    script: McScript,
+    scenes: McScene[],
+  ): Promise<McStep> {
+    const options = resolveProjectOptions(project.options);
+    const kit = await manager.findOne(McCharacterKit, { where: { id: project.kitId } });
+    const backgroundColor = (
+      script.talkBackgroundColor?.trim() ||
+      kit?.tileBackgroundColor?.trim() ||
+      '#FFFFFF'
+    ).toUpperCase();
+    // Janela RESOLVIDA (rosto do logo: caixa do projeto mapeada pelo contain-fit
+    // da arte) — mover a caixa invalida a composição.
+    const logoFace = script.logoFace === true;
+    const logoBox = logoFace ? readProjectLogoBox(project.logoBox) : null;
+    const art =
+      logoBox && project.backgroundArtAssetId
+        ? await manager.findOne(AnimationAsset, { where: { id: project.backgroundArtAssetId } })
+        : null;
+    // (só o modo rosto do logo usa o quadro: a caixa passa pelo contain-fit)
+    const frame = logoBox ? compositionDimensions(project.aspectRatio) : { width: 1, height: 1 };
+    const composeHash = computeComposeFfmpegHash({
+      clips: scenes.map((s) => ({
+        sceneId: s.scriptSceneId as string,
+        finalAssetId: s.finalAssetId ?? `pending:${s.generation}`,
+      })),
+      backgroundArtAssetId: project.backgroundArtAssetId ?? null,
+      aspectRatio: project.aspectRatio,
+      window: composeHashWindow({
+        window: script.window ?? null,
+        logoFace,
+        logoBox,
+        artWidth: art?.width ?? null,
+        artHeight: art?.height ?? null,
+        width: frame.width,
+        height: frame.height,
+      }),
+      logoFace,
+      backgroundColor,
+      gapMs: MC_TALK_GAP_MS,
+      captionsEnabled: options.captionsEnabled,
+      endcard: script.endcard?.storeName ?? null,
+      graphVersion: MC_COMPOSE_GRAPH_VERSION,
+    });
+    const finalizeHash = computeFinalizeHash({
+      composeHash,
+      channel: project.channel ?? null,
+      musicEnabled: options.musicEnabled,
+      captionsEnabled: options.captionsEnabled,
+      loudness: { ...MC_FINALIZE_LOUDNESS },
+      graphVersion: MC_FINALIZE_GRAPH_VERSION,
+    });
+    const chain = projectAssemblySteps(project.format);
+    const hashes: Partial<Record<McStepType, string>> = {
+      [McStepType.COMPOSE_FFMPEG]: composeHash,
+      [McStepType.FINALIZE]: finalizeHash,
+    };
+    // tentativa comum da cadeia: a pendente existente, ou a próxima
+    const existing = await manager.find(McStep, {
+      where: { projectId: project.id, type: In([...chain]) },
+    });
+    const pendingAttempt = existing.find((s) => s.status === McStepStatus.PENDING)?.attempt;
+    const attempt =
+      pendingAttempt ?? existing.reduce((max, s) => Math.max(max, s.attempt ?? 1), 0) + 1;
+    let first: McStep | null = null;
+    for (const type of chain) {
+      const step = await this.upsertPendingProjectStep(
+        manager,
+        project,
+        type,
+        hashes[type] as string,
+        'assembly',
+        project.revision,
+        attempt,
+      );
+      first = first ?? step;
+    }
+    return first as McStep;
+  }
+
+  /** Assembly v2 (F3): hash do CONTEÚDO renderizado (identidade de cena, finais, selos, cartela, opções). */
+  private async ensureSceneAssemblyStepV2(
     manager: EntityManager,
     project: McProject,
     script: McScript,
@@ -1018,21 +1133,48 @@ export class McMaterializerService {
     return Math.max(1, max);
   }
 
-  private async upsertPendingAssembly(
+  private upsertPendingAssembly(
     manager: EntityManager,
     project: McProject,
     inputHash: string,
     phase: McPhase | null,
     projectRevision: number | null,
   ): Promise<McStep> {
+    return this.upsertPendingProjectStep(
+      manager,
+      project,
+      McStepType.ASSEMBLY,
+      inputHash,
+      phase,
+      projectRevision,
+      1,
+    );
+  }
+
+  /**
+   * Garante UM step de projeto (`sceneId = null`) PENDENTE do tipo com o hash
+   * corrente: atualiza hash/revisão do pendente existente ou cria outro (o
+   * anterior, concluído, fica na trilha). `attempt` identifica a cadeia da
+   * entrega nos formatos novos (compose + finalize com o mesmo valor).
+   */
+  private async upsertPendingProjectStep(
+    manager: EntityManager,
+    project: McProject,
+    type: McStepType,
+    inputHash: string,
+    phase: McPhase | null,
+    projectRevision: number | null,
+    attempt: number,
+  ): Promise<McStep> {
     const pending = await manager.findOne(McStep, {
-      where: { projectId: project.id, type: McStepType.ASSEMBLY, status: McStepStatus.PENDING },
+      where: { projectId: project.id, type, status: McStepStatus.PENDING },
     });
     if (pending) {
       const patch: Partial<McStep> = {};
       if (pending.inputHash !== inputHash) patch.inputHash = inputHash;
       if (projectRevision != null && pending.projectRevision !== projectRevision)
         patch.projectRevision = projectRevision;
+      if ((pending.attempt ?? 1) !== attempt) patch.attempt = attempt;
       if (Object.keys(patch).length > 0) {
         await manager.update(McStep, { id: pending.id }, patch);
         Object.assign(pending, patch);
@@ -1043,13 +1185,13 @@ export class McMaterializerService {
       projectId: project.id,
       sceneId: null,
       sceneGeneration: null,
-      type: McStepType.ASSEMBLY,
+      type,
       status: McStepStatus.PENDING,
       inputHash,
-      costCredits: MC_STEP_CREDITS[McStepType.ASSEMBLY],
+      costCredits: MC_STEP_CREDITS[type],
       phase,
       projectRevision,
-      attempt: 1,
+      attempt,
     });
     await manager.save(step);
     return step;

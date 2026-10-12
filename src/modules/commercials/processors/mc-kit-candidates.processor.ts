@@ -40,10 +40,21 @@ const MOCK_CANDIDATE_COLORS = ['#4F86C6', '#6BAA75', '#C68C4F', '#A05FB5', '#D95
  *
  * MC_KIT_PROVIDER=mock: PNGs sintéticos (fundo liso + cabeça na caixa do
  * gate mock) — a rodada inteira sem gastar API.
+ *
+ * Idempotência por rodada (M2): o job só vale enquanto `kit.candidateRoundId`
+ * for a sua rodada (a escolha de um candidato ou "usar como está" fecham a
+ * rodada e o job atrasado/duplicado vira no-op); as transições terminais
+ * repetem a cerca na MESMA UPDATE do CAS. Execuções sobrepostas da mesma
+ * rodada no mesmo worker (retry do pg-boss após expiração com a primeira
+ * ainda rodando) são barradas por um claim em memória; entre processos, a
+ * gravação do asset na linha é um CAS (`assetId IS NULL`) e o perdedor
+ * descarta a imagem — nunca dois assets para a mesma linha.
  */
 @Injectable()
 export class McKitCandidatesProcessor {
   private readonly logger = new Logger(McKitCandidatesProcessor.name);
+  /** Rodadas em execução neste processo (`kitId:roundId`). */
+  private readonly active = new Set<string>();
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -56,8 +67,31 @@ export class McKitCandidatesProcessor {
   ) {}
 
   async process({ kitId, roundId }: { kitId: string; roundId: string }): Promise<void> {
+    const claim = `${kitId}:${roundId}`;
+    if (this.active.has(claim)) {
+      this.logger.warn(`Kit ${kitId}: rodada ${roundId} já em execução neste worker — ignorada.`);
+      return;
+    }
+    this.active.add(claim);
+    try {
+      await this.run(kitId, roundId);
+    } finally {
+      this.active.delete(claim);
+    }
+  }
+
+  private async run(kitId: string, roundId: string): Promise<void> {
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: kitId });
     if (!kit) return;
+    // Cerca de rodada: a escolha/"usar como está" fecha a rodada corrente
+    // (candidateRoundId nulo ou de outra rodada) — job atrasado é no-op.
+    if (kit.candidateRoundId !== roundId) {
+      this.logger.warn(
+        `Kit ${kitId}: job da rodada ${roundId} chegou com a rodada corrente ` +
+          `${kit.candidateRoundId ?? 'nenhuma'} — ignorado.`,
+      );
+      return;
+    }
     const rows = await this.dataSource
       .getRepository(McKitCandidate)
       .find({ where: { kitId, roundId }, order: { idx: 'ASC' } });
@@ -77,14 +111,34 @@ export class McKitCandidatesProcessor {
     const styleRefs = kind === 'mascotization' ? await this.loadStyleReferences(kit) : [];
 
     let ready = 0;
+    let attempted = 0;
     for (const row of rows) {
       if (row.assetId) {
         ready += 1;
         continue;
       }
+      // A cerca vale a cada imagem, não só na entrada: "usar como está" ou a
+      // escolha de um candidato fecham a rodada no meio — parar aqui poupa as
+      // chamadas restantes (o CAS terminal já viraria no-op).
+      if (attempted++ > 0 && !(await this.roundStillOpen(kit.id, roundId, expected))) {
+        this.logger.warn(
+          `Kit ${kit.id}: rodada ${roundId} fechada durante a geração — interrompida.`,
+        );
+        return;
+      }
       try {
         const assetId = await this.generateCandidate(kit, row, source, styleRefs);
-        await this.dataSource.getRepository(McKitCandidate).update({ id: row.id }, { assetId });
+        // CAS na linha: outra execução (outro processo) pode ter preenchido
+        // antes — o asset perdedor é descartado, a linha nunca troca de imagem.
+        const result = await this.dataSource
+          .getRepository(McKitCandidate)
+          .update({ id: row.id, assetId: IsNull() }, { assetId });
+        if (result?.affected === 0) {
+          this.logger.warn(
+            `Kit ${kit.id}: candidato ${row.idx} da rodada ${roundId} já preenchido por outra execução — imagem descartada.`,
+          );
+          await this.dataSource.getRepository(AnimationAsset).softDelete(assetId);
+        }
         ready += 1;
       } catch (err) {
         const message = (err as Error).message ?? 'erro desconhecido';
@@ -120,6 +174,7 @@ export class McKitCandidatesProcessor {
         McKitStatus.GENERATING,
         McKitStatus.CANDIDATES,
         { candidateRoundId: roundId },
+        this.sameRound(roundId),
       );
       if (!won) return;
       await this.commercials.appendEvent(manager, {
@@ -242,12 +297,46 @@ export class McKitCandidatesProcessor {
 
   // ─────────────────────────────── desfechos ───────────────────────────────
 
+  /** Cerca de rodada para o CAS terminal: a MESMA UPDATE exige `candidateRoundId = roundId`. */
+  private sameRound(roundId: string) {
+    return { sql: '"candidateRoundId" = :roundId', params: { roundId } };
+  }
+
+  /** Releitura da cerca: a rodada ainda é a corrente e o kit segue no estado esperado. */
+  private async roundStillOpen(
+    kitId: string,
+    roundId: string,
+    expected: McKitStatus,
+  ): Promise<boolean> {
+    const fresh = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: kitId });
+    return !!fresh && fresh.candidateRoundId === roundId && fresh.status === expected;
+  }
+
   private async finishMouthVariant(
     kit: McCharacterKit,
     roundId: string,
     ready: number,
   ): Promise<void> {
+    // A rodada pode ter sido fechada durante a geração (candidato escolhido)
+    // ou o kit aprovado: o aviso "variante pronta" seria falso para a UI.
+    const fresh = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: kit.id });
+    if (!fresh || fresh.candidateRoundId !== roundId || fresh.status !== McKitStatus.REVIEW) {
+      this.logger.warn(
+        `Kit ${kit.id}: rodada ${roundId} (mouth_variant) fechada antes de terminar.`,
+      );
+      return;
+    }
     await this.dataSource.transaction(async (manager) => {
+      // Variante falhou: a rodada fecha (cercada por ela mesma) para o
+      // usuário poder pedir outra já — senão MOUTH_VARIANT_IN_PROGRESS a
+      // bloquearia até a janela de expiração do job (L3).
+      if (ready === 0) {
+        await manager.update(
+          McCharacterKit,
+          { id: kit.id, candidateRoundId: roundId },
+          { candidateRoundId: null },
+        );
+      }
       await this.commercials.appendEvent(manager, {
         userId: kit.userId,
         refKind: 'kit',
@@ -295,6 +384,7 @@ export class McKitCandidatesProcessor {
         McKitStatus.GENERATING,
         to,
         to === McKitStatus.CANDIDATES ? { candidateRoundId: previous?.roundId ?? null } : {},
+        this.sameRound(roundId),
       );
       if (!won) return;
       await this.commercials.appendEvent(manager, {

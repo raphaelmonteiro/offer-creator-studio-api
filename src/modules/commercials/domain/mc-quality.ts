@@ -182,6 +182,12 @@ export interface McQualityState {
   lastDelivery: McDeliveryRecord | null;
   /** Usuário aceitou entregar sem as legendas ausentes desta revisão. */
   captionsMissingAccepted: boolean;
+  /**
+   * F1 (change video-formatos-personagem, spec "Duração pela fala"): o usuário
+   * aceitou explicitamente a soma das falas fora de 6–25 s nesta revisão —
+   * persistido como `captionsMissingAccepted`, nunca silencioso.
+   */
+  speechDurationAccepted: boolean;
 }
 
 export const MC_EMPTY_QUALITY: McQualityState = {
@@ -194,6 +200,7 @@ export const MC_EMPTY_QUALITY: McQualityState = {
   timeline: null,
   lastDelivery: null,
   captionsMissingAccepted: false,
+  speechDurationAccepted: false,
 };
 
 /** Leitor tolerante do jsonb (campos faltando → defaults; nunca lança). */
@@ -208,6 +215,7 @@ export function resolveQuality(raw: Partial<McQualityState> | null | undefined):
     timeline: raw?.timeline ?? null,
     lastDelivery: raw?.lastDelivery ?? null,
     captionsMissingAccepted: raw?.captionsMissingAccepted === true,
+    speechDurationAccepted: raw?.speechDurationAccepted === true,
   };
 }
 

@@ -9,7 +9,7 @@ import { EmailModule } from '../email/email.module';
 import { MascotsModule } from '../mascots/mascots.module';
 import { CommercialsController } from './commercials.controller';
 import { CommercialsService } from './commercials.service';
-import { MC_QUEUE_CONCURRENCY, parseMcFormats } from './domain/mc-pipeline.config';
+import { MC_QUEUE_CONCURRENCY, mcTalkEngines, parseMcFormats } from './domain/mc-pipeline.config';
 import { McCharacterKit } from './entities/mc-character-kit.entity';
 import { McEvent } from './entities/mc-event.entity';
 import { McKitCandidate } from './entities/mc-kit-candidate.entity';
@@ -20,6 +20,8 @@ import { McStepType } from './domain/mc-types';
 import { McEnabledGuard } from './mc-enabled.guard';
 import { McEventsController } from './mc-events.controller';
 import { McAssemblyProcessor } from './processors/mc-assembly.processor';
+import { McComposeFfmpegProcessor } from './processors/mc-compose-ffmpeg.processor';
+import { McFinalizeProcessor } from './processors/mc-finalize.processor';
 import { McIngestProcessor } from './processors/mc-ingest.processor';
 import { McClipInspectorService } from './services/mc-clip-inspector.service';
 import { McKeyframeProcessor } from './processors/mc-keyframe.processor';
@@ -30,13 +32,16 @@ import { McSceneComposeProcessor } from './processors/mc-scene-compose.processor
 import { McScriptProcessor } from './processors/mc-script.processor';
 import { McTalkingProcessor } from './processors/mc-talking.processor';
 import { McTtsProcessor } from './processors/mc-tts.processor';
-import { McKitCandidatesService } from './services/mc-kit-candidates.service';
+import { McKitCandidatesService, McKitReferencesJob } from './services/mc-kit-candidates.service';
 import { McKitTileService } from './services/mc-kit-tile.service';
 import { McKitViewService } from './services/mc-kit-view.service';
 import { McKitsService } from './services/mc-kits.service';
 import { McMouthGateService } from './services/mc-mouth-gate.service';
+import { McLogoLocatorService } from './services/mc-logo-locator.service';
 import { McMaterializerService } from './services/mc-materializer.service';
 import { McPipelineService } from './services/mc-pipeline.service';
+import { McArtService } from './services/mc-art.service';
+import { McFromArtService } from './services/mc-from-art.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
 import { McQualityService } from './services/mc-quality.service';
 import { McReconcilerService } from './services/mc-reconciler.service';
@@ -89,6 +94,10 @@ import { McVoicesService } from './services/mc-voices.service';
     McMaterializerService,
     McPipelineService,
     McProjectActionsService,
+    // Ponte arte → projeto (D9): upload da arte e criação a partir dela.
+    McArtService,
+    McFromArtService,
+    McLogoLocatorService,
     McTranslationService,
     McQualityService,
     McScriptProcessor,
@@ -100,6 +109,9 @@ import { McVoicesService } from './services/mc-voices.service';
     McIngestProcessor,
     McAssemblyProcessor,
     McSceneComposeProcessor,
+    // Steps de projeto do F1 (D6): composição e finalização na fila mc.ffmpeg.
+    McComposeFfmpegProcessor,
+    McFinalizeProcessor,
     McReconcilerService,
     McClipInspectorService,
     McEnabledGuard,
@@ -120,14 +132,18 @@ export class CommercialsModule implements OnModuleInit {
     private readonly ingestProcessor: McIngestProcessor,
     private readonly assemblyProcessor: McAssemblyProcessor,
     private readonly sceneComposeProcessor: McSceneComposeProcessor,
+    private readonly composeFfmpegProcessor: McComposeFfmpegProcessor,
+    private readonly finalizeProcessor: McFinalizeProcessor,
     private readonly reconciler: McReconcilerService,
     private readonly voices: McVoicesService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     if (process.env.MC_ENABLED !== 'true') return;
-    // Falha cedo com MC_FORMATS mal escrito (design D13): vale para API e worker.
+    // Falha cedo com MC_FORMATS ou MC_TALK_ENGINE_* mal escritos (design D2/D13):
+    // vale para API e worker — tarifa/limite errados nunca chegam à telemetria.
     parseMcFormats();
+    mcTalkEngines();
     if (process.env.WORKER_ONLY === 'true') {
       await this.queue.subscribe(
         QUEUES.MC_LLM,
@@ -146,6 +162,8 @@ export class CommercialsModule implements OnModuleInit {
           stepId?: string;
           candidates?: boolean;
           roundId?: string;
+          fromReview?: boolean;
+          previous?: McKitReferencesJob['previous'];
         }) => {
           if (!d.kitId) return this.keyframeProcessor.process({ stepId: d.stepId as string });
           if (d.candidates) {
@@ -154,7 +172,12 @@ export class CommercialsModule implements OnModuleInit {
               roundId: d.roundId as string,
             });
           }
-          return this.kitProcessor.process({ kitId: d.kitId, slot: d.slot });
+          return this.kitProcessor.process({
+            kitId: d.kitId,
+            slot: d.slot,
+            fromReview: d.fromReview,
+            previous: d.previous,
+          });
         },
       );
       await this.queue.subscribe(
@@ -205,6 +228,9 @@ export class CommercialsModule implements OnModuleInit {
       type = step ?? McStepType.ASSEMBLY;
     }
     if (type === McStepType.SCENE_COMPOSE) return this.sceneComposeProcessor.process(d);
+    // Steps de projeto do F1 (D6): compose_ffmpeg → finalize na mesma fila.
+    if (type === McStepType.COMPOSE_FFMPEG) return this.composeFfmpegProcessor.process(d);
+    if (type === McStepType.FINALIZE) return this.finalizeProcessor.process(d);
     return this.assemblyProcessor.process(d);
   }
 

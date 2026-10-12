@@ -38,7 +38,7 @@ import {
   ClipInspectionContext,
   McClipInspectorService,
 } from '../services/mc-clip-inspector.service';
-import { MC_CLIP_TOO_SHORT_ERROR_CODE } from '../domain/mc-error-classes';
+import { MC_CLIP_TOO_SHORT_ERROR_CODE, mcShouldRetry } from '../domain/mc-error-classes';
 
 /** Snapshot do step `talk` que o ingest lê (gravado pelo materializer e completado no submit). */
 interface TalkIngestSnapshot {
@@ -53,7 +53,15 @@ interface TalkIngestSnapshot {
 
 /** Resultado da conformação do clipe falado ao áudio (D7) — vai ao metadata do asset. */
 interface TalkConformRecord {
+  /** Plano EXECUTADO (no aceite por teto esgotado, o replanejado com clone ilimitado). */
   plan: TalkConformPlan;
+  /** Veredito do plano original (`too_short` quando o clipe foi aceito no teto). */
+  verdict: TalkConformPlan['durationAction'];
+  /**
+   * Aceite do clipe curto demais após esgotar a classe `quality` (mesma regra
+   * de `McClipInspectorService.decision`): sinaliza a cena para revisão humana.
+   */
+  accepted: { reason: typeof MC_CLIP_TOO_SHORT_ERROR_CODE; executions: number } | null;
   rawDurationMs: number | null;
   rawWidth: number | null;
   rawHeight: number | null;
@@ -78,9 +86,11 @@ interface TalkConformRecord {
  *
  * Step `talk` (change video-formatos-personagem, D7/D11): antes do asset, o
  * clipe é CONFORMADO ao áudio da fala (aparado, último quadro clonado até
- * 300 ms, ou reprovado como `clip_too_short`), recortado ao aspecto do tile e
- * remuxado com o TTS original (áudio do fornecedor descartado); a inspeção
- * recebe origem/estilo/fundo liso e as janelas de fala do alinhamento.
+ * 300 ms, ou reprovado como `clip_too_short` — classe `quality`, nova geração
+ * até o teto; esgotado, aceito com o último quadro clonado e sinalizado para
+ * revisão humana), recortado ao aspecto do tile e remuxado com o TTS original
+ * (áudio do fornecedor descartado); a inspeção recebe origem/estilo/fundo liso
+ * e as janelas de fala do alinhamento.
  */
 @Injectable()
 export class McIngestProcessor {
@@ -277,7 +287,9 @@ export class McIngestProcessor {
               ? {
                   sceneType: 'talk_tile',
                   conform: {
-                    durationAction: conform.plan.durationAction,
+                    // veredito do plano (`too_short` no aceite) × ação executada (`pad`)
+                    durationAction: conform.verdict,
+                    executedAction: conform.plan.durationAction,
                     deltaMs: conform.plan.deltaMs,
                     padS: conform.plan.padS,
                     crop: conform.plan.crop,
@@ -287,6 +299,15 @@ export class McIngestProcessor {
                     audioMs: conform.audioMs,
                     audioAssetId: conform.audioAssetId,
                     audioPolicy: 'replace_clip_audio',
+                    // teto da classe `quality` esgotado: aceito e sinalizado para
+                    // revisão humana (mesmo marcador de `inspection.accepted`)
+                    ...(conform.accepted
+                      ? {
+                          accepted: true,
+                          acceptedReason: conform.accepted.reason,
+                          executions: conform.accepted.executions,
+                        }
+                      : {}),
                   },
                 }
               : {}),
@@ -326,7 +347,8 @@ export class McIngestProcessor {
   /**
    * Conformação do clipe `talk` ao áudio (D7): probe das duas durações; plano
    * puro (`planTalkConform`); `clip_too_short` → classe `quality` (nova
-   * geração); senão ffmpeg (aparar/clonar/recortar + TTS original muxado) e
+   * geração até o teto; esgotado, aceite com clone ilimitado do último
+   * quadro); senão ffmpeg (aparar/clonar/recortar + TTS original muxado) e
    * probe de verificação. Devolve o arquivo conformado, as medidas e as
    * janelas de fala (do alinhamento do áudio) para a inspeção.
    */
@@ -379,19 +401,34 @@ export class McIngestProcessor {
       tileWidth = tile?.width ?? null;
       tileHeight = tile?.height ?? null;
     }
-    const plan = planTalkConform({
+    const conformInput = {
       videoMs: probe.durationMs,
       audioMs,
       videoWidth: probe.width,
       videoHeight: probe.height,
       tileWidth,
       tileHeight,
-    });
+    };
+    let plan = planTalkConform(conformInput);
+    const verdict = plan.durationAction;
+    let accepted: TalkConformRecord['accepted'] = null;
     if (plan.durationAction === 'too_short') {
-      throw new TerminalProviderError(
-        `Clipe ${plan.deltaMs} ms mais curto que o áudio (boca parada) — regerar`,
-        MC_CLIP_TOO_SHORT_ERROR_CODE,
+      // Classe `quality` (boca parada): nova geração até o teto — a MESMA
+      // regra de McClipInspectorService.decision. Esgotado o teto, não vira
+      // terminal: o último clipe é aceito com o último quadro clonado até o
+      // áudio e a cena fica sinalizada para revisão humana.
+      if (mcShouldRetry('quality', step.attempts)) {
+        throw new TerminalProviderError(
+          `Clipe ${plan.deltaMs} ms mais curto que o áudio (boca parada) — regerar`,
+          MC_CLIP_TOO_SHORT_ERROR_CODE,
+        );
+      }
+      this.logger.warn(
+        `Ingest ${step.id}: clipe ${plan.deltaMs} ms mais curto que o áudio após ` +
+          `${step.attempts} gerações — aceito com o último quadro clonado (revisão humana)`,
       );
+      plan = planTalkConform({ ...conformInput, padMaxMs: Infinity });
+      accepted = { reason: MC_CLIP_TOO_SHORT_ERROR_CODE, executions: step.attempts };
     }
     const output = path.join(tempDir, 'conformed.mp4');
     this.logger.log(
@@ -422,6 +459,8 @@ export class McIngestProcessor {
       },
       record: {
         plan,
+        verdict,
+        accepted,
         rawDurationMs: probe.durationMs,
         rawWidth: probe.width,
         rawHeight: probe.height,

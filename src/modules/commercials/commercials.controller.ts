@@ -5,18 +5,35 @@ import {
   ForbiddenException,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipValidation } from '../../common/decorators/skip-validation.decorator';
 import { CurrentUser } from '../../common/decorators/user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { createFileInterceptor } from '../../common/utils/multer.util';
 import { CommercialsService, MC_PAUSED_KEY } from './commercials.service';
+import { MC_SOURCE_ART_KINDS, McSourceArtKind } from './domain/mc-types';
+import {
+  ArtOffersQueryDto,
+  CreateProjectFromArtDto,
+  KitSuggestQueryDto,
+  ListProjectsQueryDto,
+  SetLogoBoxDto,
+} from './dto/from-art.dto';
+import { McArtService } from './services/mc-art.service';
+import { McFromArtService } from './services/mc-from-art.service';
 import { SystemSettingsService } from '../../shared/settings/system-settings.service';
 import { AdminPauseDto } from './dto/admin-pause.dto';
 import { CreateKitDto } from './dto/create-kit.dto';
@@ -66,6 +83,8 @@ export class CommercialsController {
     private readonly quality: McQualityService,
     private readonly settings: SystemSettingsService,
     private readonly configService: ConfigService,
+    private readonly art: McArtService,
+    private readonly fromArt: McFromArtService,
   ) {}
 
   /** Rotas compartilhadas entre executores despacham pelo `pipelineVersion` do projeto. */
@@ -109,6 +128,17 @@ export class CommercialsController {
   @Get('kits')
   findAllKits(@CurrentUser() user: { id: string }) {
     return this.kits.findAll(user.id);
+  }
+
+  /**
+   * Kit sugerido para o cliente de uma arte (ponte, tarefa 5.6): kits aprovados
+   * cujo mascote/logo é do cliente, último usado primeiro, e se dá para criar
+   * um a partir do logo. Declarada ANTES de `kits/:id` (senão o ParseUUIDPipe
+   * de `:id` capturaria "suggest").
+   */
+  @Get('kits/suggest')
+  suggestKit(@CurrentUser() user: { id: string }, @Query() query: KitSuggestQueryDto) {
+    return this.fromArt.suggestKit(user.id, query.clientId);
   }
 
   @Get('kits/:id')
@@ -209,6 +239,76 @@ export class CommercialsController {
     return this.voices.preview(user.id, dto);
   }
 
+  // ───────────────────── ponte arte → projeto (D9, tarefas 5.1–5.5) ─────────────────────
+
+  /**
+   * Arte rasterizada no cliente (PNG/JPEG, 50 MB) → asset `video_art` com
+   * largura/altura e aspecto inferido (D12). Multipart passa por
+   * @SkipValidation(); o service valida tipo/conteúdo (400 INVALID_ART_FILE).
+   */
+  @Post('art')
+  @SkipValidation()
+  @UseInterceptors(createFileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Envia a arte (PNG/JPEG) que vira fundo de um vídeo' })
+  uploadArt(@CurrentUser() user: { id: string }, @UploadedFile() file: Express.Multer.File) {
+    return this.art.upload(user.id, file);
+  }
+
+  @Get('art/:id')
+  findOneArt(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
+    return this.art.findOne(user.id, id);
+  }
+
+  /** Ofertas de uma página da arte, com os ids que a seleção de `from-art` usa. */
+  @Get('art-sources/:kind/:id/offers')
+  listArtOffers(
+    @Param('kind') kind: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ArtOffersQueryDto,
+  ) {
+    if (!(MC_SOURCE_ART_KINDS as readonly string[]).includes(kind)) {
+      throw new BadRequestException(
+        `kind inválido: "${kind}" (aceitos: ${MC_SOURCE_ART_KINDS.join(', ')})`,
+      );
+    }
+    return this.fromArt.listOffers(kind as McSourceArtKind, id, query.pageIndex ?? 0);
+  }
+
+  /** Projeto F1/F2 a partir da arte: ofertas congeladas, `sourceArt.snapshotHash`, kit sugerido. */
+  @Post('projects/from-art')
+  createProjectFromArt(@CurrentUser() user: { id: string }, @Body() dto: CreateProjectFromArtDto) {
+    return this.fromArt.createFromArt(user.id, dto);
+  }
+
+  /**
+   * Rosto do logo (D9b, 4.6): localiza o logo do kit na arte do projeto e
+   * grava a proposta (≥ 0,7, a confirmar); abaixo disso pede a marcação.
+   * Só em storyboard_review/visual_review (422 PROJECT_NOT_EDITABLE).
+   */
+  @Post('projects/:id/logo-box/detect')
+  @HttpCode(HttpStatus.OK)
+  detectLogoBox(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
+    return this.fromArt.detectLogoBox(user.id, id);
+  }
+
+  /** Caixa do logo marcada/confirmada pelo usuário: frações 0..1 da arte, inteira dentro dela. */
+  @Put('projects/:id/logo-box')
+  setLogoBox(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetLogoBoxDto,
+  ) {
+    return this.fromArt.setLogoBox(user.id, id, { x: dto.x, y: dto.y, w: dto.w, h: dto.h });
+  }
+
   // ─────────────────────────────── projetos ───────────────────────────────
 
   @Post('projects')
@@ -216,14 +316,19 @@ export class CommercialsController {
     return this.commercials.createProject(user.id, dto);
   }
 
+  /** `?sourceKind=&sourceId=` lista os vídeos gerados de uma arte (cada item traz `sourceArt`). */
   @Get('projects')
-  findAllProjects(@CurrentUser() user: { id: string }) {
-    return this.commercials.findAllProjects(user.id);
+  findAllProjects(@CurrentUser() user: { id: string }, @Query() query: ListProjectsQueryDto) {
+    return this.commercials.findAllProjects(user.id, query);
   }
 
+  /** Inclui `sourceArt` + `sourceArtChanged` (origem reextraída e comparada pelo `snapshotHash`). */
   @Get('projects/:id')
-  findOneProject(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
-    return this.commercials.findOneProject(user.id, id);
+  async findOneProject(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.fromArt.withSourceArtStatus(await this.commercials.findOneProject(user.id, id));
   }
 
   /**
