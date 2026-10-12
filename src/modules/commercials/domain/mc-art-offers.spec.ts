@@ -30,6 +30,7 @@ describe('mc-art-offers — extração das ofertas da arte (D9)', () => {
         originalPrice: '29,90',
         unit: 'un',
         imageUrl: '/uploads/products/arroz.png',
+        badge: 'OFERTA', // `badgeText` do editor (F2: selo do card; fora do hash do snapshot)
       },
       {
         id: 'p-feijao',

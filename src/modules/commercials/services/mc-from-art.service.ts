@@ -53,6 +53,7 @@ import { McArtService } from './mc-art.service';
 import { McKitView, McKitViewService } from './mc-kit-view.service';
 import { McLogoLocatorService } from './mc-logo-locator.service';
 import { McStorageService } from './mc-storage.service';
+import { McOfferCatalogChange, offersCatalogChanges } from './mc-offer-carousel.service';
 
 /** Duração alvo default por formato (F1: apresentação de 6 a 25 s; F2: ≤ 30 s estimados). */
 export const MC_FROM_ART_DEFAULT_DURATION_S: Record<'talking_art' | 'offer_carousel', number> = {
@@ -134,7 +135,8 @@ export interface McLogoBoxView {
 }
 
 /** Produto do snapshot como `createProject` o recebe (+ catalogId/preço anterior preservados, D9). */
-type FromArtProduct = ProjectProductDto & Pick<McSealProduct, 'catalogId' | 'originalPrice'>;
+type FromArtProduct = ProjectProductDto &
+  Pick<McSealProduct, 'catalogId' | 'originalPrice' | 'badge'>;
 
 /**
  * Ponte arte → projeto (tarefas 5.3 a 5.6, design D9/D9b/D12/D13).
@@ -300,6 +302,8 @@ export class McFromArtService {
       imageUrl: o.imageUrl,
       catalogId: o.catalogId,
       originalPrice: o.originalPrice,
+      // F2: selo do card congelado com a oferta (6.6); ausente = sem badge.
+      ...(o.badge ? { badge: o.badge } : {}),
     }));
 
     const createDto: CreateProjectDto = {
@@ -313,6 +317,7 @@ export class McFromArtService {
       tier: dto.tier ?? MC_DEFAULT_PROJECT_TIER,
       channel: dto.channel,
       backgroundArtAssetId: asset.id,
+      ...(dto.layoutPreset ? { layoutPreset: dto.layoutPreset } : {}),
       logoBox: logoBox ?? undefined,
       sourceArt,
     };
@@ -434,11 +439,24 @@ export class McFromArtService {
     };
   }
 
-  /** Decora a visão do projeto (GET /commercials/projects/:id) com o status da origem. */
+  /**
+   * Decora a visão do projeto (GET /commercials/projects/:id) com o status da
+   * origem e, no F2, `offersCatalogChanged` (preço do catálogo mudou depois da
+   * criação — tarefa 6.8). A comparação com o catálogo nunca derruba a leitura.
+   */
   async withSourceArtStatus<T extends Pick<McProject, 'sourceArt' | 'backgroundArtAssetId'>>(
     view: T,
-  ): Promise<T & McSourceArtStatus> {
-    return { ...view, ...(await this.sourceArtStatus(view)) };
+  ): Promise<T & McSourceArtStatus & { offersCatalogChanged: McOfferCatalogChange[] }> {
+    let offersCatalogChanged: McOfferCatalogChange[] = [];
+    try {
+      offersCatalogChanged = await offersCatalogChanges(
+        this.dataSource,
+        view as unknown as Pick<McProject, 'format' | 'script'>,
+      );
+    } catch (err) {
+      this.logger.warn(`Catálogo indisponível para comparar ofertas: ${(err as Error).message}`);
+    }
+    return { ...view, ...(await this.sourceArtStatus(view)), offersCatalogChanged };
   }
 
   // ───────────────────────── caixa do logo (D9b, tarefa 4.6) ─────────────────────────

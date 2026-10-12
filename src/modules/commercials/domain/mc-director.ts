@@ -1,4 +1,4 @@
-import { precoPorExtenso } from './mc-preco-extenso';
+import { numeroPorExtenso, parsePreco, precoPorExtenso } from './mc-preco-extenso';
 import { MC_SCRIPT_SCHEMA_V2 } from './mc-quality';
 import { defaultSealCue, sceneSourceHash } from './mc-script-v2';
 import { estimateSpeechSecondsRaw } from './mc-speech-estimate';
@@ -8,6 +8,11 @@ import {
   windowPxToFractions,
 } from './mc-talking-art-window';
 import {
+  MC_OFFER_CAROUSEL_MAX_OFFERS,
+  MC_OFFER_CAROUSEL_MAX_SPEECH_S,
+  MC_OFFER_CAROUSEL_MIN_OFFERS,
+  McCarouselLayoutPreset,
+  McCarouselLine,
   MC_TALKING_ART_MAX_CITED_OFFERS,
   MC_TALKING_ART_MAX_S,
   MC_TALKING_ART_MAX_SCENES,
@@ -499,6 +504,9 @@ export function buildProductsSnapshot(
       imageUrl: p.imageUrl ?? null,
       name: p.name.trim(),
       price: p.price.trim(),
+      // Preço anterior e badge vêm congelados da arte (D9) — o F2 os mostra no card.
+      originalPrice: p.originalPrice?.trim() || null,
+      badge: p.badge?.trim() || null,
     }));
 }
 
@@ -738,7 +746,7 @@ export function matchCitedOffer(text: string, cited: McSealProduct[]): string | 
 }
 
 /** Duração planejada (s) de uma fala, dentro da forma aceita pelo DTO (3..30). */
-function plannedTalkDurationS(text: string): number {
+export function plannedTalkDurationS(text: string): number {
   return Math.min(
     MC_SCENE_MAX_S + 18,
     Math.max(MC_SCENE_MIN_S - 1, Math.round(estimateSpeechSecondsRaw(text))),
@@ -858,9 +866,9 @@ export function buildTalkingArtScript(
   };
 }
 
-/** Nome curto do produto para a fala mock (até 4 palavras, sem gramatura solta). */
-function shortProductName(name: string): string {
-  return name.trim().split(/\s+/).slice(0, 4).join(' ');
+/** Nome curto do produto para a fala mock (até `maxWords` palavras, default 4). */
+function shortProductName(name: string, maxWords = 4): string {
+  return name.trim().split(/\s+/).slice(0, maxWords).join(' ');
 }
 
 /**
@@ -905,4 +913,410 @@ export function buildMockNarrationF1(input: {
 export function buildMockScriptF1(ctx: DirectorF1Context, idFactory: () => string): McScript {
   const raw = buildMockNarrationF1({ products: ctx.products, storeName: ctx.storeName });
   return buildTalkingArtScript(raw, ctx, idFactory, { gesture: 'Acena no início.' });
+}
+
+// ─────────────── F2: ofertas em sequência (change video-formatos-personagem, tarefa 6.6) ───────────────
+
+/**
+ * Contexto do diretor F2: as ofertas CONGELADAS (3 a 6, na ordem do vídeo, com
+ * ids estáveis), a loja (abertura/fechamento), o limite do motor por fala e as
+ * escolhas de composição (preset de layout e legendas por palavra).
+ */
+export interface DirectorF2Context {
+  offers: McSealProduct[];
+  storeName: string | null;
+  maxChunkS: number;
+  layoutPreset: McCarouselLayoutPreset;
+  captions: boolean;
+}
+
+/** Folga do orçamento estimado: o diretor mira ≤ 30 s de fala (o TTS medido decide na revisão). */
+export const MC_OFFER_CAROUSEL_TARGET_SPEECH_S = MC_OFFER_CAROUSEL_MAX_SPEECH_S;
+
+const CAROUSEL_OPENING_DEFAULT = 'Olá! Confira as ofertas de hoje.';
+const CAROUSEL_OPENING_SHORT = 'Ofertas de hoje!';
+const CAROUSEL_CLOSING_DEFAULT = 'Corre pro mercado e aproveite!';
+const CAROUSEL_CLOSING_SHORT = 'Aproveite!';
+
+/**
+ * System prompt do diretor F2 (spec video-offer-carousel "Uma fala por
+ * oferta"): abertura curta, UMA fala por oferta NA ORDEM dada citando nome e
+ * preço por extenso, fechamento com convite; soma ≤ 30 s falados.
+ */
+export function buildDirectorSystemPromptF2(opts: {
+  offers: McSealProduct[];
+  storeName: string | null;
+  maxChunkS: number;
+}): string {
+  const list = opts.offers
+    .map(
+      (p, i) =>
+        `[${i}] ${p.name} — R$ ${p.price}${p.unit ? ` / ${p.unit}` : ''} ` +
+        `(fale: "${precoPorExtenso(p.price)}")`,
+    )
+    .join('; ');
+  const perOfferS = Math.max(
+    2.5,
+    Math.min(5, (MC_OFFER_CAROUSEL_TARGET_SPEECH_S - 5) / Math.max(1, opts.offers.length)),
+  );
+  const lines = [
+    'Você escreve as falas de um personagem (mascote ou logo animado) que apresenta ofertas de ' +
+      'supermercado uma a uma; cada oferta aparece num card com foto, nome e preço enquanto ele fala.',
+    `Escreva em pt-BR de varejo, natural e entusiasmado: uma ABERTURA curta, UMA fala para cada ` +
+      `uma das ${opts.offers.length} ofertas, NA ORDEM dada, e um FECHAMENTO com convite.`,
+    '',
+    'Regras obrigatórias:',
+    `- A soma de todas as falas precisa caber em ${MC_OFFER_CAROUSEL_MAX_SPEECH_S} segundos ` +
+      `(~${MC_CHARS_PER_SECOND} caracteres por segundo): abertura e fechamento com até 2,5 s ` +
+      `(~35 caracteres) cada, e cada oferta com até ${perOfferS.toFixed(1)} s ` +
+      `(~${Math.floor(perOfferS * MC_CHARS_PER_SECOND)} caracteres).`,
+    '- Cada fala de oferta cita o NOME do produto e o PREÇO SEMPRE por extenso, exatamente como ' +
+      'indicado (ex.: "vinte e quatro reais e noventa centavos", nunca "24,90" ou "R$ 24,90").',
+    `- Uma frase curta por fala (no máximo ${opts.maxChunkS} segundos cada).`,
+    '- Não invente ofertas, preços, descontos ou condições fora da lista; não fale o preço anterior.',
+    '- Nada de hashtags, emojis, instruções de câmera ou texto para a tela — só a fala.',
+    '- "offerLines": um item por oferta com o "offerIndex" da lista e o "text" da fala, na ordem dada.',
+    `- Ofertas (na ordem do vídeo): ${list}.`,
+  ];
+  if (opts.storeName) lines.push(`- A loja se chama "${opts.storeName}" — pode citá-la uma vez.`);
+  return lines.join('\n');
+}
+
+/** json_schema ESTRITO do diretor F2: abertura + exatamente uma fala por oferta + fechamento. */
+export function buildDirectorJsonSchemaF2(offerCount: number): Record<string, unknown> {
+  const count = Math.min(
+    MC_OFFER_CAROUSEL_MAX_OFFERS,
+    Math.max(MC_OFFER_CAROUSEL_MIN_OFFERS, Math.round(offerCount)),
+  );
+  return {
+    name: 'falas_ofertas_em_sequencia',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        opening: { type: 'string' },
+        offerLines: {
+          type: 'array',
+          minItems: count,
+          maxItems: count,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              offerIndex: { type: 'integer' },
+              text: { type: 'string' },
+            },
+            required: ['offerIndex', 'text'],
+          },
+        },
+        closing: { type: 'string' },
+      },
+      required: ['opening', 'offerLines', 'closing'],
+    },
+  };
+}
+
+export interface RawDirectorF2 {
+  opening?: string | null;
+  offerLines?: Array<{ offerIndex?: number | null; text?: string | null }> | null;
+  closing?: string | null;
+}
+
+/** "R$ 24,90" / "24,90" / "1.299,00" na fala → por extenso (nunca números lidos pelo TTS). */
+export function spellOutPrices(text: string): string {
+  return (text ?? '').replace(
+    /(?:R\$\s*)?\b\d{1,3}(?:\.\d{3})*,\d{1,2}\b|R\$\s*\d+(?:,\d{1,2})?\b/g,
+    (match) => precoPorExtenso(match),
+  );
+}
+
+/** A fala cita o preço por extenso? (reais e centavos por extenso, sem aritmética). */
+export function lineCitesPrice(text: string, price: string): boolean {
+  const parsed = parsePreco(price);
+  if (!parsed) return false;
+  const folded = foldText(text);
+  if (folded.includes(foldText(precoPorExtenso(price)))) return true;
+  const reaisOk = parsed.reais === 0 || folded.includes(foldText(numeroPorExtenso(parsed.reais)));
+  const centavosOk =
+    parsed.centavos === 0 || folded.includes(foldText(numeroPorExtenso(parsed.centavos)));
+  return reaisOk && centavosOk;
+}
+
+/** A fala cita o nome da oferta? (primeira palavra forte do nome). */
+export function lineCitesOffer(text: string, offer: McSealProduct): boolean {
+  const keywords = productKeywords(offer.name);
+  if (keywords.length === 0) return true;
+  return foldText(text).includes(keywords[0]);
+}
+
+const MEASURE_UNIT = /^(?:kg|g|mg|ml|l|lt|un|und|unid|cx|pct|dz|m)$/i;
+
+/**
+ * Nome falado da oferta: até `maxWords` palavras, sem gramatura solta no fim
+ * ("Óleo de Soja 900 ml" → "Óleo de Soja"; "Leite Integral 1 L" → "Leite
+ * Integral"); números que não são medida ficam ("Arroz Branco Tipo 1").
+ */
+export function spokenProductName(name: string, maxWords = 4): string {
+  const words = name.trim().split(/\s+/);
+  const cut = words.slice(0, maxWords);
+  const isMeasureNumber = (index: number) =>
+    /^\d+(?:[.,]\d+)?$/.test(words[index] ?? '') && MEASURE_UNIT.test(words[index + 1] ?? '');
+  while (cut.length > 1) {
+    const last = cut.length - 1;
+    if (MEASURE_UNIT.test(cut[last]) || /^\d+(?:[.,]\d+)?(?:kg|g|ml|l)$/i.test(cut[last])) {
+      cut.pop();
+    } else if (isMeasureNumber(last)) {
+      cut.pop();
+    } else break;
+  }
+  return cut.join(' ');
+}
+
+const UNIT_SPOKEN: Record<string, string> = {
+  kg: 'o quilo',
+  un: 'a unidade',
+  und: 'a unidade',
+  unid: 'a unidade',
+  l: 'o litro',
+  lt: 'o litro',
+  dz: 'a dúzia',
+};
+
+/**
+ * Fala DETERMINÍSTICA de uma oferta (o "line builder" do diretor F2): nome
+ * curto + preço por extenso (+ unidade falada quando é kg/un/litro/dúzia).
+ * É o que o mock usa, o fallback quando o LLM não cita nome ou preço, e a
+ * PROPOSTA de nova fala quando o nome ou o preço atual da oferta mudam (6.8).
+ */
+export function buildOfferLineText(
+  offer: Pick<McSealProduct, 'name' | 'price' | 'unit'>,
+  opts: { maxWords?: number; compact?: boolean } = {},
+): string {
+  const name = spokenProductName(offer.name, opts.maxWords ?? 4);
+  const unit = UNIT_SPOKEN[(offer.unit ?? '').trim().toLowerCase().replace(/^\//, '')];
+  const price = precoPorExtenso(offer.price);
+  const priced = unit ? `${price} ${unit}` : price;
+  return opts.compact ? `${name}, ${priced}!` : `${name} por ${priced}!`;
+}
+
+/** Soma ESTIMADA (s) das falas — a mesma régua de 15 caracteres/s do TTS mock. */
+export function estimateCarouselSpeechS(texts: string[]): number {
+  return Number(texts.reduce((sum, t) => sum + estimateSpeechSecondsRaw(t), 0).toFixed(1));
+}
+
+interface CarouselTexts {
+  opening: string;
+  offers: string[];
+  closing: string;
+}
+
+/**
+ * Cabe no orçamento estimado (≤ 30 s)? Encurta em degraus, sem cortar
+ * palavras: abertura/fechamento curtos → falas compactas das ofertas que
+ * passaram do formato determinístico → nomes de 2 palavras. Acima disso o
+ * roteiro segue e a revisão bloqueia pelo TTS medido (SPEECH_OVER_LENGTH).
+ */
+export function fitCarouselTexts(texts: CarouselTexts, offers: McSealProduct[]): CarouselTexts {
+  const total = (t: CarouselTexts) => estimateCarouselSpeechS([t.opening, ...t.offers, t.closing]);
+  let current = { ...texts, offers: [...texts.offers] };
+  if (total(current) <= MC_OFFER_CAROUSEL_TARGET_SPEECH_S) return current;
+  current = { ...current, opening: CAROUSEL_OPENING_SHORT, closing: CAROUSEL_CLOSING_SHORT };
+  if (total(current) <= MC_OFFER_CAROUSEL_TARGET_SPEECH_S) return current;
+  for (const maxWords of [3, 2]) {
+    current = {
+      ...current,
+      offers: current.offers.map((text, i) => {
+        const compact = buildOfferLineText(offers[i], { maxWords, compact: true });
+        return compact.length < text.length ? compact : text;
+      }),
+    };
+    if (total(current) <= MC_OFFER_CAROUSEL_TARGET_SPEECH_S) return current;
+  }
+  return current;
+}
+
+function cleanLine(text: string | null | undefined): string {
+  return spellOutPrices((text ?? '').replace(/\s+/g, ' ').trim());
+}
+
+/**
+ * Cenas `talk_tile` do F2 + falas (D6): abertura, uma por oferta (com
+ * `productRef = offerRef`) e fechamento, cada uma com identidade estável e
+ * duração estimada; sem keyframe, cenário ou selo.
+ */
+export function buildCarouselScenes(
+  texts: CarouselTexts,
+  offers: McSealProduct[],
+  idFactory: () => string,
+): { scenes: McScriptScene[]; lines: McCarouselLine[] } {
+  const entries: Array<{ text: string; kind: McCarouselLine['kind']; offerRef: string | null }> = [
+    { text: texts.opening, kind: 'opening', offerRef: null },
+    ...texts.offers.map((text, i) => ({
+      text,
+      kind: 'offer' as const,
+      offerRef: offers[i].id ?? null,
+    })),
+    { text: texts.closing, kind: 'closing', offerRef: null },
+  ];
+  const scenes: McScriptScene[] = entries.map((entry, idx) => ({
+    idx,
+    sceneId: idFactory(),
+    sceneType: 'talk_tile' as const,
+    camera: null,
+    environmentId: null,
+    productRef: entry.offerRef,
+    sealCue: null,
+    safeArea: null,
+    actionPrompt: idx === 0 ? 'Acena no início.' : '',
+    dialogue: entry.text,
+    durationS: plannedTalkDurationS(entry.text),
+  }));
+  const lines: McCarouselLine[] = entries.map((entry, idx) => ({
+    sceneId: scenes[idx].sceneId as string,
+    kind: entry.kind,
+    offerRef: entry.offerRef,
+  }));
+  return { scenes, lines };
+}
+
+/**
+ * Roteiro F2 a partir da resposta do diretor (LLM ou mock): uma fala por
+ * oferta NA ORDEM congelada (a do LLM quando cita nome e preço por extenso;
+ * senão a determinística), abertura/fechamento (defaults quando vazios),
+ * orçamento ≤ 30 s estimado, `offers[]` = `products[]` espelhados.
+ */
+export function buildOfferCarouselScript(
+  raw: RawDirectorF2,
+  ctx: DirectorF2Context,
+  idFactory: () => string,
+): McScript {
+  const offers = ctx.offers.map((o) => ({ ...o, id: o.id ?? idFactory() }));
+  if (
+    offers.length < MC_OFFER_CAROUSEL_MIN_OFFERS ||
+    offers.length > MC_OFFER_CAROUSEL_MAX_OFFERS
+  ) {
+    throw new Error(
+      `script_failed: "ofertas em sequência" pede de ${MC_OFFER_CAROUSEL_MIN_OFFERS} a ` +
+        `${MC_OFFER_CAROUSEL_MAX_OFFERS} ofertas (recebidas: ${offers.length})`,
+    );
+  }
+  const byIndex = new Map<number, string>();
+  for (const item of raw?.offerLines ?? []) {
+    const index = item?.offerIndex;
+    if (typeof index !== 'number' || !Number.isInteger(index) || byIndex.has(index)) continue;
+    const text = cleanLine(item?.text);
+    if (text) byIndex.set(index, text);
+  }
+  const offerTexts = offers.map((offer, index) => {
+    const text = byIndex.get(index);
+    const valid =
+      !!text &&
+      lineCitesOffer(text, offer) &&
+      lineCitesPrice(text, offer.price) &&
+      estimateSpeechSecondsRaw(text) <= ctx.maxChunkS;
+    return valid ? (text as string) : buildOfferLineText(offer);
+  });
+  const texts = fitCarouselTexts(
+    {
+      opening: cleanLine(raw?.opening) || CAROUSEL_OPENING_DEFAULT,
+      offers: offerTexts,
+      closing: cleanLine(raw?.closing) || CAROUSEL_CLOSING_DEFAULT,
+    },
+    offers,
+  );
+  const { scenes, lines } = buildCarouselScenes(texts, offers, idFactory);
+  const endcard = buildEndcard(ctx.storeName);
+  return {
+    version: 1,
+    schemaVersion: MC_SCRIPT_SCHEMA_V2,
+    format: 'offer_carousel',
+    offers: offers.map((o) => ({ ...o })),
+    products: offers.map((o) => ({ ...o })),
+    environments: [],
+    scenes,
+    seal: null,
+    endcard: endcard ?? null,
+    lines,
+    layoutPreset: ctx.layoutPreset,
+    captions: ctx.captions,
+  };
+}
+
+/** Falas MOCK do F2 (MC_SCRIPT_PROVIDER=mock): determinísticas, preço por extenso, ≤ 30 s estimado. */
+export function buildMockDirectorF2(
+  ctx: Pick<DirectorF2Context, 'offers' | 'storeName'>,
+): RawDirectorF2 {
+  const store = ctx.storeName?.trim();
+  return {
+    opening: store ? `Olá! Confira as ofertas de hoje no ${store}.` : CAROUSEL_OPENING_DEFAULT,
+    offerLines: ctx.offers.map((offer, offerIndex) => ({
+      offerIndex,
+      text: buildOfferLineText(offer),
+    })),
+    closing: CAROUSEL_CLOSING_DEFAULT,
+  };
+}
+
+/** Roteiro MOCK F2: abertura + uma fala determinística por oferta + fechamento. */
+export function buildMockScriptF2(ctx: DirectorF2Context, idFactory: () => string): McScript {
+  return buildOfferCarouselScript(buildMockDirectorF2(ctx), ctx, idFactory);
+}
+
+/** Mesmo preço? ("24,9" = "24,90" = "R$ 24,90"); ilegível compara o texto. */
+export function samePrice(a: string | null | undefined, b: string | null | undefined): boolean {
+  const pa = parsePreco(a ?? '');
+  const pb = parsePreco(b ?? '');
+  if (pa && pb) return pa.reais === pb.reais && pa.centavos === pb.centavos;
+  return (a ?? '').trim() === (b ?? '').trim();
+}
+
+export interface McOfferLineRewrite {
+  sceneId: string;
+  offerId: string;
+  previousDialogue: string | null;
+  proposedDialogue: string;
+}
+
+/**
+ * F2 (tarefa 6.8, spec "Correção por tipo de mudança"): oferta cujo NOME ou
+ * PREÇO ATUAL mudou em relação ao roteiro anterior e cuja fala NÃO foi
+ * editada nesta mesma alteração → a fala é reescrita pelo line builder
+ * (`buildOfferLineText`) e volta para confirmação na revisão do roteiro; só
+ * o TTS e o clipe dela são refeitos (as outras falas mantêm o hash). Fala
+ * editada junto pelo usuário é respeitada. Outros formatos: nada muda.
+ */
+export function rewriteSpokenOfferLines(
+  previous: McScript | null | undefined,
+  next: McScript,
+): { script: McScript; rewritten: McOfferLineRewrite[] } {
+  if (!previous || next.format !== 'offer_carousel') return { script: next, rewritten: [] };
+  const before = new Map(
+    (previous.offers ?? previous.products ?? []).map((o) => [o.id as string, o]),
+  );
+  const prevScenes = new Map(previous.scenes.map((s) => [s.sceneId as string, s]));
+  const rewritten: McOfferLineRewrite[] = [];
+  const scenes = next.scenes.map((scene) => {
+    if (!scene.productRef) return scene;
+    const offer = (next.offers ?? next.products ?? []).find((o) => o.id === scene.productRef);
+    const old = before.get(scene.productRef);
+    if (!offer || !old) return scene;
+    const spokenChanged =
+      offer.name.trim() !== old.name.trim() || !samePrice(offer.price, old.price);
+    if (!spokenChanged) return scene;
+    const prevDialogue = prevScenes.get(scene.sceneId as string)?.dialogue ?? null;
+    const untouched =
+      (prevDialogue ?? '').replace(/\s+/g, ' ').trim() ===
+      (scene.dialogue ?? '').replace(/\s+/g, ' ').trim();
+    if (!untouched) return scene;
+    const proposed = buildOfferLineText(offer);
+    rewritten.push({
+      sceneId: scene.sceneId as string,
+      offerId: offer.id as string,
+      previousDialogue: prevDialogue,
+      proposedDialogue: proposed,
+    });
+    return { ...scene, dialogue: proposed, durationS: plannedTalkDurationS(proposed) };
+  });
+  return { script: { ...next, scenes }, rewritten };
 }

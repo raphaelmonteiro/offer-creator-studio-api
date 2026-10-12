@@ -22,6 +22,12 @@ export const QUEUES = {
   MC_INGEST: 'mc.ingest',
   /** Comerciais (plano §6.4): montagem final ffmpeg (concorrência 1, gate de recursos). */
   MC_FFMPEG: 'mc.ffmpeg',
+  /**
+   * Comerciais (change video-formatos-personagem, tarefa 6.5): render da
+   * composição Remotion do F2 (navegador headless — concorrência 1, gate de
+   * recursos, expiração própria de 900 s).
+   */
+  MC_RENDER: 'mc.render',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

@@ -17,6 +17,7 @@ export const MC_BUILDER_VERSIONS: Record<McStepType, number> = {
   [McStepType.TALK]: 1,
   [McStepType.COMPOSE_FFMPEG]: 1,
   [McStepType.FINALIZE]: 1,
+  [McStepType.RENDER_REMOTION]: 1,
 };
 
 /**
@@ -43,6 +44,12 @@ export const MC_BUILDER_VERSIONS_V2: Record<McStepType, number> = {
    */
   [McStepType.COMPOSE_FFMPEG]: 1,
   [McStepType.FINALIZE]: 1,
+  /**
+   * Render Remotion do F2 (tarefa 6.5): a versão da COMPOSIÇÃO
+   * (`MC_COMPOSITION_VERSION`) e o tipo de renderizador entram no hash junto
+   * desta versão — trocar o pacote de templates invalida o render.
+   */
+  [McStepType.RENDER_REMOTION]: 1,
 };
 
 /**

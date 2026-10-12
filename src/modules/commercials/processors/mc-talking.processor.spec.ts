@@ -19,6 +19,7 @@ import {
   KLING_AVATAR_PRO_MODEL,
   MINIMAX_H3_LIPSYNC_MODEL,
 } from '../domain/mc-pipeline.config';
+import { OMNIHUMAN_V15_MODEL } from '../domain/mc-talk-engines';
 import { McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -434,6 +435,7 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
   let project: Record<string, unknown>;
   let kit: Record<string, unknown>;
   let step: Record<string, unknown>;
+  let audioDurationMs: number | null;
   let tilePng: Buffer;
   let pipeline: Record<string, jest.Mock>;
   let transitions: { casTransition: jest.Mock };
@@ -461,6 +463,7 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
     delete process.env.MC_TALK_ENGINE_ECONOMICO;
     delete process.env.MC_TALK_ENGINE_PREMIUM;
     delete process.env.MC_TALK_ENGINE_LOGO;
+    audioDurationMs = null;
     project = {
       id: 'p1',
       userId: 'u1',
@@ -528,7 +531,11 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
           if (entity === McStep) return Promise.resolve(step);
           if (entity === McCharacterKit) return Promise.resolve(kit);
           if (entity === AnimationAsset)
-            return Promise.resolve({ id: where.id, fileUrl: `/uploads/${where.id}.bin` });
+            return Promise.resolve({
+              id: where.id,
+              fileUrl: `/uploads/${where.id}.bin`,
+              durationMs: where.id === 'a-audio' ? audioDurationMs : null,
+            });
           return Promise.resolve(null);
         }),
       })),
@@ -790,6 +797,57 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
     );
   });
 
+  describe('OmniHuman 1.5 como motor premium (tarefa 7.1)', () => {
+    beforeEach(() => {
+      process.env.MC_TALK_ENGINE_PREMIUM = `${OMNIHUMAN_V15_MODEL}|0.16|30`;
+      project.tier = 'premium';
+      (step.inputSnapshot as Record<string, unknown>).tier = 'premium';
+    });
+
+    it('MC_TALK_ENGINE_PREMIUM=omnihuman → submit no OmniHuman com resolution 1080p; motor/tarifa/limite no snapshot', async () => {
+      audioDurationMs = 12_000;
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(submitted().model).toBe(OMNIHUMAN_V15_MODEL);
+      expect(submitted().input).toEqual({
+        image_url: expect.stringMatching(/^data:image\/png;base64,/),
+        audio_url: expect.stringMatching(/^data:audio\/mpeg;base64,/),
+        prompt: expect.stringContaining('no camera motion'),
+        resolution: '1080p',
+      });
+      expect(transitions.casTransition.mock.calls[0][5]).toMatchObject({
+        provider: OMNIHUMAN_V15_MODEL,
+        inputSnapshot: expect.objectContaining({
+          engine: { key: 'premium', model: OMNIHUMAN_V15_MODEL, usdPerSecond: 0.16, maxChunkS: 30 },
+          effectiveEngine: {
+            key: 'premium',
+            model: OMNIHUMAN_V15_MODEL,
+            usdPerSecond: 0.16,
+            maxChunkS: 30,
+          },
+        }),
+      });
+      expect(pipeline.consumeStepCredits).toHaveBeenCalledTimes(1);
+    });
+
+    it('fala de 31 s (acima dos 30 s a 1080p) → validação terminal audio_too_long SEM chamar o provider nem consumir', async () => {
+      audioDurationMs = 31_000;
+      await processor.process({ stepId: 'st-talk' });
+      expect(fal.submit).not.toHaveBeenCalled();
+      expect(pipeline.consumeStepCredits).not.toHaveBeenCalled();
+      const err = pipeline.failStep.mock.calls[0][2] as TerminalProviderError;
+      expect(err).toBeInstanceOf(TerminalProviderError);
+      expect(err.code).toBe('audio_too_long');
+    });
+
+    it('fala de exatamente 30 s passa (limite inclusivo)', async () => {
+      audioDurationMs = 30_000;
+      await processor.process({ stepId: 'st-talk' });
+      expect(fal.submit).toHaveBeenCalledTimes(1);
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+    });
+  });
+
   it('kit sem tile → validação terminal sem chamar o provider', async () => {
     kit.tileAssetId = null;
     (step.inputSnapshot as Record<string, unknown>).tileAssetId = null;
@@ -919,6 +977,30 @@ describe('McTalkingProcessor — provider mock: clipe talk com a duração do á
       McStepStatus.RUNNING,
       McStepStatus.PROVIDER_WAIT,
       expect.objectContaining({ provider: 'mock' }),
+    );
+  });
+
+  it('premium (kit gerado) simula o 1080p nativo: clipe mock 1080×1440; logo_as_is premium segue em 720×960 (7.2)', async () => {
+    step.inputSnapshot = {
+      audioAssetId: 'a-audio',
+      tileAssetId: 'a-tile',
+      tier: 'premium',
+      identityMode: 'generated',
+    };
+    await processor.process({ stepId: 'st-mock' });
+    expect(lavfiInput(ffmpeg.run.mock.calls[0][0] as string[])).toBe(
+      'color=c=0x2E5E9E:s=1080x1440:r=30:d=12.534',
+    );
+    ffmpeg.run.mockClear();
+    step.inputSnapshot = {
+      audioAssetId: 'a-audio',
+      tileAssetId: 'a-tile',
+      tier: 'premium',
+      identityMode: 'logo_as_is',
+    };
+    await processor.process({ stepId: 'st-mock' });
+    expect(lavfiInput(ffmpeg.run.mock.calls[0][0] as string[])).toBe(
+      'color=c=0x2E5E9E:s=720x960:r=30:d=12.534',
     );
   });
 

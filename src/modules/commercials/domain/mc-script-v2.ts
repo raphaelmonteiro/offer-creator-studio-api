@@ -1,11 +1,18 @@
 import { createHash } from 'crypto';
+import { computeContentHash } from './input-hash';
 import { legacySceneType, isSceneType, sceneTypeDialogueIssue } from './mc-execution-plan';
+import { parsePreco } from './mc-preco-extenso';
 import { MC_SCRIPT_SCHEMA_V2 } from './mc-quality';
 import { MC_COMPOSITION_DIMENSIONS } from './mc-composition.config';
 import { isWindowWellFormed, validateCharacterWindow } from './mc-talking-art-window';
 import {
+  isCarouselLayoutPreset,
   McAspectRatio,
+  McCarouselLine,
   MC_MAX_SEAL_PRODUCTS,
+  MC_OFFER_CAROUSEL_MAX_OFFERS,
+  MC_OFFER_CAROUSEL_MAX_SPEECH_S,
+  MC_OFFER_CAROUSEL_MIN_OFFERS,
   MC_SAFE_AREAS,
   MC_TALKING_ART_MAX_CITED_OFFERS,
   MC_TALKING_ART_MAX_OFFERS,
@@ -176,8 +183,9 @@ export function validateScriptV2(
       });
     }
   }
-  // Teto de produtos por formato: selos do F3 (6); os formatos novos congelam as ofertas da arte (12).
-  const maxProducts = format === 'scenes' ? MC_MAX_SEAL_PRODUCTS : MC_TALKING_ART_MAX_OFFERS;
+  // Teto de produtos por formato: selos do F3 (6); o F1 congela as ofertas da arte (12); o F2
+  // anuncia de 3 a 6 (os limites próprios ficam em `validateOfferCarouselFields`).
+  const maxProducts = MC_MAX_PRODUCTS_BY_FORMAT[format] ?? MC_MAX_SEAL_PRODUCTS;
   if ((script.products ?? []).length > maxProducts) {
     issues.push({
       code: 'TOO_MANY_PRODUCTS',
@@ -278,8 +286,16 @@ export function validateScriptV2(
     }
   });
   issues.push(...validateTalkingArtFields(script, productIds, opts));
+  issues.push(...validateOfferCarouselFields(script));
   return issues;
 }
+
+/** Teto de `products[]` por formato (o F2 congela as ofertas escolhidas: 3 a 6). */
+export const MC_MAX_PRODUCTS_BY_FORMAT: Record<McProjectFormat, number> = {
+  scenes: MC_MAX_SEAL_PRODUCTS,
+  talking_art: MC_TALKING_ART_MAX_OFFERS,
+  offer_carousel: MC_OFFER_CAROUSEL_MAX_OFFERS,
+};
 
 /**
  * Campos do formato F1 "arte que fala" (change video-formatos-personagem, D6):
@@ -362,6 +378,206 @@ export function validateTalkingArtFields(
   return issues;
 }
 
+// ───────────────── F2 "ofertas em sequência" (tarefa 6.6) ─────────────────
+
+/** Ofertas do roteiro F2 (`offers[]`; roteiros sem o campo caem em `products[]`). */
+export function carouselOffers(script: Pick<McScript, 'offers' | 'products'>): McSealProduct[] {
+  return script.offers ?? script.products ?? [];
+}
+
+/**
+ * Falas do F2 derivadas das CENAS (fonte única do texto e da ordem): a
+ * primeira é a abertura, a última o fechamento e as do meio, uma por oferta,
+ * com `offerRef = productRef` da cena. Reordenar cenas reordena as falas.
+ */
+export function deriveCarouselLines(scenes: McScriptScene[]): McCarouselLine[] {
+  const last = scenes.length - 1;
+  return scenes.map((scene, position) => {
+    const kind = position === 0 ? 'opening' : position === last ? 'closing' : 'offer';
+    return {
+      sceneId: scene.sceneId as string,
+      kind,
+      offerRef: scene.productRef ?? null,
+    };
+  });
+}
+
+/**
+ * Normalização do roteiro F2: falas derivadas das cenas; `offers[]` na ordem
+ * das falas de oferta (ofertas sem fala vão para o fim — a validação aponta);
+ * `products[]` vira o espelho de `offers[]` (mesmos ids, mesma ordem).
+ * Roteiros de outros formatos voltam intactos.
+ */
+export function normalizeOfferCarouselScript(script: McScript): McScript {
+  if (script.format !== 'offer_carousel') return script;
+  const lines = deriveCarouselLines(script.scenes);
+  const offers = carouselOffers(script);
+  const order = lines.filter((l) => l.kind === 'offer' && l.offerRef).map((l) => l.offerRef);
+  const ranked = [
+    ...order
+      .map((id) => offers.find((o) => o.id === id))
+      .filter((o, i, all): o is McSealProduct => !!o && all.indexOf(o) === i),
+    ...offers.filter((o) => !order.includes(o.id as string)),
+  ];
+  return {
+    ...script,
+    offers: ranked.map((o) => ({ ...o })),
+    products: ranked.map((o) => ({ ...o })),
+    lines,
+  };
+}
+
+/**
+ * Campos do formato F2 (D6/D8, spec video-offer-carousel): 3 a 6 ofertas
+ * congeladas, cada uma com nome, preço legível e foto; `products[]` espelho de
+ * `offers[]`; falas = abertura + uma por oferta NA ORDEM das ofertas +
+ * fechamento, cada fala uma cena `talk_tile` com `productRef = offerRef`;
+ * preset de layout conhecido e `captions` booleano.
+ */
+export function validateOfferCarouselFields(script: McScript): McScriptIssue[] {
+  const issues: McScriptIssue[] = [];
+  if (script.format !== 'offer_carousel') return issues;
+  const offers = carouselOffers(script);
+  if (offers.length < MC_OFFER_CAROUSEL_MIN_OFFERS) {
+    issues.push({
+      code: 'OFFERS_TOO_FEW',
+      element: 'offers',
+      message: `"Ofertas em sequência" precisa de no mínimo ${MC_OFFER_CAROUSEL_MIN_OFFERS} ofertas.`,
+    });
+  }
+  if (offers.length > MC_OFFER_CAROUSEL_MAX_OFFERS) {
+    issues.push({
+      code: 'OFFERS_TOO_MANY',
+      element: 'offers',
+      message:
+        `"Ofertas em sequência" aceita no máximo ${MC_OFFER_CAROUSEL_MAX_OFFERS} ofertas ` +
+        `(o vídeo tem até ${MC_OFFER_CAROUSEL_MAX_SPEECH_S} s de fala).`,
+    });
+  }
+  offers.forEach((offer, position) => {
+    const label = `Oferta ${position + 1}${offer.name?.trim() ? ` ("${offer.name.trim()}")` : ''}`;
+    if (!offer.id) {
+      issues.push({ code: 'OFFER_WITHOUT_ID', element: 'offer', message: `${label} sem chave.` });
+    }
+    if (!offer.imageUrl?.trim()) {
+      issues.push({
+        code: 'OFFER_IMAGE_REQUIRED',
+        element: 'offer',
+        message: `${label} precisa de foto (catálogo ou galeria).`,
+      });
+    }
+    if (offer.price?.trim() && !parsePreco(offer.price)) {
+      issues.push({
+        code: 'OFFER_PRICE_INVALID',
+        element: 'offer',
+        message: `${label}: preço "${offer.price}" ilegível (use o formato 24,90).`,
+      });
+    }
+    if (offer.originalPrice?.trim() && !parsePreco(offer.originalPrice)) {
+      issues.push({
+        code: 'OFFER_PRICE_INVALID',
+        element: 'offer',
+        message: `${label}: preço anterior "${offer.originalPrice}" ilegível.`,
+      });
+    }
+  });
+  const productIds = (script.products ?? []).map((p) => p.id ?? '');
+  if (productIds.join('\u0000') !== offers.map((o) => o.id ?? '').join('\u0000')) {
+    issues.push({
+      code: 'OFFERS_PRODUCTS_MISMATCH',
+      element: 'offers',
+      message: 'As ofertas e os produtos do roteiro divergem (products[] espelha offers[]).',
+    });
+  }
+  const scenes = Array.isArray(script.scenes) ? script.scenes : [];
+  const lines = script.lines ?? [];
+  const expectedLines = offers.length + 2;
+  if (scenes.length !== expectedLines || lines.length !== scenes.length) {
+    issues.push({
+      code: 'CAROUSEL_LINES_COUNT',
+      element: 'lines',
+      message:
+        `O roteiro precisa de ${expectedLines} falas: abertura, uma por oferta ` +
+        `(${offers.length}) e fechamento — tem ${scenes.length}.`,
+    });
+  }
+  lines.forEach((line, position) => {
+    const scene = scenes[position];
+    const sceneId = scene?.sceneId;
+    if (!scene || line.sceneId !== sceneId) {
+      issues.push({
+        code: 'CAROUSEL_LINE_SCENE_MISMATCH',
+        element: 'lines',
+        message: `A fala ${position + 1} não corresponde à cena ${position + 1} do roteiro.`,
+      });
+      return;
+    }
+    const expectedKind =
+      position === 0 ? 'opening' : position === lines.length - 1 ? 'closing' : 'offer';
+    if (line.kind !== expectedKind) {
+      issues.push({
+        code: 'CAROUSEL_LINE_KIND',
+        sceneId,
+        element: 'lines',
+        message:
+          expectedKind === 'offer'
+            ? `Fala ${position + 1}: entre a abertura e o fechamento, cada fala apresenta uma oferta.`
+            : `Fala ${position + 1}: a primeira fala é a abertura e a última o fechamento.`,
+      });
+    }
+    if (line.kind === 'offer' && !line.offerRef) {
+      issues.push({
+        code: 'CAROUSEL_LINE_OFFER_MISSING',
+        sceneId,
+        element: 'lines',
+        message: `Fala ${position + 1}: vincule a fala à sua oferta.`,
+      });
+    }
+    if (line.kind !== 'offer' && line.offerRef) {
+      issues.push({
+        code: 'CAROUSEL_LINE_OFFER_MISMATCH',
+        sceneId,
+        element: 'lines',
+        message: `Fala ${position + 1}: a abertura e o fechamento não apresentam oferta.`,
+      });
+    }
+    if ((scene.productRef ?? null) !== (line.offerRef ?? null)) {
+      issues.push({
+        code: 'CAROUSEL_LINE_OFFER_MISMATCH',
+        sceneId,
+        element: 'lines',
+        message: `Fala ${position + 1}: a oferta da fala difere da oferta da cena.`,
+      });
+    }
+  });
+  const offerLineRefs = lines.filter((l) => l.kind === 'offer').map((l) => l.offerRef ?? '');
+  if (
+    lines.length > 0 &&
+    offerLineRefs.join('\u0000') !== offers.map((o) => o.id ?? '').join('\u0000')
+  ) {
+    issues.push({
+      code: 'CAROUSEL_LINES_OFFER_ORDER',
+      element: 'lines',
+      message: 'Precisa haver exatamente uma fala por oferta, na ordem das ofertas.',
+    });
+  }
+  if (script.layoutPreset !== undefined && !isCarouselLayoutPreset(script.layoutPreset)) {
+    issues.push({
+      code: 'LAYOUT_PRESET_INVALID',
+      element: 'layout',
+      message: `Preset de layout desconhecido: "${String(script.layoutPreset)}".`,
+    });
+  }
+  if (script.captions !== undefined && typeof script.captions !== 'boolean') {
+    issues.push({
+      code: 'CAPTIONS_INVALID',
+      element: 'captions',
+      message: 'captions precisa ser verdadeiro ou falso.',
+    });
+  }
+  return issues;
+}
+
 /**
  * Normalização de um roteiro v2 recebido (DTO/LLM): reindexa por posição,
  * gera `sceneId` para cenas sem identidade, aplica tipo default pela fala
@@ -400,13 +616,23 @@ export function normalizeScriptV2(
       ...(productRef === undefined ? {} : { productRef }),
     };
   });
-  return {
+  return normalizeOfferCarouselScript({
     ...script,
     schemaVersion: MC_SCRIPT_SCHEMA_V2,
     products,
+    ...(script.offers
+      ? {
+          offers: script.offers.map((o) => ({
+            ...o,
+            id: o.id ?? idFactory(),
+            name: o.name.trim(),
+            price: o.price.trim(),
+          })),
+        }
+      : {}),
     scenes,
     seal: null,
-  };
+  });
 }
 
 /**
@@ -589,12 +815,139 @@ export function isCompositionOnlyChange(
   );
   if (touchesMedia) return false;
   const productsChanged =
-    JSON.stringify(previous.products ?? []) !== JSON.stringify(next.products ?? []);
+    JSON.stringify(canonicalProducts(previous.products)) !==
+    JSON.stringify(canonicalProducts(next.products));
   return (
     diffs.some((d) => d.compositionOnlyChanged || d.orderChanged) ||
     productsChanged ||
+    compositionFieldsChanged(previous, next) ||
     options.endcardChanged === true
   );
+}
+
+/** Campos de um produto/oferta como chegam de um DTO: opcionais `undefined` = "não mexer". */
+export interface McProductPatch {
+  id?: string;
+  catalogId?: string | null;
+  unit?: string | null;
+  imageUrl?: string | null;
+  name: string;
+  price: string;
+  originalPrice?: string | null;
+  badge?: string | null;
+}
+
+/**
+ * Produto do roteiro a partir do DTO PRESERVANDO o que o DTO omite (BUG B):
+ * campo ausente (`undefined`) mantém o valor congelado da mesma oferta
+ * (catálogo, unidade, foto, preço anterior, badge); `null` explícito limpa.
+ */
+export function mergeScriptProduct(
+  patch: McProductPatch,
+  known: McSealProduct | null | undefined,
+  idFactory: () => string,
+): McSealProduct {
+  const pick = <K extends keyof McSealProduct>(key: K): McSealProduct[K] | null =>
+    (patch as Partial<McSealProduct>)[key] !== undefined
+      ? ((patch as Partial<McSealProduct>)[key] as McSealProduct[K])
+      : ((known?.[key] ?? null) as McSealProduct[K] | null);
+  return {
+    id: patch.id ?? idFactory(),
+    catalogId: pick('catalogId'),
+    unit: pick('unit'),
+    imageUrl: pick('imageUrl'),
+    name: patch.name,
+    price: patch.price,
+    originalPrice: pick('originalPrice'),
+    badge: pick('badge'),
+  };
+}
+
+/**
+ * Produto canônico para comparação: campos opcionais ausentes valem null —
+ * `{originalPrice: undefined}` e `{originalPrice: null}` são a mesma oferta
+ * (BUG B: um "salvar" sem mudança não pode parecer troca de produto).
+ */
+export function canonicalProduct(product: McSealProduct): Record<string, unknown> {
+  return {
+    id: product.id ?? null,
+    catalogId: product.catalogId ?? null,
+    name: (product.name ?? '').trim(),
+    price: (product.price ?? '').trim(),
+    originalPrice: product.originalPrice ?? null,
+    unit: product.unit ?? null,
+    badge: product.badge ?? null,
+    imageUrl: product.imageUrl ?? null,
+  };
+}
+
+export function canonicalProducts(
+  products: McSealProduct[] | null | undefined,
+): Array<Record<string, unknown>> {
+  return (products ?? []).map(canonicalProduct);
+}
+
+/**
+ * Campos de COMPOSIÇÃO dos formatos novos (não tocam TTS nem clipe — só
+ * `compose_ffmpeg`/`render_remotion` + `finalize`): F1 janela, cor da janela e
+ * rosto do logo; F2 preset de layout, legendas e ordem das falas.
+ */
+export function compositionFieldsChanged(previous: McScript, next: McScript): boolean {
+  const pick = (s: McScript) =>
+    JSON.stringify({
+      window: s.window ?? null,
+      logoFace: s.logoFace ?? null,
+      talkBackgroundColor: s.talkBackgroundColor ?? null,
+      layoutPreset: s.layoutPreset ?? null,
+      captions: s.captions ?? null,
+      lines: s.lines ?? null,
+      offers: s.offers ? canonicalProducts(s.offers) : null,
+    });
+  return pick(previous) !== pick(next);
+}
+
+/**
+ * Conteúdo editorial do roteiro (sem `version`, sem o carimbo das derivações),
+ * com opcionais ausentes valendo null: dois roteiros com a mesma impressão
+ * são o MESMO roteiro — o `updateScript` trata como "salvar sem mudança".
+ */
+export function scriptContentHash(script: McScript): string {
+  const scenes = (script.scenes ?? []).map((scene) => ({
+    sceneId: scene.sceneId ?? null,
+    sceneType: scene.sceneType ?? null,
+    initialFrame: canon(scene.initialFrame) || null,
+    camera: scene.camera ?? null,
+    environmentId: scene.environmentId ?? null,
+    productRef: scene.productRef ?? null,
+    sealCue: scene.sealCue ?? null,
+    safeArea: scene.safeArea ?? null,
+    actionPrompt: canon(scene.actionPrompt),
+    dialogue: canon(scene.dialogue) || null,
+    durationS: scene.durationS,
+    derivedSourceHash: scene.derived?.sourceHash ?? null,
+  }));
+  return computeContentHash({
+    schemaVersion: script.schemaVersion ?? null,
+    format: script.format ?? null,
+    products: canonicalProducts(script.products),
+    offers: script.offers ? canonicalProducts(script.offers) : null,
+    lines: script.lines ?? null,
+    environments: (script.environments ?? []).map((e) => ({
+      id: e.id,
+      assetId: e.assetId ?? null,
+      description: e.description,
+      version: e.version ?? null,
+    })),
+    scenes,
+    endcard: script.endcard?.storeName ?? null,
+    narration: canon(script.narration) || null,
+    window: script.window ?? null,
+    logoFace: script.logoFace ?? null,
+    citedOfferIds: script.citedOfferIds ?? null,
+    talkBackgroundColor: script.talkBackgroundColor ?? null,
+    layoutPreset: script.layoutPreset ?? null,
+    captions: script.captions ?? null,
+  });
 }
 
 /** Preço citado na fala mudou? (ADR §3.6: preço também falado exige revalidar o áudio.) */

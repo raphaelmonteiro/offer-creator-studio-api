@@ -50,15 +50,22 @@ import { assertLogoFaceReady } from '../domain/mc-logo-face';
 import { voiceoverPlanExcessMs } from '../domain/mc-scene-compose-graph';
 import { preparationComplete } from '../domain/mc-scheduler';
 import {
+  carouselOffers,
   convertLegacyScript,
   defaultSealCue,
   dialogueMentionsPrice,
   isCompositionOnlyChange,
   isScriptV2,
   McScriptWindowContext,
+  mergeScriptProduct,
+  normalizeOfferCarouselScript,
   normalizeScriptV2,
+  scriptContentHash,
   validateScriptV2,
 } from '../domain/mc-script-v2';
+import { hasSpeechAlignment } from '../domain/mc-captions';
+import { rewriteSpokenOfferLines } from '../domain/mc-director';
+import { carouselPrice } from '../domain/mc-offer-carousel-props';
 import {
   assertProjectTransition,
   assertSceneTransition,
@@ -67,14 +74,18 @@ import {
   McStepStatus,
 } from '../domain/mc-state-machines';
 import {
+  MC_OFFER_CAROUSEL_MAX_SPEECH_S,
   MC_TALKING_ART_MAX_S,
   MC_TALKING_ART_MIN_S,
+  McProjectOptions,
   McScript,
   McScriptScene,
   McSceneType,
+  McSealProduct,
   McStepType,
   resolveProjectOptions,
 } from '../domain/mc-types';
+import { ElevenLabsAlignment } from '../domain/mc-captions';
 import {
   RegeneratePreviewDto,
   SelectPreviewDto,
@@ -176,23 +187,24 @@ export class McQualityService {
     ]);
     const previous = project.script;
     const prevById = new Map((previous?.scenes ?? []).map((s) => [s.sceneId as string, s]));
-    const knownProducts = new Map((previous?.products ?? []).map((p) => [p.id as string, p]));
+    const carousel = project.format === 'offer_carousel';
+    // BUG B: o produto do DTO é MESCLADO com o congelado de mesmo `id` — campo
+    // omitido (catálogo, unidade, foto, preço anterior, badge) nunca se perde,
+    // senão todo "salvar" parecia troca de produto e mudava o escopo da revisão.
+    const frozen: McSealProduct[] = previous
+      ? carousel
+        ? carouselOffers(previous)
+        : (previous.products ?? [])
+      : [];
+    const knownProducts = new Map(frozen.map((p) => [p.id as string, p]));
+    const sourceProducts = (carousel ? (dto.offers ?? dto.products) : dto.products) ?? frozen;
+    const products = sourceProducts.map((p) =>
+      mergeScriptProduct(p, p.id ? knownProducts.get(p.id) : null, () => randomUUID()),
+    );
     const draft: McScript = {
       version: (previous?.version ?? 0) + 1,
       schemaVersion: MC_SCRIPT_SCHEMA_V2,
-      products: (dto.products ?? previous?.products ?? []).map((p) => ({
-        id: p.id ?? randomUUID(),
-        catalogId: p.catalogId ?? (p.id ? (knownProducts.get(p.id)?.catalogId ?? null) : null),
-        unit: p.unit ?? null,
-        imageUrl:
-          p.imageUrl === undefined
-            ? p.id
-              ? (knownProducts.get(p.id)?.imageUrl ?? null)
-              : null
-            : p.imageUrl,
-        name: p.name,
-        price: p.price,
-      })),
+      products,
       environments: (dto.environments ?? previous?.environments ?? []).map((e) => ({
         id: e.id,
         assetId: e.assetId ?? null,
@@ -208,6 +220,9 @@ export class McQualityService {
             message: `A cena ${scene.sceneId} não existe neste roteiro.`,
           });
         }
+        // talk_tile (F1/F2) não tem selo nem área do terço inferior: sem default —
+        // senão todo "salvar" inventava um selo e virava mudança de composição (BUG B).
+        const talkTile = scene.sceneType === 'talk_tile';
         const next: McScriptScene = {
           idx: position,
           sceneId: scene.sceneId ?? randomUUID(),
@@ -216,8 +231,16 @@ export class McQualityService {
           camera: scene.camera ?? null,
           environmentId: scene.environmentId ?? null,
           productRef: scene.productRef,
-          sealCue: scene.sealCue ?? before?.sealCue ?? defaultSealCue(scene.durationS),
-          safeArea: scene.safeArea ?? before?.safeArea ?? 'lower_third',
+          sealCue: talkTile
+            ? scene.sealCue !== undefined
+              ? scene.sealCue
+              : (before?.sealCue ?? null)
+            : (scene.sealCue ?? before?.sealCue ?? defaultSealCue(scene.durationS)),
+          safeArea: talkTile
+            ? scene.safeArea !== undefined
+              ? scene.safeArea
+              : (before?.safeArea ?? null)
+            : (scene.safeArea ?? before?.safeArea ?? 'lower_third'),
           actionPrompt: (scene.actionPrompt ?? '').trim(),
           dialogue: scene.dialogue?.trim() ? scene.dialogue.trim() : null,
           durationS: scene.durationS,
@@ -247,8 +270,35 @@ export class McQualityService {
         : previous?.talkBackgroundColor !== undefined
           ? { talkBackgroundColor: previous.talkBackgroundColor }
           : {}),
+      // F2 (6.6): ofertas = produtos mesclados (ordem acompanha as falas na
+      // normalização), preset e legendas do DTO ou preservados; falas derivadas.
+      ...(carousel
+        ? {
+            offers: products.map((p) => ({ ...p })),
+            ...((dto.layoutPreset ?? previous?.layoutPreset)
+              ? { layoutPreset: dto.layoutPreset ?? previous?.layoutPreset }
+              : {}),
+            ...(typeof (dto.captions ?? previous?.captions) === 'boolean'
+              ? { captions: dto.captions ?? previous?.captions }
+              : {}),
+          }
+        : {}),
     };
-    const script = normalizeScriptV2(draft, () => randomUUID());
+    // F2 (6.8): nome/preço atual de uma oferta mudou e a fala dela não ⇒ a fala
+    // é reescrita pelo diretor e volta para confirmação (revisão do roteiro).
+    const script = rewriteSpokenOfferLines(
+      previous,
+      normalizeScriptV2(draft, () => randomUUID()),
+    ).script;
+    // Salvar sem mudança é no-op (BUG B): mesma impressão editorial ⇒ nada de
+    // revisão nova, evento ou troca de status (nem moderação).
+    if (
+      previous &&
+      isScriptV2(previous) &&
+      scriptContentHash(previous) === scriptContentHash(script)
+    ) {
+      return project;
+    }
     const issues = validateScriptV2(script, {
       format: project.format ?? 'scenes',
       ...(await this.windowContext(project)),
@@ -954,7 +1004,10 @@ export class McQualityService {
           }
           const options = resolveProjectOptions(project.options);
           const hasAlignment = !!(audio.metadata as { alignment?: unknown } | null)?.alignment;
+          // F2: alinhamento é obrigatório para os cards (SPEECH_ALIGNMENT_MISSING,
+          // abaixo, sem aceite) — o aceite de "entregar sem legenda" não se aplica.
           if (
+            project.format !== 'offer_carousel' &&
             options.captionsEnabled &&
             !hasAlignment &&
             !dto.acceptMissingCaptions &&
@@ -998,6 +1051,14 @@ export class McQualityService {
           });
         }
       }
+    }
+    // F2 (tarefa 6.7, spec video-offer-carousel): cards e legendas por palavra
+    // dependem dos timestamps do TTS — fala sem alinhamento bloqueia com
+    // SPEECH_ALIGNMENT_MISSING (única ação: refazer o TTS da fala, SEM aceite);
+    // a soma das falas MEDIDAS acima de 30 s bloqueia com SPEECH_OVER_LENGTH
+    // (encurtar falas ou remover oferta, SEM aceite).
+    if (project.format === 'offer_carousel') {
+      problems.push(...this.offerCarouselSpeechProblems(scenes, assets));
     }
     if (problems.length > 0) {
       throw new UnprocessableEntityException({
@@ -1235,10 +1296,17 @@ export class McQualityService {
   // ───────────────────── composição pós-entrega (assembly_only) ─────────────────────
 
   /**
-   * PATCH /projects/:id/composition — preço/selo/cartela/trilha/legenda/ordem
-   * após a entrega: abre revisão `assembly_only` (visual_review) SEM
-   * preparação paga nem vídeo. Preço também falado no áudio ⇒ 422 (não é só
-   * composição — edite a fala).
+   * PATCH /projects/:id/composition — correção só de COMPOSIÇÃO após a entrega
+   * (ou numa revisão `assembly_only` aberta): abre/atualiza a revisão
+   * `assembly_only` (visual_review) SEM preparação paga nem clipe novo — a
+   * aprovação de montagem refaz só os steps de projeto do formato. FORMAT-AWARE
+   * (BUG A — o roteiro F1/F2 era validado como `scenes` e sempre falhava):
+   * - `scenes` (F3): produtos/selos/ordem/cartela; preço também falado ⇒ 422;
+   * - `talking_art` (F1): janela, cor da janela, cartela, legendas, trilha →
+   *   `compose_ffmpeg` + `finalize`;
+   * - `offer_carousel` (F2): preset de layout, legendas, foto/badge/unidade/
+   *   preço anterior das ofertas e ordem das ofertas → `render_remotion` +
+   *   `finalize`. Nome/preço atual são falados ⇒ 422 (use PATCH /offers/:id).
    */
   async updateComposition(
     userId: string,
@@ -1258,65 +1326,53 @@ export class McQualityService {
         message: 'Edite a composição no roteiro durante a revisão visual.',
       });
     }
-    const previous = this.validatedScript(project);
-    const products = (dto.products ?? previous.products ?? []).map((p) => ({
-      id: p.id ?? randomUUID(),
-      catalogId: p.catalogId ?? null,
-      unit: p.unit ?? null,
-      imageUrl: p.imageUrl ?? null,
-      name: p.name,
-      price: p.price,
-    }));
-    const byId = new Map(dto.scenes?.map((s) => [s.sceneId, s]) ?? []);
-    let scenes = previous.scenes.map((s) => {
-      const patch = byId.get(s.sceneId as string);
-      if (!patch) return { ...s };
-      return {
-        ...s,
-        productRef: patch.productRef === undefined ? s.productRef : patch.productRef,
-        sealCue: patch.sealCue === undefined ? s.sealCue : patch.sealCue,
-        safeArea: patch.safeArea === undefined ? s.safeArea : patch.safeArea,
+    const format = project.format ?? 'scenes';
+    this.assertCompositionFields(format, dto);
+    const windowCtx = await this.windowContext(project);
+    const previous = this.validatedScript(project, windowCtx);
+    const options = resolveProjectOptions(project.options);
+    const endcard = dto.endcard === undefined ? (previous.endcard ?? null) : dto.endcard;
+    let script: McScript;
+    if (format === 'talking_art') {
+      script = {
+        ...previous,
+        version: previous.version + 1,
+        endcard,
+        ...(dto.window ? { window: { ...dto.window } } : {}),
       };
-    });
-    if (dto.order) {
-      const known = new Set(scenes.map((s) => s.sceneId as string));
-      if (dto.order.length !== scenes.length || dto.order.some((id) => !known.has(id))) {
-        throw new UnprocessableEntityException({
-          code: 'ORDER_INVALID',
-          message: 'A ordem precisa listar todas as cenas exatamente uma vez.',
-        });
-      }
-      scenes = dto.order.map((id, idx) => ({ ...scenes.find((s) => s.sceneId === id)!, idx }));
+    } else if (format === 'offer_carousel') {
+      script = this.offerCarouselComposition(previous, dto, options, endcard);
+    } else {
+      script = this.sceneComposition(previous, dto, endcard);
     }
-    const script: McScript = {
-      ...previous,
-      version: previous.version + 1,
-      products,
-      scenes: scenes.map((s, idx) => ({ ...s, idx })),
-      endcard: dto.endcard === undefined ? (previous.endcard ?? null) : dto.endcard,
-    };
-    const issues = validateScriptV2(script);
+    const issues = validateScriptV2(script, {
+      format,
+      aspectRatio: project.aspectRatio,
+      ...windowCtx,
+    });
     if (issues.length > 0)
       throw new UnprocessableEntityException({
         code: 'SCRIPT_INVALID',
         message: issues[0].message,
         issues,
       });
-    // Preço mudou E a fala cita preço ⇒ não é só composição (ADR §3.6).
-    const priceChanged = (previous.products ?? []).some((p) => {
-      const n = products.find((x) => x.id === p.id);
-      return n && n.price !== p.price;
-    });
-    if (priceChanged) {
-      const spokenPrice = script.scenes
-        .filter((s) => s.productRef && dialogueMentionsPrice(s.dialogue))
-        .map((s) => s.sceneId);
-      if (spokenPrice.length > 0) {
-        throw new UnprocessableEntityException({
-          code: 'PRICE_SPOKEN_IN_DIALOGUE',
-          message: 'O preço também é falado nestas cenas — edite a fala para regravar a locução.',
-          sceneIds: spokenPrice,
-        });
+    if (format === 'scenes') {
+      // Preço mudou E a fala cita preço ⇒ não é só composição (ADR §3.6).
+      const priceChanged = (previous.products ?? []).some((p) => {
+        const n = (script.products ?? []).find((x) => x.id === p.id);
+        return n && n.price !== p.price;
+      });
+      if (priceChanged) {
+        const spokenPrice = script.scenes
+          .filter((s) => s.productRef && dialogueMentionsPrice(s.dialogue))
+          .map((s) => s.sceneId);
+        if (spokenPrice.length > 0) {
+          throw new UnprocessableEntityException({
+            code: 'PRICE_SPOKEN_IN_DIALOGUE',
+            message: 'O preço também é falado nestas cenas — edite a fala para regravar a locução.',
+            sceneIds: spokenPrice,
+          });
+        }
       }
     }
     if (
@@ -1333,8 +1389,7 @@ export class McQualityService {
         message: 'Nada mudou na composição.',
       });
     }
-    const options = resolveProjectOptions(project.options);
-    const nextOptions = {
+    const nextOptions: McProjectOptions = {
       ...options,
       musicEnabled: dto.musicEnabled ?? options.musicEnabled,
       captionsEnabled: dto.captionsEnabled ?? options.captionsEnabled,
@@ -1350,6 +1405,10 @@ export class McQualityService {
           script,
           options: nextOptions,
           revision: nextRevision,
+          // F2: o preset fica também na coluna do projeto (lida pela ponte/duplicação)
+          ...(format === 'offer_carousel' && script.layoutPreset
+            ? { layoutPreset: script.layoutPreset }
+            : {}),
           quality: {
             ...quality,
             approval: null,
@@ -1367,7 +1426,7 @@ export class McQualityService {
         kind: 'composition_updated',
         fromStatus: project.status,
         toStatus: McProjectStatus.VISUAL_REVIEW,
-        detail: { revision: nextRevision },
+        detail: { revision: nextRevision, format },
       });
       await this.transitions.notify(
         manager,
@@ -1382,6 +1441,167 @@ export class McQualityService {
       );
     });
     return this.reload(project.id);
+  }
+
+  /** Campos do DTO de composição que o formato NÃO tem → 422 COMPOSITION_FIELD_NOT_SUPPORTED. */
+  private assertCompositionFields(format: string, dto: UpdateCompositionDto): void {
+    const byFormat: Record<string, Array<keyof UpdateCompositionDto>> = {
+      scenes: ['window', 'talkBackgroundColor', 'layoutPreset', 'offers', 'offerOrder'],
+      // A cor do fundo do tile está gravada nos clipes de fala: trocá-la exige regravar
+      // (edição do roteiro), não só remontar — por isso não é campo de composição no F1.
+      talking_art: [
+        'products',
+        'scenes',
+        'order',
+        'offers',
+        'offerOrder',
+        'layoutPreset',
+        'lowerThirdBlur',
+        'talkBackgroundColor',
+      ],
+      offer_carousel: ['products', 'scenes', 'window', 'talkBackgroundColor', 'lowerThirdBlur'],
+    };
+    const fields = (byFormat[format] ?? []).filter((key) => dto[key] !== undefined);
+    if (fields.length > 0) {
+      throw new UnprocessableEntityException({
+        code: 'COMPOSITION_FIELD_NOT_SUPPORTED',
+        message: `Campo(s) de composição que o formato "${format}" não tem: ${fields.join(', ')}.`,
+        details: { format, fields },
+      });
+    }
+  }
+
+  /** F3: selos/produtos/ordem das cenas (produtos mesclados — campos omitidos preservados). */
+  private sceneComposition(
+    previous: McScript,
+    dto: UpdateCompositionDto,
+    endcard: McScript['endcard'],
+  ): McScript {
+    const known = new Map((previous.products ?? []).map((p) => [p.id as string, p]));
+    const products = (dto.products ?? previous.products ?? []).map((p) =>
+      mergeScriptProduct(p, p.id ? known.get(p.id) : null, () => randomUUID()),
+    );
+    const byId = new Map(dto.scenes?.map((s) => [s.sceneId, s]) ?? []);
+    let scenes = previous.scenes.map((s) => {
+      const patch = byId.get(s.sceneId as string);
+      if (!patch) return { ...s };
+      return {
+        ...s,
+        productRef: patch.productRef === undefined ? s.productRef : patch.productRef,
+        sealCue: patch.sealCue === undefined ? s.sealCue : patch.sealCue,
+        safeArea: patch.safeArea === undefined ? s.safeArea : patch.safeArea,
+      };
+    });
+    if (dto.order) scenes = this.reorderScenes(scenes, dto.order);
+    return {
+      ...previous,
+      version: previous.version + 1,
+      products,
+      scenes: scenes.map((s, idx) => ({ ...s, idx })),
+      endcard,
+    };
+  }
+
+  private reorderScenes(scenes: McScriptScene[], order: string[]): McScriptScene[] {
+    const known = new Set(scenes.map((s) => s.sceneId as string));
+    if (
+      order.length !== scenes.length ||
+      new Set(order).size !== order.length ||
+      order.some((id) => !known.has(id))
+    ) {
+      throw new UnprocessableEntityException({
+        code: 'ORDER_INVALID',
+        message: 'A ordem precisa listar todas as cenas exatamente uma vez.',
+      });
+    }
+    return order.map((id, idx) => ({ ...scenes.find((s) => s.sceneId === id)!, idx }));
+  }
+
+  /**
+   * F2 (6.8): composição das ofertas — foto/badge/unidade/preço anterior,
+   * ordem das ofertas (as falas acompanham: abertura, ofertas na nova ordem,
+   * fechamento — nenhum TTS/clipe refeito), preset e legendas. Nome/preço
+   * atual diferentes do congelado ⇒ 422 OFFER_SPOKEN_FIELDS_CHANGED.
+   */
+  private offerCarouselComposition(
+    previous: McScript,
+    dto: UpdateCompositionDto,
+    options: McProjectOptions,
+    endcard: McScript['endcard'],
+  ): McScript {
+    const offers = carouselOffers(previous).map((o) => ({ ...o }));
+    for (const patch of dto.offers ?? []) {
+      const offer = offers.find((o) => o.id === patch.id);
+      if (!offer) {
+        throw new UnprocessableEntityException({
+          code: 'OFFER_NOT_FOUND',
+          message: `A oferta ${patch.id} não existe neste vídeo.`,
+          details: { offerId: patch.id },
+        });
+      }
+      const spoken: string[] = [];
+      if (patch.name !== undefined && patch.name.trim() !== offer.name.trim()) spoken.push('name');
+      if (
+        patch.price !== undefined &&
+        (carouselPrice(patch.price) ?? patch.price.trim()) !==
+          (carouselPrice(offer.price) ?? offer.price.trim())
+      ) {
+        spoken.push('price');
+      }
+      if (spoken.length > 0) {
+        throw new UnprocessableEntityException({
+          code: 'OFFER_SPOKEN_FIELDS_CHANGED',
+          message:
+            'Nome e preço atual são falados no vídeo — a fala da oferta precisa ser refeita. ' +
+            'Use "atualizar oferta".',
+          details: { offerId: offer.id, fields: spoken, actions: ['update_offer'] },
+        });
+      }
+      if (patch.imageUrl !== undefined) offer.imageUrl = patch.imageUrl;
+      if (patch.badge !== undefined) offer.badge = patch.badge;
+      if (patch.unit !== undefined) offer.unit = patch.unit;
+      if (patch.originalPrice !== undefined) offer.originalPrice = patch.originalPrice;
+    }
+    let scenes = previous.scenes.map((s) => ({ ...s }));
+    if (dto.order) scenes = this.reorderScenes(scenes, dto.order);
+    if (dto.offerOrder) {
+      const ids = offers.map((o) => o.id as string);
+      if (
+        dto.offerOrder.length !== ids.length ||
+        new Set(dto.offerOrder).size !== ids.length ||
+        dto.offerOrder.some((id) => !ids.includes(id))
+      ) {
+        throw new UnprocessableEntityException({
+          code: 'ORDER_INVALID',
+          message: 'A ordem precisa listar todas as ofertas exatamente uma vez.',
+        });
+      }
+      const opening = scenes[0];
+      const closing = scenes[scenes.length - 1];
+      const offerScenes = dto.offerOrder.map((id) => scenes.find((s) => s.productRef === id));
+      if (offerScenes.some((s) => !s)) {
+        throw new UnprocessableEntityException({
+          code: 'ORDER_INVALID',
+          message: 'Toda oferta precisa da sua fala para ser reordenada.',
+        });
+      }
+      scenes = [opening, ...(offerScenes as McScriptScene[]), closing];
+    }
+    return normalizeOfferCarouselScript({
+      ...previous,
+      version: previous.version + 1,
+      offers,
+      products: offers.map((o) => ({ ...o })),
+      scenes: scenes.map((s, idx) => ({ ...s, idx })),
+      endcard,
+      layoutPreset: dto.layoutPreset ?? previous.layoutPreset,
+      captions:
+        dto.captionsEnabled !== undefined
+          ? dto.captionsEnabled
+          : typeof previous.captions === 'boolean'
+            ? previous.captions
+            : options.captionsEnabled,
+    });
   }
 
   /** POST /projects/:id/approve-assembly — aprovação editorial: só montagem, com os clipes existentes. */
@@ -1522,6 +1742,74 @@ export class McQualityService {
   }
 
   // ─────────────────────────────── internos ───────────────────────────────
+
+  /**
+   * Bloqueios do F2 na revisão visual (6.7): falas sem timestamps por palavra
+   * (SPEECH_ALIGNMENT_MISSING, ação `regenerate_tts` por cena) e soma das
+   * falas medidas acima de 30 s (SPEECH_OVER_LENGTH, durações por fala). Sem
+   * aceite em nenhum dos dois — `acceptMissingCaptions`/`acceptSpeechDuration`
+   * não os liberam.
+   */
+  private offerCarouselSpeechProblems(
+    scenes: McScene[],
+    assets: AnimationAsset[],
+  ): Array<{ code: string; sceneId: string; message: string; detail?: Record<string, unknown> }> {
+    const problems: Array<{
+      code: string;
+      sceneId: string;
+      message: string;
+      detail?: Record<string, unknown>;
+    }> = [];
+    const audioOf = (scene: McScene) => assets.find((a) => a.id === scene.audioAssetId) ?? null;
+    const missing = scenes.filter((scene) => {
+      const audio = audioOf(scene);
+      if (!audio?.fileUrl) return false; // AUDIO_MISSING já cobre
+      const alignment = (audio.metadata as { alignment?: ElevenLabsAlignment } | null)?.alignment;
+      return !hasSpeechAlignment(alignment ?? null);
+    });
+    for (const scene of missing) {
+      problems.push({
+        code: 'SPEECH_ALIGNMENT_MISSING',
+        sceneId: scene.scriptSceneId as string,
+        message:
+          `Fala ${scene.idx + 1}: a voz não tem os tempos de cada palavra — sem eles os cards ` +
+          'e as legendas não sincronizam. Refaça a voz desta fala.',
+        detail: {
+          sceneId: scene.scriptSceneId,
+          sceneIds: missing.map((s) => s.scriptSceneId),
+          actions: ['regenerate_tts'],
+        },
+      });
+    }
+    const measured = scenes.map((scene) => ({
+      sceneId: scene.scriptSceneId as string,
+      ms: audioOf(scene)?.durationMs ?? null,
+    }));
+    if (measured.length > 0 && measured.every((m) => m.ms != null)) {
+      const totalS = Number(
+        (measured.reduce((sum, m) => sum + (m.ms as number), 0) / 1000).toFixed(2),
+      );
+      if (totalS > MC_OFFER_CAROUSEL_MAX_SPEECH_S) {
+        problems.push({
+          code: 'SPEECH_OVER_LENGTH',
+          sceneId: measured[0].sceneId,
+          message:
+            `As falas somam ${totalS.toFixed(1)}s e o vídeo cabe em ${MC_OFFER_CAROUSEL_MAX_SPEECH_S}s. ` +
+            'Encurte falas ou remova uma oferta.',
+          detail: {
+            totalS,
+            maxS: MC_OFFER_CAROUSEL_MAX_SPEECH_S,
+            scenes: measured.map((m) => ({
+              sceneId: m.sceneId,
+              measuredS: Number(((m.ms as number) / 1000).toFixed(2)),
+            })),
+            actions: ['shorten_speech', 'remove_offer'],
+          },
+        });
+      }
+    }
+    return problems;
+  }
 
   /** Reserva o preço fechado da fase (ledger próprio da fase/revisão) e devolve o orçamento persistível. */
   private async reservePhase(

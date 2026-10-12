@@ -26,6 +26,8 @@ export const MC_QUEUE_CONCURRENCY: Partial<Record<QueueName, number>> = {
   [QUEUES.MC_POLL]: 10,
   [QUEUES.MC_INGEST]: 2,
   [QUEUES.MC_FFMPEG]: 1,
+  /** Render Remotion do F2 (tarefa 6.5): um navegador headless por vez (CPU da VM). */
+  [QUEUES.MC_RENDER]: 1,
 };
 
 export const MC_QUEUE_EXPIRE_S: Partial<Record<QueueName, number>> = {
@@ -36,6 +38,8 @@ export const MC_QUEUE_EXPIRE_S: Partial<Record<QueueName, number>> = {
   [QUEUES.MC_POLL]: 120,
   [QUEUES.MC_INGEST]: 300,
   [QUEUES.MC_FFMPEG]: 600,
+  /** Render do F2: ~4 min por 30 s de vídeo na concorrência 1 (benchmark local) — teto de 15 min. */
+  [QUEUES.MC_RENDER]: 900,
 };
 
 /**
@@ -56,6 +60,8 @@ export const MC_STEP_QUEUE: Record<McStepType, QueueName> = {
   /** Steps de projeto dos formatos novos (D6): composição e finalização no ffmpeg (gate ResourceGuard). */
   [McStepType.COMPOSE_FFMPEG]: QUEUES.MC_FFMPEG,
   [McStepType.FINALIZE]: QUEUES.MC_FFMPEG,
+  /** Render Remotion do F2 (tarefa 6.5): fila própria com navegador, concorrência 1. */
+  [McStepType.RENDER_REMOTION]: QUEUES.MC_RENDER,
 };
 
 /**

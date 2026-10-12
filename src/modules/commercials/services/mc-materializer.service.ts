@@ -19,7 +19,13 @@ import {
   McSelectedReference,
 } from '../domain/mc-quality';
 import { keyframeReferenceLimit, selectReferences } from '../domain/mc-references';
-import { effectiveScenePrompts } from '../domain/mc-script-v2';
+import {
+  carouselCaptionsOf,
+  carouselLayoutPresetOf,
+  computeRenderRemotionInputsHash,
+} from '../domain/mc-offer-carousel-props';
+import { mcCarouselRendererKind, mcCompositionVersion } from '../domain/mc-render.config';
+import { carouselOffers, effectiveScenePrompts } from '../domain/mc-script-v2';
 import { buildTalkPrompt } from '../domain/mc-talk-prompts';
 import { kitVoiceDelivery } from '../domain/mc-voice-delivery';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
@@ -846,7 +852,65 @@ export class McMaterializerService {
     if (project.format === 'talking_art') {
       return this.ensureTalkingArtProjectStepsV2(manager, project, script, scenes);
     }
+    if (project.format === 'offer_carousel') {
+      return this.ensureOfferCarouselProjectStepsV2(manager, project, script, scenes);
+    }
     return this.ensureSceneAssemblyStepV2(manager, project, script, scenes);
+  }
+
+  /**
+   * F2 (tarefas 6.5/6.7): `render_remotion` (hash das ENTRADAS: clipes por
+   * identidade — asset final ou `pending:<geração>` — e áudios, ofertas,
+   * falas, layout, legendas, tile, cor da janela, marca, silêncio, versão da
+   * composição e renderizador; o processor grava o hash EXATO das props) →
+   * `finalize` (hash do render + canal + trilha + loudness, SEM legendas
+   * queimadas: a composição já as desenha). Mesma cadeia/attempt do F1.
+   */
+  async ensureOfferCarouselProjectStepsV2(
+    manager: EntityManager,
+    project: McProject,
+    script: McScript,
+    scenes: McScene[],
+  ): Promise<McStep> {
+    const options = resolveProjectOptions(project.options);
+    const kit = await manager.findOne(McCharacterKit, { where: { id: project.kitId } });
+    const backgroundColor = (
+      script.talkBackgroundColor?.trim() ||
+      kit?.tileBackgroundColor?.trim() ||
+      '#FFFFFF'
+    ).toUpperCase();
+    const ordered = [...scenes].sort((a, b) => a.idx - b.idx);
+    const renderHash = computeRenderRemotionInputsHash({
+      clips: ordered.map((s) => ({
+        sceneId: s.scriptSceneId as string,
+        finalAssetId: s.finalAssetId ?? `pending:${s.generation}`,
+        audioAssetId: s.audioAssetId ?? null,
+      })),
+      offers: carouselOffers(script),
+      lines: script.lines ?? [],
+      aspectRatio: project.aspectRatio,
+      layoutPreset: carouselLayoutPresetOf(script, project),
+      captions: carouselCaptionsOf(script, options),
+      tileAssetId: kit?.tileAssetId ?? null,
+      characterBackgroundColor: backgroundColor,
+      brandName: script.endcard?.storeName ?? null,
+      gapMs: MC_TALK_GAP_MS,
+      compositionVersion: mcCompositionVersion(),
+      renderer: mcCarouselRendererKind(),
+    });
+    const finalizeHash = computeFinalizeHash({
+      composeHash: renderHash,
+      channel: project.channel ?? null,
+      musicEnabled: options.musicEnabled,
+      // F2: as legendas são da composição (por palavra) — o finalize não queima de novo.
+      captionsEnabled: false,
+      loudness: { ...MC_FINALIZE_LOUDNESS },
+      graphVersion: MC_FINALIZE_GRAPH_VERSION,
+    });
+    return this.upsertProjectChain(manager, project, {
+      [McStepType.RENDER_REMOTION]: renderHash,
+      [McStepType.FINALIZE]: finalizeHash,
+    });
   }
 
   /**
@@ -911,11 +975,23 @@ export class McMaterializerService {
       loudness: { ...MC_FINALIZE_LOUDNESS },
       graphVersion: MC_FINALIZE_GRAPH_VERSION,
     });
-    const chain = projectAssemblySteps(project.format);
-    const hashes: Partial<Record<McStepType, string>> = {
+    return this.upsertProjectChain(manager, project, {
       [McStepType.COMPOSE_FFMPEG]: composeHash,
       [McStepType.FINALIZE]: finalizeHash,
-    };
+    });
+  }
+
+  /**
+   * Cadeia de steps de PROJETO de uma entrega (F1/F2): todos pendentes com o
+   * MESMO `attempt` (o pendente existente ou o próximo), hash atualizado nos
+   * pendentes. Devolve o primeiro da cadeia.
+   */
+  private async upsertProjectChain(
+    manager: EntityManager,
+    project: McProject,
+    hashes: Partial<Record<McStepType, string>>,
+  ): Promise<McStep> {
+    const chain = projectAssemblySteps(project.format);
     // tentativa comum da cadeia: a pendente existente, ou a próxima
     const existing = await manager.find(McStep, {
       where: { projectId: project.id, type: In([...chain]) },

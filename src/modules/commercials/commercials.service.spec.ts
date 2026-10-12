@@ -188,6 +188,38 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
       expect(queue.publish).not.toHaveBeenCalled();
     });
 
+    it('F2 (offer_carousel): 2 ou 7 ofertas → 422 OFFER_SELECTION_INVALID; oferta sem foto → 422 OFFER_IMAGE_REQUIRED; 3 com foto → cria', async () => {
+      process.env.MC_FORMATS = 'offer_carousel';
+      process.env.MC_PIPELINE_V2 = 'all';
+      const offer = (n: number, imageUrl: string | null = `/uploads/p${n}.png`) => ({
+        name: `Produto ${n}`,
+        price: '9,90',
+        imageUrl,
+      });
+      const f2 = { ...dto, format: 'offer_carousel' as const };
+      await expect(
+        service.createProject('u1', { ...f2, products: [offer(1), offer(2)] }),
+      ).rejects.toMatchObject({
+        status: 422,
+        response: { code: 'OFFER_SELECTION_INVALID', details: { min: 3, received: 2 } },
+      });
+      await expect(
+        service.createProject('u1', {
+          ...f2,
+          products: [1, 2, 3, 4, 5, 6, 7].map((n) => offer(n)),
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'OFFER_SELECTION_INVALID', message: expect.stringContaining('30 s') },
+      });
+      await expect(
+        service.createProject('u1', { ...f2, products: [offer(1), offer(2, null), offer(3)] }),
+      ).rejects.toMatchObject({ response: { code: 'OFFER_IMAGE_REQUIRED' } });
+      expect(queue.publish).not.toHaveBeenCalled();
+      await expect(
+        service.createProject('u1', { ...f2, products: [offer(1), offer(2), offer(3)] }),
+      ).resolves.toMatchObject({ format: 'offer_carousel', pipelineVersion: 2 });
+    });
+
     it('admitProjectFormat é reutilizável (createFromArt): devolve v2 para os formatos novos e a coorte para scenes', () => {
       process.env.MC_FORMATS = 'talking_art';
       process.env.MC_PIPELINE_V2 = 'all';

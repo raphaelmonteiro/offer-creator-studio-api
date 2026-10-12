@@ -19,10 +19,14 @@ import {
 } from 'class-validator';
 import { MC_MAX_SCENES, MC_SCENE_MAX_S, MC_SCENE_MIN_S } from '../domain/mc-director';
 import {
+  MC_CAROUSEL_LAYOUT_PRESETS,
   MC_MAX_SEAL_PRODUCTS,
+  MC_OFFER_CAROUSEL_MAX_OFFERS,
   MC_SAFE_AREAS,
   MC_SCENE_TYPES,
   MC_TALKING_ART_MAX_CITED_OFFERS,
+  MC_TALKING_ART_MAX_OFFERS,
+  McCarouselLayoutPreset,
 } from '../domain/mc-types';
 
 /**
@@ -75,6 +79,23 @@ export class ScriptProductV2Dto {
   @Matches(/\/uploads\//, { message: 'imageUrl precisa apontar para um arquivo em /uploads/' })
   @MaxLength(500)
   imageUrl?: string | null;
+
+  /**
+   * Preço anterior ("de", formatado como `price`). Omitido = PRESERVA o
+   * congelado da mesma oferta (`id`); `null` remove.
+   */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Length(1, 20)
+  originalPrice?: string | null;
+
+  /** Selo do card do F2 ("OFERTA", "-18%"). Omitido = preserva; `null` remove. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Length(1, 24)
+  badge?: string | null;
 }
 
 export class ScriptEnvironmentDto {
@@ -214,9 +235,15 @@ export class UpdateScriptV2Dto {
   @Type(() => ScriptSceneV2Dto)
   scenes: ScriptSceneV2Dto[];
 
+  /**
+   * Snapshot de produtos. Omitido PRESERVA o atual; cada produto omitindo um
+   * campo opcional (catálogo, unidade, foto, preço anterior, badge) preserva o
+   * valor congelado do mesmo `id`. Teto da FORMA = 12 (ofertas da arte do F1);
+   * o teto por formato (F3 6, F2 6) é regra do service (422).
+   */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(MC_MAX_SEAL_PRODUCTS)
+  @ArrayMaxSize(MC_TALKING_ART_MAX_OFFERS)
   @ValidateNested({ each: true })
   @Type(() => ScriptProductV2Dto)
   products?: ScriptProductV2Dto[];
@@ -227,6 +254,30 @@ export class UpdateScriptV2Dto {
   @ValidateNested({ each: true })
   @Type(() => ScriptEnvironmentDto)
   environments?: ScriptEnvironmentDto[];
+
+  // ── formato F2 "ofertas em sequência" (tarefa 6.6): omitidos preservam o atual ──
+
+  /**
+   * F2: ofertas congeladas NA ORDEM do vídeo (prevalece sobre `products`, que
+   * vira o espelho). As falas (`lines`) são derivadas das cenas — abertura,
+   * uma por oferta (`productRef`), fechamento.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MC_OFFER_CAROUSEL_MAX_OFFERS)
+  @ValidateNested({ each: true })
+  @Type(() => ScriptProductV2Dto)
+  offers?: ScriptProductV2Dto[];
+
+  /** F2: preset de layout (`character_left` | `character_right` | `character_bottom`). */
+  @IsOptional()
+  @IsIn(MC_CAROUSEL_LAYOUT_PRESETS as readonly string[])
+  layoutPreset?: McCarouselLayoutPreset;
+
+  /** F2: legendas por palavra desenhadas pela composição. */
+  @IsOptional()
+  @IsBoolean()
+  captions?: boolean;
 
   /** Omitir PRESERVA a cartela atual; `null` remove. */
   @IsOptional()
@@ -344,7 +395,63 @@ export class CompositionSceneDto {
   safeArea?: (typeof MC_SAFE_AREAS)[number] | null;
 }
 
-/** PATCH /projects/:id/composition — correção só de composição após a entrega (assembly_only). */
+/**
+ * Oferta do F2 na correção de COMPOSIÇÃO: só foto, badge, unidade e preço
+ * anterior mudam aqui (render + finalize). `name`/`price` são aceitos na forma
+ * mas, se diferentes do congelado, o service recusa com 422
+ * OFFER_SPOKEN_FIELDS_CHANGED (são falados: use PATCH /offers/:offerId).
+ */
+export class CompositionOfferDto {
+  @IsString()
+  @Length(1, 64)
+  id: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/\/uploads\//, { message: 'imageUrl precisa apontar para um arquivo em /uploads/' })
+  @MaxLength(500)
+  imageUrl?: string;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Length(1, 24)
+  badge?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Length(1, 20)
+  unit?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Length(1, 20)
+  originalPrice?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 60)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 20)
+  price?: string;
+}
+
+/**
+ * PATCH /projects/:id/composition — correção só de composição após a entrega
+ * (assembly_only: sem TTS nem clipe novos). FORMAT-AWARE (BUG A):
+ * - `scenes` (F3): selos/produtos/ordem/cartela/trilha/legendas/faixa;
+ * - `talking_art` (F1): `window`, `talkBackgroundColor`, `endcard`,
+ *   `captionsEnabled`, `musicEnabled` → compose_ffmpeg + finalize;
+ * - `offer_carousel` (F2): `layoutPreset`, `captionsEnabled`, `offers` (foto,
+ *   badge, unidade, preço anterior), `offerOrder` (ou `order` das cenas),
+ *   `endcard`, `musicEnabled` → render_remotion + finalize.
+ * Campo de outro formato → 422 COMPOSITION_FIELD_NOT_SUPPORTED.
+ */
 export class UpdateCompositionDto extends RevisionDto {
   @IsOptional()
   @IsArray()
@@ -384,4 +491,95 @@ export class UpdateCompositionDto extends RevisionDto {
   @IsOptional()
   @IsBoolean()
   lowerThirdBlur?: boolean;
+
+  // ── F1 (talking_art) ──
+
+  /** F1: janela do personagem (frações do quadro); área segura/aspecto do tile no service (422). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CharacterWindowDto)
+  window?: CharacterWindowDto;
+
+  /** F1: cor da janela (#RRGGBB); `null` volta à cor do kit. */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'talkBackgroundColor precisa ser #RRGGBB' })
+  talkBackgroundColor?: string | null;
+
+  // ── F2 (offer_carousel) ──
+
+  /** F2: preset de layout da composição. */
+  @IsOptional()
+  @IsIn(MC_CAROUSEL_LAYOUT_PRESETS as readonly string[])
+  layoutPreset?: McCarouselLayoutPreset;
+
+  /** F2: correção visual por oferta (foto, badge, unidade, preço anterior). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MC_OFFER_CAROUSEL_MAX_OFFERS)
+  @ValidateNested({ each: true })
+  @Type(() => CompositionOfferDto)
+  offers?: CompositionOfferDto[];
+
+  /** F2: nova ordem das ofertas (ids) — as falas acompanham; nenhum áudio/clipe é regerado. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MC_OFFER_CAROUSEL_MAX_OFFERS)
+  @IsString({ each: true })
+  offerOrder?: string[];
+}
+
+/**
+ * PATCH /projects/:id/offers/:offerId (F2, tarefa 6.8) — correção de UMA
+ * oferta pelo tipo de mudança: foto/badge/unidade/preço anterior → só
+ * composição (render + finalize); nome ou preço atual → a fala da oferta é
+ * reescrita (proposta do diretor, ou `dialogue` confirmado) e só o TTS/clipe
+ * dela são refeitos na próxima preparação. `dryRun` devolve a proposta sem gravar.
+ */
+export class UpdateOfferDto extends RevisionDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 60)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 20)
+  price?: string;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Length(1, 20)
+  originalPrice?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Length(1, 20)
+  unit?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @Length(1, 24)
+  badge?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/\/uploads\//, { message: 'imageUrl precisa apontar para um arquivo em /uploads/' })
+  @MaxLength(500)
+  imageUrl?: string;
+
+  /** Fala confirmada/editada pelo usuário para a oferta (ausente = a proposta do diretor). */
+  @IsOptional()
+  @IsString()
+  @Length(1, 1000)
+  dialogue?: string;
+
+  /** true = só devolve a proposta de fala, sem gravar nada. */
+  @IsOptional()
+  @IsBoolean()
+  dryRun?: boolean;
 }

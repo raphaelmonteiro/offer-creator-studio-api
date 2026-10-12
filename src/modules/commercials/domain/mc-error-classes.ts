@@ -53,6 +53,13 @@ export const MC_CLIP_MOUTH_STILL_ERROR_CODE = 'clip_mouth_still';
  * quadro clonado até o áudio) e sinaliza a cena para revisão humana.
  */
 export const MC_CLIP_TOO_SHORT_ERROR_CODE = 'clip_too_short';
+/**
+ * Ingest (tarefa 7.2): clipe do tier premium (exceto `logo_as_is`) com o lado
+ * maior < 1080 px antes da composição. Classe `quality` com teto PRÓPRIO
+ * (`MC_QUALITY_CODE_MAX_EXECUTIONS`): uma regeração; depois o clipe é aceito
+ * com `premiumResolutionOk = false` registrado no asset.
+ */
+export const MC_CLIP_LOW_RESOLUTION_ERROR_CODE = 'clip_low_resolution';
 
 /** Todos os códigos da classe `quality`: nova geração no provider até o teto, depois aceite. */
 export const MC_QUALITY_ERROR_CODES: readonly string[] = [
@@ -60,7 +67,30 @@ export const MC_QUALITY_ERROR_CODES: readonly string[] = [
   MC_CLIP_DEFORMED_ERROR_CODE,
   MC_CLIP_MOUTH_STILL_ERROR_CODE,
   MC_CLIP_TOO_SHORT_ERROR_CODE,
+  MC_CLIP_LOW_RESOLUTION_ERROR_CODE,
 ];
+
+/**
+ * Teto por CÓDIGO dentro da classe `quality` (nunca acima do teto da classe):
+ * resolução baixa no premium regera UMA vez (1ª geração + 1 regeração) — o
+ * motor raramente muda de resolução entre execuções, então insistir só gasta.
+ */
+export const MC_QUALITY_CODE_MAX_EXECUTIONS: Readonly<Record<string, number>> = {
+  [MC_CLIP_LOW_RESOLUTION_ERROR_CODE]: 2,
+};
+
+/**
+ * Decisão do ingest para um código `quality`: true = reprova e regera (o
+ * failStep re-enfileira pela política da classe); false = teto do código
+ * atingido, o ingest ACEITA o clipe e registra.
+ */
+export function mcShouldRegenerateQuality(code: string, executionsSoFar: number): boolean {
+  const cap = Math.min(
+    MC_MAX_EXECUTIONS.quality,
+    MC_QUALITY_CODE_MAX_EXECUTIONS[code] ?? MC_MAX_EXECUTIONS.quality,
+  );
+  return executionsSoFar < cap;
+}
 
 /** Backoff dos retries via fila (startAfterSeconds), indexado por nº de execuções já feitas. */
 export const MC_RETRY_BACKOFF_S = [15, 30, 60] as const;

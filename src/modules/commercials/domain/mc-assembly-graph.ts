@@ -69,7 +69,9 @@ export function escapeDrawtextText(text: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
     .replace(/:/g, '\\:')
-    .replace(/%/g, '\\%')
+    // `%` precisa de DUAS barras: o parser do filtergraph consome uma e o drawtext a outra.
+    // Com uma só, o drawtext acusa "Stray %" e o texto inteiro some (ex.: selo "-18%").
+    .replace(/%/g, '\\\\%')
     .replace(/\r?\n/g, ' ');
   return escaped + '\u00a0'.repeat(utf8ExtraBytes(text));
 }

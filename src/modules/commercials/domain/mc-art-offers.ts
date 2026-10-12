@@ -31,6 +31,12 @@ export interface McArtOffer {
   originalPrice: string | null;
   unit: string | null;
   imageUrl: string | null;
+  /**
+   * Selo da oferta na arte (`badgeText`/`offerBadge` do editor), ≤ 24
+   * caracteres — mostrado no card do F2. Ausente quando a arte não tem selo.
+   * Fica FORA do hash do snapshot (projetos anteriores não "mudam").
+   */
+  badge?: string;
 }
 
 export type McArtOffersErrorCode =
@@ -98,6 +104,7 @@ function offerFromProductData(raw: Dict, index: number, seen: Set<string>): McAr
   const price = formatOfferPrice(raw.price);
   if (!name || !price) return null;
   const base = stringOrNull(raw.id) ?? '';
+  const badge = (stringOrNull(raw.badgeText) ?? stringOrNull(raw.offerBadge))?.slice(0, 24);
   return {
     id: uniqueId(base, index, seen),
     catalogId: stringOrNull(raw.catalogId) ?? stringOrNull(raw.productId),
@@ -106,6 +113,7 @@ function offerFromProductData(raw: Dict, index: number, seen: Set<string>): McAr
     originalPrice: formatOfferPrice(raw.originalPrice),
     unit: stringOrNull(raw.unit),
     imageUrl: stringOrNull(raw.imageUrl),
+    ...(badge ? { badge } : {}),
   };
 }
 

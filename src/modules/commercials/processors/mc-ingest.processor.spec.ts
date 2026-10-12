@@ -406,6 +406,8 @@ describe('McIngestProcessor — step talk: conformação ao áudio, inspeção p
   });
 
   it('clipe 200 ms mais curto → último quadro clonado (tpad) até a duração do áudio', async () => {
+    // 720p é o motor econômico (no premium a garantia de 1080 px reprovaria, 7.2)
+    (step.inputSnapshot as Record<string, unknown>).tier = 'economico';
     probes['video.mp4'] = {
       hasVideo: true,
       hasAudio: true,
@@ -511,6 +513,7 @@ describe('McIngestProcessor — step talk: conformação ao áudio, inspeção p
   });
 
   it('motor devolve largura/altura ÍMPAR (721×961) sem desvio de aspecto → filtro de paridade, medidas pares gravadas (L1)', async () => {
+    (step.inputSnapshot as Record<string, unknown>).tier = 'economico'; // 720p: motor econômico
     probes['video.mp4'] = {
       hasVideo: true,
       hasAudio: true,
@@ -620,6 +623,136 @@ describe('McIngestProcessor — step talk: conformação ao áudio, inspeção p
         inspected: false,
         inspection: expect.objectContaining({ verdict: 'não inspecionado', available: false }),
       }),
+    });
+  });
+
+  describe('1080p nativo no premium (tarefa 7.2)', () => {
+    const lowRes = () => {
+      probes['video.mp4'] = {
+        hasVideo: true,
+        hasAudio: true,
+        width: 720,
+        height: 960,
+        durationMs: 6000,
+      };
+      probes['conformed.mp4'] = {
+        hasVideo: true,
+        hasAudio: true,
+        width: 720,
+        height: 960,
+        durationMs: 6000,
+      };
+    };
+
+    it('premium 1080×1440 → premiumResolutionOk = true e resolução registrada no asset', async () => {
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(savedAssets[0]).toMatchObject({
+        metadata: expect.objectContaining({
+          premiumResolutionOk: true,
+          resolution: {
+            width: 1080,
+            height: 1440,
+            longSidePx: 1440,
+            requiredLongSidePx: 1080,
+            ok: true,
+          },
+          engine: expect.objectContaining({ model: KLING_AVATAR_PRO_MODEL }),
+        }),
+      });
+    });
+
+    it('premium 720×960 na 1ª execução → clip_low_resolution (quality), nada publicado nem inspecionado', async () => {
+      lowRes();
+      await processor.process({ stepId: 'st-talk' });
+      expect(savedAssets).toHaveLength(0);
+      expect(inspector.inspect).not.toHaveBeenCalled();
+      expect(pipeline.completeStepAndAdvance).not.toHaveBeenCalled();
+      const err = pipeline.failStep.mock.calls[0][2] as TerminalProviderError;
+      expect(err).toBeInstanceOf(TerminalProviderError);
+      expect(err.code).toBe('clip_low_resolution');
+      expect(classifyMcError(err)).toBe('quality');
+    });
+
+    it('premium 720×960 na 2ª execução (uma regeração) → aceito com premiumResolutionOk = false sinalizado; inspeção roda', async () => {
+      lowRes();
+      step.attempts = 2;
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(inspector.inspect).toHaveBeenCalledTimes(1);
+      expect(savedAssets[0]).toMatchObject({
+        width: 720,
+        height: 960,
+        metadata: expect.objectContaining({
+          premiumResolutionOk: false,
+          resolution: {
+            width: 720,
+            height: 960,
+            longSidePx: 960,
+            requiredLongSidePx: 1080,
+            ok: false,
+            accepted: true,
+            acceptedReason: 'clip_low_resolution',
+            executions: 2,
+          },
+        }),
+      });
+      expect(pipeline.completeStepAndAdvance).toHaveBeenCalledTimes(1);
+    });
+
+    it('logo_as_is no premium → a garantia não se aplica: 720×960 segue sem premiumResolutionOk', async () => {
+      lowRes();
+      (step.inputSnapshot as Record<string, unknown>).identityMode = 'logo_as_is';
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      const metadata = savedAssets[0].metadata as Record<string, unknown>;
+      expect(metadata).not.toHaveProperty('premiumResolutionOk');
+      expect(metadata.resolution).toEqual({
+        width: 720,
+        height: 960,
+        longSidePx: 960,
+        requiredLongSidePx: null,
+        ok: null,
+      });
+    });
+
+    it('snapshot sem identityMode → lê o kit (logo_as_is isenta); econômico nunca exige 1080', async () => {
+      lowRes();
+      kit.identityMode = 'logo_as_is';
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(savedAssets[0].metadata).not.toHaveProperty('premiumResolutionOk');
+
+      savedAssets.length = 0;
+      kit.identityMode = 'generated';
+      (step.inputSnapshot as Record<string, unknown>).tier = 'economico';
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(savedAssets[0].metadata).not.toHaveProperty('premiumResolutionOk');
+    });
+
+    it('OmniHuman fora da config corrente: tarifa vem do motor efetivo gravado no submit (0,16 US$/s)', async () => {
+      step.provider = 'fal-ai/bytedance/omnihuman/v1.5';
+      (step.inputSnapshot as Record<string, unknown>).effectiveEngine = {
+        key: 'premium',
+        model: 'fal-ai/bytedance/omnihuman/v1.5',
+        usdPerSecond: 0.16,
+        maxChunkS: 30,
+      };
+      await processor.process({ stepId: 'st-talk' });
+      expect(savedAssets[0]).toMatchObject({
+        metadata: expect.objectContaining({
+          engine: expect.objectContaining({
+            key: 'premium',
+            model: 'fal-ai/bytedance/omnihuman/v1.5',
+            usdPerSecond: 0.16,
+          }),
+          providerCostUsd: Number((7.4 * 0.16).toFixed(4)),
+        }),
+      });
+      expect(pipeline.completeStepAndAdvance.mock.calls[0][2]).toMatchObject({
+        providerCostUsd: 7.4 * 0.16,
+      });
     });
   });
 

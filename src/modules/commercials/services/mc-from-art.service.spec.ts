@@ -272,6 +272,7 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
         name: 'Arroz Tio João 5kg',
         price: '24,90',
         originalPrice: '29,90',
+        badge: 'OFERTA', // `badgeText` da arte congelado (card do F2, tarefa 6.6)
       },
       expect.objectContaining({ catalogId: ART_CATALOG_B, name: 'Feijão Carioca 1kg' }),
     ]);

@@ -22,14 +22,27 @@ import {
   talkFallbackEngineKey,
 } from './mc-pipeline.config';
 import {
+  assertTalkAudioWithinEngineLimit,
   buildTalkSubmitInput,
   isTalkEngineAvailabilityError,
   isTalkEngineKey,
+  MC_PREMIUM_MIN_LONG_SIDE_PX,
+  OMNIHUMAN_V15_MODEL,
+  omnihumanResolution,
+  premiumResolutionApplies,
+  premiumResolutionOk,
   resolveTalkEngine,
   talkEngineFamily,
+  talkEngineMaxAudioS,
   talkEngineSnapshot,
   talkFallbackEngine,
 } from './mc-talk-engines';
+import {
+  classifyMcError,
+  MC_CLIP_LOW_RESOLUTION_ERROR_CODE,
+  mcShouldRegenerateQuality,
+  MC_CLIP_TEXT_ERROR_CODE,
+} from './mc-error-classes';
 import { buildTalkPrompt, TALK_PROMPT_SUFFIX } from './mc-talk-prompts';
 import { McStepType } from './mc-types';
 
@@ -161,7 +174,8 @@ describe('motores de fala por tier e origem (design D2, tarefa 3.2)', () => {
       expect(talkEngineFamily(KLING_AVATAR_MODEL)).toBe('kling_avatar');
       expect(talkEngineFamily(KLING_AVATAR_PRO_MODEL)).toBe('kling_avatar');
       expect(talkEngineFamily(MINIMAX_H3_LIPSYNC_MODEL)).toBe('minimax_h3');
-      expect(talkEngineFamily('fal-ai/bytedance/omnihuman/v1.5')).toBe('unknown');
+      expect(talkEngineFamily(OMNIHUMAN_V15_MODEL)).toBe('omnihuman');
+      expect(talkEngineFamily('fal-ai/outro/avatar')).toBe('unknown');
     });
 
     it('Kling Avatar pro: {image_url, audio_url, prompt} — mesmo schema do standard', () => {
@@ -300,6 +314,126 @@ describe('motores de fala por tier e origem (design D2, tarefa 3.2)', () => {
       expect(prompt).toMatch(/no captions, no subtitles, no signs/);
       expect(buildTalkPrompt('')).toBe(TALK_PROMPT_SUFFIX);
       expect(buildTalkPrompt(null)).toBe(TALK_PROMPT_SUFFIX);
+    });
+  });
+
+  describe('OmniHuman 1.5 (tarefa 7.1) — adapter, limite por chamada e seleção por config', () => {
+    const ingredients = {
+      imageUrl: 'data:image/png;base64,AAA',
+      audioUrl: 'data:audio/mpeg;base64,BBB',
+      prompt: 'Waves. Static shot.',
+    };
+
+    it('payload: {image_url, audio_url, prompt, resolution: "1080p"} — resolução SEMPRE explícita, sem máscara', () => {
+      const input = buildTalkSubmitInput(OMNIHUMAN_V15_MODEL, ingredients);
+      expect(input).toEqual({
+        image_url: ingredients.imageUrl,
+        audio_url: ingredients.audioUrl,
+        prompt: 'Waves. Static shot.',
+        resolution: '1080p',
+      });
+      expect(Object.keys(input).some((k) => /mask|background|art|logo|price/i.test(k))).toBe(false);
+      // 720p só quando pedido; enum do H3 (768P) ou lixo caem no 1080p
+      expect(
+        buildTalkSubmitInput(OMNIHUMAN_V15_MODEL, { ...ingredients, resolution: '720P' }),
+      ).toMatchObject({ resolution: '720p' });
+      expect(
+        buildTalkSubmitInput(OMNIHUMAN_V15_MODEL, { ...ingredients, resolution: '768P' }),
+      ).toMatchObject({ resolution: '1080p' });
+      // sem prompt: a chave some, a resolução fica
+      expect(buildTalkSubmitInput(OMNIHUMAN_V15_MODEL, { ...ingredients, prompt: '' })).toEqual({
+        image_url: ingredients.imageUrl,
+        audio_url: ingredients.audioUrl,
+        resolution: '1080p',
+      });
+      expect(omnihumanResolution(null)).toBe('1080p');
+    });
+
+    it('limite documentado: 30 s a 1080p, 60 s a 720p; demais motores sem limite publicado (null)', () => {
+      expect(talkEngineMaxAudioS(OMNIHUMAN_V15_MODEL)).toBe(30);
+      expect(talkEngineMaxAudioS(OMNIHUMAN_V15_MODEL, '1080p')).toBe(30);
+      expect(talkEngineMaxAudioS(OMNIHUMAN_V15_MODEL, '720p')).toBe(60);
+      expect(talkEngineMaxAudioS(KLING_AVATAR_PRO_MODEL)).toBeNull();
+      expect(talkEngineMaxAudioS(MINIMAX_H3_LIPSYNC_MODEL)).toBeNull();
+    });
+
+    it('guarda do submit: fala > 30 s no OmniHuman 1080p → validação terminal (audio_too_long); ≤ 30 s, 720p até 60 s ou duração desconhecida passam', () => {
+      expect(() => assertTalkAudioWithinEngineLimit(OMNIHUMAN_V15_MODEL, 30_000)).not.toThrow();
+      let caught: unknown;
+      try {
+        assertTalkAudioWithinEngineLimit(OMNIHUMAN_V15_MODEL, 30_500);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(TerminalProviderError);
+      expect((caught as TerminalProviderError).code).toBe('audio_too_long');
+      expect((caught as Error).message).toMatch(/30\.5s.*30s/);
+      // validação: terminal sem retry, nunca disponibilidade (não dispara fallback)
+      expect(classifyMcError(caught)).toBe('validation');
+      expect(isTalkEngineAvailabilityError(caught)).toBe(false);
+      expect(() =>
+        assertTalkAudioWithinEngineLimit(OMNIHUMAN_V15_MODEL, 45_000, '720p'),
+      ).not.toThrow();
+      expect(() => assertTalkAudioWithinEngineLimit(OMNIHUMAN_V15_MODEL, null)).not.toThrow();
+      expect(() => assertTalkAudioWithinEngineLimit(KLING_AVATAR_MODEL, 90_000)).not.toThrow();
+    });
+
+    it('MC_TALK_ENGINE_PREMIUM=omnihuman|0.16|30 → kit gerado premium usa o OmniHuman (tarifa 0.16, maxChunkS 30); logo_as_is segue no motor de logo', () => {
+      const env = { MC_TALK_ENGINE_PREMIUM: `${OMNIHUMAN_V15_MODEL}|0.16|30` };
+      const premium = talkEngineFor({ tier: 'premium', identityMode: 'generated' }, env);
+      expect(premium).toEqual({
+        key: 'premium',
+        model: OMNIHUMAN_V15_MODEL,
+        usdPerSecond: 0.16,
+        maxChunkS: 30,
+      });
+      expect(talkEngineFamily(premium.model)).toBe('omnihuman');
+      expect(mcUsdPerSecondForModel(OMNIHUMAN_V15_MODEL, env)).toBe(0.16);
+      // o maxChunkS da config é o limite que a aprovação usa (fala de 31 s bloqueia)
+      expect(31 > premium.maxChunkS).toBe(true);
+      expect(premium.maxChunkS).toBeLessThanOrEqual(talkEngineMaxAudioS(premium.model)!);
+      expect(talkEngineFor({ tier: 'premium', identityMode: 'logo_as_is' }, env).model).toBe(
+        MINIMAX_H3_LIPSYNC_MODEL,
+      );
+      // snapshot do step com o OmniHuman (env trocado depois) preserva tarifa/limite gravados
+      expect(
+        resolveTalkEngine(
+          { key: 'premium', model: OMNIHUMAN_V15_MODEL, usdPerSecond: 0.16, maxChunkS: 30 },
+          { tier: 'premium', identityMode: 'generated' },
+          {},
+        ),
+      ).toEqual({ key: 'premium', model: OMNIHUMAN_V15_MODEL, usdPerSecond: 0.16, maxChunkS: 30 });
+    });
+  });
+
+  describe('1080p nativo no premium (tarefa 7.2) — regra pura e política do código quality', () => {
+    it('a garantia vale para premium com identidade gerada; nunca para logo_as_is nem econômico', () => {
+      expect(premiumResolutionApplies({ tier: 'premium', identityMode: 'generated' })).toBe(true);
+      expect(premiumResolutionApplies({ tier: 'premium', identityMode: null })).toBe(true);
+      expect(premiumResolutionApplies({ tier: 'premium', identityMode: 'logo_as_is' })).toBe(false);
+      expect(premiumResolutionApplies({ tier: 'economico', identityMode: 'generated' })).toBe(
+        false,
+      );
+      expect(premiumResolutionApplies({ tier: null, identityMode: 'generated' })).toBe(false);
+    });
+
+    it('lado MAIOR ≥ 1080 px (1080×1440, 1920×1080, 810×1080 passam; 720×960 não; desconhecido não comprova)', () => {
+      expect(MC_PREMIUM_MIN_LONG_SIDE_PX).toBe(1080);
+      expect(premiumResolutionOk(1080, 1440)).toBe(true);
+      expect(premiumResolutionOk(1920, 1080)).toBe(true);
+      expect(premiumResolutionOk(810, 1080)).toBe(true);
+      expect(premiumResolutionOk(720, 960)).toBe(false);
+      expect(premiumResolutionOk(1078, 1078)).toBe(false);
+      expect(premiumResolutionOk(null, 1440)).toBe(false);
+    });
+
+    it('clip_low_resolution é classe quality com UMA regeração (teto 2 execuções); os demais códigos seguem o teto da classe (3)', () => {
+      const err = new TerminalProviderError('baixa', MC_CLIP_LOW_RESOLUTION_ERROR_CODE);
+      expect(classifyMcError(err)).toBe('quality');
+      expect(mcShouldRegenerateQuality(MC_CLIP_LOW_RESOLUTION_ERROR_CODE, 1)).toBe(true);
+      expect(mcShouldRegenerateQuality(MC_CLIP_LOW_RESOLUTION_ERROR_CODE, 2)).toBe(false);
+      expect(mcShouldRegenerateQuality(MC_CLIP_TEXT_ERROR_CODE, 2)).toBe(true);
+      expect(mcShouldRegenerateQuality(MC_CLIP_TEXT_ERROR_CODE, 3)).toBe(false);
     });
   });
 

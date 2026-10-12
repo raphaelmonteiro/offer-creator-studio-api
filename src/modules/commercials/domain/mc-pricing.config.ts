@@ -37,6 +37,8 @@ export const MC_STEP_CREDITS: Record<McStepType, number> = {
   /** Composição e finalização determinísticas (ffmpeg) dos formatos novos — inclusas (0), como o assembly. */
   [McStepType.COMPOSE_FFMPEG]: 0,
   [McStepType.FINALIZE]: 0,
+  /** Render da composição Remotion do F2 — incluso (0) até a calibração (custo é CPU do worker). */
+  [McStepType.RENDER_REMOTION]: 0,
 };
 
 /** Kit do mascote (Ativo de Personagem, 1× por mascote): 30 cr = R$ 3 (§8). */

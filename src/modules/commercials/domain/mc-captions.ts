@@ -52,6 +52,17 @@ function isValidAlignment(alignment: ElevenLabsAlignment | null | undefined): bo
   );
 }
 
+/**
+ * A fala tem timestamps por palavra utilizáveis? (alinhamento válido com ao
+ * menos uma palavra). F2 exige isso para sincronizar cards e legendas
+ * (SPEECH_ALIGNMENT_MISSING, design D8) — sem aceite.
+ */
+export function hasSpeechAlignment(alignment: ElevenLabsAlignment | null | undefined): boolean {
+  return (
+    isValidAlignment(alignment) && alignmentToWords(alignment as ElevenLabsAlignment).length > 0
+  );
+}
+
 /** Caracteres → palavras com janela de tempo (espaços/quebras separam). */
 export function alignmentToWords(alignment: ElevenLabsAlignment): TimedWord[] {
   const words: TimedWord[] = [];

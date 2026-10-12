@@ -335,7 +335,11 @@ export class CommercialsController {
     return this.commercials.findAllProjects(user.id, query);
   }
 
-  /** Inclui `sourceArt` + `sourceArtChanged` (origem reextraída e comparada pelo `snapshotHash`). */
+  /**
+   * Inclui `sourceArt` + `sourceArtChanged` (origem reextraída e comparada pelo
+   * `snapshotHash`) e, no F2, `offersCatalogChanged: [{offerId, catalogId,
+   * frozenPrice, catalogPrice}]` (preço do catálogo mudou depois da criação).
+   */
   @Get('projects/:id')
   async findOneProject(
     @CurrentUser() user: { id: string },

@@ -29,7 +29,7 @@ describe('mc-assembly-graph — grafo puro da montagem (plano §5.1 etapa 6 / §
       expect(escapeDrawtextText('Oferta: R$ 9,90')).toBe('Oferta\\: R$ 9,90');
       // 'Á' = +1 byte UTF-8 → 1 NBSP no fim (contorno do corte do drawtext)
       expect(escapeDrawtextText("D'Água")).toBe("D\\'Água\u00a0");
-      expect(escapeDrawtextText('100%')).toBe('100\\%');
+      expect(escapeDrawtextText('100%')).toBe('100\\\\%');
       expect(escapeDrawtextText('a\\b')).toBe('a\\\\b');
     });
 

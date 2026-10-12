@@ -501,4 +501,57 @@ describe('McFinalizeProcessor — step de projeto finalize (tarefas 4.3/4.5)', (
     expect(ffmpeg.run).not.toHaveBeenCalled();
     expect(pipeline.sendCompletionEmail).not.toHaveBeenCalled();
   });
+
+  it('F2 (offer_carousel): parte do render_remotion da cadeia, NÃO queima legendas (a composição já as desenha) e a timeline inclui a cartela da composição', async () => {
+    project.format = 'offer_carousel';
+    project.channel = 'instagram';
+    composeSteps = [
+      {
+        id: 'render-1',
+        type: McStepType.RENDER_REMOTION,
+        status: McStepStatus.SUCCEEDED,
+        projectRevision: 1,
+        attempt: 1,
+        outputAssetId: 'composed-asset',
+        finishedAt: new Date('2026-10-12T10:00:00Z'),
+      },
+    ];
+    assets[0].metadata = {
+      timeline,
+      endcard: false,
+      tailS: 1.5,
+      captionsRendered: true,
+      windowPx: { x: 65, y: 742, width: 380, height: 506 },
+    };
+    await processor.process({ stepId: 'fin-1' });
+    expect(pipeline.failStep).not.toHaveBeenCalled();
+    const stepQuery = (
+      dataSource.getRepository.mock.results as Array<{ value: { find: jest.Mock } }>
+    )
+      .flatMap((r) => r.value.find.mock.calls)
+      .map(([opts]) => (opts as { where?: { type?: string } })?.where?.type)
+      .filter(Boolean);
+    expect(stepQuery).toContain(McStepType.RENDER_REMOTION);
+    expect(stepQuery).not.toContain(McStepType.COMPOSE_FFMPEG);
+    const graph = graphOf(renderArgs()[0]);
+    expect(graph).not.toContain('drawtext'); // legendas por palavra vêm da composição
+    expect(graph).toContain('loudnorm=I=-14');
+    expect(saved[0]).toMatchObject({
+      metadata: expect.objectContaining({
+        format: 'offer_carousel',
+        captions: 0,
+        captionsMissingSceneIds: [],
+      }),
+    });
+    expect(pipeline.succeedProject).toHaveBeenCalledWith(expect.anything(), 'p1', 'final-asset', {
+      quality: expect.objectContaining({
+        timeline: expect.objectContaining({
+          totalS: 19.9, // 18,4 s de falas + 1,5 s de cartela da composição
+          endcard: null,
+          captionsRequested: true,
+          captionsMissingSceneIds: [],
+        }),
+      }),
+    });
+  });
 });

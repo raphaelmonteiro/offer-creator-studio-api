@@ -420,9 +420,10 @@ function coveredFraction(
  * de saída) entram prontas; preço coberto em ≥ 20% da caixa gera o aviso com
  * os presets alternativos que não cobrem preço. Não bloqueia.
  *
- * TODO(4.7 — detecção): chamar o Gemini visão com a arte composta (sem custo
- * nesta etapa: nenhuma chamada paga foi ligada) e converter as caixas para
- * frações do quadro de saída antes de chamar esta função na revisão.
+ * Detecção: `McWindowPriceService` (Gemini visão sobre a arte de fundo, cache
+ * por arte no `metadata.priceDetections`) converte as caixas da arte para
+ * frações do quadro de saída (`detectionsToOutputFrame`) antes de chamar esta
+ * função — exposta em `GET /commercials/projects/:id/window-warnings`.
  */
 export function windowCoversPriceWarning(
   detections: McArtTextDetection[],

@@ -26,6 +26,11 @@ import {
   planTalkConform,
   TalkConformPlan,
 } from '../domain/mc-talk-conform-graph';
+import {
+  MC_PREMIUM_MIN_LONG_SIDE_PX,
+  premiumResolutionApplies,
+  premiumResolutionOk,
+} from '../domain/mc-talk-engines';
 import { McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
@@ -38,7 +43,12 @@ import {
   ClipInspectionContext,
   McClipInspectorService,
 } from '../services/mc-clip-inspector.service';
-import { MC_CLIP_TOO_SHORT_ERROR_CODE, mcShouldRetry } from '../domain/mc-error-classes';
+import {
+  MC_CLIP_LOW_RESOLUTION_ERROR_CODE,
+  MC_CLIP_TOO_SHORT_ERROR_CODE,
+  mcShouldRegenerateQuality,
+  mcShouldRetry,
+} from '../domain/mc-error-classes';
 
 /** Snapshot do step `talk` que o ingest lê (gravado pelo materializer e completado no submit). */
 interface TalkIngestSnapshot {
@@ -47,8 +57,32 @@ interface TalkIngestSnapshot {
   tileWidth?: number | null;
   tileHeight?: number | null;
   tier?: string | null;
-  engine?: { key?: string; model?: string } | null;
-  effectiveEngine?: { key?: string; model?: string; fallbackFrom?: string } | null;
+  identityMode?: string | null;
+  engine?: { key?: string; model?: string; usdPerSecond?: number } | null;
+  effectiveEngine?: {
+    key?: string;
+    model?: string;
+    usdPerSecond?: number;
+    fallbackFrom?: string;
+  } | null;
+}
+
+/**
+ * Resolução do clipe falado registrada no asset (7.2): medidas do arquivo que
+ * vai à composição (conformado) e, no premium (exceto `logo_as_is`), o
+ * veredito da garantia de 1080 px — `accepted` quando o teto do código
+ * `clip_low_resolution` esgotou e o clipe seguiu assim mesmo.
+ */
+export interface TalkResolutionRecord {
+  width: number | null;
+  height: number | null;
+  longSidePx: number | null;
+  /** 1080 quando a garantia do premium se aplica; null = não se aplica. */
+  requiredLongSidePx: number | null;
+  ok: boolean | null;
+  accepted?: true;
+  acceptedReason?: typeof MC_CLIP_LOW_RESOLUTION_ERROR_CODE;
+  executions?: number;
 }
 
 /** Resultado da conformação do clipe falado ao áudio (D7) — vai ao metadata do asset. */
@@ -90,7 +124,10 @@ interface TalkConformRecord {
  * até o teto; esgotado, aceito com o último quadro clonado e sinalizado para
  * revisão humana), recortado ao aspecto do tile e remuxado com o TTS original
  * (áudio do fornecedor descartado); a inspeção recebe origem/estilo/fundo liso
- * e as janelas de fala do alinhamento.
+ * e as janelas de fala do alinhamento. No tier premium (exceto `logo_as_is`)
+ * o clipe conformado precisa ter lado maior ≥ 1080 px (7.2): abaixo disso,
+ * `clip_low_resolution` com uma regeração e depois aceite sinalizado
+ * (`metadata.premiumResolutionOk = false`).
  */
 @Injectable()
 export class McIngestProcessor {
@@ -151,12 +188,16 @@ export class McIngestProcessor {
       let measured = { width: probe.width, height: probe.height, durationMs: probe.durationMs };
       let conform: TalkConformRecord | null = null;
       let speechWindows: SpeechWindow[] = [];
+      let resolution: TalkResolutionRecord | null = null;
       if (talk) {
         const result = await this.conformTalkClip(step, scene, tempDir, videoPath, probe);
         finalVideoPath = result.path;
         measured = result.measured;
         conform = result.record;
         speechWindows = result.speechWindows;
+        // 7.2: 1080p nativo no premium, conferido no clipe que vai à composição
+        // e ANTES da inspeção (não paga visão por um clipe que será regerado).
+        resolution = await this.checkTalkResolution(step, project, measured);
       }
 
       // Inspeção de qualidade (opção B, 24/09; D11): texto inventado,
@@ -234,12 +275,23 @@ export class McIngestProcessor {
       // Custo real por SEGUNDO de saída do MOTOR que gerou o clipe (D2:
       // tarifa por modelo; cai na tarifa por tipo de step quando o modelo não
       // é reconhecido). Segundos do clipe CRU do provider, antes da conformação.
-      const usdPerSecond = mcUsdPerSecondForModel(step.provider) ?? mcUsdPerSecond(step.type);
+      const snapshot = (step.inputSnapshot ?? null) as TalkIngestSnapshot | null;
+      // Tarifa: config corrente pelo modelo; senão a do motor EFETIVO gravado
+      // no submit (env trocado entre o submit e o ingest não zera nem
+      // subestima o custo de um modelo fora da config, ex.: OmniHuman); senão
+      // a tarifa por tipo de step.
+      const snapshotRate =
+        talk && snapshot?.effectiveEngine?.model === step.provider
+          ? snapshot.effectiveEngine.usdPerSecond
+          : undefined;
+      const usdPerSecond =
+        mcUsdPerSecondForModel(step.provider) ??
+        (typeof snapshotRate === 'number' && snapshotRate >= 0 ? snapshotRate : null) ??
+        mcUsdPerSecond(step.type);
       const providerCostUsd =
         step.provider === 'mock' || probe.durationMs == null
           ? 0
           : (probe.durationMs / 1000) * usdPerSecond;
-      const snapshot = (step.inputSnapshot ?? null) as TalkIngestSnapshot | null;
       const engineRecord = talk
         ? {
             engine: {
@@ -283,6 +335,14 @@ export class McIngestProcessor {
             providerJobId: step.providerJobId,
             providerCostUsd: Number(providerCostUsd.toFixed(4)),
             ...engineRecord,
+            ...(resolution
+              ? {
+                  resolution,
+                  ...(resolution.requiredLongSidePx != null
+                    ? { premiumResolutionOk: resolution.ok === true }
+                    : {}),
+                }
+              : {}),
             ...(conform
               ? {
                   sceneType: 'talk_tile',
@@ -470,6 +530,60 @@ export class McIngestProcessor {
       speechWindows: speechWindowsFromAlignment(
         alignment as Parameters<typeof speechWindowsFromAlignment>[0],
       ),
+    };
+  }
+
+  /**
+   * Garantia de 1080 px do premium (7.2, spec "Tier premium"): projeto
+   * premium com kit que NÃO é `logo_as_is` exige lado maior ≥ 1080 px no
+   * clipe conformado. Abaixo disso: `clip_low_resolution` (classe `quality`,
+   * UMA regeração pelo teto do código); esgotado, aceita e registra
+   * `premiumResolutionOk = false`. Fora do premium só registra as medidas.
+   */
+  private async checkTalkResolution(
+    step: McStep,
+    project: McProject,
+    measured: { width: number | null; height: number | null },
+  ): Promise<TalkResolutionRecord> {
+    const snapshot = (step.inputSnapshot ?? null) as TalkIngestSnapshot | null;
+    const tier = snapshot?.tier ?? project.tier ?? 'economico';
+    let identityMode = snapshot?.identityMode ?? null;
+    if (!identityMode && tier === 'premium') {
+      const kit = await this.dataSource
+        .getRepository(McCharacterKit)
+        .findOneBy({ id: project.kitId });
+      identityMode = kit?.identityMode ?? 'generated';
+    }
+    const { width, height } = measured;
+    const longSidePx = width && height ? Math.max(width, height) : null;
+    if (!premiumResolutionApplies({ tier, identityMode })) {
+      return { width, height, longSidePx, requiredLongSidePx: null, ok: null };
+    }
+    const ok = premiumResolutionOk(width, height);
+    const record: TalkResolutionRecord = {
+      width,
+      height,
+      longSidePx,
+      requiredLongSidePx: MC_PREMIUM_MIN_LONG_SIDE_PX,
+      ok,
+    };
+    if (ok) return record;
+    if (mcShouldRegenerateQuality(MC_CLIP_LOW_RESOLUTION_ERROR_CODE, step.attempts)) {
+      throw new TerminalProviderError(
+        `Clipe premium com ${width ?? '?'}×${height ?? '?'} px (lado maior < ` +
+          `${MC_PREMIUM_MIN_LONG_SIDE_PX}) — regerar`,
+        MC_CLIP_LOW_RESOLUTION_ERROR_CODE,
+      );
+    }
+    this.logger.warn(
+      `Ingest ${step.id}: clipe premium ${width ?? '?'}×${height ?? '?'} abaixo de ` +
+        `${MC_PREMIUM_MIN_LONG_SIDE_PX} px após ${step.attempts} gerações — aceito e sinalizado`,
+    );
+    return {
+      ...record,
+      accepted: true,
+      acceptedReason: MC_CLIP_LOW_RESOLUTION_ERROR_CODE,
+      executions: step.attempts,
     };
   }
 

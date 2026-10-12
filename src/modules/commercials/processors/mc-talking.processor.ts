@@ -25,10 +25,12 @@ import {
 import { buildActionVideoPrompt, buildAvatarVideoPrompt } from '../domain/mc-scene-prompts';
 import { assertStepTransition, McStepStatus } from '../domain/mc-state-machines';
 import {
+  assertTalkAudioWithinEngineLimit,
   buildTalkSubmitInput,
   isTalkEngineAvailabilityError,
   McTalkEffectiveEngine,
   McTalkEngineSnapshot,
+  premiumResolutionApplies,
   resolveTalkEngine,
   talkEngineSnapshot,
   talkFallbackEngine,
@@ -399,7 +401,10 @@ export class McTalkingProcessor {
       .findOneBy({ id: project.kitId });
     const tileAssetId = snapshot.tileAssetId ?? kit?.tileAssetId ?? null;
     const tile = await this.loadAssetBuffer(tileAssetId, 'tile de fala');
-    const audio = await this.loadAssetBuffer(snapshot.audioAssetId ?? scene.audioAssetId, 'áudio');
+    const { buffer: audio, asset: audioAsset } = await this.loadAsset(
+      snapshot.audioAssetId ?? scene.audioAssetId,
+      'áudio',
+    );
     if (audio.length > MC_DATA_URI_MAX_BYTES) {
       throw new TerminalProviderError(
         'Áudio da fala excede o teto de 3,3MB do data URI',
@@ -425,10 +430,16 @@ export class McTalkingProcessor {
       audioUrl: toDataUri(audio, 'audio/mpeg'),
       prompt,
     };
+    // 7.1: limite DOCUMENTADO de áudio por chamada do modelo (OmniHuman: 30 s
+    // a 1080p) checado ANTES de qualquer submit — validação terminal, sem custo.
+    const submitTo = (model: string) => {
+      assertTalkAudioWithinEngineLimit(model, audioAsset.durationMs);
+      return this.fal.submit(model, buildTalkSubmitInput(model, ingredients));
+    };
     let effective: McTalkEffectiveEngine | null = null;
     let result: Awaited<ReturnType<FalQueueClient['submit']>>;
     try {
-      result = await this.fal.submit(chosen.model, buildTalkSubmitInput(chosen.model, ingredients));
+      result = await submitTo(chosen.model);
     } catch (err) {
       const fallback = talkFallbackEngine(chosen, tier);
       if (!fallback || !isTalkEngineAvailabilityError(err)) throw err;
@@ -436,10 +447,7 @@ export class McTalkingProcessor {
         `Motor ${chosen.model} indisponível (${(err as Error).message}) — ` +
           `fallback para o motor do tier (${fallback.model})`,
       );
-      result = await this.fal.submit(
-        fallback.model,
-        buildTalkSubmitInput(fallback.model, ingredients),
-      );
+      result = await submitTo(fallback.model);
       effective = fallback;
     }
     // `engine` = planejado, `effectiveEngine` = submetido (com `fallbackFrom`
@@ -480,6 +488,8 @@ export class McTalkingProcessor {
     const snapshot = (step.inputSnapshot ?? null) as {
       audioAssetId?: string;
       providerDuration?: string;
+      tier?: string | null;
+      identityMode?: string | null;
     } | null;
     let audioPath: string | null = null;
     let durationS = Math.min(15, Math.max(2, scene.durationS || 5));
@@ -505,8 +515,16 @@ export class McTalkingProcessor {
     await fs.mkdir(this.storage.mockJobsAbsDir(), { recursive: true });
     const outPath = this.storage.mockJobAbsPath(jobId);
     const args = ['-y', '-hide_banner', '-loglevel', 'error'];
-    // talk: tile 3:4 (proporção típica do tile do kit); demais: 9:16 da cena
-    const size = talk ? '720x960' : '720x1280';
+    // talk: tile 3:4 (proporção típica do tile do kit); demais: 9:16 da cena.
+    // Premium (exceto logo_as_is) simula o 1080p nativo do motor (7.2) — o
+    // ingest exige lado maior ≥ 1080 px e regeraria um clipe mock de 720p.
+    const premium =
+      talk &&
+      premiumResolutionApplies({
+        tier: snapshot?.tier ?? null,
+        identityMode: snapshot?.identityMode ?? null,
+      });
+    const size = talk ? (premium ? '1080x1440' : '720x960') : '720x1280';
     args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`);
     if (audioPath) {
       args.push('-i', audioPath, '-map', '0:v', '-map', '1:a', '-c:a', 'aac');
@@ -567,6 +585,14 @@ export class McTalkingProcessor {
   }
 
   private async loadAssetBuffer(assetId: string | null, label: string): Promise<Buffer> {
+    return (await this.loadAsset(assetId, label)).buffer;
+  }
+
+  /** Asset + bytes (o `talk` também lê a duração medida do áudio para o limite do motor). */
+  private async loadAsset(
+    assetId: string | null,
+    label: string,
+  ): Promise<{ asset: AnimationAsset; buffer: Buffer }> {
     if (!assetId) {
       throw new TerminalProviderError(
         `Cena sem ${label} pronto para o submit`,
@@ -584,6 +610,6 @@ export class McTalkingProcessor {
         'missing_input_asset',
       );
     }
-    return buffer;
+    return { asset, buffer };
   }
 }

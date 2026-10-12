@@ -10,21 +10,27 @@ import { AnimationAsset } from '../../../shared/media-assets/animation-asset.ent
 import {
   buildDirectorJsonSchema,
   buildDirectorJsonSchemaF1,
+  buildDirectorJsonSchemaF2,
   buildDirectorJsonSchemaV2,
   buildDirectorSystemPrompt,
   buildDirectorSystemPromptF1,
+  buildDirectorSystemPromptF2,
   buildDirectorSystemPromptV2,
   buildEndcard,
   buildMockScript,
   buildMockScriptF1,
+  buildMockScriptF2,
   buildMockScriptV2,
+  buildOfferCarouselScript,
   buildProductsSnapshot,
   buildScriptSeal,
   buildTalkingArtScript,
   DirectorF1Context,
+  DirectorF2Context,
   normalizeDirectorScenes,
   normalizeDirectorScenesV2,
   RawDirectorF1,
+  RawDirectorF2,
   RawDirectorScene,
   RawDirectorSceneV2,
 } from '../domain/mc-director';
@@ -39,6 +45,9 @@ import {
   McStepStatus,
 } from '../domain/mc-state-machines';
 import {
+  isCarouselLayoutPreset,
+  MC_DEFAULT_CAROUSEL_LAYOUT_PRESET,
+  MC_OFFER_CAROUSEL_MAX_OFFERS,
   MC_TALKING_ART_MAX_OFFERS,
   McScript,
   McSealProduct,
@@ -229,6 +238,14 @@ export class McScriptProcessor {
       if (provider === 'openai') return this.generateScriptOpenAiF1(project, ctx);
       throw new Error(`not_implemented: MC_SCRIPT_PROVIDER desconhecido '${provider}'`);
     }
+    // F2 "ofertas em sequência" (tarefa 6.6): abertura + uma fala por oferta
+    // congelada (na ordem) + fechamento, cada uma uma cena `talk_tile`.
+    if (project.format === 'offer_carousel') {
+      const ctx = await this.offerCarouselContext(project, options.products, storeName);
+      if (provider === 'mock') return buildMockScriptF2(ctx, () => randomUUID());
+      if (provider === 'openai') return this.generateScriptOpenAiF2(project, ctx);
+      throw new Error(`not_implemented: MC_SCRIPT_PROVIDER desconhecido '${provider}'`);
+    }
     if (provider === 'mock') {
       // Roteiro MOCK multi-cena — atravessa o pipeline inteiro sem chamar LLM
       // nem gastar um centavo. Legado: 2 faladas + 1 muda; v2: presenter +
@@ -287,6 +304,89 @@ export class McScriptProcessor {
       logoFace: kit?.identityMode === 'logo_as_is' && !!project.logoBox,
       logoBox: project.logoBox ?? null,
     };
+  }
+
+  /**
+   * Contexto do diretor F2: ofertas congeladas na criação (ids estáveis, na
+   * ORDEM escolhida, com preço anterior/unidade/badge/foto/catálogo), limite
+   * do motor por fala (tier × identidade do kit), preset de layout do projeto
+   * (default `character_left`) e legendas (opção do projeto).
+   */
+  private async offerCarouselContext(
+    project: McProject,
+    optionProducts: McSealProduct[],
+    storeName: string | null,
+  ): Promise<DirectorF2Context> {
+    const kit = await this.dataSource
+      .getRepository(McCharacterKit)
+      .findOneBy({ id: project.kitId });
+    const engine = talkEngineFor({
+      tier: project.tier ?? 'economico',
+      identityMode: kit?.identityMode ?? 'generated',
+    });
+    const options = resolveProjectOptions(project.options);
+    return {
+      offers: buildProductsSnapshot(
+        optionProducts,
+        () => randomUUID(),
+        MC_OFFER_CAROUSEL_MAX_OFFERS,
+      ),
+      storeName,
+      maxChunkS: engine.maxChunkS,
+      layoutPreset: isCarouselLayoutPreset(project.layoutPreset)
+        ? project.layoutPreset
+        : MC_DEFAULT_CAROUSEL_LAYOUT_PRESET,
+      captions: options.captionsEnabled,
+    };
+  }
+
+  /**
+   * Diretor F2 real: UMA chamada com json_schema estrito (abertura, exatamente
+   * uma fala por oferta, fechamento). Nome e preço por extenso são conferidos
+   * por oferta (fala que não cita vira a fala determinística) e o orçamento de
+   * 30 s estimados é aplicado em `buildOfferCarouselScript`.
+   */
+  private async generateScriptOpenAiF2(
+    project: McProject,
+    ctx: DirectorF2Context,
+  ): Promise<McScript> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('script_failed: OPENAI_API_KEY ausente');
+    const model = process.env.MC_DIRECTOR_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o';
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.7,
+        response_format: {
+          type: 'json_schema',
+          json_schema: buildDirectorJsonSchemaF2(ctx.offers.length),
+        },
+        messages: [
+          {
+            role: 'system',
+            content: buildDirectorSystemPromptF2({
+              offers: ctx.offers,
+              storeName: ctx.storeName,
+              maxChunkS: ctx.maxChunkS,
+            }),
+          },
+          { role: 'user', content: `Briefing: ${project.briefing}` },
+        ],
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      throw new Error(`script_failed: OpenAI HTTP ${res.status}: ${body?.error?.message ?? ''}`);
+    }
+    const content = body.choices?.[0]?.message?.content;
+    if (!content) throw new Error('script_failed: resposta do OpenAI sem conteúdo');
+    const parsed = JSON.parse(content) as RawDirectorF2;
+    return buildOfferCarouselScript(parsed, ctx, () => randomUUID());
   }
 
   /**

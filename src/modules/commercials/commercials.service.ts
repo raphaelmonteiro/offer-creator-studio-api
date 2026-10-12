@@ -40,6 +40,9 @@ import {
   parseMcFormats,
 } from './domain/mc-pipeline.config';
 import {
+  MC_OFFER_CAROUSEL_MAX_OFFERS,
+  MC_OFFER_CAROUSEL_MAX_SPEECH_S,
+  MC_OFFER_CAROUSEL_MIN_OFFERS,
   MC_DEFAULT_PROJECT_CHANNEL,
   MC_DEFAULT_PROJECT_FORMAT,
   MC_DEFAULT_PROJECT_TIER,
@@ -51,6 +54,7 @@ import {
 } from './domain/mc-types';
 import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
 import { availableProjectActions, McProjectAction } from './domain/mc-project-available-actions';
+import { McClipView, sceneClipView, stepClipView } from './domain/mc-clip-view';
 import { randomUUID } from 'crypto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { McCharacterKit, McKitStatus } from './entities/mc-character-kit.entity';
@@ -101,6 +105,51 @@ export interface McCommercialsConfig {
   formats: Record<McProjectFormat, boolean>;
   render: Record<RenderFormat, RenderFormatAvailability> | null;
 }
+
+/**
+ * Admissão do F2 "ofertas em sequência" (spec video-offer-carousel "Ofertas do
+ * projeto", tarefa 6.6): 3 a 6 ofertas, todas com foto — regra de negócio
+ * (422) ANTES de qualquer gasto; a ponte arte → projeto já recusa na forma
+ * (400) e resolve fotos faltantes pelo catálogo/galeria.
+ */
+export const McCommercialsF2Gate = {
+  assertOffers(products: Array<{ name: string; imageUrl?: string | null }>): void {
+    if (
+      products.length < MC_OFFER_CAROUSEL_MIN_OFFERS ||
+      products.length > MC_OFFER_CAROUSEL_MAX_OFFERS
+    ) {
+      throw new HttpException(
+        {
+          code: 'OFFER_SELECTION_INVALID',
+          message:
+            products.length < MC_OFFER_CAROUSEL_MIN_OFFERS
+              ? `"Ofertas em sequência" pede no mínimo ${MC_OFFER_CAROUSEL_MIN_OFFERS} ofertas.`
+              : `"Ofertas em sequência" aceita no máximo ${MC_OFFER_CAROUSEL_MAX_OFFERS} ofertas ` +
+                `(o vídeo tem até ${MC_OFFER_CAROUSEL_MAX_SPEECH_S} s de fala).`,
+          details: {
+            min: MC_OFFER_CAROUSEL_MIN_OFFERS,
+            max: MC_OFFER_CAROUSEL_MAX_OFFERS,
+            received: products.length,
+          },
+        },
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+    const withoutImage = products.filter((p) => !p.imageUrl?.trim());
+    if (withoutImage.length > 0) {
+      throw new HttpException(
+        {
+          code: 'OFFER_IMAGE_REQUIRED',
+          message:
+            'Toda oferta de "ofertas em sequência" precisa de foto. Escolha uma do catálogo ou ' +
+            `da galeria para: ${withoutImage.map((p) => p.name).join(', ')}`,
+          details: { offers: withoutImage.map((p) => ({ name: p.name })) },
+        },
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+  },
+};
 
 @Injectable()
 export class CommercialsService {
@@ -259,6 +308,7 @@ export class CommercialsService {
       );
     }
     if (dto.backgroundArtAssetId) await this.assertBackgroundArt(userId, dto.backgroundArtAssetId);
+    if (format === 'offer_carousel') McCommercialsF2Gate.assertOffers(dto.products ?? []);
 
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: dto.kitId });
     if (!kit) throw new NotFoundException('Kit não encontrado');
@@ -471,15 +521,20 @@ export class CommercialsService {
       posterUrl: string | null;
       /** v2: URL da última entrega válida preservada em `quality.lastDelivery` (revisão anterior). */
       lastDeliveryUrl: string | null;
+      /** `engine`/`resolution` (7.2): motor e medidas do clipe final da cena. */
       scenes: Array<
-        McScene & {
-          keyframeUrl: string | null;
-          finalUrl: string | null;
-          audioUrl: string | null;
-          videoUrl: string | null;
-        }
+        McScene &
+          McClipView & {
+            keyframeUrl: string | null;
+            finalUrl: string | null;
+            audioUrl: string | null;
+            videoUrl: string | null;
+          }
       >;
-      steps: Array<McStep & { outputUrl: string | null; outputPosterUrl: string | null }>;
+      /** `engine`/`resolution` (7.2): só em steps de motor (talk/lipsync/video); null nos demais. */
+      steps: Array<
+        McStep & McClipView & { outputUrl: string | null; outputPosterUrl: string | null }
+      >;
       /** Ações oferecidas à UI (ex.: `refazer`, `duplicar_como_economico` após falha do motor premium). */
       availableActions: McProjectAction[];
     }
@@ -520,26 +575,54 @@ export class CommercialsService {
         finalUrl: url(s.finalAssetId),
         audioUrl: url(s.audioAssetId),
         videoUrl: url(s.videoAssetId),
+        ...sceneClipView(s.finalAssetId ? urls.get(s.finalAssetId) : null),
       })),
       steps: steps.map((s) => ({
         ...s,
         outputUrl: url(s.outputAssetId),
         outputPosterUrl: (s.outputAssetId && urls.get(s.outputAssetId)?.posterUrl) || null,
+        ...stepClipView(s, s.outputAssetId ? urls.get(s.outputAssetId) : null),
       })),
     };
   }
 
-  /** Resolve fileUrl/posterUrl de um conjunto de asset ids (ignora nulos e ausentes). */
-  private async resolveAssetUrls(
-    ids: Array<string | null | undefined>,
-  ): Promise<Map<string, { fileUrl: string | null; posterUrl: string | null }>> {
+  /**
+   * Resolve fileUrl/posterUrl de um conjunto de asset ids (ignora nulos e
+   * ausentes), com tipo/medidas/metadata para a visão do clipe (motor e
+   * resolução, 7.2).
+   */
+  private async resolveAssetUrls(ids: Array<string | null | undefined>): Promise<
+    Map<
+      string,
+      {
+        fileUrl: string | null;
+        posterUrl: string | null;
+        kind: string;
+        mimeType: string | null;
+        width: number | null;
+        height: number | null;
+        metadata: Record<string, unknown> | null;
+      }
+    >
+  > {
     const unique = [...new Set(ids.filter((v): v is string => !!v))];
     if (unique.length === 0) return new Map();
     const assets = await this.dataSource
       .getRepository(AnimationAsset)
       .find({ where: { id: In(unique) } });
     return new Map(
-      assets.map((a) => [a.id, { fileUrl: a.fileUrl ?? null, posterUrl: a.posterUrl ?? null }]),
+      assets.map((a) => [
+        a.id,
+        {
+          fileUrl: a.fileUrl ?? null,
+          posterUrl: a.posterUrl ?? null,
+          kind: a.kind,
+          mimeType: a.mimeType ?? null,
+          width: a.width ?? null,
+          height: a.height ?? null,
+          metadata: a.metadata ?? null,
+        },
+      ]),
     );
   }
 

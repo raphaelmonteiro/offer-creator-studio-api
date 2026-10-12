@@ -8,6 +8,7 @@ import { ClientsModule } from '../clients/clients.module';
 import { EmailModule } from '../email/email.module';
 import { MascotsModule } from '../mascots/mascots.module';
 import { CommercialsController } from './commercials.controller';
+import { CommercialsInsightsController } from './commercials-insights.controller';
 import { CommercialsService } from './commercials.service';
 import { MC_QUEUE_CONCURRENCY, mcTalkEngines, parseMcFormats } from './domain/mc-pipeline.config';
 import { McCharacterKit } from './entities/mc-character-kit.entity';
@@ -19,9 +20,13 @@ import { McStep } from './entities/mc-step.entity';
 import { McStepType } from './domain/mc-types';
 import { McEnabledGuard } from './mc-enabled.guard';
 import { McEventsController } from './mc-events.controller';
+import { McOfferCarouselController } from './mc-offer-carousel.controller';
 import { McAssemblyProcessor } from './processors/mc-assembly.processor';
 import { McComposeFfmpegProcessor } from './processors/mc-compose-ffmpeg.processor';
 import { McFinalizeProcessor } from './processors/mc-finalize.processor';
+import { McRenderRemotionProcessor } from './processors/mc-render-remotion.processor';
+import { McCarouselRendererService } from './services/mc-carousel-renderer';
+import { McOfferCarouselService } from './services/mc-offer-carousel.service';
 import { McIngestProcessor } from './processors/mc-ingest.processor';
 import { McClipInspectorService } from './services/mc-clip-inspector.service';
 import { McKeyframeProcessor } from './processors/mc-keyframe.processor';
@@ -48,6 +53,8 @@ import { McReconcilerService } from './services/mc-reconciler.service';
 import { McStorageService } from './services/mc-storage.service';
 import { McTranslationService } from './services/mc-translation.service';
 import { McVoicesService } from './services/mc-voices.service';
+import { McAdminCostsService } from './services/mc-admin-costs.service';
+import { McWindowPriceService } from './services/mc-window-price.service';
 
 /**
  * Módulo de Comerciais com Mascote (docs/plano-comerciais-mascote.md §6).
@@ -80,7 +87,14 @@ import { McVoicesService } from './services/mc-voices.service';
     EmailModule,
     TypeOrmModule.forFeature([McCharacterKit, McKitCandidate, McProject, McScene, McStep, McEvent]),
   ],
-  controllers: [CommercialsController, McEventsController],
+  // CommercialsInsightsController: custos por mês (admin, 8.3) e avisos da janela (4.7).
+  controllers: [
+    CommercialsController,
+    McEventsController,
+    CommercialsInsightsController,
+    // F2 (6.8): correção por oferta e "atualizar oferta" a partir do catálogo.
+    McOfferCarouselController,
+  ],
   providers: [
     CommercialsService,
     McKitsService,
@@ -112,8 +126,15 @@ import { McVoicesService } from './services/mc-voices.service';
     // Steps de projeto do F1 (D6): composição e finalização na fila mc.ffmpeg.
     McComposeFfmpegProcessor,
     McFinalizeProcessor,
+    // F2 (tarefas 6.5–6.8): render Remotion (fila mc.render) e correções por oferta.
+    McRenderRemotionProcessor,
+    McCarouselRendererService,
+    McOfferCarouselService,
     McReconcilerService,
     McClipInspectorService,
+    // Leituras derivadas (8.3 / 4.7): custo de fornecedor e aviso de janela sobre preço.
+    McAdminCostsService,
+    McWindowPriceService,
     McEnabledGuard,
   ],
 })
@@ -134,6 +155,7 @@ export class CommercialsModule implements OnModuleInit {
     private readonly sceneComposeProcessor: McSceneComposeProcessor,
     private readonly composeFfmpegProcessor: McComposeFfmpegProcessor,
     private readonly finalizeProcessor: McFinalizeProcessor,
+    private readonly renderRemotionProcessor: McRenderRemotionProcessor,
     private readonly reconciler: McReconcilerService,
     private readonly voices: McVoicesService,
   ) {}
@@ -210,6 +232,14 @@ export class CommercialsModule implements OnModuleInit {
         QUEUES.MC_FFMPEG,
         MC_QUEUE_CONCURRENCY[QUEUES.MC_FFMPEG] ?? 1,
         (d: { stepId: string; type?: string }) => this.dispatchFfmpeg(d),
+        () => this.resourceGuard.admitHeavyJob(),
+      );
+      // mc.render (F2, tarefa 6.5): render Remotion — um navegador por vez, gate
+      // do ResourceGuard (CPU/memória), expiração própria (MC_QUEUE_EXPIRE_S).
+      await this.queue.subscribe(
+        QUEUES.MC_RENDER,
+        MC_QUEUE_CONCURRENCY[QUEUES.MC_RENDER] ?? 1,
+        (d: { stepId: string }) => this.renderRemotionProcessor.process(d),
         () => this.resourceGuard.admitHeavyJob(),
       );
       // Watchdog de steps órfãos (domain/mc-watchdog.ts): repõe jobs de steps

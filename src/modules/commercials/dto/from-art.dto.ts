@@ -137,6 +137,15 @@ export class CreateProjectFromArtDto {
   @IsUUID()
   kitId?: string;
 
+  /**
+   * Preset de layout da composição. F2: `character_left` (default) |
+   * `character_right` | `character_bottom` (o roteiro F2 o congela).
+   */
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  layoutPreset?: string;
+
   /** Caixa do logo derivada do layout pela ponte (D9b camada a) — usada como está, sem detecção. */
   @IsOptional()
   @ValidateNested()

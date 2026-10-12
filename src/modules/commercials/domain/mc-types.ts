@@ -29,6 +29,13 @@ export enum McStepType {
    */
   COMPOSE_FFMPEG = 'compose_ffmpeg',
   FINALIZE = 'finalize',
+  /**
+   * Step de PROJETO do F2 "ofertas em sequência" (tarefa 6.5, D3/D6): renderiza
+   * a composição Remotion `OfferCarousel` (cards + personagem + legendas por
+   * palavra) a partir das falas conformadas — fila própria `mc.render`
+   * (concorrência 1, expiração 900 s) — e entrega o vídeo COMPOSTO ao `finalize`.
+   */
+  RENDER_REMOTION = 'render_remotion',
 }
 
 /**
@@ -214,6 +221,11 @@ export interface McSealProduct {
    * Ausente/null = oferta sem preço anterior.
    */
   originalPrice?: string | null;
+  /**
+   * Selo curto da oferta ("OFERTA", "-18%", "LEVE 6 PAGUE 5") quando a arte o
+   * traz (F2: badge do card). Ausente/null = sem badge. Nunca falado.
+   */
+  badge?: string | null;
 }
 
 /**
@@ -257,6 +269,47 @@ export const MC_TALKING_ART_MAX_OFFERS = 12;
 /** O diretor divide a narração em até 3 falas (D6) — cada uma vira uma cena `talk_tile`. */
 export const MC_TALKING_ART_MAX_SCENES = 3;
 
+// ─────────────── F2 "ofertas em sequência" (change video-formatos-personagem, tarefa 6.6) ───────────────
+
+/** Limites do F2 (spec video-offer-carousel "Ofertas do projeto" / "Uma fala por oferta"). */
+export const MC_OFFER_CAROUSEL_MIN_OFFERS = 3;
+export const MC_OFFER_CAROUSEL_MAX_OFFERS = 6;
+/** Teto da SOMA das falas medidas pelo TTS (s) — acima bloqueia com SPEECH_OVER_LENGTH, sem aceite. */
+export const MC_OFFER_CAROUSEL_MAX_SPEECH_S = 30;
+
+/**
+ * Presets de layout do F2 (os mesmos da composição `OfferCarousel` do pacote
+ * `@chroma/video-templates`): personagem numa faixa lateral (esquerda/direita)
+ * ou embaixo; os cards ocupam o resto da área segura.
+ */
+export const MC_CAROUSEL_LAYOUT_PRESETS = [
+  'character_left',
+  'character_right',
+  'character_bottom',
+] as const;
+export type McCarouselLayoutPreset = (typeof MC_CAROUSEL_LAYOUT_PRESETS)[number];
+export const MC_DEFAULT_CAROUSEL_LAYOUT_PRESET: McCarouselLayoutPreset = 'character_left';
+
+export function isCarouselLayoutPreset(value: unknown): value is McCarouselLayoutPreset {
+  return (MC_CAROUSEL_LAYOUT_PRESETS as readonly unknown[]).includes(value);
+}
+
+/** Papel de uma fala no roteiro F2: abertura, uma por oferta (na ordem) e fechamento. */
+export const MC_CAROUSEL_LINE_KINDS = ['opening', 'offer', 'closing'] as const;
+export type McCarouselLineKind = (typeof MC_CAROUSEL_LINE_KINDS)[number];
+
+/**
+ * Fala do roteiro F2: ÍNDICE editorial da cena `talk_tile` de mesma identidade
+ * (`sceneId`). O texto falado vive em `scenes[].dialogue` (fonte única); aqui
+ * ficam só o papel e a oferta vinculada (`offerRef` = id em `offers[]`, igual
+ * ao `productRef` da cena; null na abertura e no fechamento).
+ */
+export interface McCarouselLine {
+  sceneId: string;
+  kind: McCarouselLineKind;
+  offerRef: string | null;
+}
+
 export interface McScript {
   /** Versão editorial histórica (incrementa a cada edição), independente do schema. */
   version: number;
@@ -290,6 +343,19 @@ export interface McScript {
    * fala e ela entra no hash do `talk`. Ausente = `tileBackgroundColor` do kit.
    */
   talkBackgroundColor?: string | null;
+  /**
+   * F2 (tarefa 6.6): ofertas CONGELADAS na ordem do vídeo (3 a 6, cada uma com
+   * foto) — nome, preço, preço anterior, unidade, badge, foto e `catalogId`.
+   * `products[]` é sempre o ESPELHO desta lista (mesmos ids e ordem) para que
+   * validação, cotação e moderação continuem lendo `products`.
+   */
+  offers?: McSealProduct[];
+  /** F2: abertura, uma fala por oferta (na ordem de `offers`) e fechamento — uma cena `talk_tile` cada. */
+  lines?: McCarouselLine[];
+  /** F2: preset de layout da composição (default `character_left`). */
+  layoutPreset?: McCarouselLayoutPreset;
+  /** F2: legendas por palavra renderizadas pela composição (o `finalize` não queima de novo). */
+  captions?: boolean;
 }
 
 /**

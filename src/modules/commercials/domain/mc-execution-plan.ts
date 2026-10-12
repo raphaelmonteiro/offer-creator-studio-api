@@ -123,14 +123,15 @@ export function planSteps(plan: McScenePlan): McStepType[] {
  * personagem, D6), na ordem de execução depois do último final de cena:
  * - scenes (F3): `assembly` (montagem 720p, selos/legendas/trilha);
  * - talking_art (F1): `compose_ffmpeg` (arte + janela) → `finalize`;
- * - offer_carousel (F2): `render_remotion` (tarefa 6.5, ainda não existe) → `finalize`.
+ * - offer_carousel (F2): `render_remotion` (composição Remotion, fila mc.render) → `finalize`
+ *   (sem legendas queimadas: a composição já as desenha por palavra).
  * Cada um depende do anterior; o primeiro depende de todas as cenas prontas.
  * Fonte única para scheduler, materializer, cotação e transição assembling.
  */
 export const MC_PROJECT_ASSEMBLY_STEPS: Record<McProjectFormat, readonly McStepType[]> = {
   scenes: [McStepType.ASSEMBLY],
   talking_art: [McStepType.COMPOSE_FFMPEG, McStepType.FINALIZE],
-  offer_carousel: [McStepType.FINALIZE],
+  offer_carousel: [McStepType.RENDER_REMOTION, McStepType.FINALIZE],
 };
 
 export function projectAssemblySteps(
@@ -139,11 +140,12 @@ export function projectAssemblySteps(
   return MC_PROJECT_ASSEMBLY_STEPS[format ?? 'scenes'] ?? MC_PROJECT_ASSEMBLY_STEPS.scenes;
 }
 
-/** Step de projeto da fase assembly (sceneId null): assembly, compose_ffmpeg ou finalize. */
+/** Step de projeto da fase assembly (sceneId null): assembly, compose_ffmpeg, render_remotion ou finalize. */
 export function isProjectAssemblyStep(type: McStepType): boolean {
   return (
     type === McStepType.ASSEMBLY ||
     type === McStepType.COMPOSE_FFMPEG ||
+    type === McStepType.RENDER_REMOTION ||
     type === McStepType.FINALIZE
   );
 }

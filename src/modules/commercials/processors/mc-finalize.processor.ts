@@ -109,7 +109,10 @@ export class McFinalizeProcessor {
     const tempDir = await this.ffmpeg.createTempDir('mc-finalize-');
     let delivered = false;
     try {
-      const composed = await this.composedAssetFor(step);
+      // F2 (tarefa 6.7): a entrada é o render da composição Remotion, que JÁ
+      // desenha as legendas por palavra e a cartela — o finalize não queima legendas.
+      const carousel = project.format === 'offer_carousel';
+      const composed = await this.composedAssetFor(step, carousel);
       const sourcePath = composed.fileUrl ? this.storage.absoluteFromUrl(composed.fileUrl) : null;
       if (!sourcePath) {
         throw new TerminalProviderError('Vídeo composto fora do bucket', 'composed_missing');
@@ -126,6 +129,9 @@ export class McFinalizeProcessor {
         endcard?: boolean;
         version?: number;
         windowPx?: WindowPx | null;
+        /** F2: segundos depois da última fala (cartela da composição). */
+        tailS?: number;
+        captionsRendered?: boolean;
       };
       const timeline: ComposedTimeline = meta.timeline ?? { totalS: 0, scenes: [] };
       const options = resolveProjectOptions(project.options);
@@ -133,7 +139,11 @@ export class McFinalizeProcessor {
         sourceProbe.durationMs ?? composed.durationMs ?? Math.round(timeline.totalS * 1000);
 
       // entradas: timestamps do TTS por cena → legendas + janelas de fala; trilha
-      const speech = await this.speechInputs(project.id, timeline, options.captionsEnabled);
+      const speech = await this.speechInputs(
+        project.id,
+        timeline,
+        options.captionsEnabled && !carousel,
+      );
       const musicPath = options.musicEnabled
         ? await this.resolveSoundtrack(project, durationMs / 1000, tempDir)
         : null;
@@ -250,7 +260,11 @@ export class McFinalizeProcessor {
       const renderedTimeline: McRenderedTimeline = {
         revision: project.revision,
         version,
-        totalS: meta.endcard ? Number((lastEnd + ENDCARD_DURATION_S).toFixed(3)) : lastEnd,
+        totalS: carousel
+          ? Number((lastEnd + Math.max(0, meta.tailS ?? 0)).toFixed(3))
+          : meta.endcard
+            ? Number((lastEnd + ENDCARD_DURATION_S).toFixed(3))
+            : lastEnd,
         scenes: timeline.scenes.map((s) => ({
           sceneId: s.sceneId,
           idx: s.idx,
@@ -262,7 +276,7 @@ export class McFinalizeProcessor {
         endcard: meta.endcard
           ? { startS: lastEnd, endS: Number((lastEnd + ENDCARD_DURATION_S).toFixed(3)) }
           : null,
-        captionsRequested: options.captionsEnabled,
+        captionsRequested: carousel ? meta.captionsRendered === true : options.captionsEnabled,
         captionsMissingSceneIds: speech.captionsMissingSceneIds,
         seals: [],
         renderedAt: new Date().toISOString(),
@@ -452,14 +466,15 @@ export class McFinalizeProcessor {
 
   /**
    * Vídeo composto da MESMA cadeia (revisão + attempt do finalize): o
-   * `compose_ffmpeg` concluído mais recente com asset. Sem ele não há o que
-   * finalizar (erro terminal, nunca uma entrega de outra revisão).
+   * `compose_ffmpeg` (F1) ou `render_remotion` (F2) concluído mais recente com
+   * asset. Sem ele não há o que finalizar (erro terminal, nunca uma entrega de
+   * outra revisão).
    */
-  private async composedAssetFor(step: McStep): Promise<AnimationAsset> {
+  private async composedAssetFor(step: McStep, carousel = false): Promise<AnimationAsset> {
     const composeSteps = await this.dataSource.getRepository(McStep).find({
       where: {
         projectId: step.projectId,
-        type: McStepType.COMPOSE_FFMPEG,
+        type: carousel ? McStepType.RENDER_REMOTION : McStepType.COMPOSE_FFMPEG,
         status: McStepStatus.SUCCEEDED,
       },
       order: { finishedAt: 'DESC' },
