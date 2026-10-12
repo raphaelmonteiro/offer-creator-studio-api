@@ -117,6 +117,19 @@ export class CommercialsController {
     }
   }
 
+  // ───────────────────────────── configuração ─────────────────────────────
+
+  /**
+   * Formatos habilitados neste ambiente (`MC_FORMATS` + executor v2) e a
+   * disponibilidade de render por formato do último preflight do worker
+   * (`null` enquanto desconhecida). A UI usa para não oferecer o que a
+   * criação recusaria com 422 FORMAT_NOT_ENABLED/RENDER_UNAVAILABLE.
+   */
+  @Get('config')
+  getConfig() {
+    return this.commercials.getConfig();
+  }
+
   // ───────────────────────────── kits (plano §4) ─────────────────────────────
 
   /** Fluxo real: valida mascote + direitos, modera a imagem e dispara a geração das referências. */

@@ -13,7 +13,11 @@ import { AnimationAsset } from '../../shared/media-assets/animation-asset.entity
 import { MediaAssetsService } from '../../shared/media-assets/media-assets.service';
 import { MC_EVENTS_CHANNEL } from '../../shared/events/animation-events.service';
 import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queue.service';
-import { renderMissingFor } from '../../shared/ffmpeg/render-preflight';
+import {
+  RenderFormat,
+  RenderFormatAvailability,
+  renderMissingFor,
+} from '../../shared/ffmpeg/render-preflight';
 import { SystemSettingsService } from '../../shared/settings/system-settings.service';
 import {
   WORKER_HEARTBEAT_KEY,
@@ -29,7 +33,12 @@ import {
   McStepStatus,
 } from './domain/mc-state-machines';
 import { assertAspectSupportedForFormat } from './domain/mc-composition.config';
-import { assertFormatEnabled, assertPipelineV2ForFormat } from './domain/mc-pipeline.config';
+import {
+  assertFormatEnabled,
+  assertPipelineV2ForFormat,
+  isPipelineV2RequiredSatisfied,
+  parseMcFormats,
+} from './domain/mc-pipeline.config';
 import {
   MC_DEFAULT_PROJECT_CHANNEL,
   MC_DEFAULT_PROJECT_FORMAT,
@@ -82,6 +91,16 @@ export function pipelineVersionForNewProject(
  * e checada a cada enqueue via SystemSettingsService.get (cache de 10s).
  */
 export const MC_PAUSED_KEY = 'mc_paused';
+
+/**
+ * `GET /commercials/config`: o que o front pode oferecer ANTES de criar —
+ * formatos admitidos neste ambiente e a disponibilidade de render por formato
+ * segundo o último preflight do worker (`null` = worker ainda sem preflight).
+ */
+export interface McCommercialsConfig {
+  formats: Record<McProjectFormat, boolean>;
+  render: Record<RenderFormat, RenderFormatAvailability> | null;
+}
 
 @Injectable()
 export class CommercialsService {
@@ -162,6 +181,34 @@ export class CommercialsService {
       },
       HttpStatus.UNPROCESSABLE_ENTITY,
     );
+  }
+
+  /**
+   * Configuração pública do módulo para a UI (spec "Gate por formato"): um
+   * formato novo está habilitado quando está em `MC_FORMATS` E o executor v2
+   * está em `all` (senão a criação responderia FORMAT_NOT_ENABLED ou
+   * PIPELINE_V2_REQUIRED); `scenes` sempre. `render` espelha
+   * `worker.render.formats` do heartbeat FRESCO — heartbeat ausente ou
+   * ilegível vira `null` (desconhecido; os gates não bloqueiam nesse caso).
+   */
+  async getConfig(env: NodeJS.ProcessEnv = process.env): Promise<McCommercialsConfig> {
+    const enabled = parseMcFormats(env);
+    const admitted = (format: McProjectFormat) =>
+      enabled.includes(format) && isPipelineV2RequiredSatisfied(format, env);
+    let heartbeat: WorkerHeartbeat | null = null;
+    try {
+      heartbeat = await this.settings.getFresh<WorkerHeartbeat>(WORKER_HEARTBEAT_KEY);
+    } catch {
+      heartbeat = null;
+    }
+    return {
+      formats: {
+        scenes: true,
+        talking_art: admitted('talking_art'),
+        offer_carousel: admitted('offer_carousel'),
+      },
+      render: heartbeat?.render?.formats ?? null,
+    };
   }
 
   /**
