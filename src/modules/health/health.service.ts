@@ -11,8 +11,14 @@ import {
 /** Worker "saudável" = batimento há menos de 60s (4× o intervalo de 15s). */
 export const WORKER_HEARTBEAT_STALE_MS = 60_000;
 
-/** Recorte do preflight de render exposto no health (sem a lista bruta de checagens). */
-export type HealthRenderStatus = Pick<RenderPreflight, 'checkedAt' | 'versions' | 'formats'>;
+/**
+ * Recorte do preflight de render exposto no health público: disponibilidade
+ * por formato, motivo do que falta, versões dos binários. Fica de fora a lista
+ * bruta de checagens e o caminho da fonte no disco (o health não tem auth).
+ */
+export type HealthRenderStatus = Pick<RenderPreflight, 'checkedAt' | 'formats' | 'details'> & {
+  versions: Partial<Record<'ffmpeg' | 'ffprobe' | 'browser', string>>;
+};
 
 @Injectable()
 export class HealthService {
@@ -76,7 +82,12 @@ export class HealthService {
       const render = heartbeat?.render
         ? {
             checkedAt: heartbeat.render.checkedAt,
-            versions: heartbeat.render.versions,
+            versions: {
+              ffmpeg: heartbeat.render.versions?.ffmpeg,
+              ffprobe: heartbeat.render.versions?.ffprobe,
+              browser: heartbeat.render.versions?.browser,
+            },
+            details: heartbeat.render.details ?? {},
             formats: heartbeat.render.formats,
           }
         : null;

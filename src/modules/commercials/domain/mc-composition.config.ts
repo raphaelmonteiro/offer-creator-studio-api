@@ -1,11 +1,22 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
+import { RENDER_FORMATS, RenderFormat } from '../../../shared/ffmpeg/render-preflight';
 import {
   isScenesAspectRatio,
   MC_ASPECT_RATIOS,
+  MC_PROJECT_FORMATS,
   MC_SCENES_ASPECT_RATIOS,
   McAspectRatio,
   McProjectFormat,
 } from './mc-types';
+
+/**
+ * `RENDER_FORMATS` (shared, preflight) é um espelho de `MC_PROJECT_FORMATS`
+ * (a fronteira do ESLint proíbe shared → commercials). As duas atribuições
+ * abaixo são checagens de compilação: se um lado ganhar um formato que o outro
+ * não conhece, o tsc falha aqui em vez de o gate de render "falhar aberto".
+ */
+export const RENDER_FORMATS_IN_SYNC: readonly McProjectFormat[] = RENDER_FORMATS;
+export const MC_PROJECT_FORMATS_IN_SYNC: readonly RenderFormat[] = MC_PROJECT_FORMATS;
 
 /**
  * Resolução de saída dos formatos NOVOS (change video-formatos-personagem,

@@ -39,7 +39,7 @@ describe('MC_FORMATS (admissão por formato)', () => {
       expect(http.getStatus()).toBe(422);
       expect(http.getResponse()).toMatchObject({
         code: 'FORMAT_NOT_ENABLED',
-        details: { format: 'talking_art', enabled: ['offer_carousel'] },
+        details: { format: 'talking_art' },
       });
     }
   });

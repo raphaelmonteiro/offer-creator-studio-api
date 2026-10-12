@@ -47,6 +47,8 @@ export interface RenderFormatAvailability {
 export interface RenderPreflight {
   checkedAt: string; // ISO-8601
   versions: Partial<Record<RenderRequirementId, string>>;
+  /** Motivo de cada requisito que falhou (ex.: fonts → "DejaVu Sans não encontrada (…)"). */
+  details: Partial<Record<RenderRequirementId, string>>;
   checks: RenderRequirementCheck[];
   formats: Record<RenderFormat, RenderFormatAvailability>;
 }
@@ -58,16 +60,18 @@ export function summarizeRenderPreflight(
 ): RenderPreflight {
   const okById = new Map<RenderRequirementId, boolean>();
   const versions: Partial<Record<RenderRequirementId, string>> = {};
+  const details: Partial<Record<RenderRequirementId, string>> = {};
   for (const check of checks) {
     okById.set(check.id, check.ok);
     if (check.ok && check.version) versions[check.id] = check.version;
+    if (!check.ok) details[check.id] = check.detail ?? 'faltando';
   }
   const formats = {} as Record<RenderFormat, RenderFormatAvailability>;
   for (const format of RENDER_FORMATS) {
     const missing = RENDER_REQUIREMENTS[format].filter((id) => okById.get(id) !== true);
     formats[format] = { available: missing.length === 0, missing };
   }
-  return { checkedAt, versions, checks, formats };
+  return { checkedAt, versions, details, checks, formats };
 }
 
 /**

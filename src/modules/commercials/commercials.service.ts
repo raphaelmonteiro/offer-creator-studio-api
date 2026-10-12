@@ -110,7 +110,12 @@ export class CommercialsService {
         message:
           `O worker não tem o necessário para renderizar o formato "${format}": ` +
           missing.join(', '),
-        details: { format, missing, checkedAt: heartbeat?.render?.checkedAt ?? null },
+        details: {
+          format,
+          missing,
+          details: heartbeat?.render?.details ?? {},
+          checkedAt: heartbeat?.render?.checkedAt ?? null,
+        },
       },
       HttpStatus.UNPROCESSABLE_ENTITY,
     );
@@ -145,8 +150,10 @@ export class CommercialsService {
     assertAspectSupportedForFormat(format, aspectRatio);
 
     // Preflight de render (design D14): recusa antes de qualquer gasto quando o
-    // worker publicou que falta requisito do formato.
-    await this.assertRenderAvailable(format);
+    // worker publicou que falta requisito do formato. O formato de cenas (F3)
+    // NÃO é gated — "F3 não muda nesta change" (proposal); o health continua
+    // informando o estado dele.
+    if (format !== MC_DEFAULT_PROJECT_FORMAT) await this.assertRenderAvailable(format);
 
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: dto.kitId });
     if (!kit) throw new NotFoundException('Kit não encontrado');

@@ -76,7 +76,8 @@ MC_FORMATS                    # formatos novos admitidos (talking_art, offer_car
 MC_TALK_ENGINE_ECONOMICO / _PREMIUM / _LOGO
                               # "modelo fal | US$/s | máx. s por chamada" — motor de fala por tier e origem
 GEMINI_IMAGE_MODEL_REFS       # modelo das referências do kit (default GEMINI_IMAGE_MODEL)
-MC_RENDER_BROWSER             # navegador do render Remotion (só offer_carousel)
+MC_RENDER_BROWSER             # navegador do render Remotion (só offer_carousel); vazio = formato indisponível
+MC_RENDER_FONT_FILE           # dica só para o preflight (DejaVuSans.ttf fora dos caminhos usuais); o drawtext usa o fontconfig
 FAL_API_KEY / ELEVENLABS_API_KEY / GEMINI_API_KEY
                               # pipeline real (vídeo, TTS, imagens)
 FFMPEG_PATH / FFPROBE_PATH    # binários do ffmpeg (worker); o preflight do worker reporta no /v1/health

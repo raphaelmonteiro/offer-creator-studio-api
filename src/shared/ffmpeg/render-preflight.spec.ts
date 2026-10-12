@@ -45,6 +45,8 @@ describe('preflight de render por formato', () => {
     const p = summarizeRenderPreflight([ok('ffmpeg'), ok('ffprobe'), missing('fonts')], at);
     expect(p.formats.talking_art.missing).toEqual(['fonts']);
     expect(p.formats.offer_carousel.missing).toEqual(['fonts', 'browser']); // browser nem checado
+    // o motivo (ex.: nome da fonte) acompanha o requisito que falhou
+    expect(p.details).toEqual({ fonts: 'fonts: não encontrado' });
   });
 
   it('tudo presente → todos disponíveis', () => {

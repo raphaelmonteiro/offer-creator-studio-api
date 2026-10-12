@@ -52,10 +52,16 @@ export class VoiceCatalogController {
    */
   @Get()
   async findAll(@CurrentUser() user: { id: string }) {
-    const voices = await this.dataSource.getRepository(VoiceCatalogEntry).find({
+    const repo = this.dataSource.getRepository(VoiceCatalogEntry);
+    const voices = await repo.find({
       where: applyVoiceVisibility({}, user.id),
       order: { sort: 'ASC', name: 'ASC' },
     });
-    return voices.length > 0 ? voices : DEFAULT_VOICES;
+    if (voices.length > 0) return voices;
+    // As vozes padrão só cobrem o catálogo VAZIO (seed/sync ainda não rodou).
+    // Catálogo com linhas e nenhuma visível para este usuário é um estado
+    // normal do predicado de tenant: devolve lista vazia, nunca ids fora do catálogo.
+    const total = await repo.count();
+    return total === 0 ? DEFAULT_VOICES : [];
   }
 }

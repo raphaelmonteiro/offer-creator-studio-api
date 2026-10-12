@@ -74,13 +74,15 @@ describe('VoiceCatalogController — vozes visíveis por tenant (D10)', () => {
   };
 
   let find: jest.Mock;
+  let count: jest.Mock;
   let controller: VoiceCatalogController;
 
   beforeEach(() => {
     find = jest.fn(async ({ where }: { where: unknown }) =>
       catalog.filter((r) => matches(r, where)),
     );
-    const dataSource = { getRepository: jest.fn(() => ({ find })) };
+    count = jest.fn(async () => catalog.length);
+    const dataSource = { getRepository: jest.fn(() => ({ find, count })) };
     controller = new VoiceCatalogController(dataSource as unknown as DataSource);
   });
 
@@ -120,9 +122,17 @@ describe('VoiceCatalogController — vozes visíveis por tenant (D10)', () => {
     });
   });
 
-  it('catálogo sem voz visível → vozes padrão (seed ainda não rodou)', async () => {
+  it('catálogo VAZIO → vozes padrão (seed ainda não rodou)', async () => {
     find.mockResolvedValueOnce([]);
+    count.mockResolvedValueOnce(0);
     const out = (await controller.findAll({ id: 'u9' })) as Array<{ id: string }>;
     expect(out.map((v) => v.id)).toEqual(['default-1', 'default-2', 'default-3']);
+  });
+
+  it('catálogo com linhas mas nenhuma visível para o usuário → lista vazia, nunca ids fora do catálogo', async () => {
+    find.mockResolvedValueOnce([]);
+    count.mockResolvedValueOnce(7);
+    const out = (await controller.findAll({ id: 'u9' })) as Array<{ id: string }>;
+    expect(out).toEqual([]);
   });
 });

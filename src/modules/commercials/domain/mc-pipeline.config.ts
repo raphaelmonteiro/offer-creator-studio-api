@@ -187,7 +187,8 @@ export function assertFormatEnabled(
     {
       code: 'FORMAT_NOT_ENABLED',
       message: `O formato de vídeo "${format}" não está habilitado neste ambiente`,
-      details: { format, enabled: parseMcFormats(env) },
+      // só o formato pedido: a lista completa de MC_FORMATS é configuração do operador
+      details: { format },
     },
     HttpStatus.UNPROCESSABLE_ENTITY,
   );

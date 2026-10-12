@@ -80,7 +80,9 @@ describe('HealthService — preflight de render por formato (design D14)', () =>
     expect(data.worker.healthy).toBe(true);
     expect(data.worker.render).toEqual({
       checkedAt: '2026-10-12T00:00:00.000Z',
-      versions: render.versions,
+      // sem o caminho da fonte: o health é público
+      versions: { ffmpeg: '6.1.2', ffprobe: '6.1.2' },
+      details: { browser: 'MC_RENDER_BROWSER não definido' },
       formats: {
         scenes: { available: true, missing: [] },
         talking_art: { available: true, missing: [] },

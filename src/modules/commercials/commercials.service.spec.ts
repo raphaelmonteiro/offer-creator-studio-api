@@ -143,12 +143,16 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
     at: new Date().toISOString(),
     pid: 1,
     render: summarizeRenderPreflight(
-      checks.map((c) => ({ ...c, version: c.ok ? c.id : null })) as never,
+      checks.map((c) => ({
+        ...c,
+        version: c.ok ? c.id : null,
+        detail: c.ok ? undefined : `${c.id}: não encontrado`,
+      })) as never,
       '2026-10-12T00:00:00.000Z',
     ),
   });
 
-  it('worker sem ffmpeg → 422 RENDER_UNAVAILABLE antes de qualquer criação ou gasto', async () => {
+  it('worker sem ffmpeg → 422 RENDER_UNAVAILABLE para os formatos novos, com o motivo', async () => {
     settings.getFresh.mockResolvedValue(
       heartbeatWith([
         { id: 'ffmpeg', ok: false },
@@ -156,18 +160,32 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
         { id: 'fonts', ok: true },
       ]),
     );
-    const promise = service.createProject('u1', dto);
+    const promise = service.assertRenderAvailable('talking_art');
     await expect(promise).rejects.toThrow(HttpException);
     await promise.catch((err: HttpException) => {
       expect(err.getStatus()).toBe(422);
       expect(err.getResponse()).toMatchObject({
         code: 'RENDER_UNAVAILABLE',
-        details: { format: 'scenes', missing: ['ffmpeg'] },
+        details: {
+          format: 'talking_art',
+          missing: ['ffmpeg'],
+          details: { ffmpeg: 'ffmpeg: não encontrado' },
+        },
       });
     });
     expect(settings.getFresh).toHaveBeenCalledWith(WORKER_HEARTBEAT_KEY);
-    expect(dataSource.transaction).not.toHaveBeenCalled();
-    expect(queue.publish).not.toHaveBeenCalled();
+  });
+
+  it('o formato de cenas (F3) NÃO é gated pelo preflight: cria mesmo sem ffmpeg no worker', async () => {
+    settings.getFresh.mockResolvedValue(
+      heartbeatWith([
+        { id: 'ffmpeg', ok: false },
+        { id: 'ffprobe', ok: true },
+        { id: 'fonts', ok: true },
+      ]),
+    );
+    await expect(service.createProject('u1', dto)).resolves.toBeDefined();
+    expect(queue.publish).toHaveBeenCalledTimes(1);
   });
 
   it('só o navegador ausente não bloqueia o formato de cenas', async () => {
