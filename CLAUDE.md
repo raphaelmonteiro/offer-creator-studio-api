@@ -528,7 +528,8 @@ Executor v2 (`pipelineVersion = 2`) para projetos novos com `MC_PIPELINE_V2=all`
 **Kit do personagem**: origem `mascot` ou `logo` (logo vira `mascots.kind = 'logo'`), estilo `cartoon_2d |
 3d_render | realistic`, rodadas de candidatos de mascotização (`mc_kit_candidates`), "usar o logo como está"
 (`identityMode = logo_as_is`), gate de boca (visão; `MOUTH_NOT_LEGIBLE`, `MOUTH_GATE_UNDECIDED` +
-`acceptMouthRisk`) e tile com alfa (recorte do rosto ≥ 60%, 1:1–3:4, ≥ 720 px) usado pelos motores de fala.
+`acceptMouthRisk`) e tile com alfa (recorte do rosto ≥ 60%, 1:1–3:4, ≥ 720 px; rosto mais largo que 5:3 fica
+abaixo de 60% com `tile.faceBelowMinimum` e aviso, sem bloquear) usado pelos motores de fala.
 
 **Motor de fala** por tier (`economico | premium`) e origem: `MC_TALK_ENGINE_*` (Kling Avatar v2 std/pro,
 OmniHuman 1.5, MiniMax H3 Max Lip Sync para `logo_as_is`), sempre audio-driven com o TTS ElevenLabs; o clipe é
