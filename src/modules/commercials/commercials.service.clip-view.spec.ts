@@ -73,6 +73,16 @@ describe('CommercialsService.findOneProject — motor e resolução do clipe (7.
         engine: { key: 'premium', model: PRO, usdPerSecond: 0.115 },
         tier: 'premium',
         premiumResolutionOk: true,
+        inspected: false,
+        inspection: {
+          available: false,
+          verdict: 'não inspecionado',
+          mouthCheck: 'skipped',
+          flagged: false,
+          reasons: [],
+          accepted: false,
+          executions: 1,
+        },
       },
     },
     {
@@ -118,6 +128,19 @@ describe('CommercialsService.findOneProject — motor e resolução do clipe (7.
       resolution: { width: 1080, height: 1440, premiumResolutionOk: true },
     });
     expect(view.scenes[1]).toMatchObject({ id: 'sc2', engine: null, resolution: null });
+  });
+
+  it('cena expõe o veredito da inspeção do clipe (3.7): "não inspecionado" chega à revisão', async () => {
+    const view = await service().findOneProject('u1', 'p1');
+    expect(view.scenes[0].inspection).toEqual({
+      verdict: 'não inspecionado',
+      inspected: false,
+      mouthCheck: 'skipped',
+      accepted: false,
+      reasons: [],
+      executions: 1,
+    });
+    expect(view.scenes[1].inspection).toBeNull();
   });
 
   it('steps: talk concluído lê o asset; talk em voo lê o motor efetivo; tts fica sem motor', async () => {

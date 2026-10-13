@@ -54,7 +54,13 @@ import {
 } from './domain/mc-types';
 import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
 import { availableProjectActions, McProjectAction } from './domain/mc-project-available-actions';
-import { McClipView, sceneClipView, stepClipView } from './domain/mc-clip-view';
+import {
+  clipInspectionView,
+  McClipInspectionView,
+  McClipView,
+  sceneClipView,
+  stepClipView,
+} from './domain/mc-clip-view';
 import { randomUUID } from 'crypto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { McCharacterKit, McKitStatus } from './entities/mc-character-kit.entity';
@@ -522,7 +528,10 @@ export class CommercialsService {
       posterUrl: string | null;
       /** v2: URL da última entrega válida preservada em `quality.lastDelivery` (revisão anterior). */
       lastDeliveryUrl: string | null;
-      /** `engine`/`resolution` (7.2): motor e medidas do clipe final da cena. */
+      /**
+       * `engine`/`resolution` (7.2): motor e medidas do clipe final da cena;
+       * `inspection` (3.7): veredito da inspeção do clipe para a revisão sinalizar.
+       */
       scenes: Array<
         McScene &
           McClipView & {
@@ -530,6 +539,7 @@ export class CommercialsService {
             finalUrl: string | null;
             audioUrl: string | null;
             videoUrl: string | null;
+            inspection: McClipInspectionView | null;
           }
       >;
       /** `engine`/`resolution` (7.2): só em steps de motor (talk/lipsync/video); null nos demais. */
@@ -577,6 +587,7 @@ export class CommercialsService {
         audioUrl: url(s.audioAssetId),
         videoUrl: url(s.videoAssetId),
         ...sceneClipView(s.finalAssetId ? urls.get(s.finalAssetId) : null),
+        inspection: clipInspectionView(s.finalAssetId ? urls.get(s.finalAssetId) : null),
       })),
       steps: steps.map((s) => ({
         ...s,

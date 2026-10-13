@@ -1,4 +1,4 @@
-import { sceneClipView, stepClipView } from './mc-clip-view';
+import { clipInspectionView, sceneClipView, stepClipView } from './mc-clip-view';
 import { McStepType } from './mc-types';
 
 describe('visão do clipe — motor e resolução por cena/step (tarefa 7.2)', () => {
@@ -89,5 +89,96 @@ describe('visão do clipe — motor e resolução por cena/step (tarefa 7.2)', (
         },
       ),
     ).toEqual({ engine: null, resolution: null });
+  });
+});
+
+describe('visão do clipe — veredito da inspeção por cena (tarefa 3.7, D11)', () => {
+  const clip = (metadata: Record<string, unknown>) => ({
+    kind: 'scene_synced',
+    width: 1080,
+    height: 1440,
+    metadata,
+  });
+
+  it('inspeção indisponível → "não inspecionado" (a revisão sinaliza a cena)', () => {
+    expect(
+      clipInspectionView(
+        clip({
+          inspected: false,
+          inspection: {
+            available: false,
+            verdict: 'não inspecionado',
+            mouthCheck: 'skipped',
+            flagged: false,
+            reasons: [],
+            accepted: false,
+            executions: 1,
+            description: 'MC_CLIP_TEXT_CHECK=off',
+          },
+        }),
+      ),
+    ).toEqual({
+      verdict: 'não inspecionado',
+      inspected: false,
+      mouthCheck: 'skipped',
+      accepted: false,
+      reasons: [],
+      executions: 1,
+    });
+  });
+
+  it('sem alinhamento de fala: inspecionado, boca "skipped" (não verificada)', () => {
+    expect(
+      clipInspectionView(
+        clip({
+          inspected: true,
+          inspection: {
+            available: true,
+            verdict: 'ok',
+            mouthCheck: 'skipped',
+            reasons: [],
+            accepted: false,
+            executions: 1,
+          },
+        }),
+      ),
+    ).toMatchObject({ verdict: 'ok', inspected: true, mouthCheck: 'skipped', accepted: false });
+  });
+
+  it('reprovado e aceito no teto: motivos e gerações executadas', () => {
+    expect(
+      clipInspectionView(
+        clip({
+          inspected: true,
+          inspection: {
+            available: true,
+            verdict: 'reprovado',
+            mouthCheck: 'still',
+            reasons: ['mouth_still', 'desconhecido'],
+            flagged: true,
+            accepted: true,
+            executions: 3,
+          },
+        }),
+      ),
+    ).toEqual({
+      verdict: 'reprovado',
+      inspected: true,
+      mouthCheck: 'still',
+      accepted: true,
+      reasons: ['mouth_still'],
+      executions: 3,
+    });
+  });
+
+  it('clipe sem inspeção gravada (mock/legado) ou asset que não é clipe → null', () => {
+    expect(clipInspectionView(clip({ provider: 'mock' }))).toBeNull();
+    expect(clipInspectionView(null)).toBeNull();
+    expect(
+      clipInspectionView({
+        kind: 'keyframe',
+        metadata: { inspected: false, inspection: { available: false } },
+      }),
+    ).toBeNull();
   });
 });

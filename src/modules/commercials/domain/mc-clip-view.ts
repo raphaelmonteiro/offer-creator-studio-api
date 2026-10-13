@@ -108,3 +108,68 @@ export function stepClipView(
     modelOf(snapshot.engine);
   return { engine, resolution: fromAsset.resolution };
 }
+
+/**
+ * Veredito da inspeção do clipe na visão da CENA (D11, tarefa 3.7): a revisão
+ * sinaliza "não inspecionado", "boca não verificada" e o clipe reprovado que
+ * foi aceito no teto de gerações. Lido de `metadata.inspected`/`metadata.inspection`,
+ * gravados pelo ingest; null quando o clipe não passou pela inspeção (mock,
+ * legado, asset que não é clipe).
+ */
+export type McClipInspectionVerdict = 'ok' | 'reprovado' | 'não inspecionado';
+export type McClipInspectionMouthCheck = 'checked' | 'skipped' | 'still';
+export type McClipInspectionReason = 'text' | 'deformation' | 'mouth_still';
+
+export interface McClipInspectionView {
+  verdict: McClipInspectionVerdict;
+  /** false = inspeção indisponível ou desligada: clipe aceito sem inspeção. */
+  inspected: boolean;
+  /** `skipped` = boca não verificada (fala sem alinhamento por palavra). */
+  mouthCheck: McClipInspectionMouthCheck;
+  /** true = clipe reprovado e aceito porque as gerações chegaram ao limite. */
+  accepted: boolean;
+  reasons: McClipInspectionReason[];
+  /** Gerações executadas até o aceite (null quando não gravado). */
+  executions: number | null;
+}
+
+const INSPECTION_MOUTH_CHECKS: readonly string[] = ['checked', 'skipped', 'still'];
+const INSPECTION_REASONS: readonly string[] = ['text', 'deformation', 'mouth_still'];
+
+export function clipInspectionView(
+  asset: McClipAssetLike | null | undefined,
+): McClipInspectionView | null {
+  if (!isClipAsset(asset)) return null;
+  const metadata = asset.metadata ?? {};
+  const raw = metadata.inspection;
+  if (!raw || typeof raw !== 'object') return null;
+  const inspection = raw as Record<string, unknown>;
+  const inspected =
+    metadata.inspected !== false &&
+    inspection.available !== false &&
+    inspection.verdict !== 'não inspecionado';
+  const verdict: McClipInspectionVerdict = !inspected
+    ? 'não inspecionado'
+    : inspection.verdict === 'reprovado'
+      ? 'reprovado'
+      : 'ok';
+  const mouthCheck: McClipInspectionMouthCheck = INSPECTION_MOUTH_CHECKS.includes(
+    inspection.mouthCheck as string,
+  )
+    ? (inspection.mouthCheck as McClipInspectionMouthCheck)
+    : 'skipped';
+  const reasons = Array.isArray(inspection.reasons)
+    ? (inspection.reasons.filter(
+        (reason) => typeof reason === 'string' && INSPECTION_REASONS.includes(reason),
+      ) as McClipInspectionReason[])
+    : [];
+  const executions = inspection.executions;
+  return {
+    verdict,
+    inspected,
+    mouthCheck,
+    accepted: inspected && inspection.accepted === true,
+    reasons,
+    executions: typeof executions === 'number' && Number.isFinite(executions) ? executions : null,
+  };
+}
