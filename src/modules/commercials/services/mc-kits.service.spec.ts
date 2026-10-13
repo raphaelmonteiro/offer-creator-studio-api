@@ -686,7 +686,11 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
           service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
         ).rejects.toMatchObject({
           status: 422,
-          response: { code: 'MOUTH_GATE_UNDECIDED' },
+          response: {
+            code: 'MOUTH_GATE_UNDECIDED',
+            // spec "Resultado incerto": "aceitar o risco" e "gerar variante com boca"
+            details: expect.objectContaining({ actions: ['accept_mouth_risk', 'mouth_variant'] }),
+          },
         });
         expect(transitions.casTransition).not.toHaveBeenCalled();
 

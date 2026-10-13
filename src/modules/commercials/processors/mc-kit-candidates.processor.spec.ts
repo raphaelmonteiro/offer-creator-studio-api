@@ -29,7 +29,12 @@ const passed: McMouthVerdict = {
 };
 
 describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4)', () => {
+  // sharp real (candidatos mock 768×960 com texto): sob a suíte inteira em
+  // paralelo, um teste pode passar dos 5 s padrão do jest — e o processor
+  // abandonado pelo timeout continuaria rodando durante o teste seguinte.
+  jest.setTimeout(60_000);
   const originalProvider = process.env.MC_KIT_PROVIDER;
+  const originalStyleRefsDir = process.env.MC_KIT_STYLE_REFS_DIR;
   let tmpDir: string;
   let assetSeq: number;
   let kitRepo: { findOneBy: jest.Mock };
@@ -86,6 +91,7 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
 
   beforeEach(() => {
     delete process.env.MC_KIT_PROVIDER;
+    delete process.env.MC_KIT_STYLE_REFS_DIR;
     assetSeq = 0;
     kitRepo = { findOneBy: jest.fn().mockResolvedValue({ ...kit }) };
     candidateRepo = {
@@ -100,15 +106,23 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       softDelete: jest.fn().mockResolvedValue(undefined),
     };
     manager = { insert: jest.fn(), update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    // Repositórios e manager DESTE teste presos na closure (não nas variáveis
+    // `let` reatribuídas a cada beforeEach): uma execução que sobre de um teste
+    // anterior nunca escreve nos mocks do teste seguinte.
+    const repos = new Map<unknown, unknown>([
+      [McCharacterKit, kitRepo],
+      [McKitCandidate, candidateRepo],
+      [AnimationAsset, assetRepo],
+    ]);
+    const txManager = manager;
     dataSource = {
       getRepository: jest.fn((entity: unknown) => {
-        if (entity === McCharacterKit) return kitRepo;
-        if (entity === McKitCandidate) return candidateRepo;
-        if (entity === AnimationAsset) return assetRepo;
-        throw new Error('repo inesperado');
+        const repo = repos.get(entity);
+        if (!repo) throw new Error('repo inesperado');
+        return repo;
       }),
       transaction: jest.fn((cb: (m: EntityManager) => Promise<unknown>) =>
-        cb(manager as unknown as EntityManager),
+        cb(txManager as unknown as EntityManager),
       ),
     };
     transitions = {
@@ -142,6 +156,8 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
   afterEach(() => {
     if (originalProvider === undefined) delete process.env.MC_KIT_PROVIDER;
     else process.env.MC_KIT_PROVIDER = originalProvider;
+    if (originalStyleRefsDir === undefined) delete process.env.MC_KIT_STYLE_REFS_DIR;
+    else process.env.MC_KIT_STYLE_REFS_DIR = originalStyleRefsDir;
   });
 
   it('provider mock: 4 candidatos sintéticos gravados, linhas preenchidas, kit generating → candidates', async () => {
@@ -223,6 +239,39 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       { candidateRoundId: 'round-1' },
       { sql: '"candidateRoundId" = :roundId', params: { roundId: 'round-1' } },
     );
+  });
+
+  it('gemini com MC_KIT_STYLE_REFS_DIR: referências de estilo do estilo do kit vão DEPOIS do logo (D4, opcionais)', async () => {
+    process.env.MC_KIT_PROVIDER = 'gemini';
+    const refsDir = path.join(tmpDir, 'style-refs');
+    await fs.mkdir(refsDir, { recursive: true });
+    const solid = (r: number, g: number, b: number) =>
+      sharp({ create: { width: 8, height: 8, channels: 3, background: { r, g, b } } })
+        .png()
+        .toBuffer();
+    const refOne = await solid(0, 255, 0);
+    const refTwo = await solid(0, 0, 255);
+    await fs.writeFile(path.join(refsDir, '3d_render-1.png'), refOne);
+    await fs.writeFile(path.join(refsDir, '3d_render-2.png'), refTwo);
+    await fs.writeFile(path.join(refsDir, 'cartoon_2d-1.png'), await solid(9, 9, 9)); // outro estilo
+    process.env.MC_KIT_STYLE_REFS_DIR = refsDir;
+    gemini.generateImageWithModel.mockResolvedValue({
+      image: Buffer.from('img'),
+      model: 'nano-banana-pro-preview',
+    });
+
+    await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+
+    const logo = await fs.readFile(path.join(tmpDir, 'mascots', 'logo.png'));
+    expect(gemini.generateImageWithModel).toHaveBeenCalledTimes(4);
+    for (const [call] of gemini.generateImageWithModel.mock.calls as Array<
+      [{ referenceImages: Buffer[] }]
+    >) {
+      expect(call.referenceImages).toEqual([logo, refOne, refTwo]);
+    }
+    expect(assetRepo.save.mock.calls[0][0]).toMatchObject({
+      metadata: expect.objectContaining({ styleReferences: 2 }),
+    });
   });
 
   describe('rodada sem nenhum candidato', () => {

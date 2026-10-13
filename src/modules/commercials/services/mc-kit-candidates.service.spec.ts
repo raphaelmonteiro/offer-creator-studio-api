@@ -250,6 +250,35 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
         path.join(dir, '3d_render-3.jpg'),
       ]);
     });
+
+    it('prompt da rodada anuncia as referências de estilo só quando a pasta tem imagens do estilo do kit', async () => {
+      const original = process.env.MC_KIT_STYLE_REFS_DIR;
+      const dir = path.join(tmpDir, 'style-refs-prompt');
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, '3d_render-1.png'), Buffer.from('x'));
+      await fs.writeFile(path.join(dir, '3d_render-2.webp'), Buffer.from('x'));
+      try {
+        delete process.env.MC_KIT_STYLE_REFS_DIR;
+        await service.openRound(manager as unknown as EntityManager, logoKit, {
+          kind: 'mascotization',
+        });
+        const without = manager.insert.mock.calls[0][1] as Array<{ prompt: string }>;
+        for (const row of without) expect(row.prompt).not.toMatch(/style reference/);
+
+        process.env.MC_KIT_STYLE_REFS_DIR = dir;
+        await service.openRound(manager as unknown as EntityManager, logoKit, {
+          kind: 'mascotization',
+        });
+        const withRefs = manager.insert.mock.calls[1][1] as Array<{ prompt: string }>;
+        for (const row of withRefs) {
+          expect(row.prompt).toContain('derived from the logo in the first reference image');
+          expect(row.prompt).toContain('The next 2 images are style references only');
+        }
+      } finally {
+        if (original === undefined) delete process.env.MC_KIT_STYLE_REFS_DIR;
+        else process.env.MC_KIT_STYLE_REFS_DIR = original;
+      }
+    });
   });
 
   describe('startRound — nova rodada com ajustes', () => {
