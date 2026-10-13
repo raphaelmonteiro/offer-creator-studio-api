@@ -148,19 +148,25 @@ describe('McKitTileService — tile do personagem na aprovação (D1)', () => {
     expect(result.backgroundColor).toBe('#4F86C6');
   });
 
-  it('logo como está: recorte dos pixels ORIGINAIS, alfa preservado, fundo = cor dominante (logo transparente)', async () => {
+  it('logo como está: recorte dos pixels ORIGINAIS, alfa preservado, fundo = cor de marca do kit (logo transparente)', async () => {
     const identity = await writePng(
       'logo.png',
       '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">' +
         '<rect x="100" y="80" width="400" height="240" fill="#FF0000"/></svg>',
     );
-    const logoKit = { ...kit, identityMode: 'logo_as_is' } as McCharacterKit;
+    // kit de logo sem cor pedida: a criação grava o cinza claro padrão
+    const logoKit = {
+      ...kit,
+      identityMode: 'logo_as_is',
+      tileBackgroundColor: '#E5E7EB',
+    } as McCharacterKit;
     const result = await service.build(logoKit, identity, null);
 
     // 600×400 → 1:1 (600×600) → escala 1,2 → 720×720
     expect([result.width, result.height]).toEqual([720, 720]);
     expect(result.hasAlpha).toBe(true);
-    expect(result.backgroundColor).toBe('#FF0000');
+    // nunca a cor dominante do próprio logo (#FF0000): o tile achatado apagaria a marca
+    expect(result.backgroundColor).toBe('#E5E7EB');
     expect(result.faceFraction).toBeNull();
 
     const file = await fs.readFile(path.join(tmpDir, result.url.replace(/^\/uploads\//, '')));
@@ -177,6 +183,26 @@ describe('McKitTileService — tile do personagem na aprovação (D1)', () => {
     expect(assetRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'kit_tile', origin: 'imported', hasAlpha: true }),
     );
+  });
+
+  it('logo como está e transparente: a cor de marca PEDIDA na criação vira o fundo; kit sem cor cai no cinza padrão', async () => {
+    const identity = await writePng(
+      'logo-brand.png',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">' +
+        '<rect x="100" y="80" width="400" height="240" fill="#FF0000"/></svg>',
+    );
+    const requested = await service.build(
+      { ...kit, identityMode: 'logo_as_is', tileBackgroundColor: '#0A3D91' } as McCharacterKit,
+      identity,
+      null,
+    );
+    expect(requested.backgroundColor).toBe('#0A3D91');
+    const legacy = await service.build(
+      { ...kit, identityMode: 'logo_as_is', tileBackgroundColor: null } as McCharacterKit,
+      identity,
+      null,
+    );
+    expect(legacy.backgroundColor).toBe('#E5E7EB');
   });
 
   it('logo como está: caixa do rosto que corta o logo cai para o logo inteiro (pixels originais, borda do próprio logo)', async () => {

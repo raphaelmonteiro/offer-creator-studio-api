@@ -7,7 +7,6 @@ import { KIT_TILE_BACKGROUND_DEFAULT } from '../domain/kit-prompts';
 import { McNormalizedBox } from '../domain/mc-mouth-gate';
 import {
   computeTileCrop,
-  dominantOpaqueColor,
   edgeUniformity,
   keyEdgeBackground,
   MC_TILE_EDGE_TOLERANCE,
@@ -128,7 +127,7 @@ export class McKitTileService {
     const png = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
       .png()
       .toBuffer();
-    const backgroundColor = await this.resolveBackgroundColor(kit, uniformity, source);
+    const backgroundColor = this.resolveBackgroundColor(kit, uniformity);
 
     const url = await this.storage.saveFile(
       `commercials/kits/${kit.id}`,
@@ -203,40 +202,17 @@ export class McKitTileService {
   }
 
   /**
-   * Cor de fundo padrão do tile: em `logo_as_is` é o fundo do próprio logo
-   * (ou a cor dominante — "cor de marca" — quando o logo é transparente); em
-   * `generated` vale a cor do kit (pedida no prompt), senão a borda detectada,
-   * senão o cinza claro padrão.
+   * Cor de fundo padrão do tile (spec "Logo usado como está"): em `logo_as_is`
+   * é o fundo do próprio logo ou, quando o logo é transparente, a cor de marca
+   * do kit (`tileBackgroundColor`: a pedida na criação, senão o cinza claro
+   * padrão) — nunca a cor dominante do próprio logo, que apagaria a marca no
+   * tile achatado. Em `generated` vale a cor do kit (pedida no prompt), senão a
+   * borda detectada, senão o cinza claro padrão.
    */
-  private async resolveBackgroundColor(
-    kit: McCharacterKit,
-    uniformity: McEdgeUniformity,
-    source: Buffer,
-  ): Promise<string> {
+  private resolveBackgroundColor(kit: McCharacterKit, uniformity: McEdgeUniformity): string {
     if (kit.identityMode === 'logo_as_is') {
-      if (uniformity.hex) return uniformity.hex;
-      const dominant = await this.dominantHex(source);
-      return dominant ?? kit.tileBackgroundColor ?? KIT_TILE_BACKGROUND_DEFAULT;
+      return uniformity.hex ?? kit.tileBackgroundColor ?? KIT_TILE_BACKGROUND_DEFAULT;
     }
     return kit.tileBackgroundColor ?? uniformity.hex ?? KIT_TILE_BACKGROUND_DEFAULT;
-  }
-
-  /** "Cor de marca" de um logo transparente: dominante entre os pixels opacos (amostra 64×64). */
-  private async dominantHex(source: Buffer): Promise<string | null> {
-    try {
-      const { data, info } = await sharp(source)
-        .ensureAlpha()
-        .resize(64, 64, { fit: 'inside' })
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-      return dominantOpaqueColor({
-        data,
-        width: info.width,
-        height: info.height,
-        channels: info.channels as 3 | 4,
-      });
-    } catch {
-      return null;
-    }
   }
 }
