@@ -41,7 +41,15 @@ interface Probe {
   hasVideo: boolean;
   hasAudio: boolean;
   audioStreams: number;
+  /** Duração do CONTAINER (`format.duration`): com `apad` + `-t`, é sempre a do áudio. */
   durationMs: number | null;
+  /**
+   * Duração e quadros da TRILHA DE VÍDEO (`v:0`): é aqui que o clone do último
+   * quadro aparece — sem `tpad`, o container ainda mede o áudio, mas o vídeo
+   * fica mais curto.
+   */
+  videoDurationMs: number | null;
+  videoFrames: number | null;
   width: number | null;
   height: number | null;
 }
@@ -57,20 +65,40 @@ async function probe(file: string): Promise<Probe> {
     file,
   ]);
   const json = JSON.parse(out) as {
-    streams?: Array<{ codec_type: string; width?: number; height?: number }>;
+    streams?: Array<{
+      codec_type: string;
+      width?: number;
+      height?: number;
+      duration?: string;
+      nb_frames?: string;
+    }>;
     format?: { duration?: string };
   };
   const video = json.streams?.find((s) => s.codec_type === 'video');
   const audios = json.streams?.filter((s) => s.codec_type === 'audio') ?? [];
   const durationS = Number(json.format?.duration);
+  const videoS = Number(video?.duration);
+  const frames = Number(video?.nb_frames);
   return {
     hasVideo: !!video,
     hasAudio: audios.length > 0,
     audioStreams: audios.length,
     durationMs: Number.isFinite(durationS) ? Math.round(durationS * 1000) : null,
+    videoDurationMs: Number.isFinite(videoS) ? Math.round(videoS * 1000) : null,
+    videoFrames: Number.isFinite(frames) ? frames : null,
     width: video?.width ?? null,
     height: video?.height ?? null,
   };
+}
+
+/** Trilha de VÍDEO cobre o áudio inteiro: duração ±120 ms e quadros a 30 fps (±1). */
+function expectVideoTrackCoversAudio(out: Probe, audioMs: number): void {
+  expect(out.videoDurationMs).not.toBeNull();
+  expect(Math.abs((out.videoDurationMs as number) - audioMs)).toBeLessThanOrEqual(120);
+  expect(out.videoFrames).not.toBeNull();
+  expect(
+    Math.abs((out.videoFrames as number) - Math.round((audioMs / 1000) * 30)),
+  ).toBeLessThanOrEqual(1);
 }
 
 /**
@@ -191,6 +219,7 @@ describeIf('conformação do clipe falado — ffmpeg real (MC_TEST_FFMPEG=1)', (
     expect(out.hasVideo && out.hasAudio).toBe(true);
     expect(out.audioStreams).toBe(1); // áudio do fornecedor descartado, TTS único
     expect(Math.abs((out.durationMs as number) - AUDIO_MS)).toBeLessThanOrEqual(120);
+    expectVideoTrackCoversAudio(out, AUDIO_MS);
     expect(conformedOutputIssue(out, AUDIO_MS)).toBeNull();
     expect([out.width, out.height]).toEqual([720, 960]);
   }, 90_000);
@@ -201,7 +230,27 @@ describeIf('conformação do clipe falado — ffmpeg real (MC_TEST_FFMPEG=1)', (
     const { plan, out } = await conform(clip, { width: 720, height: 960 });
     expect(plan.durationAction).toBe('pad');
     expect(Math.abs((out.durationMs as number) - AUDIO_MS)).toBeLessThanOrEqual(120);
+    // o clone aparece na TRILHA DE VÍDEO (180 quadros a 30 fps), não só no container
+    expectVideoTrackCoversAudio(out, AUDIO_MS);
     expect(conformedOutputIssue(out, AUDIO_MS)).toBeNull();
+
+    // controle: o mesmo comando SEM o clone (`tpad`) engana o container (`apad` +
+    // `-t` o deixam com a duração do áudio), mas a trilha de vídeo fica em ~5,8 s
+    const audio = await probe(voice);
+    const unpadded = path.join(dir, 'shorter-200-unpadded.mp4');
+    await run(
+      FFMPEG,
+      buildTalkConformArgs({
+        videoPath: clip,
+        audioPath: voice,
+        output: unpadded,
+        plan: { ...plan, durationAction: 'keep', padS: 0 },
+        audioDurationS: (audio.durationMs as number) / 1000,
+      }),
+    );
+    const control = await probe(unpadded);
+    expect(Math.abs((control.durationMs as number) - AUDIO_MS)).toBeLessThanOrEqual(120);
+    expect(control.videoFrames as number).toBeLessThan(Math.round((AUDIO_MS / 1000) * 30) - 3);
   }, 90_000);
 
   it('clipe 1,2 s mais curto → too_short (classe quality): nenhum comando nem arquivo; no teto esgotado (H1) o último quadro é clonado até o áudio', async () => {
@@ -239,6 +288,7 @@ describeIf('conformação do clipe falado — ffmpeg real (MC_TEST_FFMPEG=1)', (
     expect(accepted.out.hasVideo && accepted.out.hasAudio).toBe(true);
     expect(accepted.out.audioStreams).toBe(1);
     expect(Math.abs((accepted.out.durationMs as number) - AUDIO_MS)).toBeLessThanOrEqual(120);
+    expectVideoTrackCoversAudio(accepted.out, AUDIO_MS);
     expect(conformedOutputIssue(accepted.out, AUDIO_MS)).toBeNull();
     expect([accepted.out.width, accepted.out.height]).toEqual([720, 960]);
   }, 120_000);
