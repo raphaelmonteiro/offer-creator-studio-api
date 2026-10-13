@@ -7,6 +7,12 @@ import {
   conformedOutputIssue,
   planTalkConform,
 } from './mc-talk-conform-graph';
+import { MINIMAX_H3_LIPSYNC_MODEL } from './mc-pipeline.config';
+import {
+  buildTalkAudioPadArgs,
+  planTalkAudioPadding,
+  talkBilledDurationMs,
+} from './mc-talk-engines';
 
 /**
  * Fixtures de MÍDIA com FFmpeg REAL da conformação do clipe falado (change
@@ -89,6 +95,139 @@ async function probe(file: string): Promise<Probe> {
     width: video?.width ?? null,
     height: video?.height ?? null,
   };
+}
+
+/** Codec, taxa e canais da primeira trilha de áudio. */
+async function audioStreamInfo(
+  file: string,
+): Promise<{ codec: string | null; sampleRate: number | null; channels: number | null }> {
+  const out = await run(FFPROBE, [
+    '-v',
+    'error',
+    '-select_streams',
+    'a:0',
+    '-show_entries',
+    'stream=codec_name,sample_rate,channels',
+    '-of',
+    'json',
+    file,
+  ]);
+  const stream = (
+    JSON.parse(out) as {
+      streams?: Array<{ codec_name?: string; sample_rate?: string; channels?: number }>;
+    }
+  ).streams?.[0];
+  return {
+    codec: stream?.codec_name ?? null,
+    sampleRate: stream?.sample_rate ? Number(stream.sample_rate) : null,
+    channels: stream?.channels ?? null,
+  };
+}
+
+/** PCM mono s16le a 8 kHz da primeira trilha de áudio no trecho [startS, startS + durS). */
+function decodePcm(file: string, startS: number, durS: number): Promise<Int16Array> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      FFMPEG,
+      [
+        '-v',
+        'error',
+        '-ss',
+        startS.toFixed(3),
+        '-t',
+        durS.toFixed(3),
+        '-i',
+        file,
+        '-map',
+        '0:a:0',
+        '-ac',
+        '1',
+        '-ar',
+        '8000',
+        '-f',
+        's16le',
+        '-',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const chunks: Buffer[] = [];
+    let err = '';
+    child.stdout.on('data', (d: Buffer) => chunks.push(d));
+    child.stderr.on('data', (d: Buffer) => (err += d.toString()));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`ffmpeg pcm ${code}: ${err.slice(-400)}`));
+      const buf = Buffer.concat(chunks);
+      resolve(new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 2)));
+    });
+  });
+}
+
+/**
+ * Duração DECODIFICADA (ms) da primeira trilha de áudio: amostras PCM na taxa
+ * nativa ÷ taxa — o que um decodificador que respeita o cabeçalho Info/LAME
+ * (ffmpeg, pydub, librosa) entrega, sem o atraso do encoder que o
+ * `format.duration` do ffprobe soma num MP3.
+ */
+async function decodedDurationMs(file: string): Promise<number> {
+  const { sampleRate } = await audioStreamInfo(file);
+  const bytes = await new Promise<number>((resolve, reject) => {
+    const child = spawn(
+      FFMPEG,
+      ['-v', 'error', '-i', file, '-map', '0:a:0', '-ac', '1', '-f', 's16le', '-'],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let total = 0;
+    let err = '';
+    child.stdout.on('data', (d: Buffer) => (total += d.length));
+    child.stderr.on('data', (d: Buffer) => (err += d.toString()));
+    child.on('error', reject);
+    child.on('close', (code) =>
+      code === 0 ? resolve(total) : reject(new Error(`ffmpeg decode ${code}: ${err.slice(-400)}`)),
+    );
+  });
+  return (bytes / 2 / (sampleRate as number)) * 1000;
+}
+
+/** MP3 CBR 128 kbps mono 44,1 kHz (cabeçalho Info/LAME, como o TTS da ElevenLabs) com `durationS` de tom. */
+async function makeCbrVoice(file: string, durationS: number): Promise<void> {
+  await run(FFMPEG, [
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    `sine=frequency=440:sample_rate=44100:duration=${durationS}`,
+    '-af',
+    'volume=0.1',
+    '-ac',
+    '1',
+    '-c:a',
+    'libmp3lame',
+    '-b:a',
+    '128k',
+    file,
+  ]);
+}
+
+function rms(pcm: Int16Array): number {
+  if (pcm.length === 0) return 0;
+  let sum = 0;
+  for (const v of pcm) sum += v * v;
+  return Math.sqrt(sum / pcm.length);
+}
+
+/** Frequência dominante (Hz) de um tom puro por cruzamentos de zero (PCM a 8 kHz). */
+function toneHz(pcm: Int16Array, sampleRate = 8000): number {
+  let crossings = 0;
+  for (let i = 1; i < pcm.length; i += 1) {
+    if ((pcm[i - 1] < 0 && pcm[i] >= 0) || (pcm[i - 1] >= 0 && pcm[i] < 0)) crossings += 1;
+  }
+  return crossings / 2 / (pcm.length / sampleRate);
 }
 
 /** Trilha de VÍDEO cobre o áudio inteiro: duração ±120 ms e quadros a 30 fps (±1). */
@@ -305,6 +444,125 @@ describeIf('conformação do clipe falado — ffmpeg real (MC_TEST_FFMPEG=1)', (
     expect(Math.abs((out.durationMs as number) - AUDIO_MS)).toBeLessThanOrEqual(120);
     expect(conformedOutputIssue(out, AUDIO_MS)).toBeNull();
   }, 90_000);
+
+  it('fala curta no motor do logo (H3, decisão de 13/10/2026): TTS de 2 s completado com silêncio até 5,15 s (mínimo + folga; MP3, mesma taxa); o clipe do fornecedor é aparado a 2 s com o TTS ORIGINAL', async () => {
+    // TTS curto (tom de 440 Hz) — o asset original, que nunca é alterado
+    const shortVoice = path.join(dir, 'short-voice.mp3');
+    await makeVoice(shortVoice, 2);
+    const original = await probe(shortVoice);
+    const speechMs = original.durationMs as number;
+    const originalBytes = await fs.readFile(shortVoice);
+
+    // 1) submit: silêncio no fim até o mínimo do H3 + 150 ms de folga da medida do MP3
+    const plan = planTalkAudioPadding(MINIMAX_H3_LIPSYNC_MODEL, speechMs);
+    expect(plan).toMatchObject({ minS: 5, submittedMs: 5150 });
+    const padded = path.join(dir, 'short-voice-padded.mp3');
+    await run(
+      FFMPEG,
+      buildTalkAudioPadArgs({
+        input: shortVoice,
+        output: padded,
+        totalS: (plan as NonNullable<typeof plan>).submittedMs / 1000,
+      }),
+    );
+    const paddedProbe = await probe(padded);
+    // contêiner ≥ alvo e no máximo um par de quadros MP3 acima; DECODIFICADO ≥ 5,15 s
+    // (folga real sobre o mínimo de 5 s, qualquer que seja a medida do fornecedor)
+    expect(paddedProbe.durationMs as number).toBeGreaterThanOrEqual(5150);
+    expect(paddedProbe.durationMs as number).toBeLessThanOrEqual(5250);
+    expect(await decodedDurationMs(padded)).toBeGreaterThanOrEqual(5149);
+    expect(paddedProbe.hasVideo).toBe(false);
+    // mesmo codec (MP3 → data URI audio/mpeg), mesma taxa de amostragem e canais do TTS
+    const originalInfo = await audioStreamInfo(shortVoice);
+    expect(await audioStreamInfo(padded)).toEqual({ ...originalInfo, codec: 'mp3' });
+    // fala no começo, silêncio no fim
+    expect(rms(await decodePcm(padded, 0.2, 1.6))).toBeGreaterThan(100); // tom ~ 270 RMS
+    expect(rms(await decodePcm(padded, 2.3, 2.5))).toBeLessThan(5);
+    // o TTS original fica intacto
+    expect((await fs.readFile(shortVoice)).equals(originalBytes)).toBe(true);
+
+    // 2) o fornecedor devolve um clipe com a duração ENVIADA e o PRÓPRIO áudio (tom de 880 Hz)
+    const clip = path.join(dir, 'h3-padded.mp4');
+    await makeClip(clip, '720x960', (paddedProbe.durationMs as number) / 1000);
+    const raw = await probe(clip);
+    expect(
+      Math.abs((raw.durationMs as number) - (paddedProbe.durationMs as number)),
+    ).toBeLessThanOrEqual(120);
+
+    // 3) ingest: conformação contra o TTS ORIGINAL (2 s), nunca contra o áudio enviado
+    const conformPlan = planTalkConform({
+      videoMs: raw.durationMs as number,
+      audioMs: speechMs,
+      videoWidth: raw.width,
+      videoHeight: raw.height,
+      tileWidth: 720,
+      tileHeight: 960,
+    });
+    expect(conformPlan.durationAction).toBe('trim');
+    expect(conformPlan.deltaMs).toBeLessThan(-2900);
+    const output = conformedPath(clip);
+    await run(
+      FFMPEG,
+      buildTalkConformArgs({
+        videoPath: clip,
+        audioPath: shortVoice,
+        output,
+        plan: conformPlan,
+        audioDurationS: speechMs / 1000,
+      }),
+    );
+    const out = await probe(output);
+    expect(out.hasVideo && out.hasAudio).toBe(true);
+    expect(out.audioStreams).toBe(1);
+    expect(Math.abs((out.durationMs as number) - speechMs)).toBeLessThanOrEqual(120);
+    expectVideoTrackCoversAudio(out, speechMs);
+    expect(conformedOutputIssue(out, speechMs)).toBeNull();
+    expect([out.width, out.height]).toEqual([720, 960]);
+    // a trilha é o TTS original (440 Hz), não o áudio do fornecedor (880 Hz)
+    const hz = toneHz(await decodePcm(output, 0.3, 1.4));
+    expect(Math.abs(hz - 440)).toBeLessThanOrEqual(30);
+
+    // 4) custo: os segundos ENVIADOS (o clipe entregue tem 2 s)
+    expect(talkBilledDurationMs(raw.durationMs, plan)).toBeGreaterThanOrEqual(5150);
+  }, 120_000);
+
+  it('fala de 4,97 s DECODIFICADOS que o ffprobe mede ≥ 5 s (atraso do encoder MP3) → completada pelo plano; o áudio enviado decodifica ≥ 5,15 s (nunca abaixo do mínimo do H3)', async () => {
+    const voice497 = path.join(dir, 'voice-4970.mp3');
+    await makeCbrVoice(voice497, 4.97);
+    const decoded = await decodedDurationMs(voice497);
+    const probed = (await probe(voice497)).durationMs as number;
+    // o problema: o contêiner passa do mínimo, o áudio real não
+    expect(decoded).toBeGreaterThan(4960);
+    expect(decoded).toBeLessThan(5000);
+    expect(probed).toBeGreaterThanOrEqual(5000);
+
+    // o plano usa a medida do asset (a do probe) e completa mesmo assim
+    const plan = planTalkAudioPadding(MINIMAX_H3_LIPSYNC_MODEL, probed);
+    expect(plan).toMatchObject({ minS: 5, speechMs: probed, submittedMs: 5150 });
+    const padded = path.join(dir, 'voice-4970-padded.mp3');
+    await run(
+      FFMPEG,
+      buildTalkAudioPadArgs({
+        input: voice497,
+        output: padded,
+        totalS: (plan as NonNullable<typeof plan>).submittedMs / 1000,
+      }),
+    );
+    expect(await decodedDurationMs(padded)).toBeGreaterThanOrEqual(5149);
+    expect((await probe(padded)).durationMs as number).toBeGreaterThanOrEqual(5150);
+    // a fala inteira continua lá (tom até ~4,9 s), silêncio só depois dela
+    expect(rms(await decodePcm(padded, 4.7, 0.2))).toBeGreaterThan(100);
+    expect(rms(await decodePcm(padded, 5.02, 0.1))).toBeLessThan(5);
+  }, 120_000);
+
+  it('fala que alcança o alvo (≥ 5,15 s no probe) vai sem silêncio e decodifica acima do mínimo de 5 s', async () => {
+    const voice = path.join(dir, 'voice-5200.mp3');
+    await makeCbrVoice(voice, 5.2);
+    const probed = (await probe(voice)).durationMs as number;
+    expect(probed).toBeGreaterThanOrEqual(5150);
+    expect(planTalkAudioPadding(MINIMAX_H3_LIPSYNC_MODEL, probed)).toBeNull();
+    expect(await decodedDurationMs(voice)).toBeGreaterThan(5000);
+  }, 60_000);
 
   it('tile 3:4 e motor devolve 9:16 → recorte centralizado para 3:4 (720×960), sem barras', async () => {
     const clip = path.join(dir, 'aspect-916.mp4');

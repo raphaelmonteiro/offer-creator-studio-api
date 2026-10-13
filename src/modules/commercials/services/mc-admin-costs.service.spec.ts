@@ -126,6 +126,11 @@ describe('McAdminCostsService — custo de fornecedor no mês (8.3)', () => {
     expect(MC_COSTS_SQL).toContain("a.metadata->>'providerCostUsd'");
     expect(MC_COSTS_SQL).toContain("a.metadata->'engine'->>'model'");
     expect(MC_COSTS_SQL).toContain("('scene_synced', 'scene_clip')");
+    // segundos: os COBRADOS (talk com silêncio do submit: max(clipe cru, áudio enviado)),
+    // depois os do clipe cru, depois a duração do arquivo
+    expect(MC_COSTS_SQL).toContain(
+      "COALESCE((a.metadata->>'billedDurationMs')::numeric, (a.metadata->'conform'->>'rawDurationMs')::numeric, a.\"durationMs\")",
+    );
   });
 
   it('mês sem clipes: relatório zerado sem consultar projetos', async () => {

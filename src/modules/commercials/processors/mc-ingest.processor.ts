@@ -30,6 +30,8 @@ import {
   MC_PREMIUM_MIN_LONG_SIDE_PX,
   premiumResolutionApplies,
   premiumResolutionOk,
+  readTalkAudioPadding,
+  talkBilledDurationMs,
 } from '../domain/mc-talk-engines';
 import { McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -66,6 +68,8 @@ interface TalkIngestSnapshot {
     usdPerSecond?: number;
     fallbackFrom?: string;
   } | null;
+  /** Silêncio do submit (fala curta num motor com mínimo, ex.: H3 5 s) — `null` = sem silêncio. */
+  audioPadding?: unknown;
 }
 
 /**
@@ -122,10 +126,13 @@ interface TalkConformRecord {
  * até o teto; esgotado, aceito com o último quadro clonado e sinalizado para
  * revisão humana), recortado ao aspecto do tile e remuxado com o TTS original
  * (áudio do fornecedor descartado); a inspeção recebe origem/estilo/fundo liso
- * e as janelas de fala do alinhamento. No tier premium (exceto `logo_as_is`)
- * o clipe conformado precisa ter lado maior ≥ 1080 px (7.2): abaixo disso,
- * `clip_low_resolution` com uma regeração e depois falha terminal
- * (`clip_low_resolution_final`, projeto em "precisa de atenção").
+ * e as janelas de fala do alinhamento. Fala curta enviada com silêncio até o
+ * mínimo do motor (`inputSnapshot.audioPadding`, H3: 5 s): o clipe volta com
+ * a duração ENVIADA e é aparado à fala como qualquer clipe mais longo — mas o
+ * custo conta os segundos enviados (`talkBilledDurationMs`). No tier premium
+ * (exceto `logo_as_is`) o clipe conformado precisa ter lado maior ≥ 1080 px
+ * (7.2): abaixo disso, `clip_low_resolution` com uma regeração e depois falha
+ * terminal (`clip_low_resolution_final`, projeto em "precisa de atenção").
  */
 @Injectable()
 export class McIngestProcessor {
@@ -272,8 +279,14 @@ export class McIngestProcessor {
 
       // Custo real por SEGUNDO de saída do MOTOR que gerou o clipe (D2:
       // tarifa por modelo; cai na tarifa por tipo de step quando o modelo não
-      // é reconhecido). Segundos do clipe CRU do provider, antes da conformação.
+      // é reconhecido). Segundos do clipe CRU do provider, antes da conformação;
+      // no talk com silêncio do submit, nunca abaixo dos segundos ENVIADOS (o
+      // fornecedor cobra max(fala, mínimo) — decisão de 13/10/2026).
       const snapshot = (step.inputSnapshot ?? null) as TalkIngestSnapshot | null;
+      const audioPadding = talk ? readTalkAudioPadding(snapshot?.audioPadding) : null;
+      const billedDurationMs = talk
+        ? talkBilledDurationMs(probe.durationMs, audioPadding)
+        : probe.durationMs;
       // Tarifa: config corrente pelo modelo; senão a do motor EFETIVO gravado
       // no submit (env trocado entre o submit e o ingest não zera nem
       // subestima o custo de um modelo fora da config, ex.: OmniHuman); senão
@@ -287,9 +300,9 @@ export class McIngestProcessor {
         (typeof snapshotRate === 'number' && snapshotRate >= 0 ? snapshotRate : null) ??
         mcUsdPerSecond(step.type);
       const providerCostUsd =
-        step.provider === 'mock' || probe.durationMs == null
+        step.provider === 'mock' || billedDurationMs == null
           ? 0
-          : (probe.durationMs / 1000) * usdPerSecond;
+          : (billedDurationMs / 1000) * usdPerSecond;
       const engineRecord = talk
         ? {
             engine: {
@@ -301,6 +314,9 @@ export class McIngestProcessor {
                 : {}),
             },
             tier: snapshot?.tier ?? project.tier ?? 'economico',
+            // segundos cobrados (base do providerCostUsd e do relatório de custo)
+            billedDurationMs,
+            ...(audioPadding ? { audioPadding } : {}),
           }
         : {};
 

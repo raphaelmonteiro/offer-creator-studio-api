@@ -534,6 +534,13 @@ abaixo de 60% com `tile.faceBelowMinimum` e aviso, sem bloquear) usado pelos mot
 **Motor de fala** por tier (`economico | premium`) e origem: `MC_TALK_ENGINE_*` (Kling Avatar v2 std/pro,
 OmniHuman 1.5, MiniMax H3 Max Lip Sync para `logo_as_is`), sempre audio-driven com o TTS ElevenLabs; o clipe é
 conformado ao áudio (trim / tpad ≤ 300 ms / `clip_too_short` como qualidade) e o áudio do fornecedor é descartado.
+O H3 Max (motor de logo) não tem campo de prompt e exige ≥ 5 s de áudio por chamada: fala medida abaixo de 5,15 s
+vai com silêncio no fim até 5,15 s (decisão de 13/10/2026; os 150 ms de folga cobrem o `format.duration` do MP3, que
+passa 30–70 ms do áudio decodificado — `MC_TALK_AUDIO_PAD_MARGIN_MS` e `planTalkAudioPadding` em
+`domain/mc-talk-engines.ts`, também no provider mock). Sem a duração medida da fala, o submit num motor com mínimo
+vira erro transiente antes de qualquer chamada (nunca TTS cru nem fallback de motor). O ingest apara o clipe à fala
+com o TTS original e o custo conta os segundos enviados (uma fala de 2 s custa 5,15 s × US$ 0,08). Registro em
+`inputSnapshot.audioPadding` e em `metadata.audioPadding` / `metadata.billedDurationMs` do clipe.
 
 **Rotas** (prefixo `/v1/commercials`, JWT + `McEnabledGuard`):
 

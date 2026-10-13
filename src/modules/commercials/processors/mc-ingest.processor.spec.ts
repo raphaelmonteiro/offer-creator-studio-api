@@ -7,9 +7,9 @@ import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { FalQueueClient } from '../../../shared/providers/fal-queue.client';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
-import { syntheticAlignment } from '../domain/mc-captions';
+import { speechWindowsFromAlignment, syntheticAlignment } from '../domain/mc-captions';
 import { classifyMcError } from '../domain/mc-error-classes';
-import { KLING_AVATAR_PRO_MODEL } from '../domain/mc-pipeline.config';
+import { KLING_AVATAR_PRO_MODEL, MINIMAX_H3_LIPSYNC_MODEL } from '../domain/mc-pipeline.config';
 import { McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -395,8 +395,11 @@ describe('McIngestProcessor — step talk: conformação ao áudio, inspeção p
           audioPolicy: 'replace_clip_audio',
         }),
         inspected: true,
+        // sem silêncio do submit: segundos cobrados = os do clipe cru
+        billedDurationMs: 7400,
       }),
     });
+    expect(savedAssets[0].metadata).not.toHaveProperty('audioPadding');
     // custo = segundos do clipe CRU × tarifa do motor premium
     expect(pipeline.completeStepAndAdvance).toHaveBeenCalledWith(
       expect.anything(),
@@ -743,6 +746,128 @@ describe('McIngestProcessor — step talk: conformação ao áudio, inspeção p
       expect(pipeline.completeStepAndAdvance.mock.calls[0][2]).toMatchObject({
         providerCostUsd: 7.4 * 0.16,
       });
+    });
+  });
+
+  describe('fala curta enviada com silêncio até o mínimo do motor (H3 5 s, decisão de 13/10/2026)', () => {
+    const SPEECH_MS = 2000;
+    const padding = {
+      engineModel: MINIMAX_H3_LIPSYNC_MODEL,
+      minS: 5,
+      speechMs: SPEECH_MS,
+      submittedMs: 5000,
+    };
+
+    beforeEach(() => {
+      step.provider = MINIMAX_H3_LIPSYNC_MODEL;
+      step.inputSnapshot = {
+        audioAssetId: 'au1',
+        tileAssetId: 'tile1',
+        tileWidth: 720,
+        tileHeight: 960,
+        tier: 'economico',
+        identityMode: 'logo_as_is',
+        engine: { key: 'logo', model: MINIMAX_H3_LIPSYNC_MODEL, usdPerSecond: 0.08 },
+        effectiveEngine: { key: 'logo', model: MINIMAX_H3_LIPSYNC_MODEL, usdPerSecond: 0.08 },
+        audioPadding: padding,
+      };
+      audioAsset.durationMs = SPEECH_MS;
+      audioAsset.metadata = { alignment: syntheticAlignment('Leve três, pague dois', 2) };
+      // o H3 devolve o clipe com a duração do áudio ENVIADO (5 s)
+      probes['video.mp4'] = {
+        hasVideo: true,
+        hasAudio: true,
+        width: 720,
+        height: 960,
+        durationMs: 5000,
+      };
+      probes['voice.mp3'] = {
+        hasVideo: false,
+        hasAudio: true,
+        width: null,
+        height: null,
+        durationMs: SPEECH_MS,
+      };
+      probes['conformed.mp4'] = {
+        hasVideo: true,
+        hasAudio: true,
+        width: 720,
+        height: 960,
+        durationMs: 2005,
+      };
+    });
+
+    it('clipe de 5 s → aparado à FALA (-t 2.000) e remuxado com o TTS ORIGINAL; janelas de fala do alinhamento original; custo sobre os 5 s enviados; silêncio e segundos cobrados no asset', async () => {
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      const args = conformArgs()!;
+      expect(args).toEqual(
+        expect.arrayContaining(['-t', '2.000', '-map', '0:v:0', '-map', '1:a:0']),
+      );
+      expect(args!.join(' ')).not.toContain('tpad');
+      // as duas entradas: o clipe do fornecedor e o TTS ORIGINAL do asset da fala
+      const inputs = args.flatMap((a, i) => (a === '-i' ? [args[i + 1]] : []));
+      expect(inputs).toEqual([path.join(dir, 'video.mp4'), path.join(dir, 'voice.mp3')]);
+      expect((await fs.readFile(path.join(dir, 'voice.mp3'))).toString()).toBe('mp3-bytes');
+      // inspeção: janelas da fala ORIGINAL (nenhuma no silêncio do submit)
+      const ctx = inspector.inspect.mock.calls[0][3] as { speechWindows: Array<{ endS: number }> };
+      expect(ctx.speechWindows).toEqual(
+        speechWindowsFromAlignment(
+          (audioAsset.metadata as { alignment: Parameters<typeof speechWindowsFromAlignment>[0] })
+            .alignment,
+        ),
+      );
+      expect(ctx.speechWindows.length).toBeGreaterThan(0);
+      expect(Math.max(...ctx.speechWindows.map((w) => w.endS))).toBeLessThanOrEqual(2.05);
+      expect(inspector.inspect.mock.calls[0][1]).toBe(2005);
+      expect(savedAssets[0]).toMatchObject({
+        durationMs: 2005,
+        metadata: expect.objectContaining({
+          engine: expect.objectContaining({ key: 'logo', model: MINIMAX_H3_LIPSYNC_MODEL }),
+          conform: expect.objectContaining({
+            durationAction: 'trim',
+            deltaMs: -3000,
+            rawDurationMs: 5000,
+            audioMs: SPEECH_MS,
+            audioAssetId: 'au1',
+            audioPolicy: 'replace_clip_audio',
+          }),
+          audioPadding: padding,
+          billedDurationMs: 5000,
+          providerCostUsd: 0.4,
+        }),
+      });
+      const opts = pipeline.completeStepAndAdvance.mock.calls[0][2] as { providerCostUsd: number };
+      expect(opts.providerCostUsd).toBeCloseTo(5 * 0.08, 10);
+    });
+
+    it('clipe cru 40 ms mais curto que o áudio enviado (4,96 s) → ainda aparado à fala; custo sobre os 5 s enviados (o fornecedor cobra o mínimo)', async () => {
+      (probes['video.mp4'] as Record<string, unknown>).durationMs = 4960;
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(conformArgs()).toEqual(expect.arrayContaining(['-t', '2.000']));
+      expect(savedAssets[0].metadata).toMatchObject({
+        billedDurationMs: 5000,
+        conform: expect.objectContaining({ rawDurationMs: 4960 }),
+      });
+      const opts = pipeline.completeStepAndAdvance.mock.calls[0][2] as { providerCostUsd: number };
+      expect(opts.providerCostUsd).toBeCloseTo(5 * 0.08, 10);
+    });
+
+    it('clipe cru acima do enviado (5,04 s, quadros do encoder) → custo sobre o clipe cru', async () => {
+      (probes['video.mp4'] as Record<string, unknown>).durationMs = 5040;
+      await processor.process({ stepId: 'st-talk' });
+      expect(savedAssets[0].metadata).toMatchObject({ billedDurationMs: 5040 });
+      const opts = pipeline.completeStepAndAdvance.mock.calls[0][2] as { providerCostUsd: number };
+      expect(opts.providerCostUsd).toBeCloseTo(5.04 * 0.08, 10);
+    });
+
+    it('registro de silêncio inválido no snapshot → ignorado: custo sobre o clipe cru, sem audioPadding no asset', async () => {
+      (step.inputSnapshot as Record<string, unknown>).audioPadding = { minS: 5 };
+      (probes['video.mp4'] as Record<string, unknown>).durationMs = 4960;
+      await processor.process({ stepId: 'st-talk' });
+      expect(savedAssets[0].metadata).toMatchObject({ billedDurationMs: 4960 });
+      expect(savedAssets[0].metadata).not.toHaveProperty('audioPadding');
     });
   });
 

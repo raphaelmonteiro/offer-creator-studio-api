@@ -19,6 +19,7 @@ import {
   KLING_AVATAR_PRO_MODEL,
   MINIMAX_H3_LIPSYNC_MODEL,
 } from '../domain/mc-pipeline.config';
+import { classifyMcError } from '../domain/mc-error-classes';
 import { OMNIHUMAN_V15_MODEL } from '../domain/mc-talk-engines';
 import { McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
@@ -436,12 +437,19 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
   let kit: Record<string, unknown>;
   let step: Record<string, unknown>;
   let audioDurationMs: number | null;
+  /** Medida do ffprobe do TTS quando o asset não traz a duração (motor com mínimo). */
+  let probedSpeechMs: number | null;
+  /** Medida do ffprobe do áudio completado com silêncio (o encoder MP3 pode passar do mínimo). */
+  let paddedProbeMs: number | null;
+  /** Bytes que o ffmpeg do silêncio recebeu como entrada (o TTS original). */
+  let padInputs: Buffer[];
   let tilePng: Buffer;
   let pipeline: Record<string, jest.Mock>;
   let transitions: { casTransition: jest.Mock };
   let queue: { publish: jest.Mock };
   let fal: { submit: jest.Mock };
   let storage: Record<string, jest.Mock>;
+  let ffmpeg: Record<string, jest.Mock>;
   let processor: McTalkingProcessor;
 
   beforeAll(async () => {
@@ -463,7 +471,11 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
     delete process.env.MC_TALK_ENGINE_ECONOMICO;
     delete process.env.MC_TALK_ENGINE_PREMIUM;
     delete process.env.MC_TALK_ENGINE_LOGO;
-    audioDurationMs = null;
+    // o TTS sempre chega medido (mc-tts grava o probe); os casos sem medida são explícitos
+    audioDurationMs = 6_000;
+    probedSpeechMs = null;
+    paddedProbeMs = 5_000;
+    padInputs = [];
     project = {
       id: 'p1',
       userId: 'u1',
@@ -523,6 +535,24 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
       mockJobsAbsDir: jest.fn(),
       mockJobAbsPath: jest.fn(),
     };
+    // ffmpeg do silêncio do submit: grava 'mp3-completado' na saída e mede por nome
+    ffmpeg = {
+      createTempDir: jest.fn(() => fs.mkdtemp(path.join(os.tmpdir(), 'mc-talk-pad-spec-'))),
+      removeTempDir: jest.fn((dir: string) => fs.rm(dir, { recursive: true, force: true })),
+      run: jest.fn(async (args: string[]) => {
+        padInputs.push(await fs.readFile(args[args.indexOf('-i') + 1]));
+        await fs.writeFile(args[args.length - 1], Buffer.from('mp3-completado'));
+      }),
+      probe: jest.fn((file: string) =>
+        Promise.resolve({
+          hasVideo: false,
+          hasAudio: true,
+          width: null,
+          height: null,
+          durationMs: file.endsWith('voice-padded.mp3') ? paddedProbeMs : probedSpeechMs,
+        }),
+      ),
+    };
     const dataSource = {
       getRepository: jest.fn((entity: unknown) => ({
         findOneBy: jest.fn((where: { id: string }) => {
@@ -550,7 +580,7 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
       { appendEvent: jest.fn().mockResolvedValue(undefined) } as unknown as CommercialsService,
       queue as unknown as AnimationQueueService,
       fal as unknown as FalQueueClient,
-      {} as unknown as FfmpegRunner,
+      ffmpeg as unknown as FfmpegRunner,
       storage as unknown as McStorageService,
     );
   });
@@ -645,16 +675,263 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
     (step.inputSnapshot as Record<string, unknown>).identityMode = 'logo_as_is';
     await processor.process({ stepId: 'st-talk' });
     expect(submitted().model).toBe(MINIMAX_H3_LIPSYNC_MODEL);
+    // schema do H3 Max Lip Sync no fal: sem campo de prompt
     expect(submitted().input).toEqual({
       image_url: expect.any(String),
       audio_url: expect.any(String),
-      prompt: expect.any(String),
     });
     expect(transitions.casTransition.mock.calls[0][5]).toMatchObject({
       provider: MINIMAX_H3_LIPSYNC_MODEL,
       inputSnapshot: expect.objectContaining({
         effectiveEngine: expect.objectContaining({ key: 'logo' }),
       }),
+    });
+  });
+
+  /** Bytes do áudio enviado no data URI do submit `n` (0 = primeiro). */
+  function submittedAudio(n = 0): string {
+    const input = (fal.submit.mock.calls[n] as [string, Record<string, unknown>])[1];
+    return Buffer.from((input.audio_url as string).split(',')[1], 'base64').toString();
+  }
+
+  function patchedSnapshot(): Record<string, unknown> {
+    return (
+      transitions.casTransition.mock.calls[0][5] as { inputSnapshot: Record<string, unknown> }
+    ).inputSnapshot;
+  }
+
+  function useLogoKit(): void {
+    kit.identityMode = 'logo_as_is';
+    kit.source = 'logo';
+    (step.inputSnapshot as Record<string, unknown>).identityMode = 'logo_as_is';
+  }
+
+  describe('fala curta no motor do logo — completar com silêncio (decisão de 13/10/2026)', () => {
+    it('logo_as_is com fala de 4 s → o H3 recebe 5,15 s (TTS + silêncio no fim: mínimo + folga da medida do MP3), sem audio_too_short; snapshot com audioPadding e custo estimado sobre 5,15 s', async () => {
+      useLogoKit();
+      audioDurationMs = 4_000;
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(fal.submit).toHaveBeenCalledTimes(1);
+      expect(submitted().model).toBe(MINIMAX_H3_LIPSYNC_MODEL);
+      // o data URI leva o áudio COMPLETADO (audio/mpeg), não o TTS original
+      expect(submitted().input.audio_url).toMatch(/^data:audio\/mpeg;base64,/);
+      expect(submittedAudio()).toBe('mp3-completado');
+      // um passe de ffmpeg: entrada = TTS original; silêncio no FIM até 5 s + 150 ms de
+      // folga, MP3, sem reamostrar (taxa e canais do TTS mantidos)
+      expect(ffmpeg.run).toHaveBeenCalledTimes(1);
+      const args = ffmpeg.run.mock.calls[0][0] as string[];
+      expect(padInputs[0].toString()).toBe('mp3-pequeno');
+      expect(args).toEqual(
+        expect.arrayContaining([
+          '-af',
+          'apad=whole_dur=5.150',
+          '-t',
+          '5.150',
+          '-c:a',
+          'libmp3lame',
+        ]),
+      );
+      expect(args).not.toContain('-ar');
+      expect(args).not.toContain('-ac');
+      // o asset do TTS não é regravado (só lido)
+      expect(storage.readUploadsFile).toHaveBeenCalledWith('/uploads/a-audio.bin');
+      // snapshot: registro do silêncio + estimativa sobre os 5,15 s enviados (H3: 0,08 US$/s)
+      expect(patchedSnapshot()).toMatchObject({
+        audioPadding: {
+          engineModel: MINIMAX_H3_LIPSYNC_MODEL,
+          minS: 5,
+          speechMs: 4_000,
+          submittedMs: 5_150,
+        },
+        estimatedProviderCostUsd: 0.412,
+        effectiveEngine: expect.objectContaining({ key: 'logo', usdPerSecond: 0.08 }),
+      });
+      // créditos: tabela por step (não por segundo) — consumo único no submit
+      expect(pipeline.consumeStepCredits).toHaveBeenCalledTimes(1);
+    });
+
+    it('medida do arquivo completado acima do alvo (5,15 s decodificados medem 5,198 s no probe) → submittedMs e custo estimado sobre a medida', async () => {
+      useLogoKit();
+      audioDurationMs = 2_000;
+      paddedProbeMs = 5_198;
+      await processor.process({ stepId: 'st-talk' });
+      expect(patchedSnapshot()).toMatchObject({
+        audioPadding: { speechMs: 2_000, submittedMs: 5_198, minS: 5 },
+        estimatedProviderCostUsd: Number((5.198 * 0.08).toFixed(4)),
+      });
+    });
+
+    it('medida do arquivo completado indisponível → submittedMs = o alvo pedido (nunca abaixo)', async () => {
+      useLogoKit();
+      audioDurationMs = 3_000;
+      paddedProbeMs = null;
+      await processor.process({ stepId: 'st-talk' });
+      expect(patchedSnapshot()).toMatchObject({
+        audioPadding: { speechMs: 3_000, submittedMs: 5_150 },
+      });
+    });
+
+    it('logo_as_is com fala de 5,4 s → SEM silêncio: o TTS vai como está, audioPadding null (registro velho apagado), custo estimado sobre 5,4 s', async () => {
+      useLogoKit();
+      audioDurationMs = 5_400;
+      // registro de uma execução anterior nunca sobrevive no snapshot
+      (step.inputSnapshot as Record<string, unknown>).audioPadding = {
+        engineModel: MINIMAX_H3_LIPSYNC_MODEL,
+        minS: 5,
+        speechMs: 2_000,
+        submittedMs: 5_000,
+      };
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(ffmpeg.run).not.toHaveBeenCalled();
+      expect(submitted().model).toBe(MINIMAX_H3_LIPSYNC_MODEL);
+      expect(submittedAudio()).toBe('mp3-pequeno');
+      expect(patchedSnapshot().audioPadding).toBeNull();
+      expect(patchedSnapshot().estimatedProviderCostUsd).toBe(Number((5.4 * 0.08).toFixed(4)));
+    });
+
+    it('fala MEDIDA em 5,016 s (MP3 de 4,97 s decodificados: o probe soma o atraso do encoder) → completada até 5,15 s, nunca vai crua ao H3', async () => {
+      useLogoKit();
+      audioDurationMs = 5_016;
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(ffmpeg.run).toHaveBeenCalledTimes(1);
+      expect(ffmpeg.run.mock.calls[0][0]).toEqual(
+        expect.arrayContaining(['-af', 'apad=whole_dur=5.150', '-t', '5.150']),
+      );
+      expect(submittedAudio()).toBe('mp3-completado');
+      expect(patchedSnapshot()).toMatchObject({
+        audioPadding: { speechMs: 5_016, submittedMs: 5_150, minS: 5 },
+      });
+    });
+
+    it('fala medida em exatamente 5 s (o mínimo documentado, abaixo do alvo) é completada; no alvo (5,15 s) vai sem silêncio', async () => {
+      useLogoKit();
+      audioDurationMs = 5_000;
+      await processor.process({ stepId: 'st-talk' });
+      expect(submittedAudio()).toBe('mp3-completado');
+      expect(patchedSnapshot().audioPadding).toMatchObject({ speechMs: 5_000, submittedMs: 5_150 });
+
+      fal.submit.mockClear();
+      ffmpeg.run.mockClear();
+      transitions.casTransition.mockClear();
+      audioDurationMs = 5_150;
+      await processor.process({ stepId: 'st-talk' });
+      expect(ffmpeg.run).not.toHaveBeenCalled();
+      expect(submittedAudio()).toBe('mp3-pequeno');
+      expect(patchedSnapshot().audioPadding).toBeNull();
+    });
+
+    it('asset do TTS sem duração + motor com mínimo → mede o TTS (ffprobe) e completa a fala de 2,1 s', async () => {
+      useLogoKit();
+      audioDurationMs = null;
+      probedSpeechMs = 2_100;
+      await processor.process({ stepId: 'st-talk' });
+      expect(ffmpeg.probe).toHaveBeenCalledWith(expect.stringMatching(/voice\.mp3$/));
+      expect(submittedAudio()).toBe('mp3-completado');
+      expect(patchedSnapshot()).toMatchObject({
+        audioPadding: { speechMs: 2_100, submittedMs: 5_150 },
+      });
+    });
+
+    it('asset do TTS com duração 0 (medida inválida) + motor com mínimo → mede de novo pelo ffprobe e completa', async () => {
+      useLogoKit();
+      audioDurationMs = 0;
+      probedSpeechMs = 3_200;
+      await processor.process({ stepId: 'st-talk' });
+      expect(ffmpeg.probe).toHaveBeenCalledWith(expect.stringMatching(/voice\.mp3$/));
+      expect(patchedSnapshot()).toMatchObject({
+        audioPadding: { speechMs: 3_200, submittedMs: 5_150 },
+      });
+    });
+
+    it('fala SEM medida (asset sem duração e ffprobe falhou) no motor de logo → erro TRANSIENTE antes de qualquer submit: nada vai ao H3 nem ao motor do tier, nada consumido', async () => {
+      useLogoKit();
+      audioDurationMs = null;
+      ffmpeg.probe.mockRejectedValueOnce(new Error('ffprobe excedeu 30s'));
+      await processor.process({ stepId: 'st-talk' });
+      expect(fal.submit).not.toHaveBeenCalled();
+      expect(ffmpeg.run).not.toHaveBeenCalled();
+      expect(pipeline.consumeStepCredits).not.toHaveBeenCalled();
+      expect(transitions.casTransition).not.toHaveBeenCalled();
+      const err = pipeline.failStep.mock.calls[0][2] as Error;
+      expect(err).toBeInstanceOf(TransientProviderError);
+      expect(err.message).toMatch(/Duração da fala desconhecida/);
+      // transiente: o step volta à fila e mede de novo (retry do failStep)
+      expect(classifyMcError(err)).toBe('transient');
+    });
+
+    it('fala SEM medida (ffprobe sem duração) no motor de logo → idem: transiente, sem submit', async () => {
+      useLogoKit();
+      audioDurationMs = null;
+      probedSpeechMs = null;
+      await processor.process({ stepId: 'st-talk' });
+      expect(fal.submit).not.toHaveBeenCalled();
+      expect(pipeline.failStep.mock.calls[0][2]).toBeInstanceOf(TransientProviderError);
+    });
+
+    it('fala SEM medida num motor SEM mínimo (Kling, kit gerado) → TTS como está, sem ffprobe; custo estimado desconhecido (null)', async () => {
+      audioDurationMs = null;
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(ffmpeg.probe).not.toHaveBeenCalled();
+      expect(submitted().model).toBe(KLING_AVATAR_MODEL);
+      expect(submittedAudio()).toBe('mp3-pequeno');
+      expect(patchedSnapshot()).toMatchObject({
+        audioPadding: null,
+        estimatedProviderCostUsd: null,
+      });
+    });
+
+    it('motor sem mínimo (Kling, kit gerado) com fala de 2 s → TTS como está, sem ffmpeg', async () => {
+      audioDurationMs = 2_000;
+      await processor.process({ stepId: 'st-talk' });
+      expect(submitted().model).toBe(KLING_AVATAR_MODEL);
+      expect(ffmpeg.run).not.toHaveBeenCalled();
+      expect(ffmpeg.probe).not.toHaveBeenCalled();
+      expect(submittedAudio()).toBe('mp3-pequeno');
+      expect(patchedSnapshot()).toMatchObject({
+        audioPadding: null,
+        estimatedProviderCostUsd: Number((2 * 0.0562).toFixed(4)),
+      });
+    });
+
+    it('H3 indisponível (503) com fala de 4 s → fallback no motor do tier (sem mínimo) recebe o TTS ORIGINAL; audioPadding null e custo estimado na tarifa do efetivo', async () => {
+      useLogoKit();
+      audioDurationMs = 4_000;
+      fal.submit
+        .mockRejectedValueOnce(new TransientProviderError('HTTP 503'))
+        .mockResolvedValueOnce({
+          requestId: 'req-fb',
+          statusUrl: 'https://queue.fal.run/m/requests/req-fb/status',
+          responseUrl: 'https://queue.fal.run/m/requests/req-fb',
+        });
+      await processor.process({ stepId: 'st-talk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      expect(fal.submit.mock.calls[0][0]).toBe(MINIMAX_H3_LIPSYNC_MODEL);
+      expect(submittedAudio(0)).toBe('mp3-completado');
+      expect(fal.submit.mock.calls[1][0]).toBe(KLING_AVATAR_MODEL);
+      expect(submittedAudio(1)).toBe('mp3-pequeno');
+      expect(patchedSnapshot()).toMatchObject({
+        audioPadding: null,
+        estimatedProviderCostUsd: Number((4 * 0.0562).toFixed(4)),
+        effectiveEngine: expect.objectContaining({ fallbackFrom: MINIMAX_H3_LIPSYNC_MODEL }),
+      });
+    });
+
+    it('áudio completado acima do teto do data URI → validação terminal audio_too_large SEM submit', async () => {
+      useLogoKit();
+      audioDurationMs = 4_000;
+      ffmpeg.run.mockImplementationOnce(async (args: string[]) => {
+        await fs.writeFile(args[args.length - 1], Buffer.alloc(Math.ceil(3.4 * 1024 * 1024)));
+      });
+      await processor.process({ stepId: 'st-talk' });
+      expect(fal.submit).not.toHaveBeenCalled();
+      expect(pipeline.consumeStepCredits).not.toHaveBeenCalled();
+      expect((pipeline.failStep.mock.calls[0][2] as TerminalProviderError).code).toBe(
+        'audio_too_large',
+      );
     });
   });
 
@@ -871,10 +1148,12 @@ describe('McTalkingProcessor — provider mock: clipe talk com a duração do á
   let step: Record<string, unknown>;
   let ffmpeg: Record<string, jest.Mock>;
   let transitions: { casTransition: jest.Mock };
+  let failStep: jest.Mock;
   let processor: McTalkingProcessor;
 
   beforeEach(async () => {
     process.env.MC_PIPELINE_PROVIDER = 'mock';
+    failStep = jest.fn().mockResolvedValue(undefined);
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mc-talking-mock-spec-'));
     step = {
       id: 'st-mock',
@@ -926,7 +1205,7 @@ describe('McTalkingProcessor — provider mock: clipe talk com a duração do á
       dataSource as unknown as DataSource,
       {
         claimStep: jest.fn(() => Promise.resolve({ ...step })),
-        failStep: jest.fn().mockResolvedValue(undefined),
+        failStep,
         consumeStepCredits: jest.fn().mockResolvedValue(undefined),
         notifyStep: jest.fn().mockResolvedValue(undefined),
         assertSubmitAllowed: jest.fn().mockResolvedValue(true),
@@ -976,8 +1255,66 @@ describe('McTalkingProcessor — provider mock: clipe talk com a duração do á
       'st-mock',
       McStepStatus.RUNNING,
       McStepStatus.PROVIDER_WAIT,
-      expect.objectContaining({ provider: 'mock' }),
+      expect.objectContaining({
+        provider: 'mock',
+        // motor econômico (sem mínimo): sem silêncio, registro explícito null
+        inputSnapshot: expect.objectContaining({ audioAssetId: 'a-audio', audioPadding: null }),
+      }),
     );
+  });
+
+  it('logo_as_is com fala de 2 s → o MESMO silêncio do submit real: áudio completado a 5,15 s muxado no clipe mock de 5,25 s e audioPadding no snapshot (o ingest apara à fala)', async () => {
+    step.inputSnapshot = {
+      audioAssetId: 'a-audio',
+      tileAssetId: 'a-tile',
+      tier: 'economico',
+      identityMode: 'logo_as_is',
+    };
+    ffmpeg.probe.mockImplementation((file: string) =>
+      Promise.resolve({
+        hasVideo: false,
+        hasAudio: true,
+        durationMs: file.endsWith('voice-padded.mp3') ? 5_000 : 2_000,
+      }),
+    );
+    ffmpeg.run.mockImplementation(async (args: string[]) => {
+      const output = args[args.length - 1];
+      if (output.endsWith('.mp3')) await fs.writeFile(output, Buffer.from('mp3-completado'));
+    });
+    await processor.process({ stepId: 'st-mock' });
+    expect(ffmpeg.run).toHaveBeenCalledTimes(2);
+    const [padArgs, clipArgs] = ffmpeg.run.mock.calls.map((c) => c[0] as string[]);
+    expect(padArgs).toEqual(expect.arrayContaining(['-af', 'apad=whole_dur=5.150']));
+    // clipe mock = áudio ENVIADO (5,15 s) + margem; o áudio muxado é o completado
+    expect(lavfiInput(clipArgs)).toBe('color=c=0x2E5E9E:s=720x960:r=30:d=5.25');
+    const audioIn = clipArgs[clipArgs.lastIndexOf('-i') + 1];
+    expect(audioIn).toMatch(/voice-submitted\.mp3$/);
+    expect(transitions.casTransition.mock.calls[0][5]).toMatchObject({
+      provider: 'mock',
+      inputSnapshot: {
+        identityMode: 'logo_as_is',
+        audioPadding: {
+          engineModel: MINIMAX_H3_LIPSYNC_MODEL,
+          minS: 5,
+          speechMs: 2_000,
+          submittedMs: 5_150,
+        },
+      },
+    });
+  });
+
+  it('logo_as_is com o TTS SEM medida (ffprobe falhou) → o MESMO erro transiente do submit real, nenhum clipe mock', async () => {
+    step.inputSnapshot = {
+      audioAssetId: 'a-audio',
+      tileAssetId: 'a-tile',
+      tier: 'economico',
+      identityMode: 'logo_as_is',
+    };
+    ffmpeg.probe.mockRejectedValueOnce(new Error('ffprobe excedeu 30s'));
+    await processor.process({ stepId: 'st-mock' });
+    expect(ffmpeg.run).not.toHaveBeenCalled();
+    expect(transitions.casTransition).not.toHaveBeenCalled();
+    expect(failStep.mock.calls[0][2]).toBeInstanceOf(TransientProviderError);
   });
 
   it('premium (kit gerado) simula o 1080p nativo: clipe mock 1080×1440; logo_as_is premium segue em 720×960 (7.2)', async () => {
@@ -1136,5 +1473,110 @@ describeIfFfmpeg('McTalkingProcessor — mock talk com ffmpeg real (MC_TEST_FFMP
     const audioMs = (await runner.probe(path.join(dir, 'voice.mp3'))).durationMs as number;
     expect(probe.durationMs as number).toBeGreaterThanOrEqual(audioMs);
     expect(Math.abs((probe.durationMs as number) - AUDIO_S * 1000)).toBeLessThanOrEqual(300);
+  }, 90_000);
+
+  it('logo_as_is com fala de 2 s (motor de logo, mínimo de 5 s) → áudio completado com silêncio pelo ffmpeg real; clipe mock com a duração ENVIADA (≥ 5,15 s) e audioPadding no snapshot', async () => {
+    process.env.MC_PIPELINE_PROVIDER = 'mock';
+    const shortPath = path.join(dir, 'short.mp3');
+    await runner.run(
+      [
+        '-y',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=440:sample_rate=44100',
+        '-t',
+        '2',
+        '-codec:a',
+        'libmp3lame',
+        '-b:a',
+        '128k',
+        shortPath,
+      ],
+      { durationMs: 2000, timeoutMs: 60_000 },
+    );
+    const short = await fs.readFile(shortPath);
+    const speechMs = (await runner.probe(shortPath)).durationMs as number;
+    const step = {
+      id: 'st-real-pad',
+      projectId: 'p1',
+      sceneId: 'sc1',
+      sceneGeneration: 1,
+      type: McStepType.TALK,
+      status: McStepStatus.RUNNING,
+      phase: 'production',
+      projectRevision: 1,
+      costCredits: 56,
+      attempts: 1,
+      providerJobId: null,
+      inputSnapshot: { audioAssetId: 'a-audio', tier: 'premium', identityMode: 'logo_as_is' },
+    };
+    const scene = {
+      id: 'sc1',
+      projectId: 'p1',
+      idx: 0,
+      generation: 1,
+      durationS: 2,
+      audioAssetId: 'a-audio',
+    };
+    const project = { id: 'p1', userId: 'u1', kitId: 'kit-1', title: 'T', tier: 'premium' };
+    const transitions = { casTransition: jest.fn().mockResolvedValue(true) };
+    const jobs = path.join(dir, 'mock-jobs-pad');
+    const processor = new McTalkingProcessor(
+      {
+        getRepository: jest.fn((entity: unknown) => ({
+          findOneBy: jest.fn((where: { id: string }) => {
+            if (entity === McScene) return Promise.resolve(scene);
+            if (entity === McProject) return Promise.resolve(project);
+            if (entity === McStep) return Promise.resolve(step);
+            if (entity === AnimationAsset)
+              return Promise.resolve({ id: where.id, fileUrl: `/uploads/${where.id}.mp3` });
+            return Promise.resolve(null);
+          }),
+        })),
+        transaction: jest.fn((cb: (m: unknown) => Promise<unknown>) =>
+          cb({ findOneByOrFail: jest.fn().mockResolvedValue(project) }),
+        ),
+      } as unknown as DataSource,
+      {
+        claimStep: jest.fn(() => Promise.resolve({ ...step })),
+        failStep: jest.fn((_s: unknown, _f: unknown, err: Error) => {
+          throw err;
+        }),
+        consumeStepCredits: jest.fn().mockResolvedValue(undefined),
+        notifyStep: jest.fn().mockResolvedValue(undefined),
+        assertSubmitAllowed: jest.fn().mockResolvedValue(true),
+      } as unknown as McPipelineService,
+      transitions as unknown as TaskTransitionService,
+      { appendEvent: jest.fn().mockResolvedValue(undefined) } as unknown as CommercialsService,
+      { publish: jest.fn().mockResolvedValue(undefined) } as unknown as AnimationQueueService,
+      { submit: jest.fn() } as unknown as FalQueueClient,
+      runner,
+      {
+        readUploadsFile: jest.fn().mockResolvedValue(short),
+        mockJobsAbsDir: jest.fn().mockReturnValue(jobs),
+        mockJobAbsPath: jest.fn((jobId: string) => path.join(jobs, `${jobId}.mp4`)),
+      } as unknown as McStorageService,
+    );
+    await processor.process({ stepId: 'st-real-pad' });
+    const written = transitions.casTransition.mock.calls[0][5] as {
+      providerJobId: string;
+      inputSnapshot: { audioPadding: Record<string, number | string> };
+    };
+    const padding = written.inputSnapshot.audioPadding;
+    expect(padding).toMatchObject({ engineModel: MINIMAX_H3_LIPSYNC_MODEL, minS: 5, speechMs });
+    // alvo 5,15 s (mínimo + folga); o probe do MP3 completado passa ~50 ms do decodificado
+    expect(padding.submittedMs as number).toBeGreaterThanOrEqual(5150);
+    expect(padding.submittedMs as number).toBeLessThanOrEqual(5250);
+    const clip = await runner.probe(path.join(jobs, `${written.providerJobId}.mp4`));
+    expect(clip.hasVideo && clip.hasAudio).toBe(true);
+    // logo_as_is no premium: sem a garantia de 1080 px (720×960)
+    expect([clip.width, clip.height]).toEqual([720, 960]);
+    // o "fornecedor" mock devolve a duração ENVIADA (+ margem), não a da fala
+    expect(clip.durationMs as number).toBeGreaterThanOrEqual(padding.submittedMs as number);
+    expect(clip.durationMs as number).toBeLessThanOrEqual((padding.submittedMs as number) + 300);
   }, 90_000);
 });

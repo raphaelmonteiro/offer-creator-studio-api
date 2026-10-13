@@ -169,9 +169,11 @@ export function aggregateMcCosts(
  * Clipes com custo de fornecedor (`scene_synced`/`scene_clip` com
  * `providerCostUsd` gravado) criados no mês, agrupados por projeto × motor ×
  * tier. Motor: `engine.model` (talk) → `provider` (lipsync/ação legados);
- * tier: o gravado no clipe (talk) → o do projeto → econômico. Segundos: os do
- * clipe CRU do fornecedor quando conformado (base da tarifa), senão a duração
- * do arquivo. Soft-deletados contam (o custo aconteceu).
+ * tier: o gravado no clipe (talk) → o do projeto → econômico. Segundos: os
+ * COBRADOS (`billedDurationMs`, gravado pelo ingest do talk: clipe cru, nunca
+ * abaixo do áudio enviado com silêncio até o mínimo do motor — H3: 5 s), senão
+ * os do clipe CRU do fornecedor quando conformado (base da tarifa), senão a
+ * duração do arquivo. Soft-deletados contam (o custo aconteceu).
  */
 export const MC_COSTS_SQL = `
 SELECT a.metadata->>'projectId' AS "projectId",
@@ -179,7 +181,7 @@ SELECT a.metadata->>'projectId' AS "projectId",
        COALESCE(NULLIF(a.metadata->>'tier', ''), p.tier, 'economico') AS tier,
        COUNT(*)::int AS clips,
        COALESCE(SUM((a.metadata->>'providerCostUsd')::numeric), 0)::text AS "costUsd",
-       (COALESCE(SUM(COALESCE((a.metadata->'conform'->>'rawDurationMs')::numeric, a."durationMs")), 0) / 1000)::text AS seconds
+       (COALESCE(SUM(COALESCE((a.metadata->>'billedDurationMs')::numeric, (a.metadata->'conform'->>'rawDurationMs')::numeric, a."durationMs")), 0) / 1000)::text AS seconds
   FROM animation_assets a
   LEFT JOIN mc_projects p ON p.id::text = a.metadata->>'projectId'
  WHERE a.kind IN ('scene_synced', 'scene_clip')

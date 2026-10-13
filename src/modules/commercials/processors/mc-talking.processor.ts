@@ -26,12 +26,17 @@ import { buildActionVideoPrompt, buildAvatarVideoPrompt } from '../domain/mc-sce
 import { assertStepTransition, McStepStatus } from '../domain/mc-state-machines';
 import {
   assertTalkAudioWithinEngineLimit,
+  assertTalkSpeechMeasuredForEngine,
+  buildTalkAudioPadArgs,
   buildTalkSubmitInput,
   isTalkEngineAvailabilityError,
+  McTalkAudioPadding,
   McTalkEffectiveEngine,
   McTalkEngineSnapshot,
+  planTalkAudioPadding,
   premiumResolutionApplies,
   resolveTalkEngine,
+  talkEngineMinAudioS,
   talkEngineSnapshot,
   talkFallbackEngine,
 } from '../domain/mc-talk-engines';
@@ -102,7 +107,10 @@ export async function recolorTileBackground(buffer: Buffer, hex: string): Promis
   return sharp(buffer).flatten({ background: color }).png().toBuffer();
 }
 
-/** Sobra do clipe `talk` mock sobre o áudio medido (s) — o ingest apara (D7: `trim`). */
+/**
+ * Sobra do clipe `talk` mock sobre o áudio ENVIADO (s; com o silêncio do
+ * submit quando o motor tem mínimo) — o ingest apara à fala (D7: `trim`).
+ */
 export const MC_MOCK_TALK_MARGIN_S = 0.1;
 
 /**
@@ -113,6 +121,15 @@ export const MC_MOCK_TALK_MARGIN_S = 0.1;
  */
 export function mockTalkClipDurationS(audioDurationMs: number): number {
   return Math.max(1, Number((audioDurationMs / 1000 + MC_MOCK_TALK_MARGIN_S).toFixed(3)));
+}
+
+/** Áudio que vai ao motor de fala: o TTS como está ou a cópia com silêncio no fim. */
+interface McTalkSentAudio {
+  buffer: Buffer;
+  /** Duração do áudio enviado (ms); `null` = desconhecida (só em motor sem mínimo). */
+  submittedMs: number | null;
+  /** Registro do silêncio; `null` = TTS como está. */
+  padding: McTalkAudioPadding | null;
 }
 
 /**
@@ -193,7 +210,7 @@ export class McTalkingProcessor {
         inputSnapshot?: Record<string, unknown>;
       } =
         this.provider() === 'mock'
-          ? await this.mockSubmit(step, scene)
+          ? await this.mockSubmit(step, scene, project)
           : step.type === McStepType.LIPSYNC
             ? await this.submitKlingAvatar(scene, step)
             : step.type === McStepType.TALK
@@ -375,6 +392,13 @@ export class McTalkingProcessor {
    * logo em qualquer tier; os demais, o do tier. Fallback para o motor do tier
    * SÓ em erro de disponibilidade do motor de logo (nunca por reprovação de
    * inspeção), com o motor efetivo gravado no snapshot do step.
+   *
+   * Fala curta (decisão do desenvolvedor de 13/10/2026, "completar com
+   * silêncio"): motor com mínimo documentado de áudio (H3 Max: 5 s) recebe o
+   * TTS seguido de silêncio até o mínimo (`talkAudioForEngine`); o asset do TTS
+   * não muda e o ingest apara o clipe à fala com o TTS original. O snapshot
+   * grava `audioPadding` ({engineModel, minS, speechMs, submittedMs}; `null`
+   * sem silêncio) e `estimatedProviderCostUsd` sobre os segundos ENVIADOS.
    */
   private async submitTalk(
     scene: McScene,
@@ -426,21 +450,49 @@ export class McTalkingProcessor {
     // pela config se veio parcial) ou a regra D2. Nunca o `effectiveEngine` de
     // uma execução anterior — cada execução tenta o motor planejado de novo.
     const chosen = resolveTalkEngine(snapshot.engine, { tier, identityMode });
-    const ingredients = {
-      imageUrl: toDataUri(speakingTile, sniffImageMime(speakingTile)),
-      audioUrl: toDataUri(audio, 'audio/mpeg'),
-      prompt,
+    const imageUrl = toDataUri(speakingTile, sniffImageMime(speakingTile));
+    // Duração da FALA: a medida do asset do TTS; desconhecida e o motor com
+    // mínimo documentado → medida aqui (ffprobe, uma vez) para decidir o silêncio.
+    const assetSpeechMs = audioAsset.durationMs;
+    const knownSpeechMs =
+      assetSpeechMs != null && Number.isFinite(assetSpeechMs) && assetSpeechMs > 0
+        ? assetSpeechMs
+        : null;
+    let probedSpeechMs: Promise<number | null> | null = null;
+    const speechMsFor = (model: string): Promise<number | null> => {
+      if (knownSpeechMs != null || talkEngineMinAudioS(model) == null) {
+        return Promise.resolve(knownSpeechMs);
+      }
+      probedSpeechMs ??= this.measureAudioMs(audio);
+      return probedSpeechMs;
     };
-    // 7.1: limite DOCUMENTADO de áudio por chamada do modelo (OmniHuman: 30 s
-    // a 1080p) checado ANTES de qualquer submit — validação terminal, sem custo.
-    const submitTo = (model: string) => {
-      assertTalkAudioWithinEngineLimit(model, audioAsset.durationMs);
-      return this.fal.submit(model, buildTalkSubmitInput(model, ingredients));
+    // Áudio que VAI ao motor, preparado LOCALMENTE e checado ANTES de qualquer
+    // submit: medida da fala (desconhecida num motor com mínimo → transiente,
+    // nada enviado), silêncio do submit e os limites DOCUMENTADOS por chamada
+    // (7.1: OmniHuman ≤ 30 s a 1080p; H3 ≥ 5 s — validação terminal, sem custo;
+    // abaixo do mínimo o áudio enviado já é o completado, nunca audio_too_short).
+    const prepareAudio = async (model: string) => {
+      const sent = await this.talkAudioForEngine(model, audio, await speechMsFor(model));
+      assertTalkAudioWithinEngineLimit(model, sent.submittedMs);
+      return sent;
     };
+    const submitTo = (model: string, sent: McTalkSentAudio) =>
+      this.fal.submit(
+        model,
+        buildTalkSubmitInput(model, {
+          imageUrl,
+          audioUrl: toDataUri(sent.buffer, 'audio/mpeg'),
+          prompt,
+        }),
+      );
+    // A preparação do motor escolhido fica FORA do try do fallback: falha local
+    // (medida, ffmpeg, limites) nunca troca o motor de logo pelo do tier — só
+    // erro de disponibilidade do PRÓPRIO submit troca (D2).
+    let sent = await prepareAudio(chosen.model);
     let effective: McTalkEffectiveEngine | null = null;
-    let result: Awaited<ReturnType<FalQueueClient['submit']>>;
+    let result: Awaited<ReturnType<typeof submitTo>>;
     try {
-      result = await submitTo(chosen.model);
+      result = await submitTo(chosen.model, sent);
     } catch (err) {
       const fallback = talkFallbackEngine(chosen, tier);
       if (!fallback || !isTalkEngineAvailabilityError(err)) throw err;
@@ -448,12 +500,25 @@ export class McTalkingProcessor {
         `Motor ${chosen.model} indisponível (${(err as Error).message}) — ` +
           `fallback para o motor do tier (${fallback.model})`,
       );
-      result = await submitTo(fallback.model);
+      sent = await prepareAudio(fallback.model);
+      result = await submitTo(fallback.model, sent);
       effective = fallback;
     }
     // `engine` = planejado, `effectiveEngine` = submetido (com `fallbackFrom`
     // só quando houve fallback) — o ingest lê o efetivo para motor/tarifa.
     const engines = talkEngineSnapshot(chosen, effective);
+    // Estimativa do custo do fornecedor sobre os segundos ENVIADOS (com o
+    // silêncio do submit: max(fala, mínimo + folga)) — o real vem do ingest.
+    const estimatedProviderCostUsd =
+      sent.submittedMs != null
+        ? Number(((sent.submittedMs / 1000) * engines.effectiveEngine.usdPerSecond).toFixed(4))
+        : null;
+    if (sent.padding) {
+      this.logger.log(
+        `Step ${step.id}: fala de ${sent.padding.speechMs} ms completada com silêncio até ` +
+          `${sent.padding.submittedMs} ms (mínimo de ${sent.padding.minS}s de ${sent.padding.engineModel})`,
+      );
+    }
     return {
       provider: engines.effectiveEngine.model,
       providerJobId: result.requestId,
@@ -467,22 +532,92 @@ export class McTalkingProcessor {
         tier,
         identityMode,
         ...engines,
+        // sempre gravados (null = sem silêncio / sem medida): uma execução
+        // anterior nunca deixa um registro velho no snapshot
+        audioPadding: sent.padding,
+        estimatedProviderCostUsd,
       },
     };
   }
 
   /**
+   * Áudio que VAI ao motor (decisão do desenvolvedor de 13/10/2026): o TTS
+   * como está, ou — motor com mínimo documentado e fala medida abaixo do alvo
+   * (`planTalkAudioPadding`: mínimo + 150 ms de folga da medida do MP3) — uma
+   * cópia com silêncio no fim até o alvo (`buildTalkAudioPadArgs`: MP3, mesma
+   * taxa de amostragem). A duração enviada é a MEDIDA do arquivo completado
+   * (nunca abaixo do alvo pedido). Motor com mínimo e fala SEM medida →
+   * `TransientProviderError` (`assertTalkSpeechMeasuredForEngine`), nunca o TTS
+   * cru. O buffer do TTS original não é alterado. Usado pelo submit real e
+   * pelo mock (mesmo comportamento).
+   */
+  private async talkAudioForEngine(
+    model: string,
+    audio: Buffer,
+    speechMs: number | null,
+  ): Promise<McTalkSentAudio> {
+    assertTalkSpeechMeasuredForEngine(model, speechMs);
+    const plan = planTalkAudioPadding(model, speechMs);
+    if (!plan) return { buffer: audio, submittedMs: speechMs, padding: null };
+    const dir = await this.ffmpeg.createTempDir('mc-talk-pad-');
+    try {
+      const input = path.join(dir, 'voice.mp3');
+      const output = path.join(dir, 'voice-padded.mp3');
+      await fs.writeFile(input, audio);
+      await this.ffmpeg.run(
+        buildTalkAudioPadArgs({ input, output, totalS: plan.submittedMs / 1000 }),
+        { durationMs: plan.submittedMs, timeoutMs: 60_000 },
+      );
+      const buffer = await fs.readFile(output);
+      if (buffer.length > MC_DATA_URI_MAX_BYTES) {
+        throw new TerminalProviderError(
+          'Áudio da fala completado com silêncio excede o teto de 3,3MB do data URI',
+          'audio_too_large',
+        );
+      }
+      const probe = await this.ffmpeg.probe(output).catch(() => null);
+      const submittedMs = Math.max(plan.submittedMs, probe?.durationMs ?? 0);
+      return { buffer, submittedMs, padding: { ...plan, submittedMs } };
+    } finally {
+      await this.ffmpeg.removeTempDir(dir);
+    }
+  }
+
+  /** Duração (ms) de um áudio em memória via ffprobe; falha ou desconhecida → null. */
+  private async measureAudioMs(audio: Buffer): Promise<number | null> {
+    const dir = await this.ffmpeg.createTempDir('mc-talk-probe-');
+    try {
+      const file = path.join(dir, 'voice.mp3');
+      await fs.writeFile(file, audio);
+      const probe = await this.ffmpeg.probe(file).catch(() => null);
+      return probe?.durationMs ?? null;
+    } finally {
+      await this.ffmpeg.removeTempDir(dir);
+    }
+  }
+
+  /**
    * Clipe sintético (cor + áudio muxado quando houver) em mock-jobs/{jobId}.mp4 — custo zero.
    *
-   * talk (D7): a duração do clipe é a do ÁUDIO MEDIDO mais `MC_MOCK_TALK_MARGIN_S`,
+   * talk (D7): a duração do clipe é a do áudio ENVIADO mais `MC_MOCK_TALK_MARGIN_S`,
    * sem `-shortest` (nunca, D7) — o ingest conforma esse clipe exatamente como
-   * conformaria um clipe real (aparar os 100 ms de sobra). O lipsync legado
+   * conformaria um clipe real (aparar a sobra). Fala curta num motor com mínimo
+   * documentado (H3: 5 s) passa pelo MESMO silêncio do submit real
+   * (`talkAudioForEngine`): o clipe mock volta com a duração completada e o
+   * snapshot grava `audioPadding`, como no provider real. O lipsync legado
    * segue com segundos inteiros + `-shortest` (executor antigo preservado).
    */
   private async mockSubmit(
     step: McStep,
     scene: McScene,
-  ): Promise<{ provider: string; providerJobId: string; statusUrl: string; responseUrl: string }> {
+    project: McProject,
+  ): Promise<{
+    provider: string;
+    providerJobId: string;
+    statusUrl: string;
+    responseUrl: string;
+    inputSnapshot?: Record<string, unknown>;
+  }> {
     const jobId = randomUUID();
     const talk = step.type === McStepType.TALK;
     const spoken = step.type === McStepType.LIPSYNC || talk;
@@ -491,60 +626,78 @@ export class McTalkingProcessor {
       providerDuration?: string;
       tier?: string | null;
       identityMode?: string | null;
+      engine?: McTalkEngineSnapshot | null;
     } | null;
     let audioPath: string | null = null;
+    let audioDir: string | null = null;
+    let audioPadding: McTalkAudioPadding | null = null;
     let durationS = Math.min(15, Math.max(2, scene.durationS || 5));
     // v2: o clipe de ação mock tem a duração que o PROVIDER entregaria (5/10s),
     // para que scene_compose e a validação de locução vejam números reais.
     if (!spoken && snapshot?.providerDuration) durationS = Number(snapshot.providerDuration);
-    if (spoken) {
-      const audio = await this.loadAssetBuffer(
-        snapshot?.audioAssetId ?? scene.audioAssetId,
-        'áudio',
-      );
-      const dir = await this.ffmpeg.createTempDir('mc-talking-mock-');
-      audioPath = path.join(dir, 'voice.mp3');
-      await fs.writeFile(audioPath, audio);
-      const probe = await this.ffmpeg.probe(audioPath).catch(() => null);
-      if (probe?.durationMs) {
-        durationS = talk
-          ? mockTalkClipDurationS(probe.durationMs)
-          : Math.max(1, Math.round(probe.durationMs / 1000));
-      }
-    }
-
-    await fs.mkdir(this.storage.mockJobsAbsDir(), { recursive: true });
-    const outPath = this.storage.mockJobAbsPath(jobId);
-    const args = ['-y', '-hide_banner', '-loglevel', 'error'];
-    // talk: tile 3:4 (proporção típica do tile do kit); demais: 9:16 da cena.
-    // Premium (exceto logo_as_is) simula o 1080p nativo do motor (7.2) — o
-    // ingest exige lado maior ≥ 1080 px e regeraria um clipe mock de 720p.
-    const premium =
-      talk &&
-      premiumResolutionApplies({
-        tier: snapshot?.tier ?? null,
-        identityMode: snapshot?.identityMode ?? null,
-      });
-    const size = talk ? (premium ? '1080x1440' : '720x960') : '720x1280';
-    args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`);
-    if (audioPath) {
-      args.push('-i', audioPath, '-map', '0:v', '-map', '1:a', '-c:a', 'aac');
-      if (!talk) args.push('-shortest');
-    }
-    // -f mp4 explícito: o sufixo .part (escrita atômica) impede o ffmpeg de
-    // inferir o muxer pela extensão.
-    args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-f', 'mp4', `${outPath}.part`);
     try {
+      if (spoken) {
+        const audio = await this.loadAssetBuffer(
+          snapshot?.audioAssetId ?? scene.audioAssetId,
+          'áudio',
+        );
+        audioDir = await this.ffmpeg.createTempDir('mc-talking-mock-');
+        audioPath = path.join(audioDir, 'voice.mp3');
+        await fs.writeFile(audioPath, audio);
+        const probe = await this.ffmpeg.probe(audioPath).catch(() => null);
+        if (talk) {
+          // mesmo motor planejado do submit real (snapshot do materializer → regra D2)
+          const model = resolveTalkEngine(snapshot?.engine, {
+            tier: (snapshot?.tier ?? project.tier ?? 'economico') as McProject['tier'],
+            identityMode: (snapshot?.identityMode ?? null) as McKitIdentityMode | null,
+          }).model;
+          const sent = await this.talkAudioForEngine(model, audio, probe?.durationMs ?? null);
+          audioPadding = sent.padding;
+          if (sent.padding) {
+            // o "fornecedor" mock recebe (e devolve muxado) o áudio completado
+            audioPath = path.join(audioDir, 'voice-submitted.mp3');
+            await fs.writeFile(audioPath, sent.buffer);
+          }
+          if (sent.submittedMs) durationS = mockTalkClipDurationS(sent.submittedMs);
+        } else if (probe?.durationMs) {
+          durationS = Math.max(1, Math.round(probe.durationMs / 1000));
+        }
+      }
+
+      await fs.mkdir(this.storage.mockJobsAbsDir(), { recursive: true });
+      const outPath = this.storage.mockJobAbsPath(jobId);
+      const args = ['-y', '-hide_banner', '-loglevel', 'error'];
+      // talk: tile 3:4 (proporção típica do tile do kit); demais: 9:16 da cena.
+      // Premium (exceto logo_as_is) simula o 1080p nativo do motor (7.2) — o
+      // ingest exige lado maior ≥ 1080 px e regeraria um clipe mock de 720p.
+      const premium =
+        talk &&
+        premiumResolutionApplies({
+          tier: snapshot?.tier ?? null,
+          identityMode: snapshot?.identityMode ?? null,
+        });
+      const size = talk ? (premium ? '1080x1440' : '720x960') : '720x1280';
+      args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`);
+      if (audioPath) {
+        args.push('-i', audioPath, '-map', '0:v', '-map', '1:a', '-c:a', 'aac');
+        if (!talk) args.push('-shortest');
+      }
+      // -f mp4 explícito: o sufixo .part (escrita atômica) impede o ffmpeg de
+      // inferir o muxer pela extensão.
+      args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-f', 'mp4', `${outPath}.part`);
       await this.ffmpeg.run(args, { durationMs: durationS * 1000, timeoutMs: 90_000 });
       await this.ffmpeg.finalizeOutput(`${outPath}.part`, outPath);
     } finally {
-      if (audioPath) await this.ffmpeg.removeTempDir(path.dirname(audioPath));
+      if (audioDir) await this.ffmpeg.removeTempDir(audioDir);
     }
     return {
       provider: 'mock',
       providerJobId: jobId,
       statusUrl: `mock:${jobId}`,
       responseUrl: `mock:${jobId}`,
+      // talk: o registro do silêncio vai ao snapshot como no submit real
+      // (`null` = sem silêncio; nunca sobra o de uma execução anterior)
+      ...(talk ? { inputSnapshot: { ...(step.inputSnapshot ?? {}), audioPadding } } : {}),
     };
   }
 
