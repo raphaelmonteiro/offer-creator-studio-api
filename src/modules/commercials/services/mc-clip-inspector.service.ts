@@ -146,10 +146,14 @@ export class McClipInspectorService {
   }
 
   /**
-   * Instantes dos PARES (t, t+Δ) dentro das janelas de fala: as janelas mais
-   * longas primeiro (mais chance de boca em movimento), t no centro da janela,
-   * e o par inteiro precisa caber na janela e no clipe. Sem janela que caiba
-   * nenhum par → lista vazia (checagem pulada e registrada).
+   * Instantes dos PARES (t, t+Δ) dentro das janelas de fala (D11: 2 a 3
+   * pares): `pairs` pares distribuídos pelas janelas cortadas ao clipe —
+   * primeiro um por janela, das mais longas para as mais curtas (mais chance de
+   * boca em movimento); os que sobram vão para a janela com o maior trecho por
+   * par. Cada par fica no centro do seu trecho, então pares da mesma janela
+   * nunca se sobrepõem. Uma fala contínua (uma janela só, o caso típico do
+   * `talk_tile`) rende os 3 pares; só uma fala curta demais rende menos de 2.
+   * Sem janela que caiba nenhum par → lista vazia (checagem pulada e registrada).
    */
   static speechPairTimesS(
     windows: SpeechWindow[],
@@ -159,15 +163,40 @@ export class McClipInspectorService {
   ): number[] {
     const clipS = durationMs / 1000;
     const usable = windows
-      .filter((w) => w.endS - w.startS >= deltaS && w.startS + deltaS <= clipS)
-      .sort((a, b) => b.endS - b.startS - (a.endS - a.startS))
-      .slice(0, pairs)
-      .sort((a, b) => a.startS - b.startS);
-    return usable.map((w) => {
-      const center = (w.startS + w.endS) / 2 - deltaS / 2;
-      const t = Math.min(Math.max(w.startS, center), Math.min(w.endS, clipS) - deltaS);
-      return Number(Math.max(0, t).toFixed(2));
+      .map((w) => ({ startS: Math.max(0, w.startS), endS: Math.min(w.endS, clipS) }))
+      .filter((w) => w.endS - w.startS >= deltaS)
+      .sort((a, b) => b.endS - b.startS - (a.endS - a.startS));
+    const counts = usable.map(() => 0);
+    let left = pairs;
+    for (let i = 0; i < usable.length && left > 0; i += 1) {
+      counts[i] = 1;
+      left -= 1;
+    }
+    while (left > 0) {
+      let best = -1;
+      let bestSlotS = 0;
+      usable.forEach((w, i) => {
+        const lengthS = w.endS - w.startS;
+        if ((counts[i] + 1) * deltaS > lengthS + 1e-9) return; // outro par não cabe sem sobrepor
+        const slotS = lengthS / (counts[i] + 1);
+        if (slotS > bestSlotS) {
+          best = i;
+          bestSlotS = slotS;
+        }
+      });
+      if (best < 0) break;
+      counts[best] += 1;
+      left -= 1;
+    }
+    const starts: number[] = [];
+    usable.forEach((w, i) => {
+      const segmentS = (w.endS - w.startS) / Math.max(1, counts[i]);
+      for (let k = 0; k < counts[i]; k += 1) {
+        const t = w.startS + segmentS * k + (segmentS - deltaS) / 2;
+        starts.push(Number(Math.max(0, t).toFixed(2)));
+      }
     });
+    return starts.sort((a, b) => a - b);
   }
 
   static parseVerdict(text: string): {

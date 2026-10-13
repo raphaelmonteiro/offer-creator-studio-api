@@ -63,6 +63,41 @@ describe('McClipInspectorService — inspeção por contexto e janelas de fala (
     expect(McClipInspectorService.speechPairTimesS([{ startS: 5.9, endS: 7 }], 6000)).toEqual([]);
   });
 
+  it('fala contínua numa janela só (caso típico do talk_tile): 3 pares espaçados, sem sobreposição, dentro da janela', () => {
+    const starts = McClipInspectorService.speechPairTimesS([{ startS: 0, endS: 6 }], 6010);
+    expect(starts).toEqual([0.88, 2.88, 4.88]);
+    for (let i = 1; i < starts.length; i += 1) {
+      expect(starts[i]).toBeGreaterThanOrEqual(starts[i - 1] + 0.25);
+    }
+    for (const t of starts) {
+      expect(t).toBeGreaterThanOrEqual(0);
+      expect(t + 0.25).toBeLessThanOrEqual(6);
+    }
+    // janela que passa do fim do clipe é cortada ao clipe antes da distribuição
+    const clipped = McClipInspectorService.speechPairTimesS([{ startS: 1, endS: 9 }], 4000);
+    expect(clipped).toHaveLength(3);
+    expect(Math.max(...clipped) + 0.25).toBeLessThanOrEqual(4);
+  });
+
+  it('mínimo de 2 pares quando a fala comporta: 2 janelas → um par em cada e o 3º na mais longa; fala de 0,6 s → 2; de 0,4 s → 1', () => {
+    const two = McClipInspectorService.speechPairTimesS(
+      [
+        { startS: 3.5, endS: 4 },
+        { startS: 0, endS: 3 },
+      ],
+      6000,
+    );
+    expect(two).toHaveLength(3);
+    expect(two.filter((t) => t >= 3.5 && t + 0.25 <= 4)).toHaveLength(1);
+    expect(two.filter((t) => t >= 0 && t + 0.25 <= 3)).toHaveLength(2);
+    expect(McClipInspectorService.speechPairTimesS([{ startS: 1, endS: 1.6 }], 6000)).toHaveLength(
+      2,
+    );
+    expect(McClipInspectorService.speechPairTimesS([{ startS: 1, endS: 1.4 }], 6000)).toHaveLength(
+      1,
+    );
+  });
+
   it('interpreta o JSON do veredito (texto, deformação, boca) e rejeita respostas inválidas', () => {
     expect(
       McClipInspectorService.parseVerdict(
