@@ -4,7 +4,12 @@ import { DataSource, In } from 'typeorm';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { Mascot } from '../../mascots/entities/mascot.entity';
 import { KIT_FRONT_SLOT } from '../domain/kit-prompts';
-import { McCallUsage, McKitCostCall } from '../domain/mc-kit-costs';
+import {
+  MC_KIT_COST_FAILURES,
+  McCallUsage,
+  McKitCostCall,
+  McKitCostFailure,
+} from '../domain/mc-kit-costs';
 import { decideMouthGate, McMouthDecision } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { MC_TILE_MIN_FACE_FRACTION } from '../domain/mc-tile';
@@ -43,9 +48,9 @@ export interface KitProviderCostView {
   usage: McCallUsage | null;
   /** Asset gerado pela chamada (referência, candidato), quando há. */
   assetId: string | null;
-  /** Chamada paga sem resultado (resposta sem imagem/texto, timeout); null = entregou. */
-  failure: 'no_output' | 'timed_out' | null;
-  /** true = custo estimado (timeout), não medido. */
+  /** Chamada paga sem resultado (resposta sem imagem/texto, timeout, rede depois do envio); null = entregou. */
+  failure: McKitCostFailure | null;
+  /** true = custo estimado (timeout, falha de rede depois do envio), não medido. */
   estimated: boolean;
   at: Date;
 }
@@ -137,8 +142,9 @@ export class McKitViewService {
         costUsd: typeof cost === 'number' && Number.isFinite(cost) ? cost : null,
         usage: (detail.usage as McCallUsage | null | undefined) ?? null,
         assetId: typeof detail.assetId === 'string' ? detail.assetId : null,
-        failure:
-          detail.failure === 'no_output' || detail.failure === 'timed_out' ? detail.failure : null,
+        failure: MC_KIT_COST_FAILURES.includes(detail.failure as McKitCostFailure)
+          ? (detail.failure as McKitCostFailure)
+          : null,
         estimated: detail.estimated === true,
         at: event.createdAt,
       };

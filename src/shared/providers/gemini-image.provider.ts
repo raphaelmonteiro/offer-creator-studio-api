@@ -1,7 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs/promises';
-import { TerminalProviderError, TransientProviderError, withRetry } from './provider-errors';
+import {
+  isPreRequestNetworkError,
+  networkErrorCodes,
+  TerminalProviderError,
+  TransientProviderError,
+  withRetry,
+} from './provider-errors';
 
 /** Modelo primário validado (Nano Banana Pro) e fallback documentado do plano §4. */
 export const GEMINI_IMAGE_MODEL = 'nano-banana-pro-preview';
@@ -85,7 +91,10 @@ export function parseGeminiUsage(raw: unknown): GeminiUsage | null {
  * Chamada que a Gemini COBROU sem entregar o resultado: resposta 200 sem
  * imagem (recusa de segurança, `no_image_returned`), visão 200 sem texto, ou
  * geração abortada no timeout do cliente (`timedOut`: a Gemini pode ter
- * gerado e cobrado mesmo assim; uso desconhecido). Vai anexada ao erro
+ * gerado e cobrado mesmo assim; uso desconhecido) ou perdida por falha de
+ * rede DEPOIS do envio (`networkFailure`: socket fechado/reset, `fetch failed`
+ * sem código, corpo da resposta interrompido — mesma ambiguidade do
+ * timeout). Vai anexada ao erro
  * lançado (`geminiBilledFailure(err)`) para quem registra custo não perder a
  * chamada paga.
  */
@@ -93,6 +102,7 @@ export interface GeminiBilledFailure {
   model: string;
   usage: GeminiUsage | null;
   timedOut?: boolean;
+  networkFailure?: boolean;
 }
 
 const BILLING_KEY = 'geminiBilling';
@@ -129,9 +139,14 @@ export interface GeminiGenerateImageParams {
   /** Override de modelo (default nano-banana-pro-preview, fallback gemini-3-pro-image-preview). */
   model?: string;
   /**
-   * false = timeout do cliente é TERMINAL (`provider_timeout`, com a cobrança
-   * estimada anexada): a requisição abortada pode ter sido gerada e cobrada,
-   * e re-tentar pagaria a imagem de novo. Default true (re-tenta, legado).
+   * false = chamada PAGA sem re-envio ambíguo: o timeout do cliente
+   * (`provider_timeout`) e a falha de rede DEPOIS do envio
+   * (`provider_response_lost`: reset, socket fechado, `fetch failed` sem
+   * código, corpo interrompido) são TERMINAIS, com a cobrança estimada
+   * anexada — a requisição pode ter sido gerada e cobrada, e re-tentar
+   * pagaria a imagem de novo. Falha de rede ANTES do envio (DNS,
+   * ECONNREFUSED, timeout de conexão) continua re-tentável.
+   * Default true (re-tenta tudo, legado).
    */
   retryOnTimeout?: boolean;
 }
@@ -142,13 +157,15 @@ export interface GeminiGenerateImageParams {
  * inlineData e parse de candidates[].content.parts[].inlineData. Erros
  * classificados no padrão do http-provider.base (plano §6.4):
  *   - 429/5xx/rede → TransientProviderError (retry com backoff + Retry-After);
+ *     com `retryOnTimeout: false`, só a rede ANTES do envio re-tenta;
  *   - 402/403      → TerminalProviderError 'quota' (sinal de kill-switch);
  *   - bloqueio de segurança (HTTP 400 ou resposta 200 sem imagem com
  *     blockReason/finishReason de safety) → TerminalProviderError 'content_policy';
  *   - 404          → TerminalProviderError 'model_not_found' (dispara o
  *     fallback de modelo gemini-3-pro-image-preview);
  *   - timeout do cliente com `retryOnTimeout: false` → TerminalProviderError
- *     'provider_timeout' (sem nova requisição paga).
+ *     'provider_timeout' e falha de rede depois do envio com o mesmo flag →
+ *     'provider_response_lost' (sem nova requisição paga, cobrança estimada).
  * Falha depois de uma resposta cobrada leva `geminiBilledFailure(err)`.
  */
 @Injectable()
@@ -245,6 +262,9 @@ export class GeminiImageProvider {
           { model, usage: null, timedOut: true },
         );
       }
+      if (params.retryOnTimeout === false && !isPreRequestNetworkError(err)) {
+        throw this.responseLost(model, err);
+      }
       throw new TransientProviderError(`Falha de rede: ${(err as Error).message}`);
     } finally {
       clearTimeout(timer);
@@ -269,7 +289,14 @@ export class GeminiImageProvider {
       );
     }
 
-    const payload = (await response.json()) as GeminiGenerateContentResponse;
+    let payload: GeminiGenerateContentResponse;
+    try {
+      payload = (await response.json()) as GeminiGenerateContentResponse;
+    } catch (err) {
+      // corpo interrompido/truncado depois do 200: a imagem foi gerada e cobrada
+      if (params.retryOnTimeout === false) throw this.responseLost(model, err);
+      throw err;
+    }
     const usage = parseGeminiUsage(payload.usageMetadata);
     try {
       return { image: this.extractImage(payload, model), usage };
@@ -277,6 +304,18 @@ export class GeminiImageProvider {
       // 200 sem imagem (recusa/sem saída): a chamada foi cobrada mesmo assim
       throw withGeminiBilling(err as Error, { model, usage });
     }
+  }
+
+  /** Falha de rede depois do envio numa geração paga: terminal, cobrança estimada anexada. */
+  private responseLost(model: string, err: unknown): TerminalProviderError {
+    const codes = networkErrorCodes(err);
+    return withGeminiBilling(
+      new TerminalProviderError(
+        `Falha de rede no ${model} depois do envio (${(err as Error)?.message ?? 'erro desconhecido'}${codes.length ? ` ${codes.join(',')}` : ''}) — a geração pode ter sido cobrada; sem nova tentativa paga`,
+        'provider_response_lost',
+      ),
+      { model, usage: null, networkFailure: true },
+    );
   }
 
   /**

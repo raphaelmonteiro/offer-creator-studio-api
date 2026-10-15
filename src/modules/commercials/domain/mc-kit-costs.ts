@@ -48,6 +48,16 @@ export interface McCallUsage {
   images: number;
 }
 
+/** Motivo de uma chamada paga sem resultado (ver `McKitProviderCost.failure`). */
+export type McKitCostFailure = 'no_output' | 'timed_out' | 'network';
+
+/** Valores aceitos ao reler `failure` de um evento `provider_cost`. */
+export const MC_KIT_COST_FAILURES: readonly McKitCostFailure[] = [
+  'no_output',
+  'timed_out',
+  'network',
+];
+
 /** Linha de custo de UMA chamada paga (evento `provider_cost` e metadata do asset). */
 export interface McKitProviderCost {
   call: McKitCostCall;
@@ -62,11 +72,12 @@ export interface McKitProviderCost {
   /**
    * Chamada paga SEM resultado: `no_output` = resposta 200 sem imagem/texto
    * (recusa de segurança, saída vazia — tokens do `usageMetadata`);
-   * `timed_out` = abortada no timeout do cliente (a Gemini pode ter gerado).
+   * `timed_out` = abortada no timeout do cliente (a Gemini pode ter gerado);
+   * `network` = resposta perdida por falha de rede DEPOIS do envio (idem).
    * Ausente = chamada que entregou o resultado.
    */
-  failure?: 'no_output' | 'timed_out';
-  /** Custo estimado, não medido (timeout: preço cheio das imagens pedidas, tokens desconhecidos). */
+  failure?: McKitCostFailure;
+  /** Custo estimado, não medido (timeout/rede: preço cheio das imagens pedidas, tokens desconhecidos). */
   estimated?: boolean;
 }
 
@@ -237,15 +248,16 @@ export function kitProviderCost(
 /**
  * Linha de custo de uma chamada Gemini cobrada que falhou
  * (`geminiBilledFailure(err)`): resposta sem resultado pelo uso devolvido
- * (sem imagem); timeout como ESTIMATIVA pelo teto — o preço das imagens
- * pedidas (`expectedImages`), já que a Gemini pode ter gerado e cobrado.
+ * (sem imagem); timeout e falha de rede depois do envio como ESTIMATIVA pelo
+ * teto — o preço das imagens pedidas (`expectedImages`), já que a Gemini pode
+ * ter gerado e cobrado.
  */
 export function kitFailedCallCost(
   input: { call: McKitCostCall; billing: GeminiBilledFailure; expectedImages: number },
   env: NodeJS.ProcessEnv = process.env,
 ): McKitProviderCost {
   const { call, billing, expectedImages } = input;
-  if (billing.timedOut) {
+  if (billing.timedOut || billing.networkFailure) {
     return {
       ...kitProviderCost(
         {
@@ -256,7 +268,7 @@ export function kitFailedCallCost(
         },
         env,
       ),
-      failure: 'timed_out',
+      failure: billing.timedOut ? 'timed_out' : 'network',
       estimated: true,
     };
   }

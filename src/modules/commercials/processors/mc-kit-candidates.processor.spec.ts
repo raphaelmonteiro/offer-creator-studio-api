@@ -681,6 +681,36 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       expect(manager.increment).toHaveBeenCalledTimes(4);
     });
 
+    it('candidato com falha de rede DEPOIS do envio: linha de custo estimada (failure network), sem nova requisição', async () => {
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      gemini.generateImageWithModel
+        .mockRejectedValueOnce(
+          withGeminiBilling(
+            new TerminalProviderError('Falha de rede depois do envio', 'provider_response_lost'),
+            { model: 'nano-banana-pro-preview', usage: null, networkFailure: true },
+          ),
+        )
+        .mockResolvedValue({ image: Buffer.from('ix'), model: 'nano-banana-pro-preview', usage });
+
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+
+      expect(gemini.generateImageWithModel).toHaveBeenCalledTimes(4);
+      const costs = commercials.appendEvent.mock.calls
+        .map(([, e]) => e as { kind: string; detail: Record<string, unknown> })
+        .filter((e) => e.kind === 'provider_cost')
+        .map((e) => e.detail);
+      expect(costs[0]).toMatchObject({
+        call: 'candidate',
+        idx: 0,
+        assetId: null,
+        failure: 'network',
+        estimated: true,
+        costUsd: 0.134,
+        providerErrorCode: 'provider_response_lost',
+      });
+      expect(manager.increment).toHaveBeenCalledTimes(4);
+    });
+
     it('provider mock não custa: metadata com custo 0, sem evento nem soma', async () => {
       await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
       expect(

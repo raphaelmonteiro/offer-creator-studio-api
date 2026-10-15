@@ -390,4 +390,78 @@ describe('GeminiImageProvider — cadeia de modelos (GEMINI_IMAGE_MODEL_REFS)', 
       expect(geminiBilledFailure(err)).toBeNull();
     });
   });
+
+  describe('falha de rede numa geração paga (achado 1 da execução real da 2.6)', () => {
+    const fetchFailed = (code?: string) =>
+      Object.assign(
+        new TypeError('fetch failed'),
+        code ? { cause: Object.assign(new Error(code), { code }) } : {},
+      );
+    const paidCall = () =>
+      provider
+        .generateImageWithModel({
+          prompt: 'p',
+          model: 'gemini-nano-banana-2.1',
+          retryOnTimeout: false,
+        })
+        .catch((e: unknown) => e);
+
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it.each([
+      ['fetch failed sem código (worker congelado)', undefined],
+      ['socket reset', 'ECONNRESET'],
+      ['socket fechado pelo servidor', 'UND_ERR_SOCKET'],
+    ])(
+      '%s → provider_response_lost terminal após UMA requisição, cobrança estimada (networkFailure)',
+      async (_name, code) => {
+        fetchSpy.mockRejectedValue(fetchFailed(code));
+        const err = await paidCall();
+        expect(err).toBeInstanceOf(TerminalProviderError);
+        expect(err).toMatchObject({ code: 'provider_response_lost' });
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(geminiBilledFailure(err)).toEqual({
+          model: 'gemini-nano-banana-2.1',
+          usage: null,
+          networkFailure: true,
+        });
+      },
+    );
+
+    it('corpo da resposta interrompido depois do 200 → provider_response_lost com cobrança estimada', async () => {
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: () => Promise.reject(new TypeError('terminated')),
+      } as unknown as Response);
+      const err = await paidCall();
+      expect(err).toMatchObject({ code: 'provider_response_lost' });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(geminiBilledFailure(err)).toMatchObject({ networkFailure: true });
+    });
+
+    it.each(['ECONNREFUSED', 'ENOTFOUND', 'UND_ERR_CONNECT_TIMEOUT'])(
+      'rede ANTES do envio (%s) continua transitória e re-tenta, sem cobrança',
+      async (code) => {
+        fetchSpy.mockRejectedValueOnce(fetchFailed(code)).mockResolvedValueOnce(imageResponse());
+        const pending = paidCall();
+        await jest.advanceTimersByTimeAsync(5_000);
+        const result = (await pending) as { model: string };
+        expect(result.model).toBe('gemini-nano-banana-2.1');
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      },
+    );
+
+    it('sem a opção (legado) o fetch failed segue transitório e re-tenta', async () => {
+      fetchSpy.mockRejectedValue(fetchFailed());
+      const pending = provider.generateImageWithModel({ prompt: 'p' }).catch((e: unknown) => e);
+      await jest.advanceTimersByTimeAsync(10_000);
+      const err = await pending;
+      expect(err).not.toBeInstanceOf(TerminalProviderError);
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(geminiBilledFailure(err)).toBeNull();
+    });
+  });
 });

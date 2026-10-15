@@ -271,6 +271,22 @@ describe('mc-kit-costs — tarifas e custo por chamada do kit (tarefa 2.6)', () 
         usage: { inputTokens: 0, outputTokens: 0, images: 1 },
       });
 
+      // falha de rede depois do envio: mesma estimativa do timeout, motivo próprio
+      const network = kitFailedCallCost(
+        {
+          call: 'reference',
+          billing: { model: 'gemini-nano-banana-2.1', usage: null, networkFailure: true },
+          expectedImages: 1,
+        },
+        {},
+      );
+      expect(network).toMatchObject({
+        failure: 'network',
+        estimated: true,
+        costUsd: 0.034,
+        usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+      });
+
       // sem usageMetadata numa resposta sem imagem: custo desconhecido (fora da soma)
       expect(
         kitFailedCallCost(

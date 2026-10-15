@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { TerminalProviderError, TransientProviderError, withRetry } from './provider-errors';
+import {
+  isPreRequestNetworkError,
+  networkErrorCodes,
+  TerminalProviderError,
+  TransientProviderError,
+  withRetry,
+} from './provider-errors';
 
 /** Modelo padrão do TTS — o mesmo usado desde o módulo de animações (TDD §5.3). */
 export const ELEVENLABS_DEFAULT_MODEL = 'eleven_multilingual_v2';
@@ -29,42 +35,9 @@ export const ELEVENLABS_TTS_TIMEOUT_MS = 120_000;
 /** Códigos terminais de uma geração que PODE ter sido feita e cobrada (nunca re-tentar nem cair no fallback). */
 export const ELEVENLABS_AMBIGUOUS_CODES = ['provider_timeout', 'provider_response_lost'] as const;
 
-/** Erro de rede ANTES de a requisição chegar ao servidor (sem geração possível). */
-const PRE_REQUEST_NETWORK_CODES = new Set([
-  'ECONNREFUSED',
-  'ENOTFOUND',
-  'EAI_AGAIN',
-  'EHOSTUNREACH',
-  'ENETUNREACH',
-  'UND_ERR_CONNECT_TIMEOUT',
-  'CERT_HAS_EXPIRED',
-  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
-]);
-
-function networkErrorCodes(err: unknown): string[] {
-  const codes: string[] = [];
-  const visit = (value: unknown, depth: number) => {
-    if (!value || typeof value !== 'object' || depth > 4) return;
-    const v = value as { code?: unknown; cause?: unknown; errors?: unknown };
-    if (typeof v.code === 'string') codes.push(v.code);
-    if (Array.isArray(v.errors)) v.errors.forEach((e) => visit(e, depth + 1));
-    visit(v.cause, depth + 1);
-  };
-  visit(err, 0);
-  return codes;
-}
-
-/**
- * A falha do `fetch` aconteceu antes de a requisição ser entregue (conexão
- * recusada, DNS, timeout de CONEXÃO)? Só aí o retry é seguro: a ElevenLabs não
- * tem chave de idempotência (`previous_request_ids` só condiciona a prosódia),
- * então uma requisição entregue cuja resposta se perdeu (socket fechado,
- * reset, timeout de resposta) pode ter sido gerada e cobrada — achado 2 da 3.7.
- */
-export function isPreRequestNetworkError(err: unknown): boolean {
-  const codes = networkErrorCodes(err);
-  return codes.length > 0 && codes.every((code) => PRE_REQUEST_NETWORK_CODES.has(code));
-}
+// Classificação da falha de rede movida para provider-errors (o provider Gemini usa a mesma);
+// reexportada aqui para os consumidores existentes.
+export { isPreRequestNetworkError };
 
 /**
  * ElevenLabs TTS (TDD §5.3) — síncrono: retorna o áudio direto (mp3).

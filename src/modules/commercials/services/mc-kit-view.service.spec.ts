@@ -283,6 +283,20 @@ describe('McKitViewService — view do kit para a API (D1/D4)', () => {
             estimated: true,
           },
         },
+        {
+          id: '4',
+          createdAt: at,
+          detail: {
+            call: 'reference',
+            provider: 'gemini',
+            model: 'gemini-nano-banana-2.1',
+            costUsd: 0.034,
+            usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+            assetId: null,
+            failure: 'network',
+            estimated: true,
+          },
+        },
       ]);
       const view = await service.findOne('u1', baseKit.id);
       expect(eventRepo.find).toHaveBeenCalledWith(
@@ -323,6 +337,17 @@ describe('McKitViewService — view do kit para a API (D1/D4)', () => {
           usage: { inputTokens: 0, outputTokens: 0, images: 1 },
           assetId: null,
           failure: 'timed_out',
+          estimated: true,
+          at,
+        },
+        {
+          call: 'reference',
+          provider: 'gemini',
+          model: 'gemini-nano-banana-2.1',
+          costUsd: 0.034,
+          usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+          assetId: null,
+          failure: 'network',
           estimated: true,
           at,
         },
