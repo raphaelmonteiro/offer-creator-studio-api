@@ -41,6 +41,42 @@ export const MC_STEP_CREDITS: Record<McStepType, number> = {
   [McStepType.RENDER_REMOTION]: 0,
 };
 
+/**
+ * Trilha instrumental do F1/F2 (ElevenLabs Music, US$ 0,15/min, chamada no
+ * `finalize`): 4 cr ≈ R$ 0,40 por entrega com trilha — uma faixa de 25 s custa
+ * ~US$ 0,06 no fornecedor. Entra na cotação/reserva só com `musicEnabled`
+ * (achado 5 da 3.7: a trilha precisa aparecer no custo antes da produção).
+ * O F3 (`assembly`) segue com a trilha inclusa — "F3 não muda nesta change".
+ * Calibração em P5, junto da tabela.
+ */
+export const MC_MUSIC_CREDITS = 4;
+
+/**
+ * Créditos de um step de PROJETO da cadeia de entrega: tabela + trilha no
+ * `finalize` (F1/F2) quando o projeto pede trilha.
+ */
+export function projectStepCredits(
+  stepType: McStepType,
+  opts: { musicEnabled?: boolean } = {},
+): number {
+  const music = opts.musicEnabled === true && stepType === McStepType.FINALIZE;
+  return MC_STEP_CREDITS[stepType] + (music ? MC_MUSIC_CREDITS : 0);
+}
+
+/** Itens da cotação para os steps de projeto da entrega (assembly/compose/render/finalize). */
+export function projectAssemblyQuoteItems(
+  format: McProjectFormat | null | undefined,
+  opts: { musicEnabled?: boolean } = {},
+): McQuoteItem[] {
+  return projectAssemblySteps(format).map((stepType) => ({
+    sceneId: null,
+    stepType,
+    attempt: 1,
+    credits: projectStepCredits(stepType, opts),
+    cached: false,
+  }));
+}
+
 /** Kit do mascote (Ativo de Personagem, 1× por mascote): 30 cr = R$ 3 (§8). */
 export const MC_KIT_CREDITS = 30;
 
@@ -92,13 +128,14 @@ export interface McQuoteSceneInput {
  * `cached: true` (não é uma segunda linha de geração). Os steps de PROJETO da
  * fase assembly (`assembly` no F3; `compose_ffmpeg` + `finalize` no F1 — D6)
  * entram na fase de produção (e sozinhos na fase `assembly` de uma revisão
- * editorial); `opts.format` escolhe a cadeia (ausente = `scenes`).
+ * editorial); `opts.format` escolhe a cadeia (ausente = `scenes`) e
+ * `opts.musicEnabled` soma a trilha ao `finalize` do F1/F2.
  */
 export function quotePhase(
   phase: McPhase,
   revision: number,
   scenes: McQuoteSceneInput[],
-  opts: { format?: McProjectFormat | null } = {},
+  opts: { format?: McProjectFormat | null; musicEnabled?: boolean } = {},
 ): McPhaseQuote {
   const items: McQuoteItem[] = [];
   for (const scene of scenes) {
@@ -117,15 +154,7 @@ export function quotePhase(
     }
   }
   if (phase === 'production' || phase === 'assembly') {
-    for (const stepType of projectAssemblySteps(opts.format)) {
-      items.push({
-        sceneId: null,
-        stepType,
-        attempt: 1,
-        credits: MC_STEP_CREDITS[stepType],
-        cached: false,
-      });
-    }
+    items.push(...projectAssemblyQuoteItems(opts.format, { musicEnabled: opts.musicEnabled }));
   }
   return {
     phase,

@@ -387,6 +387,16 @@ export const MC_DEFAULT_PROJECT_OPTIONS: McProjectOptions = {
   products: [],
 };
 
+/**
+ * Trilha por formato quando o pedido não diz nada: o F3 (`scenes`) mantém o
+ * contrato v1-B1 (ligada); F1 e F2 nascem SEM trilha (achado 5 da 3.7: a
+ * trilha é uma chamada paga ao ElevenLabs Music no `finalize` e precisa ser
+ * escolha explícita do usuário — na criação ou na aprovação da produção).
+ */
+export function defaultMusicEnabled(format: McProjectFormat | null | undefined): boolean {
+  return (format ?? 'scenes') === 'scenes' ? MC_DEFAULT_PROJECT_OPTIONS.musicEnabled : false;
+}
+
 /** Máximo de produtos com selo em um comercial (plano §5.4 / contrato v1). */
 export const MC_MAX_SEAL_PRODUCTS = 6;
 

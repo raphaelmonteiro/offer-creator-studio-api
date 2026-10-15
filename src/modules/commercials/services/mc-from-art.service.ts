@@ -327,6 +327,7 @@ export class McFromArtService {
       tier: dto.tier ?? MC_DEFAULT_PROJECT_TIER,
       channel: dto.channel,
       backgroundArtAssetId: asset.id,
+      musicEnabled: dto.musicEnabled ?? false,
       ...(dto.layoutPreset ? { layoutPreset: dto.layoutPreset } : {}),
       logoBox: logoBox ?? undefined,
       sourceArt,

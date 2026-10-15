@@ -50,6 +50,7 @@ import {
   McProjectFormat,
   McSourceArtKind,
   McStepType,
+  defaultMusicEnabled,
   resolveProjectOptions,
 } from './domain/mc-types';
 import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
@@ -339,8 +340,10 @@ export class CommercialsService {
       // Executor congelado na criação (ADR-001 §5): configuração/coorte decide
       // no F3; os formatos novos são sempre v2 (`admitProjectFormat`);
       // desligar a flag depois NÃO muda projetos em andamento.
+      // Trilha: F3 ligada por padrão (v1-B1); F1/F2 desligada por padrão — a
+      // trilha é paga (ElevenLabs Music) e só entra por escolha explícita.
       const options = resolveProjectOptions({
-        musicEnabled: dto.musicEnabled,
+        musicEnabled: dto.musicEnabled ?? defaultMusicEnabled(format),
         captionsEnabled: dto.captionsEnabled,
         lowerThirdBlur: dto.lowerThirdBlur,
         // v2: chave estável por produto desde a criação (snapshot do roteiro)

@@ -283,6 +283,15 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
     expect(project).toMatchObject({ id: 'p-new', format: 'talking_art' });
   });
 
+  it('trilha: desligada por padrão; ligada só por escolha explícita (achado 5 da 3.7)', async () => {
+    repos.get(Flyer)!.findOne.mockResolvedValue(flyerRow(LEGACY_FLYER_CONFIGURATION));
+    await service.createFromArt('u1', dto());
+    expect(createdDto().musicEnabled).toBe(false);
+    commercials.createProject.mockClear();
+    await service.createFromArt('u1', dto({ musicEnabled: true }));
+    expect(createdDto().musicEnabled).toBe(true);
+  });
+
   it('título, briefing e duração do DTO prevalecem sobre os defaults', async () => {
     repos.get(Flyer)!.findOne.mockResolvedValue(flyerRow(LEGACY_FLYER_CONFIGURATION));
     await service.createFromArt(

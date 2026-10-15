@@ -140,7 +140,7 @@ export class CreateProjectDto {
   @Type(() => ProjectProductDto)
   products?: ProjectProductDto[];
 
-  /** Trilha instrumental na montagem (default true). */
+  /** Trilha instrumental na montagem (default: ligada no F3, desligada no F1/F2 — `defaultMusicEnabled`). */
   @IsOptional()
   @IsBoolean()
   musicEnabled?: boolean;

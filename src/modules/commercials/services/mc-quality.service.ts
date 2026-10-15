@@ -22,14 +22,19 @@ import {
 import { SystemSettingsService } from '../../../shared/settings/system-settings.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { CommercialsService, MC_PAUSED_KEY } from '../commercials.service';
-import { projectAssemblySteps, scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
+import { scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
 import {
   klingActionDuration,
   mcTalkEngines,
   talkEngineFor,
   talkFallbackEngineKey,
 } from '../domain/mc-pipeline.config';
-import { custoProducaoDaCena, MC_STEP_CREDITS, quotePhase } from '../domain/mc-pricing.config';
+import {
+  custoProducaoDaCena,
+  MC_STEP_CREDITS,
+  projectAssemblyQuoteItems,
+  quotePhase,
+} from '../domain/mc-pricing.config';
 import {
   approvalAuthorizes,
   findPhaseBudget,
@@ -452,6 +457,7 @@ export class McQualityService {
     userId: string,
     projectId: string,
     phase: McPhase,
+    overrides: { musicEnabled?: boolean } = {},
   ): Promise<
     McPhaseQuote & { issues: Array<{ code: string; sceneId?: string; message: string }> }
   > {
@@ -472,7 +478,14 @@ export class McQualityService {
       if (phase === 'preparation' && row?.audioAssetId) cached.push(McStepType.TTS);
       return { sceneId: s.sceneId as string, sceneType: s.sceneType as McSceneType, cached };
     });
-    return { ...quotePhase(phase, project.revision, inputs, { format: project.format }), issues };
+    // Trilha (F1/F2): a escolha ainda não gravada (`?musicEnabled=` da tela de
+    // revisão) prevalece sobre a opção do projeto.
+    const musicEnabled =
+      overrides.musicEnabled ?? resolveProjectOptions(project.options).musicEnabled;
+    return {
+      ...quotePhase(phase, project.revision, inputs, { format: project.format, musicEnabled }),
+      issues,
+    };
   }
 
   // ──────────────────────────── preparação (P3) ────────────────────────────
@@ -1070,6 +1083,17 @@ export class McQualityService {
       });
     }
 
+    // Trilha escolhida na revisão (F1/F2): gravada junto da aprovação, antes de
+    // materializar — o hash do `finalize` e a cotação já saem com ela.
+    const currentOptions = resolveProjectOptions(project.options);
+    const producedOptions: McProjectOptions =
+      dto.musicEnabled === undefined
+        ? currentOptions
+        : { ...currentOptions, musicEnabled: dto.musicEnabled };
+    const optionsChanged = producedOptions.musicEnabled !== currentOptions.musicEnabled;
+    const produced: McProject = optionsChanged
+      ? ({ ...project, options: producedOptions } as McProject)
+      : project;
     await this.dataSource.transaction(async (manager) => {
       // Cena presa em `failed` (preparação retomada): a produção parte do zero
       // para ela — re-arma antes de materializar, senão o vídeo é produzido e
@@ -1079,19 +1103,16 @@ export class McQualityService {
       }
       const { items } = await this.materializer.materializeProductionV2(
         manager,
-        project,
+        produced,
         script,
         scenes,
       );
       // Steps de projeto da fase assembly por formato (D6): `assembly` no F3;
-      // `compose_ffmpeg` + `finalize` no F1 — cotados junto da produção.
-      const projectItems: McQuoteItem[] = projectAssemblySteps(project.format).map((stepType) => ({
-        sceneId: null,
-        stepType,
-        attempt: 1,
-        credits: MC_STEP_CREDITS[stepType],
-        cached: false,
-      }));
+      // `compose_ffmpeg` + `finalize` no F1 — cotados junto da produção (a
+      // trilha do F1/F2 soma no `finalize`).
+      const projectItems: McQuoteItem[] = projectAssemblyQuoteItems(project.format, {
+        musicEnabled: producedOptions.musicEnabled,
+      });
       const quote: McPhaseQuote = {
         phase: 'production',
         revision: project.revision,
@@ -1114,7 +1135,7 @@ export class McQualityService {
         userId,
         budgetCredits: quote.totalCredits,
       };
-      await this.materializer.ensureAssemblyStepV2(manager, project, script, scenes);
+      await this.materializer.ensureAssemblyStepV2(manager, produced, script, scenes);
       const nextQuality = upsertPhaseBudget(
         {
           ...quality,
@@ -1133,6 +1154,7 @@ export class McQualityService {
         project,
         McProjectStatus.GENERATING,
         {
+          ...(optionsChanged ? { options: producedOptions } : {}),
           quality: nextQuality,
           approvedAt: new Date(),
           reservedCredits: project.reservedCredits + budget.reservedCredits,
@@ -1152,6 +1174,7 @@ export class McQualityService {
           manifestHash: manifest.hash,
           quotedCredits: quote.totalCredits,
           cachedItems: items.filter((i) => i.cached).length,
+          musicEnabled: producedOptions.musicEnabled,
         },
       );
       await this.pipeline.enqueueReadySteps(manager, project.id);
@@ -1642,7 +1665,10 @@ export class McQualityService {
     }
     await this.dataSource.transaction(async (manager) => {
       const from = project.status;
-      const quote = quotePhase('assembly', project.revision, [], { format: project.format });
+      const quote = quotePhase('assembly', project.revision, [], {
+        format: project.format,
+        musicEnabled: resolveProjectOptions(project.options).musicEnabled,
+      });
       const budget = await this.reservePhase(manager, project, quality, quote);
       const approval: McApprovalManifest = {
         scope: 'assembly_only',

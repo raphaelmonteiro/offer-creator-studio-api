@@ -187,6 +187,15 @@ export class CreateProjectFromArtDto {
   @Length(10, 2000)
   briefing?: string;
 
+  /**
+   * Trilha instrumental (ElevenLabs Music, paga) no `finalize`. Ausente =
+   * desligada (F1/F2 só têm trilha por escolha explícita); pode ser trocada
+   * até a aprovação da produção (`approve-production`).
+   */
+  @IsOptional()
+  @IsBoolean()
+  musicEnabled?: boolean;
+
   /** Duração alvo; ausente = default do formato (F1 15 s, F2 25 s). */
   @IsOptional()
   @IsInt()

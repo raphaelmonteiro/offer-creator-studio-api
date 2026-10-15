@@ -9,6 +9,7 @@ import { CommercialsService } from '../commercials.service';
 import { fixtureCarouselScript } from '../domain/__fixtures__/mc-offer-carousel.fixtures';
 import { fixtureTalkTileScript } from '../domain/__fixtures__/mc-script-v2.fixtures';
 import { syntheticAlignment } from '../domain/mc-captions';
+import { MC_MUSIC_CREDITS } from '../domain/mc-pricing.config';
 import { MC_PIPELINE_V2, McQualityState, resolveQuality } from '../domain/mc-quality';
 import { McProjectStatus, McSceneStatus } from '../domain/mc-state-machines';
 import { McScript, McStepType } from '../domain/mc-types';
@@ -287,6 +288,47 @@ describe('F2 — bloqueios da revisão visual (tarefa 6.7)', () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+
+  describe('trilha escolhida na aprovação (achado 5 da 3.7)', () => {
+    const finalizeCredits = (h: ReturnType<typeof harness>) =>
+      (h.project.quality as McQualityState).budgets
+        .find((b) => b.phase === 'production')
+        ?.items.find((i) => i.stepType === McStepType.FINALIZE)?.credits;
+
+    it.each([
+      ['offer_carousel', () => fixtureCarouselScript(4)],
+      ['talking_art', () => f1Script()],
+    ] as const)(
+      '%s: musicEnabled=false grava a opção antes de materializar e tira a trilha da cotação',
+      async (format, script) => {
+        const h = harness(format, script());
+        await approve(h, { musicEnabled: false, acceptSpeechDuration: true });
+        expect(h.project.status).toBe(McProjectStatus.GENERATING);
+        expect((h.project.options as { musicEnabled: boolean }).musicEnabled).toBe(false);
+        expect(finalizeCredits(h)).toBe(0);
+        expect(h.materializer.ensureAssemblyStepV2).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ options: expect.objectContaining({ musicEnabled: false }) }),
+          expect.anything(),
+          expect.anything(),
+        );
+      },
+    );
+
+    it('musicEnabled=true soma a trilha no finalize; omitido mantém a opção do projeto', async () => {
+      const on = harness('offer_carousel', fixtureCarouselScript(4));
+      on.project.options = { musicEnabled: false, captionsEnabled: true, products: [] };
+      await approve(on, { musicEnabled: true });
+      expect((on.project.options as { musicEnabled: boolean }).musicEnabled).toBe(true);
+      expect(finalizeCredits(on)).toBe(MC_MUSIC_CREDITS);
+
+      const kept = harness('offer_carousel', fixtureCarouselScript(4));
+      kept.project.options = { musicEnabled: false, captionsEnabled: true, products: [] };
+      await approve(kept);
+      expect((kept.project.options as { musicEnabled: boolean }).musicEnabled).toBe(false);
+      expect(finalizeCredits(kept)).toBe(0);
+    });
   });
 
   it('falas somando 34 s → 422 SPEECH_OVER_LENGTH com a duração por fala; NÃO há aceite (nem acceptSpeechDuration)', async () => {

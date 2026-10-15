@@ -6,7 +6,7 @@ import { computeContentHash } from '../domain/input-hash';
 import { projectAssemblySteps, scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
 import { MC_FINALIZE_GRAPH_VERSION, MC_FINALIZE_LOUDNESS } from '../domain/mc-finalize-graph';
 import { klingActionDuration, talkEngineFor } from '../domain/mc-pipeline.config';
-import { MC_STEP_CREDITS } from '../domain/mc-pricing.config';
+import { MC_STEP_CREDITS, projectStepCredits } from '../domain/mc-pricing.config';
 import { MC_TALK_GAP_MS } from '../domain/mc-talk-conform-graph';
 import { readProjectLogoBox, resolveTalkWindowColor } from '../domain/mc-logo-face';
 import { composeHashWindow, MC_COMPOSE_GRAPH_VERSION } from '../domain/mc-talking-art-graph';
@@ -1247,12 +1247,17 @@ export class McMaterializerService {
     projectRevision: number | null,
     attempt: number,
   ): Promise<McStep> {
+    // Trilha do F1/F2 soma no `finalize` (mesma conta da cotação).
+    const costCredits = projectStepCredits(type, {
+      musicEnabled: resolveProjectOptions(project.options).musicEnabled,
+    });
     const pending = await manager.findOne(McStep, {
       where: { projectId: project.id, type, status: McStepStatus.PENDING },
     });
     if (pending) {
       const patch: Partial<McStep> = {};
       if (pending.inputHash !== inputHash) patch.inputHash = inputHash;
+      if (pending.costCredits !== costCredits) patch.costCredits = costCredits;
       if (projectRevision != null && pending.projectRevision !== projectRevision)
         patch.projectRevision = projectRevision;
       if ((pending.attempt ?? 1) !== attempt) patch.attempt = attempt;
@@ -1269,7 +1274,7 @@ export class McMaterializerService {
       type,
       status: McStepStatus.PENDING,
       inputHash,
-      costCredits: MC_STEP_CREDITS[type],
+      costCredits,
       phase,
       projectRevision,
       attempt,

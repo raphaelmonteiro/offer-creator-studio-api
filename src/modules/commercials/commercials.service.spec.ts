@@ -145,6 +145,17 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
       expect(queue.publish).toHaveBeenCalledTimes(1);
     });
 
+    it('trilha: F1 nasce desligada sem pedido; ligada só com musicEnabled explícito; F3 segue ligada', async () => {
+      process.env.MC_FORMATS = 'talking_art';
+      process.env.MC_PIPELINE_V2 = 'all';
+      const off = await service.createProject('u1', f1);
+      expect(off).toMatchObject({ options: expect.objectContaining({ musicEnabled: false }) });
+      const on = await service.createProject('u1', { ...f1, musicEnabled: true });
+      expect(on).toMatchObject({ options: expect.objectContaining({ musicEnabled: true }) });
+      const f3 = await service.createProject('u1', { ...dto, format: 'scenes' });
+      expect(f3).toMatchObject({ options: expect.objectContaining({ musicEnabled: true }) });
+    });
+
     it('`scenes` passa sempre, mesmo com MC_FORMATS vazio e MC_PIPELINE_V2=off (legado)', async () => {
       const project = await service.createProject('u1', { ...dto, format: 'scenes' });
       expect(project).toMatchObject({ format: 'scenes', pipelineVersion: 1, channel: 'instagram' });

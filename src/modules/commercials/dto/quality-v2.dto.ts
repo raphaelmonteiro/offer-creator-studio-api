@@ -370,6 +370,15 @@ export class ApproveProductionDto extends RevisionDto {
   @IsOptional()
   @IsBoolean()
   acceptSpeechDuration?: boolean;
+
+  /**
+   * Trilha instrumental escolhida na revisão (F1/F2): gravada em
+   * `options.musicEnabled` junto da aprovação, antes de materializar (entra no
+   * hash do `finalize` e na cotação). Omitido = mantém a opção do projeto.
+   */
+  @IsOptional()
+  @IsBoolean()
+  musicEnabled?: boolean;
 }
 
 export class CompositionSceneDto {

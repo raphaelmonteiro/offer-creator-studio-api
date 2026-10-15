@@ -443,18 +443,28 @@ export class CommercialsController {
     return this.quality.convertToV2(user.id, id);
   }
 
-  /** Estimativa de uma fase ANTES de executar (sem reservar): ?phase=preparation|production|assembly. */
+  /** Estimativa de uma fase ANTES de executar (sem reservar): ?phase=preparation|production|assembly&musicEnabled=true|false. */
   @Get('projects/:id/quote')
   quote(
     @CurrentUser() user: { id: string },
     @Param('id', ParseUUIDPipe) id: string,
     @Query('phase') phase: string | undefined,
+    @Query('musicEnabled') musicEnabled: string | undefined,
   ) {
     const value = (phase ?? 'preparation') as McPhase;
     if (!['preparation', 'production', 'assembly'].includes(value)) {
       throw new BadRequestException('phase inválida');
     }
-    return this.quality.quote(user.id, id, value);
+    if (musicEnabled !== undefined && musicEnabled !== 'true' && musicEnabled !== 'false') {
+      throw new BadRequestException('musicEnabled inválido (true|false)');
+    }
+    // `?musicEnabled=` cota a trilha ainda não gravada (escolha da tela de revisão).
+    return this.quality.quote(
+      user.id,
+      id,
+      value,
+      musicEnabled === undefined ? {} : { musicEnabled: musicEnabled === 'true' },
+    );
   }
 
   /** Gera SOMENTE prévias (imagem/TTS) da revisão — nunca vídeo. Cache integral ⇒ revisão visual imediata. */
