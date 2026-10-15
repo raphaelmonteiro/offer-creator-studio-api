@@ -31,6 +31,12 @@ export interface McMouthVerdict {
   mock?: boolean;
   /** Visão indisponível: veredito indeciso com o motivo (fail-open para o aceite com risco). */
   error?: string;
+  /**
+   * A visão RESPONDEU (e cobrou) sem veredito legível: indeciso com `error`,
+   * mas reaproveitável na aprovação do mesmo asset (o aceite de risco não
+   * paga a visão de novo). Ausente = sem resposta cobrada (re-inspeciona).
+   */
+  paid?: boolean;
 }
 
 export type McMouthDecision = 'passed' | 'blocked' | 'undecided';

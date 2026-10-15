@@ -14,6 +14,7 @@ import {
   ModerationResult,
 } from '../../../shared/providers/moderation.provider';
 import { sniffImageMime } from '../../../shared/providers/gemini-image.provider';
+import { OPENAI_NO_SDK_RETRY, withOpenAiRetry } from '../../../shared/providers/openai-errors';
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
@@ -21,6 +22,7 @@ import { ClientsService } from '../../clients/clients.service';
 import { MascotsService, MascotView } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import { McVoicesService } from './mc-voices.service';
+import { kitProviderCost, McKitProviderCost, openAiUsage } from '../domain/mc-kit-costs';
 import { McKitSource } from '../domain/mc-kit-identity';
 import {
   decideMouthGate,
@@ -45,6 +47,7 @@ import { ApproveKitDto, RegenerateReferenceDto, UpdateKitSheetDto } from '../dto
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { MC_IMAGE_EXPIRE_S, McKitCandidatesService } from './mc-kit-candidates.service';
 import { McKitTileService } from './mc-kit-tile.service';
+import { recordKitProviderCost } from './mc-kit-costs';
 import { McKitView, McKitViewService } from './mc-kit-view.service';
 import { McMouthGateService } from './mc-mouth-gate.service';
 import { McStorageService } from './mc-storage.service';
@@ -147,16 +150,35 @@ export class McKitsService {
     };
     if (moderation.flagged) await this.rejectModerated(base, moderation);
     // Gate de boca no logo CRU (spec "Logo usado como está"): se passa, a
-    // opção "usar como está" aparece ao lado dos candidatos.
-    if (source === 'logo') base.mouthGate = { logo: await this.mouthGate.inspect(imageBuffer) };
+    // opção "usar como está" aparece ao lado dos candidatos. A visão é paga
+    // antes de o kit existir: o custo entra na soma já na criação (2.6).
+    let logoGateCost: McKitProviderCost | null = null;
+    if (source === 'logo') {
+      const inspection = await this.mouthGate.inspectWithCost(imageBuffer);
+      base.mouthGate = { logo: inspection.verdict };
+      logoGateCost = inspection.cost;
+    }
 
     // Fila só DEPOIS do commit (L1): o pg-boss usa a própria conexão, e o
     // consumer lê o kit/rodada pelo banco — um job consumido antes do commit
     // não encontraria o kit (job perdido, kit órfão em 'generating').
     const { kit, publish } = await this.dataSource.transaction(async (manager) => {
-      const kit = await manager
-        .getRepository(McCharacterKit)
-        .save({ ...base, status: McKitStatus.GENERATING });
+      const kit = await manager.getRepository(McCharacterKit).save({
+        ...base,
+        status: McKitStatus.GENERATING,
+        ...(logoGateCost?.costUsd ? { providerCostUsd: logoGateCost.costUsd } : {}),
+      });
+      if (logoGateCost) {
+        // soma já gravada no INSERT acima; aqui só a linha da chamada
+        await recordKitProviderCost(
+          manager,
+          this.commercials,
+          kit,
+          logoGateCost,
+          { target: 'logo' },
+          { addToKit: false },
+        );
+      }
       await this.commercials.appendEvent(manager, {
         userId,
         refKind: 'kit',
@@ -523,13 +545,18 @@ export class McKitsService {
     return identity;
   }
 
-  /** Veredito sobre a identidade: reaproveita o já gravado para o MESMO asset (sem repetir visão). */
+  /**
+   * Veredito sobre a identidade: reaproveita o já gravado para o MESMO asset
+   * (sem repetir visão) — inclusive o indeciso de uma resposta paga e
+   * ilegível (`paid`), para o aceite de risco não pagar a visão de novo. Só o
+   * indeciso SEM resposta (visão indisponível) é inspecionado outra vez.
+   */
   private async identityMouthGate(
     kit: McCharacterKit,
     identity: AnimationAsset,
   ): Promise<{ verdict: McMouthVerdict; decision: McMouthDecision }> {
     const cached = kit.mouthGate?.identity;
-    if (cached && cached.identityAssetId === identity.id && !cached.error) {
+    if (cached && cached.identityAssetId === identity.id && (!cached.error || cached.paid)) {
       return { verdict: cached, decision: decideMouthGate(cached) };
     }
     const buffer = identity.fileUrl ? await this.storage.readUploadsFile(identity.fileUrl) : null;
@@ -541,7 +568,16 @@ export class McKitsService {
           'identidade ou regenere a referência frontal.',
       });
     }
-    const verdict = await this.mouthGate.inspect(buffer);
+    const { verdict, cost } = await this.mouthGate.inspectWithCost(buffer);
+    // custo da visão registrado já, qualquer que seja o desfecho da aprovação (2.6)
+    if (cost) {
+      await this.dataSource.transaction((manager) =>
+        recordKitProviderCost(manager, this.commercials, kit, cost, {
+          target: 'identity',
+          identityAssetId: identity.id,
+        }),
+      );
+    }
     return { verdict, decision: decideMouthGate(verdict) };
   }
 
@@ -686,7 +722,7 @@ export class McKitsService {
       const text = dto.adjustments.trim();
       if (text) {
         pt.adjustments = text;
-        next.adjustments = await this.candidates.translateAdjustments(text);
+        next.adjustments = await this.candidates.translateAdjustments(text, kit);
       }
     } else if (current?.adjustments) {
       next.adjustments = current.adjustments;
@@ -755,7 +791,10 @@ export class McKitsService {
         message: 'Tradução indisponível: o servidor está sem chave da OpenAI configurada.',
       });
     }
-    const translated = mergeTranslatedSheet(desc, await this.requestSheetTranslation(desc, apiKey));
+    const translated = mergeTranslatedSheet(
+      desc,
+      await this.requestSheetTranslation(kit, desc, apiKey),
+    );
 
     await this.dataSource.transaction(async (manager) => {
       await manager.update(
@@ -774,53 +813,72 @@ export class McKitsService {
     return this.findOne(userId, id);
   }
 
-  /** Chamada única de tradução da ficha (json_schema estrito, modelo rápido). */
+  /**
+   * Chamada única de tradução da ficha (json_schema estrito, modelo rápido).
+   * Sem retry do SDK (quota terminal na primeira resposta) e custo registrado
+   * no kit assim que a resposta chega (2.6).
+   */
   private async requestSheetTranslation(
+    kit: McCharacterKit,
     desc: KitCanonicalDesc,
     apiKey: string,
   ): Promise<KitSheetTranslation> {
     const openai = new OpenAI({ apiKey });
     const model = this.config.get<string>('OPENAI_FAST_TEXT_MODEL', 'gpt-4o-mini');
-    const response = await openai.chat.completions.create({
-      model,
-      max_tokens: 900,
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'kit_sheet_translation',
-          strict: true,
-          schema: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['traits', 'accessories', 'doNots', 'style'],
-            properties: {
-              traits: { type: 'array', items: { type: 'string' } },
-              accessories: { type: 'array', items: { type: 'string' } },
-              doNots: { type: 'array', items: { type: 'string' } },
-              style: { type: 'string' },
+    const response = await withOpenAiRetry(() =>
+      openai.chat.completions.create(
+        {
+          model,
+          max_tokens: 900,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'kit_sheet_translation',
+              strict: true,
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['traits', 'accessories', 'doNots', 'style'],
+                properties: {
+                  traits: { type: 'array', items: { type: 'string' } },
+                  accessories: { type: 'array', items: { type: 'string' } },
+                  doNots: { type: 'array', items: { type: 'string' } },
+                  style: { type: 'string' },
+                },
+              },
             },
           },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Translate a cartoon mascot character sheet from English to Brazilian ' +
+                'Portuguese. Keep the SAME number of items in each list, in the same order. ' +
+                'Translate hex color codes as-is. Reply with JSON only.',
+            },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                traits: desc.traits,
+                accessories: desc.accessories ?? [],
+                doNots: desc.doNots,
+                style: desc.style,
+              }),
+            },
+          ],
         },
-      },
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Translate a cartoon mascot character sheet from English to Brazilian ' +
-            'Portuguese. Keep the SAME number of items in each list, in the same order. ' +
-            'Translate hex color codes as-is. Reply with JSON only.',
-        },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            traits: desc.traits,
-            accessories: desc.accessories ?? [],
-            doNots: desc.doNots,
-            style: desc.style,
-          }),
-        },
-      ],
+        OPENAI_NO_SDK_RETRY,
+      ),
+    );
+    const cost = kitProviderCost({
+      call: 'sheet_translation',
+      provider: 'openai',
+      model: response.model || model,
+      usage: openAiUsage(response.usage),
     });
+    await this.dataSource.transaction((manager) =>
+      recordKitProviderCost(manager, this.commercials, kit, cost, { requestedModel: model }),
+    );
     const raw = response.choices[0]?.message?.content;
     if (!raw) throw new Error('Resposta vazia do modelo de tradução');
     return JSON.parse(raw) as KitSheetTranslation;

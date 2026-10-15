@@ -10,12 +10,26 @@ export const GEMINI_IMAGE_FALLBACK_MODEL = 'gemini-3-pro-image-preview';
 export const GEMINI_VISION_MODEL = 'gemini-3.8-flash';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
-/** Geração de imagem com referências leva dezenas de segundos — folga sobre o default de 30s. */
-const REQUEST_TIMEOUT_MS = 120_000;
+/**
+ * Timeout de UMA chamada (geração de imagem com referências leva dezenas de
+ * segundos — folga sobre o default de 30s). Exportado porque a expiração dos
+ * jobs do kit na fila é calculada a partir dele (mc-kit-candidates.service).
+ */
+export const GEMINI_IMAGE_REQUEST_TIMEOUT_MS = 120_000;
+const REQUEST_TIMEOUT_MS = GEMINI_IMAGE_REQUEST_TIMEOUT_MS;
 
 interface GeminiPart {
   text?: string;
   inlineData?: { mimeType: string; data: string };
+}
+
+/** `usageMetadata` do generateContent (contagem de tokens cobrados). */
+interface GeminiUsageMetadata {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  thoughtsTokenCount?: number;
+  totalTokenCount?: number;
+  candidatesTokensDetails?: Array<{ modality?: string; tokenCount?: number }>;
 }
 
 interface GeminiGenerateContentResponse {
@@ -24,6 +38,76 @@ interface GeminiGenerateContentResponse {
     finishReason?: string;
   }>;
   promptFeedback?: { blockReason?: string };
+  usageMetadata?: GeminiUsageMetadata;
+}
+
+/**
+ * Uso de tokens de UMA chamada, lido do `usageMetadata` da resposta — base do
+ * custo registrado pelo chamador (o provider não precifica: a tabela de
+ * tarifas fica com quem registra o custo, ex.: commercials/domain/mc-kit-costs).
+ */
+export interface GeminiUsage {
+  /** Entrada (texto + imagens de referência). */
+  promptTokens: number;
+  /** Saída total (imagem + texto), sem o raciocínio. */
+  candidatesTokens: number;
+  /** Raciocínio ("thinking"), cobrado como saída de texto. */
+  thoughtsTokens: number;
+  /** Parte IMAGE da saída quando o Gemini detalha por modalidade; null = sem detalhe. */
+  outputImageTokens: number | null;
+  totalTokens: number | null;
+}
+
+const tokenCount = (value: unknown): number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+
+/** `usageMetadata` → `GeminiUsage`; null quando a resposta não traz uso. */
+export function parseGeminiUsage(raw: unknown): GeminiUsage | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const meta = raw as GeminiUsageMetadata;
+  const details = Array.isArray(meta.candidatesTokensDetails) ? meta.candidatesTokensDetails : null;
+  const imageDetail = details?.filter((d) => String(d?.modality ?? '').toUpperCase() === 'IMAGE');
+  return {
+    promptTokens: tokenCount(meta.promptTokenCount),
+    candidatesTokens: tokenCount(meta.candidatesTokenCount),
+    thoughtsTokens: tokenCount(meta.thoughtsTokenCount),
+    outputImageTokens: details
+      ? (imageDetail ?? []).reduce((sum, d) => sum + tokenCount(d?.tokenCount), 0)
+      : null,
+    totalTokens:
+      typeof meta.totalTokenCount === 'number' && Number.isFinite(meta.totalTokenCount)
+        ? meta.totalTokenCount
+        : null,
+  };
+}
+
+/**
+ * Chamada que a Gemini COBROU sem entregar o resultado: resposta 200 sem
+ * imagem (recusa de segurança, `no_image_returned`), visão 200 sem texto, ou
+ * geração abortada no timeout do cliente (`timedOut`: a Gemini pode ter
+ * gerado e cobrado mesmo assim; uso desconhecido). Vai anexada ao erro
+ * lançado (`geminiBilledFailure(err)`) para quem registra custo não perder a
+ * chamada paga.
+ */
+export interface GeminiBilledFailure {
+  model: string;
+  usage: GeminiUsage | null;
+  timedOut?: boolean;
+}
+
+const BILLING_KEY = 'geminiBilling';
+
+/** Anexa a cobrança a um erro (ver `GeminiBilledFailure`); exportada para testes. */
+export function withGeminiBilling<E extends Error>(err: E, billing: GeminiBilledFailure): E {
+  Object.defineProperty(err, BILLING_KEY, { value: billing, enumerable: false });
+  return err;
+}
+
+/** Cobrança anexada a um erro do provider (ver `GeminiBilledFailure`); null = chamada sem resposta cobrada. */
+export function geminiBilledFailure(err: unknown): GeminiBilledFailure | null {
+  if (!err || typeof err !== 'object') return null;
+  const value = (err as Record<string, unknown>)[BILLING_KEY];
+  return value && typeof value === 'object' ? (value as GeminiBilledFailure) : null;
 }
 
 /** finishReason/blockReason que significam recusa de conteúdo (→ content_policy, plano §6.4). */
@@ -44,6 +128,12 @@ export interface GeminiGenerateImageParams {
   aspectRatio?: string;
   /** Override de modelo (default nano-banana-pro-preview, fallback gemini-3-pro-image-preview). */
   model?: string;
+  /**
+   * false = timeout do cliente é TERMINAL (`provider_timeout`, com a cobrança
+   * estimada anexada): a requisição abortada pode ter sido gerada e cobrada,
+   * e re-tentar pagaria a imagem de novo. Default true (re-tenta, legado).
+   */
+  retryOnTimeout?: boolean;
 }
 
 /**
@@ -56,7 +146,10 @@ export interface GeminiGenerateImageParams {
  *   - bloqueio de segurança (HTTP 400 ou resposta 200 sem imagem com
  *     blockReason/finishReason de safety) → TerminalProviderError 'content_policy';
  *   - 404          → TerminalProviderError 'model_not_found' (dispara o
- *     fallback de modelo gemini-3-pro-image-preview).
+ *     fallback de modelo gemini-3-pro-image-preview);
+ *   - timeout do cliente com `retryOnTimeout: false` → TerminalProviderError
+ *     'provider_timeout' (sem nova requisição paga).
+ * Falha depois de uma resposta cobrada leva `geminiBilledFailure(err)`.
  */
 @Injectable()
 export class GeminiImageProvider {
@@ -85,16 +178,20 @@ export class GeminiImageProvider {
     return chain.filter((model, index) => chain.indexOf(model) === index);
   }
 
-  /** Igual a `generateImage`, devolvendo também o modelo que efetivamente gerou (hash/auditoria). */
+  /**
+   * Igual a `generateImage`, devolvendo também o modelo que efetivamente gerou
+   * (hash/auditoria) e o uso de tokens da chamada que deu certo (custo; null
+   * quando a resposta não traz `usageMetadata`).
+   */
   async generateImageWithModel(
     params: GeminiGenerateImageParams,
-  ): Promise<{ image: Buffer; model: string }> {
+  ): Promise<{ image: Buffer; model: string; usage?: GeminiUsage | null }> {
     const chain = GeminiImageProvider.modelChain(params.model);
     const references = await this.loadReferences(params.referenceImages ?? []);
     for (const [index, model] of chain.entries()) {
       try {
-        const image = await withRetry(() => this.callModel(model, params, references));
-        return { image, model };
+        const { image, usage } = await withRetry(() => this.callModel(model, params, references));
+        return { image, model, usage };
       } catch (err) {
         const modelMissing = err instanceof TerminalProviderError && err.code === 'model_not_found';
         const next = chain[index + 1];
@@ -110,7 +207,7 @@ export class GeminiImageProvider {
     model: string,
     params: GeminiGenerateImageParams,
     references: Array<{ mimeType: string; data: string }>,
-  ): Promise<Buffer> {
+  ): Promise<{ image: Buffer; usage: GeminiUsage | null }> {
     const apiKey = this.config.get<string>('GEMINI_API_KEY');
     if (!apiKey) {
       throw new TerminalProviderError('GEMINI_API_KEY não configurada', 'missing_api_key');
@@ -139,6 +236,15 @@ export class GeminiImageProvider {
         signal: controller.signal,
       });
     } catch (err) {
+      if (controller.signal.aborted && params.retryOnTimeout === false) {
+        throw withGeminiBilling(
+          new TerminalProviderError(
+            `Tempo esgotado (${REQUEST_TIMEOUT_MS / 1000}s) no ${model} — sem nova tentativa paga`,
+            'provider_timeout',
+          ),
+          { model, usage: null, timedOut: true },
+        );
+      }
       throw new TransientProviderError(`Falha de rede: ${(err as Error).message}`);
     } finally {
       clearTimeout(timer);
@@ -164,10 +270,15 @@ export class GeminiImageProvider {
     }
 
     const payload = (await response.json()) as GeminiGenerateContentResponse;
-    return this.extractImage(payload, model);
+    const usage = parseGeminiUsage(payload.usageMetadata);
+    try {
+      return { image: this.extractImage(payload, model), usage };
+    } catch (err) {
+      // 200 sem imagem (recusa/sem saída): a chamada foi cobrada mesmo assim
+      throw withGeminiBilling(err as Error, { model, usage });
+    }
   }
 
-  /** Parse de candidates[].content.parts[].inlineData — primeira imagem encontrada. */
   /**
    * Imagens → TEXTO (inspeção/QA): manda as imagens como inlineData e devolve
    * o texto concatenado da resposta. Mesma classificação de erro do
@@ -179,6 +290,16 @@ export class GeminiImageProvider {
     model?: string;
     mimeType?: string;
   }): Promise<string> {
+    return (await this.describeImagesWithUsage(params)).text;
+  }
+
+  /** Igual a `describeImages`, devolvendo também o modelo e o uso de tokens (custo do chamador). */
+  async describeImagesWithUsage(params: {
+    prompt: string;
+    images: Buffer[];
+    model?: string;
+    mimeType?: string;
+  }): Promise<{ text: string; model: string; usage: GeminiUsage | null }> {
     const apiKey = this.config.get<string>('GEMINI_API_KEY');
     if (!apiKey) {
       throw new TerminalProviderError('GEMINI_API_KEY não configurada', 'missing_api_key');
@@ -225,13 +346,19 @@ export class GeminiImageProvider {
         .map((p) => p.text ?? '')
         .join('')
         .trim();
+      const usage = parseGeminiUsage(payload.usageMetadata);
       if (!text) {
-        throw new TerminalProviderError('Resposta sem texto', 'invalid_provider_output');
+        // 200 sem texto: cobrada mesmo assim
+        throw withGeminiBilling(
+          new TerminalProviderError('Resposta sem texto', 'invalid_provider_output'),
+          { model, usage },
+        );
       }
-      return text;
+      return { text, model, usage };
     });
   }
 
+  /** Parse de candidates[].content.parts[].inlineData — primeira imagem encontrada. */
   private extractImage(payload: GeminiGenerateContentResponse, model: string): Buffer {
     for (const candidate of payload.candidates ?? []) {
       for (const part of candidate.content?.parts ?? []) {

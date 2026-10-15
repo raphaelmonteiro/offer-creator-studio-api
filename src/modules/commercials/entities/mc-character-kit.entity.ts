@@ -10,6 +10,12 @@ import { McKitStatus } from '../domain/mc-state-machines';
  */
 export { McKitStatus };
 
+/** numeric do pg chega como texto: a coluna de custo do kit sai como número (US$) na entidade e na API. */
+const usdColumn = {
+  to: (value: number | null | undefined) => value,
+  from: (value: string | number | null) => (value == null ? 0 : Number(value)),
+};
+
 /**
  * Kit do mascote — Ativo de Personagem, 1× por mascote (plano-comerciais §4):
  * descrição canônica + voz + assets de referência. IMUTÁVEL após approved
@@ -102,6 +108,16 @@ export class McCharacterKit {
    */
   @Column({ type: 'jsonb', nullable: true })
   mouthGate: McKitMouthGate | null;
+
+  /**
+   * Custo de fornecedor do kit (tarefa 2.6), em US$: soma das chamadas pagas
+   * (descrição canônica, referências pelo modelo efetivo, gate de boca,
+   * candidatos, variante com boca, traduções), incrementada a cada chamada;
+   * cada uma fica também como evento `provider_cost` em `mc_events`
+   * (services/mc-kit-costs.ts). Número na entidade (transformer da coluna numeric).
+   */
+  @Column({ type: 'numeric', precision: 12, scale: 6, default: 0, transformer: usdColumn })
+  providerCostUsd: number;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -1,11 +1,14 @@
 import { ConfigService } from '@nestjs/config';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, FindOperator } from 'typeorm';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
-import { GeminiImageProvider } from '../../../shared/providers/gemini-image.provider';
+import {
+  GeminiImageProvider,
+  withGeminiBilling,
+} from '../../../shared/providers/gemini-image.provider';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { MascotsService } from '../../mascots/mascots.service';
@@ -13,10 +16,23 @@ import { CommercialsService } from '../commercials.service';
 import { McKitMouthGate, McMouthVerdict } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+import { McEvent } from '../entities/mc-event.entity';
 import { McKitViewService } from '../services/mc-kit-view.service';
 import { McKitProcessor } from './mc-kit.processor';
 
+/** `JsonContains` do TypeORM (`@>` no Postgres) avaliado em memória: subconjunto raso. */
+function jsonContains(value: unknown, operator: unknown): boolean {
+  if (!(operator instanceof FindOperator)) return true;
+  const expected = operator.value as Record<string, unknown>;
+  const actual = (value ?? {}) as Record<string, unknown>;
+  return Object.entries(expected).every(([k, v]) => actual[k] === v);
+}
+
 describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () => {
+  // sharp real nos PNGs mock: sob a suíte inteira em paralelo, um teste pode
+  // passar dos 5 s padrão do jest (e a execução abandonada vazaria para o
+  // teste seguinte) — mesmo teto do spec dos candidatos.
+  jest.setTimeout(60_000);
   const originalProvider = process.env.MC_KIT_PROVIDER;
   let tmpDir: string;
 
@@ -31,12 +47,18 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
 
   let assetSeq: number;
   let kitRepo: { findOneBy: jest.Mock };
-  let assetRepo: { save: jest.Mock; findOneBy: jest.Mock };
+  let assetRepo: { save: jest.Mock; findOneBy: jest.Mock; find: jest.Mock };
+  let eventRepo: { findOne: jest.Mock };
+  /** Assets gravados e eventos anexados neste teste (o "banco" em memória). */
+  let savedAssets: Array<Record<string, unknown>>;
+  let savedEvents: Array<Record<string, unknown>>;
   let manager: {
     findOne: jest.Mock;
     find: jest.Mock;
     update: jest.Mock;
     softDelete: jest.Mock;
+    save: jest.Mock;
+    increment: jest.Mock;
   };
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
@@ -61,32 +83,81 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
   beforeEach(() => {
     delete process.env.MC_KIT_PROVIDER; // default = mock
     assetSeq = 0;
+    const assets: Array<Record<string, unknown>> = [];
+    const events: Array<Record<string, unknown>> = [];
+    savedAssets = assets;
+    savedEvents = events;
     kitRepo = { findOneBy: jest.fn().mockResolvedValue({ ...baseKit }) };
     assetRepo = {
-      save: jest.fn((obj: Record<string, unknown>) =>
-        Promise.resolve({ id: `asset-${++assetSeq}`, ...obj }),
-      ),
+      save: jest.fn((obj: Record<string, unknown>) => {
+        const row = { id: `asset-${++assetSeq}`, ...obj };
+        assets.push(row);
+        return Promise.resolve(row);
+      }),
       findOneBy: jest.fn().mockResolvedValue(null),
+      // busca da referência já paga (idempotência 2.6): mais recente primeiro
+      find: jest.fn(({ where }: { where: Record<string, unknown> }) =>
+        Promise.resolve(
+          [...assets]
+            .reverse()
+            .filter(
+              (a) =>
+                a.kind === where.kind &&
+                a.userId === where.userId &&
+                jsonContains(a.metadata, where.metadata),
+            ),
+        ),
+      ),
     };
+    eventRepo = {
+      findOne: jest.fn(({ where }: { where: Record<string, unknown> }) =>
+        Promise.resolve(
+          [...events]
+            .reverse()
+            .find(
+              (e) =>
+                e.refKind === where.refKind &&
+                e.refId === where.refId &&
+                e.kind === where.kind &&
+                jsonContains(e.detail, where.detail),
+            ) ?? null,
+        ),
+      ),
+    };
+    const testAssetRepo = assetRepo;
     manager = {
       findOne: jest.fn(),
       find: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue(undefined),
       softDelete: jest.fn().mockResolvedValue(undefined),
+      // a referência nasce na transação do registro de custo (2.6)
+      save: jest.fn((_entity: unknown, obj: Record<string, unknown>) => testAssetRepo.save(obj)),
+      increment: jest.fn().mockResolvedValue(undefined),
     };
+    // Repositórios e manager DESTE teste presos na closure: uma execução que
+    // sobre de um teste anterior nunca escreve nos mocks do teste seguinte.
+    const repos = new Map<unknown, unknown>([
+      [McCharacterKit, kitRepo],
+      [McEvent, eventRepo],
+      [AnimationAsset, assetRepo],
+    ]);
+    const txManager = manager;
     dataSource = {
-      getRepository: jest.fn((entity: unknown) =>
-        entity === McCharacterKit ? kitRepo : assetRepo,
-      ),
+      getRepository: jest.fn((entity: unknown) => repos.get(entity) ?? testAssetRepo),
       transaction: jest.fn((cb: (m: EntityManager) => Promise<unknown>) =>
-        cb(manager as unknown as EntityManager),
+        cb(txManager as unknown as EntityManager),
       ),
     };
     transitions = {
       casTransition: jest.fn().mockResolvedValue(true),
       notify: jest.fn().mockResolvedValue(undefined),
     };
-    commercials = { appendEvent: jest.fn().mockResolvedValue(undefined) };
+    commercials = {
+      appendEvent: jest.fn((_m: unknown, event: Record<string, unknown>) => {
+        events.push({ id: String(events.length + 1), ...event });
+        return Promise.resolve(undefined);
+      }),
+    };
     gemini = { generateImageWithModel: jest.fn() };
     mascots = {
       findOne: jest.fn().mockResolvedValue({
@@ -599,6 +670,492 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
       await processor.process({ kitId: 'kit-1', slot: 7 });
       expect(assetRepo.save).not.toHaveBeenCalled();
+    });
+  });
+  /**
+   * Tarefa 2.6 — custo registrado por chamada, conta sem crédito terminal e
+   * geração idempotente por slot (re-entrega do pg-boss após a expiração).
+   */
+  describe('custo, quota e idempotência (2.6)', () => {
+    const desc = {
+      traits: ['capybara', 'green apron'],
+      accessories: [],
+      colors: ['#7B4A2D', '#2E7D32'],
+      style: '3D cartoon',
+      doNots: ['never change the apron color'],
+      pt: { traits: ['capivara', 'avental verde'], accessories: [], style: '3D', doNots: ['x'] },
+    };
+    const descResponse = {
+      model: 'gpt-4o-2024-08-06',
+      usage: { prompt_tokens: 1200, completion_tokens: 500, total_tokens: 1700 },
+      choices: [{ message: { content: JSON.stringify(desc) } }],
+    };
+    const usage = {
+      promptTokens: 1000,
+      candidatesTokens: 1120,
+      thoughtsTokens: 0,
+      outputImageTokens: 1120,
+      totalTokens: 2120,
+    };
+    const image = (model: string) => ({ image: Buffer.from(`img-${model}`), model, usage });
+
+    /** Cliente OpenAI fake injetado no processor (o real nasce do OPENAI_API_KEY). */
+    const withOpenAi = (target: McKitProcessor, create: jest.Mock) => {
+      (target as unknown as { openai: unknown }).openai = { chat: { completions: { create } } };
+    };
+    const newProcessor = () =>
+      new McKitProcessor(
+        dataSource as unknown as DataSource,
+        transitions as unknown as TaskTransitionService,
+        commercials as unknown as CommercialsService,
+        gemini as unknown as GeminiImageProvider,
+        mascots as unknown as MascotsService,
+        config as unknown as ConfigService,
+        view as unknown as McKitViewService,
+      );
+    const costEvents = () => savedEvents.filter((e) => e.kind === 'provider_cost');
+    const costDetail = (i: number) => costEvents()[i].detail as Record<string, unknown>;
+    const incrementTotal = () =>
+      manager.increment.mock.calls.reduce((sum, call) => sum + (call[3] as number), 0);
+    /** Espera a execução em segundo plano chegar à N-ésima chamada de imagem. */
+    const untilImageCalls = async (n: number) => {
+      for (let i = 0; i < 500 && gemini.generateImageWithModel.mock.calls.length < n; i++) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(gemini.generateImageWithModel).toHaveBeenCalledTimes(n);
+    };
+    const quotaError = () =>
+      Object.assign(new Error('429 You exceeded your current quota'), {
+        status: 429,
+        code: 'insufficient_quota',
+        type: 'insufficient_quota',
+      });
+
+    beforeEach(() => {
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      env.GEMINI_IMAGE_MODEL_REFS = 'gemini-nano-banana-2.1';
+    });
+
+    it('cada chamada paga vira uma linha de custo: descrição pelos tokens do usage (gpt-4o) e cada referência pelo modelo EFETIVO; a soma vai para o kit', async () => {
+      const create = jest.fn().mockResolvedValue(descResponse);
+      withOpenAi(processor, create);
+      gemini.generateImageWithModel
+        .mockResolvedValueOnce(image('gemini-nano-banana-2.1'))
+        .mockResolvedValueOnce(image('gemini-nano-banana-2.1'))
+        .mockResolvedValueOnce(image('gemini-nano-banana-2.1'))
+        .mockResolvedValueOnce(image('nano-banana-pro-preview')); // fallback no slot 3
+
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+
+      // SDK sem retry próprio (o withRetry decide) e com timeout por chamada
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create.mock.calls[0][1]).toEqual({ maxRetries: 0, timeout: 60_000 });
+
+      expect(costEvents()).toHaveLength(5);
+      // 1200 × 2,5/1M + 500 × 10/1M
+      expect(costDetail(0)).toMatchObject({
+        call: 'canonical_desc',
+        provider: 'openai',
+        model: 'gpt-4o-2024-08-06',
+        requestedModel: 'gpt-4o',
+        usage: { inputTokens: 1200, outputTokens: 500, images: 0 },
+        generationKey: 'job-1',
+        desc,
+      });
+      expect(costDetail(0).costUsd).toBeCloseTo(0.008, 6);
+      // 2.1: 0,034 por imagem + 1000 × 2/1M; Pro (fallback): 0,134 + 0,002
+      const refs = [1, 2, 3, 4].map(costDetail);
+      expect(refs.map((r) => r.call)).toEqual(['reference', 'reference', 'reference', 'reference']);
+      expect(refs.map((r) => r.slot)).toEqual([0, 1, 2, 3]);
+      expect(refs.map((r) => r.model)).toEqual([
+        'gemini-nano-banana-2.1',
+        'gemini-nano-banana-2.1',
+        'gemini-nano-banana-2.1',
+        'nano-banana-pro-preview',
+      ]);
+      expect(refs.map((r) => r.costUsd)).toEqual([0.036, 0.036, 0.036, 0.136]);
+      expect(refs.map((r) => r.assetId)).toEqual(['asset-1', 'asset-2', 'asset-3', 'asset-4']);
+
+      // soma no kit: incremento atômico por chamada (US$ 0,252 no total)
+      for (const call of manager.increment.mock.calls) {
+        expect(call.slice(0, 3)).toEqual([McCharacterKit, { id: 'kit-1' }, 'providerCostUsd']);
+      }
+      expect(incrementTotal()).toBeCloseTo(0.252, 6);
+
+      // custo e chave de idempotência também no metadata do asset
+      const meta = savedAssets[3].metadata as Record<string, unknown>;
+      expect(meta).toMatchObject({
+        slot: 3,
+        model: 'nano-banana-pro-preview',
+        requestedModel: 'gemini-nano-banana-2.1',
+        generationKey: 'job-1',
+        providerCostUsd: 0.136,
+        usage: { inputTokens: 1000, outputTokens: 0, images: 1 },
+      });
+      expect(meta.requestHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(meta.requestHash).not.toBe(meta.inputHash);
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-1',
+        McKitStatus.GENERATING,
+        McKitStatus.REVIEW,
+        expect.objectContaining({
+          referenceAssetIds: ['asset-1', 'asset-2', 'asset-3', 'asset-4'],
+        }),
+      );
+    });
+
+    it('OpenAI sem crédito (429 insufficient_quota) é terminal: UMA chamada, nenhuma imagem, kit failed com providerErrorCode quota', async () => {
+      const create = jest.fn().mockRejectedValue(quotaError());
+      withOpenAi(processor, create);
+
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(gemini.generateImageWithModel).not.toHaveBeenCalled();
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          kind: 'transition',
+          toStatus: McKitStatus.FAILED,
+          detail: expect.objectContaining({
+            errorCode: 'canonical_desc_failed',
+            providerErrorCode: 'quota',
+            errorMessage: expect.stringContaining('insufficient_quota'),
+          }),
+        }),
+      );
+      expect(costEvents()).toHaveLength(0); // não houve cobrança
+      expect(manager.increment).not.toHaveBeenCalled();
+    });
+
+    it('429 de LIMITE DE TAXA continua transitório: re-tenta e segue', async () => {
+      const rateLimited = Object.assign(new Error('429 Rate limit reached'), {
+        status: 429,
+        code: 'rate_limit_exceeded',
+        type: 'requests',
+      });
+      const create = jest.fn().mockRejectedValueOnce(rateLimited).mockResolvedValue(descResponse);
+      withOpenAi(processor, create);
+      gemini.generateImageWithModel.mockResolvedValue(image('gemini-nano-banana-2.1'));
+
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-1',
+        McKitStatus.GENERATING,
+        McKitStatus.REVIEW,
+        expect.anything(),
+      );
+    });
+
+    it('Gemini sem crédito (quota) numa referência: os slots restantes não são tentados; kit failed com providerErrorCode quota', async () => {
+      jest
+        .spyOn(
+          processor as unknown as { generateCanonicalDesc: () => Promise<unknown> },
+          'generateCanonicalDesc',
+        )
+        .mockResolvedValue(desc);
+      gemini.generateImageWithModel.mockRejectedValue(
+        new TerminalProviderError('HTTP 403: billing', 'quota'),
+      );
+
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+
+      expect(gemini.generateImageWithModel).toHaveBeenCalledTimes(1);
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          kind: 'reference_failed',
+          detail: expect.objectContaining({ slot: 0, providerErrorCode: 'quota' }),
+        }),
+      );
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          kind: 'transition',
+          toStatus: McKitStatus.FAILED,
+          detail: expect.objectContaining({
+            errorCode: 'kit_generation_failed',
+            providerErrorCode: 'quota',
+            failures: [expect.objectContaining({ slot: 0 })],
+          }),
+        }),
+      );
+    });
+
+    it('re-entrega do MESMO job depois de pagar 2 referências (worker caiu / job expirou): descrição reaproveitada sem nova chamada e só os slots que faltam são gerados', async () => {
+      const createA = jest.fn().mockResolvedValue(descResponse);
+      withOpenAi(processor, createA);
+      gemini.generateImageWithModel
+        .mockResolvedValueOnce(image('gemini-nano-banana-2.1'))
+        .mockResolvedValueOnce(image('gemini-nano-banana-2.1'))
+        .mockImplementationOnce(() => new Promise(() => undefined)); // slot 2 nunca responde
+      void processor.process({ kitId: 'kit-1' }, 'job-1');
+      await untilImageCalls(3);
+
+      // outro worker pega a re-entrega (mesmo id de job)
+      gemini.generateImageWithModel.mockResolvedValue(image('gemini-nano-banana-2.1'));
+      const other = newProcessor();
+      const createB = jest.fn().mockResolvedValue(descResponse);
+      withOpenAi(other, createB);
+      await other.process({ kitId: 'kit-1' }, 'job-1');
+
+      expect(createA).toHaveBeenCalledTimes(1);
+      expect(createB).not.toHaveBeenCalled(); // descrição da execução anterior
+      expect(gemini.generateImageWithModel).toHaveBeenCalledTimes(5); // 3 + só os slots 2 e 3
+      // os prompts da re-entrega são idênticos aos da primeira execução
+      const prompts = gemini.generateImageWithModel.mock.calls.map(
+        (c) => (c[0] as { prompt: string }).prompt,
+      );
+      expect(prompts[3]).toBe(prompts[2]);
+      expect(transitions.casTransition).toHaveBeenCalledWith(
+        manager,
+        McCharacterKit,
+        'kit-1',
+        McKitStatus.GENERATING,
+        McKitStatus.REVIEW,
+        expect.objectContaining({
+          referenceAssetIds: ['asset-1', 'asset-2', 'asset-3', 'asset-4'],
+        }),
+      );
+      // nenhuma chamada paga em dobro: 1 descrição + 4 referências
+      expect(costEvents().map((e) => (e.detail as { call: string }).call)).toEqual([
+        'canonical_desc',
+        'reference',
+        'reference',
+        'reference',
+        'reference',
+      ]);
+    });
+
+    it('outro job (outra geração) NÃO reaproveita a descrição de um job anterior', async () => {
+      savedEvents.push({
+        id: '99',
+        refKind: 'kit',
+        refId: 'kit-1',
+        kind: 'provider_cost',
+        detail: { call: 'canonical_desc', generationKey: 'job-1', desc },
+      });
+      const create = jest.fn().mockResolvedValue(descResponse);
+      withOpenAi(processor, create);
+      gemini.generateImageWithModel.mockResolvedValue(image('gemini-nano-banana-2.1'));
+      await processor.process({ kitId: 'kit-1' }, 'job-2');
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+
+    it('execução sobreposta do MESMO job no mesmo worker: a re-entrega ESPERA a execução em curso (sem gerar de novo) e conclui junto com ela', async () => {
+      jest
+        .spyOn(
+          processor as unknown as { generateCanonicalDesc: () => Promise<unknown> },
+          'generateCanonicalDesc',
+        )
+        .mockResolvedValue(desc);
+      let release!: (value: ReturnType<typeof image>) => void;
+      gemini.generateImageWithModel
+        .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)))
+        .mockResolvedValue(image('gemini-nano-banana-2.1'));
+      const first = processor.process({ kitId: 'kit-1' }, 'job-1');
+      await untilImageCalls(1);
+
+      let duplicateDone = false;
+      const duplicate = processor.process({ kitId: 'kit-1' }, 'job-1').then(() => {
+        duplicateDone = true;
+      });
+      await new Promise((r) => setTimeout(r, 20));
+      // não voltou antes do trabalho real (voltar na hora concluía o job no pg-boss)
+      expect(duplicateDone).toBe(false);
+      expect(kitRepo.findOneBy).toHaveBeenCalledTimes(1);
+
+      release(image('gemini-nano-banana-2.1'));
+      await Promise.all([first, duplicate]);
+      expect(duplicateDone).toBe(true);
+      expect(gemini.generateImageWithModel).toHaveBeenCalledTimes(4); // uma geração só
+      expect(kitRepo.findOneBy).toHaveBeenCalledTimes(1);
+
+      // terminada a execução, o claim é liberado: uma entrega nova roda de verdade
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+      expect(kitRepo.findOneBy).toHaveBeenCalledTimes(2);
+    });
+
+    it('re-entrega sobreposta falha junto com a execução em curso (o job continua re-tentável)', async () => {
+      jest
+        .spyOn(processor as unknown as { run: () => Promise<void> }, 'run')
+        .mockImplementationOnce(
+          () =>
+            new Promise((_resolve, reject) =>
+              setTimeout(() => reject(new Error('worker caiu')), 20),
+            ),
+        );
+      const first = processor.process({ kitId: 'kit-1' }, 'job-1');
+      const duplicate = processor.process({ kitId: 'kit-1' }, 'job-1');
+      await expect(first).rejects.toThrow('worker caiu');
+      await expect(duplicate).rejects.toThrow('worker caiu');
+    });
+
+    it('resposta 200 SEM imagem (IMAGE_SAFETY) foi cobrada: linha de custo sem asset pelo uso devolvido, evento reference_failed e o kit segue', async () => {
+      jest
+        .spyOn(
+          processor as unknown as { generateCanonicalDesc: () => Promise<unknown> },
+          'generateCanonicalDesc',
+        )
+        .mockResolvedValue(desc);
+      gemini.generateImageWithModel
+        .mockRejectedValueOnce(
+          withGeminiBilling(
+            new TerminalProviderError('Geração bloqueada (IMAGE_SAFETY)', 'content_policy'),
+            {
+              model: 'gemini-nano-banana-2.1',
+              usage: {
+                promptTokens: 1500,
+                candidatesTokens: 0,
+                thoughtsTokens: 250,
+                outputImageTokens: null,
+                totalTokens: 1750,
+              },
+            },
+          ),
+        )
+        .mockResolvedValue(image('gemini-nano-banana-2.1'));
+
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+
+      // timeout da imagem é terminal: o kit pede ao provider sem re-tentativa de timeout
+      for (const call of gemini.generateImageWithModel.mock.calls) {
+        expect(call[0]).toMatchObject({ retryOnTimeout: false });
+      }
+      expect(costEvents()).toHaveLength(4); // 1 sem resultado + 3 referências
+      expect(costDetail(0)).toMatchObject({
+        call: 'reference',
+        slot: 0,
+        model: 'gemini-nano-banana-2.1',
+        assetId: null,
+        failure: 'no_output',
+        providerErrorCode: 'content_policy',
+        usage: { inputTokens: 1500, outputTokens: 250, images: 0 },
+      });
+      // 1500 × 2/1M + 250 × 12/1M = 0,006 (sem preço de imagem: nenhuma veio)
+      expect(costDetail(0).costUsd).toBeCloseTo(0.006, 6);
+      expect(costDetail(0).estimated).toBeUndefined();
+      expect(incrementTotal()).toBeCloseTo(0.006 + 3 * 0.036, 6);
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          kind: 'reference_failed',
+          detail: expect.objectContaining({ slot: 0, providerErrorCode: 'content_policy' }),
+        }),
+      );
+    });
+
+    it('timeout de uma referência: terminal, SEM nova requisição, linha de custo ESTIMADA pelo preço da imagem', async () => {
+      jest
+        .spyOn(
+          processor as unknown as { generateCanonicalDesc: () => Promise<unknown> },
+          'generateCanonicalDesc',
+        )
+        .mockResolvedValue(desc);
+      gemini.generateImageWithModel
+        .mockResolvedValueOnce(image('gemini-nano-banana-2.1'))
+        .mockRejectedValueOnce(
+          withGeminiBilling(new TerminalProviderError('Tempo esgotado', 'provider_timeout'), {
+            model: 'gemini-nano-banana-2.1',
+            usage: null,
+            timedOut: true,
+          }),
+        )
+        .mockResolvedValue(image('gemini-nano-banana-2.1'));
+
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+
+      expect(gemini.generateImageWithModel).toHaveBeenCalledTimes(4); // 1 chamada por slot
+      const timedOut = costEvents()
+        .map((e) => e.detail as Record<string, unknown>)
+        .find((d) => d.failure === 'timed_out');
+      expect(timedOut).toMatchObject({
+        call: 'reference',
+        slot: 1,
+        assetId: null,
+        estimated: true,
+        costUsd: 0.034,
+        usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+        providerErrorCode: 'provider_timeout',
+      });
+      expect(incrementTotal()).toBeCloseTo(0.034 + 3 * 0.036, 6);
+    });
+
+    it('erro sem resposta cobrada (rede, quota) não grava linha de custo', async () => {
+      jest
+        .spyOn(
+          processor as unknown as { generateCanonicalDesc: () => Promise<unknown> },
+          'generateCanonicalDesc',
+        )
+        .mockResolvedValue(desc);
+      gemini.generateImageWithModel
+        .mockRejectedValueOnce(new Error('Falha de rede'))
+        .mockResolvedValue(image('gemini-nano-banana-2.1'));
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+      expect(costEvents()).toHaveLength(3);
+      expect(costEvents().every((e) => (e.detail as { failure?: string }).failure == null)).toBe(
+        true,
+      );
+    });
+  });
+
+  describe('regeneração de 1 célula — idempotência (2.6)', () => {
+    const reviewKit = {
+      ...baseKit,
+      status: McKitStatus.REVIEW,
+      canonicalDesc: JSON.stringify({ traits: ['t'], colors: [], style: 's', doNots: [] }),
+      referenceAssetIds: ['a1', 'a2', 'a3', 'a4'],
+    };
+    const grid = [
+      { id: 'a1', metadata: { slot: 0 } },
+      { id: 'a2', metadata: { slot: 1 } },
+      { id: 'a3', metadata: { slot: 2 } },
+      { id: 'a4', metadata: { slot: 3 } },
+    ];
+
+    it('re-entrega depois de pagar a imagem e antes da troca: reaproveita o asset gravado, sem nova imagem', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+      manager.findOne
+        .mockRejectedValueOnce(new Error('conexão caiu')) // primeira execução morre na troca
+        .mockResolvedValue({ ...reviewKit });
+      manager.find.mockResolvedValue(grid);
+
+      await processor.process({ kitId: 'kit-1', slot: 1 }, 'job-r');
+      await processor.process({ kitId: 'kit-1', slot: 1 }, 'job-r');
+
+      expect(assetRepo.save).toHaveBeenCalledTimes(1);
+      expect(manager.update).toHaveBeenCalledWith(
+        McCharacterKit,
+        { id: 'kit-1' },
+        { referenceAssetIds: ['a1', 'a3', 'a4', 'asset-1'] },
+      );
+    });
+
+    it('referência do grid ATUAL com a mesma requisição não é reaproveitada: o usuário pediu imagem nova', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+      manager.findOne.mockResolvedValue({ ...reviewKit });
+      manager.find.mockResolvedValue(grid);
+      await processor.process({ kitId: 'kit-1', slot: 1 });
+
+      // o asset novo agora está no grid; nova regeneração do mesmo slot gera outra imagem
+      const updated = { ...reviewKit, referenceAssetIds: ['a1', 'a3', 'a4', 'asset-1'] };
+      kitRepo.findOneBy.mockResolvedValue(updated);
+      manager.findOne.mockResolvedValue(updated);
+      manager.find.mockResolvedValue([...grid, { id: 'asset-1', metadata: { slot: 1 } }]);
+      await processor.process({ kitId: 'kit-1', slot: 1 });
+
+      expect(assetRepo.save).toHaveBeenCalledTimes(2);
+      expect(assetRepo.find).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ kind: 'kit_reference', userId: 'u1' }),
+        }),
+      );
     });
   });
 });

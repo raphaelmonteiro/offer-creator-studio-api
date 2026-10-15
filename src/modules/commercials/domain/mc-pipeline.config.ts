@@ -1,5 +1,11 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
+import { GEMINI_IMAGE_REQUEST_TIMEOUT_MS } from '../../../shared/providers/gemini-image.provider';
+import {
+  PROVIDER_RETRY_AFTER_MAX_S,
+  PROVIDER_RETRY_ATTEMPTS,
+} from '../../../shared/providers/provider-errors';
 import { QUEUES, QueueName } from '../../../shared/queue/animation-queue.service';
+import { KIT_CANDIDATES_MAX, KIT_REFERENCE_SLOT_COUNT } from './kit-prompts';
 import { McKitIdentityMode } from './mc-kit-identity';
 import { MC_PROJECT_FORMATS, McProjectFormat, McProjectTier, McStepType } from './mc-types';
 
@@ -13,10 +19,11 @@ import { MC_PROJECT_FORMATS, McProjectFormat, McProjectTier, McStepType } from '
  * mc.poll 10 (NUNCA gated) · mc.ingest 2 (gate ResourceGuard) ·
  * mc.ffmpeg 1 (gate ResourceGuard).
  *
- * Expiração: filas leves (llm/tts/submit/poll) 120s; mc.image 300s (geração
- * de imagem com retry passa fácil de 2 min — mesmo teto que o kit usa);
- * ingest 300s; ffmpeg 600s. O expireInSeconds do pg-boss vale por PUBLISH,
- * então filas compartilhadas (mc.image: kit + keyframe) convivem.
+ * Expiração: filas leves (llm/tts/submit/poll) 120s; mc.image 300s para o
+ * keyframe (geração de imagem com retry passa fácil de 2 min); ingest 300s;
+ * ffmpeg 600s. O expireInSeconds do pg-boss vale por PUBLISH, então filas
+ * compartilhadas (mc.image: kit + keyframe) convivem — os jobs do KIT usam
+ * `mcKitReferencesExpireS`/`mcKitCandidatesExpireS`, calculados abaixo.
  */
 export const MC_QUEUE_CONCURRENCY: Partial<Record<QueueName, number>> = {
   [QUEUES.MC_LLM]: 2,
@@ -41,6 +48,72 @@ export const MC_QUEUE_EXPIRE_S: Partial<Record<QueueName, number>> = {
   /** Render do F2: ~4 min por 30 s de vídeo na concorrência 1 (benchmark local) — teto de 15 min. */
   [QUEUES.MC_RENDER]: 900,
 };
+
+// ───────────────────────── expiração dos jobs do kit ─────────────────────────
+
+/**
+ * Timeout de UMA chamada da descrição canônica (gpt-4o visão, `max_tokens`
+ * 600): responde em 5 a 15 s; 60 s cobre a cauda sem segurar o job.
+ */
+export const KIT_CANONICAL_DESC_TIMEOUT_MS = 60_000;
+
+/** Folga dos jobs do kit sobre a soma dos timeouts (leitura de imagens, disco, banco). */
+export const MC_KIT_JOB_EXPIRE_MARGIN_S = 120;
+
+/**
+ * Pior caso de UMA chamada de imagem do kit: o timeout uma vez (o timeout da
+ * imagem é terminal — `retryOnTimeout: false` — porque a requisição abortada
+ * pode ter sido gerada e cobrada) mais as esperas entre as tentativas
+ * transitórias (429/5xx, cada uma até `PROVIDER_RETRY_AFTER_MAX_S`).
+ * Premissa: 429/5xx chegam rápido; um 5xx tardio, perto do timeout, seguido
+ * de nova tentativa passa do cálculo — esse caso residual é coberto pela
+ * idempotência dos processors (a re-entrega no mesmo worker espera a execução
+ * em curso; o slot/linha já pago é pulado).
+ */
+function kitImageCallWorstMs(imageTimeoutMs: number): number {
+  return imageTimeoutMs + (PROVIDER_RETRY_ATTEMPTS - 1) * PROVIDER_RETRY_AFTER_MAX_S * 1000;
+}
+
+/**
+ * Expiração do job de referências do kit (tarefa 2.6), acima do pior caso:
+ * descrição canônica com TODAS as tentativas no timeout (timeout de rede da
+ * OpenAI é transitório) e as esperas entre elas — 3 × 60 s + 2 × 60 s — mais
+ * 4 referências × (120 s + 2 × 60 s) e a folga = 1380 s.
+ * Antes eram 300 s: 4 imagens de até 120 s passavam da expiração, o pg-boss
+ * re-entregava o job (retryLimit 3) com o kit ainda em `generating` e as
+ * referências eram pagas de novo. Além da expiração, a geração é idempotente
+ * por slot (McKitProcessor: claim em memória que faz a re-entrega esperar a
+ * execução em curso + referência gravada ao nascer e pulada na re-entrega).
+ */
+export function mcKitReferencesExpireS(
+  slots: number = KIT_REFERENCE_SLOT_COUNT,
+  imageTimeoutMs: number = GEMINI_IMAGE_REQUEST_TIMEOUT_MS,
+  descTimeoutMs: number = KIT_CANONICAL_DESC_TIMEOUT_MS,
+): number {
+  const descWorstMs =
+    PROVIDER_RETRY_ATTEMPTS * descTimeoutMs +
+    (PROVIDER_RETRY_ATTEMPTS - 1) * PROVIDER_RETRY_AFTER_MAX_S * 1000;
+  return (
+    Math.ceil((descWorstMs + slots * kitImageCallWorstMs(imageTimeoutMs)) / 1000) +
+    MC_KIT_JOB_EXPIRE_MARGIN_S
+  );
+}
+
+/**
+ * Expiração da rodada de candidatos (até 6 imagens em sequência), no mesmo
+ * pior caso por imagem: 6 × (120 s + 2 × 60 s) + folga = 1560 s. Antes eram
+ * 600 s, abaixo de 6 imagens no timeout; a rodada já era idempotente por
+ * linha (claim em memória + CAS `assetId IS NULL`).
+ */
+export function mcKitCandidatesExpireS(
+  candidates: number = KIT_CANDIDATES_MAX,
+  imageTimeoutMs: number = GEMINI_IMAGE_REQUEST_TIMEOUT_MS,
+): number {
+  return (
+    Math.ceil((candidates * kitImageCallWorstMs(imageTimeoutMs)) / 1000) +
+    MC_KIT_JOB_EXPIRE_MARGIN_S
+  );
+}
 
 /**
  * Fila de cada tipo de step. `video` e `lipsync` são submits assíncronos

@@ -1,9 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   GEMINI_VISION_MODEL,
+  geminiBilledFailure,
   GeminiImageProvider,
   sniffImageMime,
 } from '../../../shared/providers/gemini-image.provider';
+import {
+  geminiUsage,
+  kitFailedCallCost,
+  kitProviderCost,
+  McKitProviderCost,
+} from '../domain/mc-kit-costs';
 import { MC_MOUTH_GATE_PROMPT, McMouthVerdict, parseMouthVerdict } from '../domain/mc-mouth-gate';
 
 /** Vereditos sintéticos do modo mock (MC_MOUTH_GATE_MOCK): passed (default) | blocked | undecided. */
@@ -36,6 +43,12 @@ const MOCK_VERDICTS: Record<string, Omit<McMouthVerdict, 'model' | 'at' | 'mock'
  *
  * MC_KIT_PROVIDER=mock (default em dev) devolve um veredito sintético, sem
  * gastar visão; MC_MOUTH_GATE_MOCK escolhe o cenário para testes/e2e.
+ *
+ * Custo (tarefa 2.6): `inspectWithCost` devolve também a linha de custo da
+ * chamada de visão (null no mock e quando a chamada não respondeu) — quem
+ * chama a registra no kit (services/mc-kit-costs.ts). Resposta ilegível ou
+ * sem texto foi paga: tem custo e o veredito indeciso sai com `paid: true`
+ * (reaproveitado na aprovação, sem nova chamada).
  */
 @Injectable()
 export class McMouthGateService {
@@ -48,33 +61,55 @@ export class McMouthGateService {
   }
 
   async inspect(image: Buffer): Promise<McMouthVerdict> {
+    return (await this.inspectWithCost(image)).verdict;
+  }
+
+  /** Veredito + custo da chamada de visão (null no mock ou sem resposta do Gemini). */
+  async inspectWithCost(
+    image: Buffer,
+  ): Promise<{ verdict: McMouthVerdict; cost: McKitProviderCost | null }> {
     const at = new Date().toISOString();
     if (this.isMock()) {
       const scenario = process.env.MC_MOUTH_GATE_MOCK || 'passed';
       const base = MOCK_VERDICTS[scenario] ?? MOCK_VERDICTS.passed;
-      return { ...base, model: 'mock', at, mock: true };
+      return { verdict: { ...base, model: 'mock', at, mock: true }, cost: null };
     }
     try {
-      const text = await this.gemini.describeImages({
+      const { text, model, usage } = await this.gemini.describeImagesWithUsage({
         prompt: MC_MOUTH_GATE_PROMPT,
         images: [image],
         mimeType: sniffImageMime(image),
       });
+      const cost = kitProviderCost({
+        call: 'mouth_gate',
+        provider: 'gemini',
+        model,
+        usage: geminiUsage(usage, 0),
+      });
       const parsed = parseMouthVerdict(text);
       if (!parsed) {
         this.logger.warn(`Gate de boca: resposta não interpretável: ${text.slice(0, 120)}`);
-        return this.undecided(at, 'resposta não interpretável');
+        return { verdict: this.undecided(at, 'resposta não interpretável', true), cost };
       }
-      return { ...parsed, model: GEMINI_VISION_MODEL, at };
+      return { verdict: { ...parsed, model: model || GEMINI_VISION_MODEL, at }, cost };
     } catch (err) {
       const message = (err as Error).message ?? 'erro desconhecido';
       this.logger.warn(`Gate de boca indisponível (${message}) — veredito indeciso.`);
-      return this.undecided(at, message.slice(0, 200));
+      // resposta 200 sem texto: cobrada mesmo sem veredito
+      const billing = geminiBilledFailure(err);
+      if (billing) {
+        return {
+          verdict: this.undecided(at, message.slice(0, 200), true),
+          cost: kitFailedCallCost({ call: 'mouth_gate', billing, expectedImages: 0 }),
+        };
+      }
+      return { verdict: this.undecided(at, message.slice(0, 200)), cost: null };
     }
   }
 
-  private undecided(at: string, error: string): McMouthVerdict {
+  private undecided(at: string, error: string, paid = false): McMouthVerdict {
     return {
+      ...(paid ? { paid: true } : {}),
       hasMouth: false,
       mouthOpenPossible: false,
       confidence: 0,

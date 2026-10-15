@@ -4,10 +4,13 @@ import { DataSource, In } from 'typeorm';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { Mascot } from '../../mascots/entities/mascot.entity';
 import { KIT_FRONT_SLOT } from '../domain/kit-prompts';
+import { McCallUsage, McKitCostCall } from '../domain/mc-kit-costs';
 import { decideMouthGate, McMouthDecision } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { MC_TILE_MIN_FACE_FRACTION } from '../domain/mc-tile';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+import { McEvent } from '../entities/mc-event.entity';
+import { MC_KIT_COST_EVENT } from './mc-kit-costs';
 
 /** Referência do kit resolvida para a UI de review (grid por slot, plano §4). */
 export interface KitReferenceView {
@@ -30,7 +33,29 @@ export interface KitTileView extends KitAssetView {
   faceBelowMinimum: boolean;
 }
 
+/** Uma chamada paga do kit (evento `provider_cost`), na ordem em que aconteceu. */
+export interface KitProviderCostView {
+  call: McKitCostCall;
+  provider: string;
+  model: string;
+  /** US$; null = modelo fora da tabela de tarifas (MC_KIT_PRICES). */
+  costUsd: number | null;
+  usage: McCallUsage | null;
+  /** Asset gerado pela chamada (referência, candidato), quando há. */
+  assetId: string | null;
+  /** Chamada paga sem resultado (resposta sem imagem/texto, timeout); null = entregou. */
+  failure: 'no_output' | 'timed_out' | null;
+  /** true = custo estimado (timeout), não medido. */
+  estimated: boolean;
+  at: Date;
+}
+
+/** Teto de linhas de custo devolvidas no GET do kit (um kit real tem ~5 a 15 chamadas). */
+const KIT_COST_LINES_MAX = 200;
+
 export type McKitView = McCharacterKit & {
+  /** Chamadas pagas, uma por linha — só no GET /commercials/kits/:id (a soma é `providerCostUsd`). */
+  providerCosts?: KitProviderCostView[];
   references: KitReferenceView[];
   /** Identidade efetiva: `identityAssetId` ou a referência frontal (slot 2) do kit de mascote. */
   identity: KitAssetView | null;
@@ -88,8 +113,36 @@ export class McKitViewService {
     return kit;
   }
 
+  /** Ficha do kit com as linhas de custo (GET /commercials/kits/:id). */
   async findOne(userId: string, id: string): Promise<McKitView> {
-    return this.toView(await this.findOwned(userId, id));
+    const kit = await this.findOwned(userId, id);
+    const [view, providerCosts] = await Promise.all([this.toView(kit), this.costLines(kit.id)]);
+    return { ...view, providerCosts };
+  }
+
+  /** Linhas de custo do kit (eventos `provider_cost`), da mais antiga para a mais nova. */
+  async costLines(kitId: string): Promise<KitProviderCostView[]> {
+    const events = await this.dataSource.getRepository(McEvent).find({
+      where: { refKind: 'kit', refId: kitId, kind: MC_KIT_COST_EVENT },
+      order: { id: 'ASC' },
+      take: KIT_COST_LINES_MAX,
+    });
+    return events.map((event) => {
+      const detail = (event.detail ?? {}) as Record<string, unknown>;
+      const cost = detail.costUsd;
+      return {
+        call: detail.call as McKitCostCall,
+        provider: typeof detail.provider === 'string' ? detail.provider : 'unknown',
+        model: typeof detail.model === 'string' ? detail.model : 'unknown',
+        costUsd: typeof cost === 'number' && Number.isFinite(cost) ? cost : null,
+        usage: (detail.usage as McCallUsage | null | undefined) ?? null,
+        assetId: typeof detail.assetId === 'string' ? detail.assetId : null,
+        failure:
+          detail.failure === 'no_output' || detail.failure === 'timed_out' ? detail.failure : null,
+        estimated: detail.estimated === true,
+        at: event.createdAt,
+      };
+    });
   }
 
   /** Asset da identidade efetiva (candidato escolhido / logo como está / referência frontal). */
@@ -159,8 +212,11 @@ export class McKitViewService {
         : null;
     const logoDecision = kit.mouthGate?.logo ? decideMouthGate(kit.mouthGate.logo) : null;
     const mascotName = mascotNameById.get(kit.mascotId) ?? null;
+    // a entidade já traz número (transformer); Number() cobre linha crua/mocks
+    const cost = Number(kit.providerCostUsd ?? 0);
     return {
       ...kit,
+      providerCostUsd: Number.isFinite(cost) ? cost : 0,
       references,
       identity: identityAsset ? { assetId: identityAsset.id, url: identityAsset.fileUrl } : null,
       tile: tileAsset

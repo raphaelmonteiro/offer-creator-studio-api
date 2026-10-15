@@ -43,7 +43,12 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
   /** Marca o COMMIT da transação simulada: a fila só pode ser tocada depois dele (L1). */
   let committed: jest.Mock;
   let assetRepo: { save: jest.Mock; find: jest.Mock; softDelete: jest.Mock };
-  let manager: { insert: jest.Mock; update: jest.Mock; softDelete: jest.Mock };
+  let manager: {
+    insert: jest.Mock;
+    update: jest.Mock;
+    softDelete: jest.Mock;
+    increment: jest.Mock;
+  };
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
   let queue: { publish: jest.Mock };
@@ -109,6 +114,7 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
       insert: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue(undefined),
       softDelete: jest.fn().mockResolvedValue(undefined),
+      increment: jest.fn().mockResolvedValue(undefined),
     };
     dataSource = {
       getRepository: jest.fn((entity: unknown) => {
@@ -719,5 +725,105 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
 
   it('translateAdjustments em modo mock devolve o texto como está (sem gastar chamada)', async () => {
     await expect(service.translateAdjustments('menos infantil')).resolves.toBe('menos infantil');
+  });
+
+  /** Tarefa 2.6: tradução real (SDK com fetch simulado) — custo no kit e quota terminal. */
+  describe('translateAdjustments com a OpenAI', () => {
+    const originalProvider = process.env.MC_KIT_PROVIDER;
+    let fetchSpy: jest.SpyInstance;
+    let real: McKitCandidatesService;
+    const json = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      });
+
+    beforeEach(() => {
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      fetchSpy = jest.spyOn(global, 'fetch');
+      const config = {
+        get: jest.fn((key: string, def?: string) =>
+          key === 'OPENAI_API_KEY' ? 'sk-test' : key === 'UPLOAD_DEST' ? tmpDir : def,
+        ),
+      };
+      real = new McKitCandidatesService(
+        dataSource as unknown as DataSource,
+        transitions as unknown as TaskTransitionService,
+        queue as unknown as AnimationQueueService,
+        commercials as unknown as CommercialsService,
+        new McStorageService(config as unknown as ConfigService),
+        mascots as unknown as MascotsService,
+        config as unknown as ConfigService,
+        view as unknown as McKitViewService,
+        tile as unknown as McKitTileService,
+      );
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+      if (originalProvider === undefined) delete process.env.MC_KIT_PROVIDER;
+      else process.env.MC_KIT_PROVIDER = originalProvider;
+    });
+
+    it('com o kit: devolve a tradução e registra o custo da chamada (gpt-4o-mini pelos tokens do usage)', async () => {
+      fetchSpy.mockResolvedValue(
+        json(200, {
+          id: 'chatcmpl-1',
+          object: 'chat.completion',
+          created: 0,
+          model: 'gpt-4o-mini-2024-07-18',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: 'less childish' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 60, completion_tokens: 5, total_tokens: 65 },
+        }),
+      );
+      await expect(
+        real.translateAdjustments('menos infantil', { id: 'kit-1', userId: 'u1' }),
+      ).resolves.toBe('less childish');
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          refKind: 'kit',
+          refId: 'kit-1',
+          kind: 'provider_cost',
+          detail: expect.objectContaining({
+            call: 'adjustments_translation',
+            provider: 'openai',
+            model: 'gpt-4o-mini-2024-07-18',
+            requestedModel: 'gpt-4o-mini',
+            // 60 × 0,15/1M + 5 × 0,6/1M
+            costUsd: 0.000012,
+          }),
+        }),
+      );
+      expect(manager.increment).toHaveBeenCalledWith(
+        McCharacterKit,
+        { id: 'kit-1' },
+        'providerCostUsd',
+        0.000012,
+      );
+    });
+
+    it('conta sem crédito: UMA requisição (sem retry do SDK nem do withRetry) e o texto original segue', async () => {
+      fetchSpy.mockResolvedValue(
+        json(429, {
+          error: {
+            message: 'You exceeded your current quota',
+            type: 'insufficient_quota',
+            code: 'insufficient_quota',
+          },
+        }),
+      );
+      await expect(
+        real.translateAdjustments('menos infantil', { id: 'kit-1', userId: 'u1' }),
+      ).resolves.toBe('menos infantil');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(commercials.appendEvent).not.toHaveBeenCalled();
+    });
   });
 });

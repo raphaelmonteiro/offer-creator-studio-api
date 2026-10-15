@@ -6,7 +6,10 @@ import * as path from 'path';
 import * as sharp from 'sharp';
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
-import { GeminiImageProvider } from '../../../shared/providers/gemini-image.provider';
+import {
+  GeminiImageProvider,
+  withGeminiBilling,
+} from '../../../shared/providers/gemini-image.provider';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { MascotsService } from '../../mascots/mascots.service';
@@ -40,7 +43,7 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
   let kitRepo: { findOneBy: jest.Mock };
   let candidateRepo: { find: jest.Mock; update: jest.Mock; findOne: jest.Mock };
   let assetRepo: { save: jest.Mock; softDelete: jest.Mock };
-  let manager: { insert: jest.Mock; update: jest.Mock };
+  let manager: { insert: jest.Mock; update: jest.Mock; save: jest.Mock; increment: jest.Mock };
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let transitions: { casTransition: jest.Mock; notify: jest.Mock };
   let commercials: { appendEvent: jest.Mock };
@@ -105,7 +108,15 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       ),
       softDelete: jest.fn().mockResolvedValue(undefined),
     };
-    manager = { insert: jest.fn(), update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    // O asset do candidato nasce na transação do registro de custo (2.6):
+    // `manager.save(AnimationAsset, …)` delega ao repositório do teste.
+    const testAssetRepo = assetRepo;
+    manager = {
+      insert: jest.fn(),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      save: jest.fn((_entity: unknown, obj: Record<string, unknown>) => testAssetRepo.save(obj)),
+      increment: jest.fn().mockResolvedValue(undefined),
+    };
     // Repositórios e manager DESTE teste presos na closure (não nas variáveis
     // `let` reatribuídas a cada beforeEach): uma execução que sobre de um teste
     // anterior nunca escreve nos mocks do teste seguinte.
@@ -474,6 +485,23 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
       expect(candidateRepo.find).toHaveBeenCalledTimes(2);
     });
 
+    it('a re-entrega sobreposta ESPERA a execução em curso e falha junto com ela (o job continua re-tentável)', async () => {
+      let fail!: (err: Error) => void;
+      jest
+        .spyOn(processor as unknown as { run: () => Promise<void> }, 'run')
+        .mockImplementationOnce(() => new Promise((_resolve, reject) => (fail = reject)));
+      const first = processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+      let settled = false;
+      const duplicate = processor
+        .process({ kitId: 'kit-1', roundId: 'round-1' })
+        .finally(() => (settled = true));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(settled).toBe(false); // não conclui o job antes do trabalho real
+      fail(new Error('worker caiu'));
+      await expect(first).rejects.toThrow('worker caiu');
+      await expect(duplicate).rejects.toThrow('worker caiu');
+    });
+
     it('linha já preenchida por outra execução (CAS `assetId IS NULL` perdido): a imagem perdedora é descartada', async () => {
       candidateRepo.update
         .mockResolvedValueOnce({ affected: 1 })
@@ -492,6 +520,178 @@ describe('McKitCandidatesProcessor — rodada de candidatos na fila mc.image (D4
         manager,
         expect.objectContaining({ detail: expect.objectContaining({ ready: 4, requested: 4 }) }),
       );
+    });
+  });
+
+  /** Tarefa 2.6: cada imagem gerada de verdade registra o custo no asset e no kit. */
+  describe('custo das imagens (2.6)', () => {
+    const usage = {
+      promptTokens: 1500,
+      candidatesTokens: 1140,
+      thoughtsTokens: 200,
+      outputImageTokens: 1120,
+      totalTokens: 2840,
+    };
+    // 1 × 0,134 + 1500 × 2/1M + (20 de texto + 200 de raciocínio) × 12/1M
+    const expected = 0.134 + 0.003 + 0.00264;
+
+    it('gemini: custo no metadata do asset + evento provider_cost + soma no kit, na transação do asset; candidato que falhou não custa', async () => {
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      gemini.generateImageWithModel
+        .mockResolvedValueOnce({
+          image: Buffer.from('i0'),
+          model: 'nano-banana-pro-preview',
+          usage,
+        })
+        .mockRejectedValueOnce(new TerminalProviderError('bloqueada', 'content_policy'))
+        .mockResolvedValue({ image: Buffer.from('ix'), model: 'nano-banana-pro-preview', usage });
+
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+
+      expect(assetRepo.save).toHaveBeenCalledTimes(3);
+      const meta = (assetRepo.save.mock.calls[0][0] as { metadata: Record<string, unknown> })
+        .metadata;
+      expect(meta.providerCostUsd).toBeCloseTo(expected, 6);
+      expect(meta.usage).toEqual({ inputTokens: 1500, outputTokens: 220, images: 1 });
+      const costEvents = commercials.appendEvent.mock.calls.filter(
+        ([, e]) => (e as { kind: string }).kind === 'provider_cost',
+      );
+      expect(costEvents).toHaveLength(3);
+      expect(costEvents[0][1]).toMatchObject({
+        refKind: 'kit',
+        refId: 'kit-1',
+        detail: {
+          call: 'candidate',
+          provider: 'gemini',
+          model: 'nano-banana-pro-preview',
+          assetId: 'asset-1',
+          roundId: 'round-1',
+          idx: 0,
+        },
+      });
+      expect(manager.increment).toHaveBeenCalledTimes(3);
+      expect(manager.increment.mock.calls[0].slice(0, 3)).toEqual([
+        McCharacterKit,
+        { id: 'kit-1' },
+        'providerCostUsd',
+      ]);
+      expect(manager.increment.mock.calls[0][3]).toBeCloseTo(expected, 6);
+    });
+
+    it('variante com boca registra a chamada como mouth_variant', async () => {
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      kitRepo.findOneBy.mockResolvedValue({
+        ...kit,
+        status: McKitStatus.REVIEW,
+        identityAssetId: 'asset-identity',
+        candidateRoundId: 'round-mv',
+      });
+      candidateRepo.find.mockResolvedValue(rows(1, 'mouth_variant', 'round-mv'));
+      view.resolveIdentityAsset.mockResolvedValue({
+        id: 'asset-identity',
+        fileUrl: '/uploads/mascots/logo.png',
+      });
+      gemini.generateImageWithModel.mockResolvedValue({
+        image: Buffer.from('mv'),
+        model: 'nano-banana-pro-preview',
+        usage,
+      });
+      await processor.process({ kitId: 'kit-1', roundId: 'round-mv' });
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          kind: 'provider_cost',
+          detail: expect.objectContaining({ call: 'mouth_variant', roundId: 'round-mv' }),
+        }),
+      );
+    });
+
+    it('imagem perdedora do CAS é descartada, mas o custo dela fica registrado (foi paga)', async () => {
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      gemini.generateImageWithModel.mockResolvedValue({
+        image: Buffer.from('ix'),
+        model: 'nano-banana-pro-preview',
+        usage: null, // sem usageMetadata: cobra só a imagem
+      });
+      candidateRepo.update
+        .mockResolvedValueOnce({ affected: 1 })
+        .mockResolvedValueOnce({ affected: 0 })
+        .mockResolvedValue({ affected: 1 });
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+      expect(assetRepo.softDelete).toHaveBeenCalledWith('asset-2');
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          kind: 'provider_cost',
+          detail: expect.objectContaining({ assetId: 'asset-2', costUsd: 0.134 }),
+        }),
+      );
+      expect(manager.increment).toHaveBeenCalledTimes(4);
+    });
+
+    it('candidato com resposta 200 SEM imagem (cobrada) e candidato com timeout: linhas de custo sem asset (o timeout estimado), sem re-tentativa de timeout', async () => {
+      process.env.MC_KIT_PROVIDER = 'gemini';
+      gemini.generateImageWithModel
+        .mockRejectedValueOnce(
+          withGeminiBilling(new TerminalProviderError('bloqueada', 'content_policy'), {
+            model: 'nano-banana-pro-preview',
+            usage: { ...usage, candidatesTokens: 0, outputImageTokens: null },
+          }),
+        )
+        .mockRejectedValueOnce(
+          withGeminiBilling(new TerminalProviderError('Tempo esgotado', 'provider_timeout'), {
+            model: 'nano-banana-pro-preview',
+            usage: null,
+            timedOut: true,
+          }),
+        )
+        .mockResolvedValue({ image: Buffer.from('ix'), model: 'nano-banana-pro-preview', usage });
+
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+
+      for (const call of gemini.generateImageWithModel.mock.calls) {
+        expect(call[0]).toMatchObject({ retryOnTimeout: false });
+      }
+      expect(gemini.generateImageWithModel).toHaveBeenCalledTimes(4);
+      const costs = commercials.appendEvent.mock.calls
+        .map(([, e]) => e as { kind: string; detail: Record<string, unknown> })
+        .filter((e) => e.kind === 'provider_cost')
+        .map((e) => e.detail);
+      expect(costs).toHaveLength(4);
+      expect(costs[0]).toMatchObject({
+        call: 'candidate',
+        idx: 0,
+        assetId: null,
+        failure: 'no_output',
+        providerErrorCode: 'content_policy',
+        usage: { inputTokens: 1500, outputTokens: 200, images: 0 },
+      });
+      // 1500 × 2/1M + 200 × 12/1M
+      expect(costs[0].costUsd).toBeCloseTo(0.0054, 6);
+      expect(costs[1]).toMatchObject({
+        call: 'candidate',
+        idx: 1,
+        assetId: null,
+        failure: 'timed_out',
+        estimated: true,
+        costUsd: 0.134,
+        providerErrorCode: 'provider_timeout',
+      });
+      // os dois falhos também entram na soma do kit
+      expect(manager.increment).toHaveBeenCalledTimes(4);
+    });
+
+    it('provider mock não custa: metadata com custo 0, sem evento nem soma', async () => {
+      await processor.process({ kitId: 'kit-1', roundId: 'round-1' });
+      expect(
+        (assetRepo.save.mock.calls[0][0] as { metadata: Record<string, unknown> }).metadata
+          .providerCostUsd,
+      ).toBe(0);
+      expect(commercials.appendEvent).not.toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ kind: 'provider_cost' }),
+      );
+      expect(manager.increment).not.toHaveBeenCalled();
     });
   });
 

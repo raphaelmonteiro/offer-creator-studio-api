@@ -5,6 +5,7 @@ import { Mascot } from '../../mascots/entities/mascot.entity';
 import { McMouthVerdict } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+import { McEvent } from '../entities/mc-event.entity';
 import { kitLabel, kitUseAsIsAvailable, McKitViewService } from './mc-kit-view.service';
 
 const passed: McMouthVerdict = {
@@ -22,6 +23,7 @@ describe('McKitViewService — view do kit para a API (D1/D4)', () => {
   let kitRepo: { findOneBy: jest.Mock };
   let assetRepo: { find: jest.Mock; findOneBy: jest.Mock };
   let mascotRepo: { find: jest.Mock };
+  let eventRepo: { find: jest.Mock };
   let service: McKitViewService;
 
   const baseKit = {
@@ -45,11 +47,13 @@ describe('McKitViewService — view do kit para a API (D1/D4)', () => {
     mascotRepo = {
       find: jest.fn().mockResolvedValue([{ id: 'logo-1', name: 'Logo Mercado Bom' }]),
     };
+    eventRepo = { find: jest.fn().mockResolvedValue([]) };
     const dataSource = {
       getRepository: jest.fn((entity: unknown) => {
         if (entity === McCharacterKit) return kitRepo;
         if (entity === AnimationAsset) return assetRepo;
         if (entity === Mascot) return mascotRepo;
+        if (entity === McEvent) return eventRepo;
         throw new Error('repo inesperado');
       }),
     } as unknown as DataSource;
@@ -223,5 +227,106 @@ describe('McKitViewService — view do kit para a API (D1/D4)', () => {
     const view = await service.findOne('u1', baseKit.id);
     expect(view.useAsIsAvailable).toBe(true);
     expect(view.label).toBe('Logo Mercado Bom');
+    expect(view.providerCosts).toEqual([]);
+  });
+
+  describe('custo do kit (tarefa 2.6)', () => {
+    it('providerCostUsd sai como número na view (texto cru do pg também); ausente = 0', async () => {
+      const kit = { ...baseKit, providerCostUsd: '0.146200' } as unknown as McCharacterKit;
+      expect((await service.toView(kit)).providerCostUsd).toBe(0.1462);
+      expect((await service.toView(baseKit)).providerCostUsd).toBe(0);
+      // a lista não carrega as linhas por chamada (só o GET do kit)
+      const [listed] = await service.toViewMany([kit]);
+      expect(listed.providerCosts).toBeUndefined();
+      expect(eventRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('GET do kit: uma linha por chamada paga (eventos provider_cost do kit, em ordem)', async () => {
+      kitRepo.findOneBy.mockResolvedValue({ ...baseKit, providerCostUsd: '0.009000' });
+      const at = new Date('2026-10-15T12:00:00Z');
+      eventRepo.find.mockResolvedValue([
+        {
+          id: '1',
+          createdAt: at,
+          detail: {
+            call: 'canonical_desc',
+            provider: 'openai',
+            model: 'gpt-4o-2024-08-06',
+            costUsd: 0.009,
+            usage: { inputTokens: 1200, outputTokens: 600, images: 0 },
+            desc: { traits: ['t'] },
+          },
+        },
+        {
+          id: '2',
+          createdAt: at,
+          detail: {
+            call: 'reference',
+            provider: 'gemini',
+            model: 'unknown-model',
+            costUsd: null,
+            usage: null,
+            assetId: 'ref-1',
+          },
+        },
+        {
+          id: '3',
+          createdAt: at,
+          detail: {
+            call: 'reference',
+            provider: 'gemini',
+            model: 'nano-banana-pro-preview',
+            costUsd: 0.134,
+            usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+            assetId: null,
+            failure: 'timed_out',
+            estimated: true,
+          },
+        },
+      ]);
+      const view = await service.findOne('u1', baseKit.id);
+      expect(eventRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { refKind: 'kit', refId: baseKit.id, kind: 'provider_cost' },
+          order: { id: 'ASC' },
+        }),
+      );
+      expect(view.providerCostUsd).toBe(0.009);
+      expect(view.providerCosts).toEqual([
+        {
+          call: 'canonical_desc',
+          provider: 'openai',
+          model: 'gpt-4o-2024-08-06',
+          costUsd: 0.009,
+          usage: { inputTokens: 1200, outputTokens: 600, images: 0 },
+          assetId: null,
+          failure: null,
+          estimated: false,
+          at,
+        },
+        {
+          call: 'reference',
+          provider: 'gemini',
+          model: 'unknown-model',
+          costUsd: null,
+          usage: null,
+          assetId: 'ref-1',
+          failure: null,
+          estimated: false,
+          at,
+        },
+        {
+          call: 'reference',
+          provider: 'gemini',
+          model: 'nano-banana-pro-preview',
+          costUsd: 0.134,
+          usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+          assetId: null,
+          failure: 'timed_out',
+          estimated: true,
+          at,
+        },
+      ]);
+    });
   });
 });

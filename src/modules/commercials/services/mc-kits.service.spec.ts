@@ -16,6 +16,7 @@ import { TaskTransitionService } from '../../../shared/state/task-transition.ser
 import { ClientsService } from '../../clients/clients.service';
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
+import { McKitProviderCost } from '../domain/mc-kit-costs';
 import { McMouthVerdict } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -37,6 +38,15 @@ const passedVerdict: McMouthVerdict = {
 };
 const blockedVerdict: McMouthVerdict = { ...passedVerdict, mouthOpenPossible: false };
 const undecidedVerdict: McMouthVerdict = { ...passedVerdict, confidence: 0.4 };
+/** Linha de custo de uma visão do gate (tarefa 2.6). */
+const gateCost: McKitProviderCost = {
+  call: 'mouth_gate',
+  provider: 'gemini',
+  model: 'gemini-3.8-flash',
+  usage: { inputTokens: 1200, outputTokens: 300, images: 0 },
+  costUsd: 0.0015,
+  rate: null,
+};
 
 describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
   let tmpDir: string;
@@ -47,7 +57,12 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
     sourceImageUrl: '/uploads/mascots/source.png',
   };
 
-  let manager: { getRepository: jest.Mock; save: jest.Mock; update: jest.Mock };
+  let manager: {
+    getRepository: jest.Mock;
+    save: jest.Mock;
+    update: jest.Mock;
+    increment: jest.Mock;
+  };
   let kitRepo: {
     save: jest.Mock;
     findOneBy: jest.Mock;
@@ -78,7 +93,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
   };
   /** Marca o COMMIT da transação simulada: a fila só pode ser tocada depois dele (L1). */
   let committed: jest.Mock;
-  let mouthGate: { inspect: jest.Mock };
+  let mouthGate: { inspect: jest.Mock; inspectWithCost: jest.Mock };
   let tile: { build: jest.Mock; discard: jest.Mock };
   let service: McKitsService;
   /** Origem mascote com estilo — o mínimo que gera referências (STYLE_REQUIRED sem o estilo). */
@@ -116,6 +131,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       getRepository: jest.fn(() => kitRepo),
       save: jest.fn(),
       update: jest.fn(),
+      increment: jest.fn().mockResolvedValue(undefined),
     };
     dataSource = {
       getRepository: jest.fn((entity: unknown) =>
@@ -177,7 +193,14 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       translateAdjustments: jest.fn((text: string) => Promise.resolve(text)),
     };
     committed = jest.fn();
-    mouthGate = { inspect: jest.fn().mockResolvedValue(passedVerdict) };
+    // inspectWithCost delega ao inspect (os testes trocam o veredito nele); custo null = mock
+    mouthGate = {
+      inspect: jest.fn().mockResolvedValue(passedVerdict),
+      inspectWithCost: jest.fn(async (image: Buffer) => ({
+        verdict: await mouthGate.inspect(image),
+        cost: null,
+      })),
+    };
     tile = {
       build: jest.fn().mockResolvedValue({
         assetId: 'tile-1',
@@ -264,7 +287,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
     );
   });
 
-  it('caminho feliz: moderação ANTES da fila; kit generating; mc.image com expireInSeconds 300', async () => {
+  it('caminho feliz: moderação ANTES da fila; kit generating; mc.image com expiração acima da soma dos timeouts (660 s)', async () => {
     const kit = await service.createKit('u1', { ...mascotDto, voiceId: 'voice-9' });
 
     expect(moderation.moderate).toHaveBeenCalledWith(
@@ -280,7 +303,9 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       { kitId: kit.id },
       { expireInSeconds: MC_IMAGE_EXPIRE_S },
     );
-    expect(MC_IMAGE_EXPIRE_S).toBe(300);
+    // descrição e 4 referências no pior caso com re-tentativas + folga (2.6: com
+    // 300 s o job expirava no meio da geração e as referências eram pagas de novo)
+    expect(MC_IMAGE_EXPIRE_S).toBe(1380);
     // o job sai DEPOIS do commit (L1): consumido antes, não acharia o kit
     expect(committed.mock.invocationCallOrder[0]).toBeLessThan(
       queue.publish.mock.invocationCallOrder[0],
@@ -423,6 +448,56 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         'u1',
         { kind: 'mc_kit', kitId: kit.id, status: McKitStatus.GENERATING },
         MC_EVENTS_CHANNEL,
+      );
+    });
+
+    it('gate de boca no logo cru é pago antes de o kit existir: custo na soma já no INSERT e uma linha provider_cost, sem incremento duplicado (2.6)', async () => {
+      clients.findOne.mockResolvedValue({
+        id: 'c1',
+        name: 'Mercado Bom',
+        logoUrl: '/uploads/logos/l.png',
+      });
+      mascots.createFromUrl.mockResolvedValue({ ...logoBase });
+      mouthGate.inspectWithCost.mockResolvedValue({ verdict: passedVerdict, cost: gateCost });
+      const kit = await service.createKit('u1', {
+        source: 'logo',
+        clientId: 'c1',
+        style: '3d_render',
+        rightsConfirmed: true,
+      });
+      expect(kitRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: McKitStatus.GENERATING,
+          providerCostUsd: 0.0015,
+          mouthGate: { logo: passedVerdict },
+        }),
+      );
+      expect(commercials.appendEvent).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          refKind: 'kit',
+          refId: kit.id,
+          kind: 'provider_cost',
+          detail: expect.objectContaining({
+            call: 'mouth_gate',
+            model: 'gemini-3.8-flash',
+            costUsd: 0.0015,
+            target: 'logo',
+          }),
+        }),
+      );
+      expect(manager.increment).not.toHaveBeenCalled();
+    });
+
+    it('origem mascote não chama o gate na criação: kit nasce com custo 0 (default da coluna), sem linha de custo', async () => {
+      await service.createKit('u1', mascotDto);
+      expect(mouthGate.inspectWithCost).not.toHaveBeenCalled();
+      expect(kitRepo.save).toHaveBeenCalledWith(
+        expect.not.objectContaining({ providerCostUsd: expect.anything() }),
+      );
+      expect(commercials.appendEvent).not.toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ kind: 'provider_cost' }),
       );
     });
 
@@ -606,6 +681,44 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
      * "Gate de boca legível" e "Tile do personagem").
      */
     describe('gate de boca e tile', () => {
+      it('visão paga na aprovação: custo registrado no kit (evento + soma) mesmo quando a aprovação recusa; veredito reaproveitado não paga de novo (2.6)', async () => {
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        mouthGate.inspectWithCost.mockResolvedValue({ verdict: blockedVerdict, cost: gateCost });
+        await expect(
+          service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+        ).rejects.toMatchObject({ response: { code: 'MOUTH_NOT_LEGIBLE' } });
+        expect(commercials.appendEvent).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({
+            refId: 'kit-r',
+            kind: 'provider_cost',
+            detail: expect.objectContaining({
+              call: 'mouth_gate',
+              costUsd: 0.0015,
+              target: 'identity',
+              identityAssetId: 'front-1',
+            }),
+          }),
+        );
+        expect(manager.increment).toHaveBeenCalledWith(
+          McCharacterKit,
+          { id: 'kit-r' },
+          'providerCostUsd',
+          0.0015,
+        );
+
+        // veredito já gravado para a MESMA identidade: nenhuma visão, nenhum custo novo
+        mouthGate.inspectWithCost.mockClear();
+        manager.increment.mockClear();
+        kitRepo.findOneBy.mockResolvedValue({
+          ...reviewKit,
+          mouthGate: { identity: { ...passedVerdict, identityAssetId: 'front-1' } },
+        });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+        expect(mouthGate.inspectWithCost).not.toHaveBeenCalled();
+        expect(manager.increment).not.toHaveBeenCalled();
+      });
+
       it('boca legível: tile gerado da identidade; identityAssetId/tileAssetId/cor/veredito gravados no kit aprovado', async () => {
         kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
         await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
@@ -677,6 +790,50 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
           }),
           expect.objectContaining({ sql: expect.any(String) }),
         );
+      });
+
+      it('resposta da visão PAGA e ilegível (`paid`): o aceite de risco reaproveita o veredito, sem pagar a visão de novo; visão indisponível (sem `paid`) é inspecionada outra vez', async () => {
+        const garbled: McMouthVerdict = {
+          hasMouth: false,
+          mouthOpenPossible: false,
+          confidence: 0,
+          bbox: null,
+          model: 'gemini-3.8-flash',
+          at: '2026-10-15T12:00:00Z',
+          error: 'resposta não interpretável',
+          paid: true,
+        };
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        mouthGate.inspectWithCost.mockResolvedValueOnce({ verdict: garbled, cost: gateCost });
+        await expect(
+          service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+        ).rejects.toMatchObject({ response: { code: 'MOUTH_GATE_UNDECIDED' } });
+        expect(mouthGate.inspectWithCost).toHaveBeenCalledTimes(1);
+        expect(kitRepo.update).toHaveBeenCalledWith(
+          { id: 'kit-r', status: McKitStatus.REVIEW },
+          { mouthGate: { identity: { ...garbled, identityAssetId: 'front-1' } } },
+        );
+
+        // o usuário aceita o risco: mesmo asset, veredito pago → nenhuma visão nem custo novo
+        mouthGate.inspectWithCost.mockClear();
+        manager.increment.mockClear();
+        kitRepo.findOneBy.mockResolvedValue({
+          ...reviewKit,
+          mouthGate: { identity: { ...garbled, identityAssetId: 'front-1' } },
+        });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3', acceptMouthRisk: true });
+        expect(mouthGate.inspectWithCost).not.toHaveBeenCalled();
+        expect(manager.increment).not.toHaveBeenCalled();
+
+        // visão que NÃO respondeu (error sem paid): re-inspeciona
+        transitions.casTransition.mockClear();
+        const { paid: _paid, ...unavailable } = { ...garbled, error: 'HTTP 503' };
+        kitRepo.findOneBy.mockResolvedValue({
+          ...reviewKit,
+          mouthGate: { identity: { ...unavailable, identityAssetId: 'front-1' } },
+        });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+        expect(mouthGate.inspectWithCost).toHaveBeenCalledTimes(1);
       });
 
       it('resultado incerto: sem acceptMouthRisk → 422 MOUTH_GATE_UNDECIDED; com ele aprova e registra o aceite', async () => {
@@ -1088,6 +1245,101 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         response: { code: 'TRANSLATION_UNAVAILABLE' },
       });
       expect(manager.update).not.toHaveBeenCalled();
+    });
+
+    it('traduzir ficha com a OpenAI: custo da chamada registrado no kit (2.6); sem crédito → UMA requisição e nenhuma linha de custo', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch');
+      try {
+        const keyed = {
+          get: jest.fn((key: string, def?: string) =>
+            key === 'OPENAI_API_KEY' ? 'sk-test' : key === 'UPLOAD_DEST' ? tmpDir : def,
+          ),
+        };
+        const real = new McKitsService(
+          dataSource as unknown as DataSource,
+          transitions as unknown as TaskTransitionService,
+          queue as unknown as AnimationQueueService,
+          mascots as unknown as MascotsService,
+          moderation as unknown as ModerationProvider,
+          commercials as unknown as CommercialsService,
+          voices as unknown as McVoicesService,
+          keyed as unknown as ConfigService,
+          clients as unknown as ClientsService,
+          view as unknown as McKitViewService,
+          candidates as unknown as McKitCandidatesService,
+          mouthGate as unknown as McMouthGateService,
+          tile as unknown as McKitTileService,
+          new McStorageService(keyed as unknown as ConfigService),
+        );
+        const legacy = {
+          ...reviewKit,
+          canonicalDesc: JSON.stringify({
+            traits: ['capybara character'],
+            colors: [],
+            style: '3D cartoon',
+            doNots: ['never change the species'],
+          }),
+        };
+        kitRepo.findOneBy.mockResolvedValue(legacy);
+        const respond = (status: number, body: unknown) =>
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          });
+        fetchSpy.mockResolvedValueOnce(
+          respond(200, {
+            id: 'c1',
+            object: 'chat.completion',
+            created: 0,
+            model: 'gpt-4o-mini-2024-07-18',
+            choices: [
+              {
+                index: 0,
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: JSON.stringify({
+                    traits: ['personagem capivara'],
+                    accessories: [],
+                    doNots: ['nunca mudar a espécie'],
+                    style: 'desenho 3D',
+                  }),
+                },
+              },
+            ],
+            usage: { prompt_tokens: 200, completion_tokens: 100, total_tokens: 300 },
+          }),
+        );
+        await real.translateSheet('u1', 'kit-r');
+        expect(commercials.appendEvent).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({
+            refId: 'kit-r',
+            kind: 'provider_cost',
+            // 200 × 0,15/1M + 100 × 0,6/1M
+            detail: expect.objectContaining({ call: 'sheet_translation', costUsd: 0.00009 }),
+          }),
+        );
+        expect(manager.increment).toHaveBeenCalledWith(
+          McCharacterKit,
+          { id: 'kit-r' },
+          'providerCostUsd',
+          0.00009,
+        );
+
+        commercials.appendEvent.mockClear();
+        fetchSpy.mockClear();
+        fetchSpy.mockResolvedValue(
+          respond(429, {
+            error: { message: 'quota', type: 'insufficient_quota', code: 'insufficient_quota' },
+          }),
+        );
+        await expect(real.translateSheet('u1', 'kit-r')).rejects.toMatchObject({ code: 'quota' });
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(commercials.appendEvent).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
     });
 
     it('ficha já traduzida não gasta chamada de tradução (idempotente)', async () => {

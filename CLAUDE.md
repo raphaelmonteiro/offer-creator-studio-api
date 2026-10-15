@@ -76,6 +76,9 @@ MC_FORMATS                    # formatos novos admitidos (talking_art, offer_car
 MC_TALK_ENGINE_ECONOMICO / _PREMIUM / _LOGO
                               # "modelo fal | US$/s | máx. s por chamada" — motor de fala por tier e origem
 GEMINI_IMAGE_MODEL_REFS       # modelo das referências do kit (default GEMINI_IMAGE_MODEL)
+MC_KIT_PRICES                 # tarifas do custo registrado do kit: "modelo|US$/imagem|US$/1M entrada|US$/1M saída",
+                              # vírgula entre modelos; vazio = tabela padrão (domain/mc-kit-costs.ts); substitui/acrescenta
+                              # por modelo; mal escrita derruba o boot
 MC_RENDER_BROWSER             # navegador do render Remotion (só offer_carousel); vazio = formato indisponível
 MC_RENDER_FONT_FILE           # dica só para o preflight (DejaVuSans.ttf fora dos caminhos usuais); o drawtext usa o fontconfig
 MC_CAROUSEL_RENDERER          # mock (default com pipeline mock) | remotion — renderizador do F2
@@ -530,6 +533,21 @@ Executor v2 (`pipelineVersion = 2`) para projetos novos com `MC_PIPELINE_V2=all`
 (`identityMode = logo_as_is`), gate de boca (visão; `MOUTH_NOT_LEGIBLE`, `MOUTH_GATE_UNDECIDED` +
 `acceptMouthRisk`) e tile com alfa (recorte do rosto ≥ 60%, 1:1–3:4, ≥ 720 px; rosto mais largo que 5:3 fica
 abaixo de 60% com `tile.faceBelowMinimum` e aviso, sem bloquear) usado pelos motores de fala.
+**Custo do kit** (tarefa 2.6): cada chamada paga (descrição canônica gpt-4o pelos tokens do `usage`, referências e
+candidatos pelo modelo efetivo, gate de boca, variante, traduções) vira evento `provider_cost` em `mc_events` e
+soma em `mc_character_kits.providerCostUsd` (numeric(12,6)); o asset gerado leva `providerCostUsd`/`usage` no
+metadata. `GET kits/:id` devolve `providerCostUsd` (número) e `providerCosts[]` (uma linha por chamada); a lista
+devolve só a soma. Tarifas em `MC_KIT_PRICES` (padrão: Nano Banana Pro US$ 0,134 e 2.1 US$ 0,034 por imagem,
+design.md). `GET admin/costs` segue só com os clipes dos projetos (kits fora). OpenAI sem crédito
+(`insufficient_quota`, `billing_hard_limit_reached`) é `TerminalProviderError('quota')` sem re-tentativa
+(`shared/providers/openai-errors.ts`, SDK com `maxRetries: 0`); 429 de taxa e 5xx seguem transitórios, respeitando o
+`retry-after` (teto de 60 s, `PROVIDER_RETRY_AFTER_MAX_S`). Chamada Gemini cobrada sem resultado (200 sem imagem/texto)
+vira linha de custo sem asset (`failure: 'no_output'`); o timeout de uma imagem do kit é terminal (`retryOnTimeout:
+false`, sem nova requisição paga) e vira linha estimada (`failure: 'timed_out'`, `estimated: true`). Veredito de boca
+pago e ilegível (`paid: true`) é reaproveitado no aceite de risco. Geração das referências idempotente por slot
+(`requestHash` no metadata, descrição reaproveitada pelo id do job; re-entrega no mesmo worker espera a execução em
+curso) e job com expiração de 1380 s (`mcKitReferencesExpireS`, pior caso com re-tentativas); rodada de candidatos
+1560 s.
 
 **Motor de fala** por tier (`economico | premium`) e origem: `MC_TALK_ENGINE_*` (Kling Avatar v2 std/pro,
 OmniHuman 1.5, MiniMax H3 Max Lip Sync para `logo_as_is`), sempre audio-driven com o TTS ElevenLabs; o clipe é

@@ -7,17 +7,27 @@ import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.servi
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import {
   GEMINI_IMAGE_MODEL,
+  geminiBilledFailure,
   GeminiImageProvider,
+  GeminiUsage,
 } from '../../../shared/providers/gemini-image.provider';
+import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import { KIT_TILE_BACKGROUND_DEFAULT } from '../domain/kit-prompts';
+import {
+  geminiUsage,
+  kitFailedCallCost,
+  kitProviderCost,
+  McKitProviderCost,
+} from '../domain/mc-kit-costs';
 import { decideMouthGate } from '../domain/mc-mouth-gate';
 import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McKitCandidate } from '../entities/mc-kit-candidate.entity';
 import { listStyleReferences } from '../services/mc-kit-candidates.service';
+import { costMetadata, recordKitProviderCost } from '../services/mc-kit-costs';
 import { McKitViewService } from '../services/mc-kit-view.service';
 import { McStorageService } from '../services/mc-storage.service';
 import { mockCharacterImage } from './mc-kit-mock-image';
@@ -46,15 +56,23 @@ const MOCK_CANDIDATE_COLORS = ['#4F86C6', '#6BAA75', '#C68C4F', '#A05FB5', '#D95
  * rodada e o job atrasado/duplicado vira no-op); as transições terminais
  * repetem a cerca na MESMA UPDATE do CAS. Execuções sobrepostas da mesma
  * rodada no mesmo worker (retry do pg-boss após expiração com a primeira
- * ainda rodando) são barradas por um claim em memória; entre processos, a
+ * ainda rodando) esperam a execução em curso (claim em memória com a
+ * promessa: o job conclui ou falha junto com ela); entre processos, a
  * gravação do asset na linha é um CAS (`assetId IS NULL`) e o perdedor
  * descarta a imagem — nunca dois assets para a mesma linha.
+ *
+ * CUSTO (tarefa 2.6): cada candidato/variante gerado de verdade grava o custo
+ * no metadata do asset e, na MESMA transação, um evento `provider_cost` e a
+ * soma em `mc_character_kits.providerCostUsd` — inclusive o asset descartado
+ * pelo CAS (a imagem foi paga). Resposta 200 sem imagem e timeout (terminal,
+ * `retryOnTimeout: false`: a requisição abortada pode ter sido cobrada) viram
+ * linha de custo sem asset (o timeout, estimado).
  */
 @Injectable()
 export class McKitCandidatesProcessor {
   private readonly logger = new Logger(McKitCandidatesProcessor.name);
-  /** Rodadas em execução neste processo (`kitId:roundId`). */
-  private readonly active = new Set<string>();
+  /** Execuções em curso neste processo (`kitId:roundId`). */
+  private readonly active = new Map<string, Promise<void>>();
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -68,16 +86,18 @@ export class McKitCandidatesProcessor {
 
   async process({ kitId, roundId }: { kitId: string; roundId: string }): Promise<void> {
     const claim = `${kitId}:${roundId}`;
-    if (this.active.has(claim)) {
-      this.logger.warn(`Kit ${kitId}: rodada ${roundId} já em execução neste worker — ignorada.`);
-      return;
+    const running = this.active.get(claim);
+    if (running) {
+      // a re-entrega espera a execução em curso: o job conclui (ou falha e
+      // volta a ser re-tentado) junto com o trabalho real, nunca antes dele
+      this.logger.warn(
+        `Kit ${kitId}: rodada ${roundId} já em execução neste worker — aguardando a execução em curso.`,
+      );
+      return running;
     }
-    this.active.add(claim);
-    try {
-      await this.run(kitId, roundId);
-    } finally {
-      this.active.delete(claim);
-    }
+    const execution = this.run(kitId, roundId).finally(() => this.active.delete(claim));
+    this.active.set(claim, execution);
+    return execution;
   }
 
   private async run(kitId: string, roundId: string): Promise<void> {
@@ -203,22 +223,33 @@ export class McKitCandidatesProcessor {
     styleRefs: Buffer[],
   ): Promise<string> {
     const background = kit.tileBackgroundColor ?? KIT_TILE_BACKGROUND_DEFAULT;
-    const generated =
-      this.provider() === 'mock'
-        ? {
-            image: await mockCharacterImage({
-              background: /^#/.test(background) ? background : KIT_TILE_BACKGROUND_DEFAULT,
-              color: MOCK_CANDIDATE_COLORS[row.idx % MOCK_CANDIDATE_COLORS.length],
-              label: `${row.kind} ${row.idx + 1} — mock`,
-            }),
-            model: 'mock',
-          }
-        : await this.gemini.generateImageWithModel({
-            prompt: row.prompt,
-            referenceImages: [source, ...styleRefs],
-            aspectRatio: '3:4',
-            model: GEMINI_IMAGE_MODEL,
-          });
+    const call = row.kind === 'mouth_variant' ? 'mouth_variant' : 'candidate';
+    const costContext = { roundId: row.roundId, candidateId: row.id, idx: row.idx };
+    let generated: { image: Buffer; model: string; usage?: GeminiUsage | null };
+    if (this.provider() === 'mock') {
+      generated = {
+        image: await mockCharacterImage({
+          background: /^#/.test(background) ? background : KIT_TILE_BACKGROUND_DEFAULT,
+          color: MOCK_CANDIDATE_COLORS[row.idx % MOCK_CANDIDATE_COLORS.length],
+          label: `${row.kind} ${row.idx + 1} — mock`,
+        }),
+        model: 'mock',
+        usage: null,
+      };
+    } else {
+      try {
+        generated = await this.gemini.generateImageWithModel({
+          prompt: row.prompt,
+          referenceImages: [source, ...styleRefs],
+          aspectRatio: '3:4',
+          model: GEMINI_IMAGE_MODEL,
+          retryOnTimeout: false,
+        });
+      } catch (err) {
+        await this.recordFailedCallCost(kit, call, err, costContext);
+        throw err;
+      }
+    }
     const inputHash = createHash('sha256')
       .update(
         JSON.stringify({
@@ -230,36 +261,96 @@ export class McKitCandidatesProcessor {
         }),
       )
       .digest('hex');
-    const url = await this.storage.saveFile(
-      `commercials/kits/${kit.id}`,
-      `candidate-${row.roundId.slice(0, 8)}-${row.idx}-${Date.now()}.png`,
-      generated.image,
-    );
-    const asset = await this.dataSource.getRepository(AnimationAsset).save({
-      userId: kit.userId,
-      kind: 'kit_candidate' as const,
-      status: 'ready' as const,
-      name: `${row.kind === 'mouth_variant' ? 'Variante com boca' : 'Candidato'} ${row.idx + 1} — ${kit.id.slice(0, 8)}`,
-      origin: 'ai_generated' as const,
-      fileUrl: url,
-      mimeType: 'image/png',
-      fileSize: String(generated.image.length),
-      contentHash: inputHash,
-      metadata: {
-        kitId: kit.id,
-        roundId: row.roundId,
-        candidateId: row.id,
-        idx: row.idx,
-        candidateKind: row.kind,
-        provider: this.provider(),
-        model: generated.model,
-        style: kit.style,
-        source: kit.source,
-        styleReferences: styleRefs.length,
-        prompt: row.prompt.slice(0, 1500),
-      },
+    const cost: McKitProviderCost | null =
+      this.provider() === 'mock'
+        ? null
+        : kitProviderCost({
+            call,
+            provider: 'gemini',
+            model: generated.model,
+            usage: geminiUsage(generated.usage, 1),
+          });
+    let url: string;
+    try {
+      url = await this.storage.saveFile(
+        `commercials/kits/${kit.id}`,
+        `candidate-${row.roundId.slice(0, 8)}-${row.idx}-${Date.now()}.png`,
+        generated.image,
+      );
+    } catch (err) {
+      // a imagem foi paga mesmo sem asset: o custo fica registrado
+      if (cost) {
+        await this.dataSource.transaction((manager) =>
+          recordKitProviderCost(manager, this.commercials, kit, cost, {
+            ...costContext,
+            assetId: null,
+          }),
+        );
+      }
+      throw err;
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const asset = await manager.save(AnimationAsset, {
+        userId: kit.userId,
+        kind: 'kit_candidate' as const,
+        status: 'ready' as const,
+        name: `${row.kind === 'mouth_variant' ? 'Variante com boca' : 'Candidato'} ${row.idx + 1} — ${kit.id.slice(0, 8)}`,
+        origin: 'ai_generated' as const,
+        fileUrl: url,
+        mimeType: 'image/png',
+        fileSize: String(generated.image.length),
+        contentHash: inputHash,
+        metadata: {
+          kitId: kit.id,
+          roundId: row.roundId,
+          candidateId: row.id,
+          idx: row.idx,
+          candidateKind: row.kind,
+          provider: this.provider(),
+          model: generated.model,
+          style: kit.style,
+          source: kit.source,
+          styleReferences: styleRefs.length,
+          prompt: row.prompt.slice(0, 1500),
+          ...costMetadata(cost),
+        },
+      });
+      if (cost) {
+        await recordKitProviderCost(manager, this.commercials, kit, cost, {
+          ...costContext,
+          assetId: asset.id,
+        });
+      }
+      return asset.id;
     });
-    return asset.id;
+  }
+
+  /**
+   * Chamada que falhou DEPOIS de cobrada (200 sem imagem, timeout): linha de
+   * custo sem asset antes de o erro seguir; falha no registro só loga.
+   */
+  private async recordFailedCallCost(
+    kit: McCharacterKit,
+    call: 'candidate' | 'mouth_variant',
+    err: unknown,
+    context: Record<string, unknown>,
+  ): Promise<void> {
+    const billing = geminiBilledFailure(err);
+    if (!billing) return;
+    const cost = kitFailedCallCost({ call, billing, expectedImages: 1 });
+    try {
+      await this.dataSource.transaction((manager) =>
+        recordKitProviderCost(manager, this.commercials, kit, cost, {
+          ...context,
+          assetId: null,
+          ...(err instanceof TerminalProviderError ? { providerErrorCode: err.code } : {}),
+        }),
+      );
+    } catch (recordErr) {
+      this.logger.error(
+        `Kit ${kit.id}: custo da chamada ${call} sem resultado não registrado: ${(recordErr as Error).message}`,
+      );
+    }
   }
 
   // ─────────────────────────────── insumos ───────────────────────────────

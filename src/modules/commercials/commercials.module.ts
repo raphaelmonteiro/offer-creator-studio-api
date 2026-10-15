@@ -10,6 +10,7 @@ import { MascotsModule } from '../mascots/mascots.module';
 import { CommercialsController } from './commercials.controller';
 import { CommercialsInsightsController } from './commercials-insights.controller';
 import { CommercialsService } from './commercials.service';
+import { mcModelPrices } from './domain/mc-kit-costs';
 import { MC_QUEUE_CONCURRENCY, mcTalkEngines, parseMcFormats } from './domain/mc-pipeline.config';
 import { McCharacterKit } from './entities/mc-character-kit.entity';
 import { McEvent } from './entities/mc-event.entity';
@@ -166,6 +167,8 @@ export class CommercialsModule implements OnModuleInit {
     // vale para API e worker — tarifa/limite errados nunca chegam à telemetria.
     parseMcFormats();
     mcTalkEngines();
+    // Tabela de tarifas do kit (MC_KIT_PRICES, tarefa 2.6): mal escrita derruba o boot.
+    mcModelPrices();
     if (process.env.WORKER_ONLY === 'true') {
       await this.queue.subscribe(
         QUEUES.MC_LLM,
@@ -174,19 +177,24 @@ export class CommercialsModule implements OnModuleInit {
       );
       // mc.image transporta TRÊS payloads: kit ({kitId, slot?}), rodada de
       // candidatos ({kitId, candidates: true, roundId}) e keyframe ({stepId})
-      // — o dispatcher separa pela forma (uma fila, um consumer).
+      // — o dispatcher separa pela forma (uma fila, um consumer). O kit recebe
+      // o id do job (estável nas re-entregas do pg-boss): chave da geração
+      // para não pagar a descrição canônica de novo (2.6).
       await this.queue.subscribe(
         QUEUES.MC_IMAGE,
         MC_QUEUE_CONCURRENCY[QUEUES.MC_IMAGE] ?? 4,
-        (d: {
-          kitId?: string;
-          slot?: number;
-          stepId?: string;
-          candidates?: boolean;
-          roundId?: string;
-          fromReview?: boolean;
-          previous?: McKitReferencesJob['previous'];
-        }) => {
+        (
+          d: {
+            kitId?: string;
+            slot?: number;
+            stepId?: string;
+            candidates?: boolean;
+            roundId?: string;
+            fromReview?: boolean;
+            previous?: McKitReferencesJob['previous'];
+          },
+          jobId: string,
+        ) => {
           if (!d.kitId) return this.keyframeProcessor.process({ stepId: d.stepId as string });
           if (d.candidates) {
             return this.kitCandidatesProcessor.process({
@@ -194,12 +202,15 @@ export class CommercialsModule implements OnModuleInit {
               roundId: d.roundId as string,
             });
           }
-          return this.kitProcessor.process({
-            kitId: d.kitId,
-            slot: d.slot,
-            fromReview: d.fromReview,
-            previous: d.previous,
-          });
+          return this.kitProcessor.process(
+            {
+              kitId: d.kitId,
+              slot: d.slot,
+              fromReview: d.fromReview,
+              previous: d.previous,
+            },
+            jobId,
+          );
         },
       );
       await this.queue.subscribe(

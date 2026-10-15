@@ -14,6 +14,7 @@ import * as path from 'path';
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { sniffImageMime } from '../../../shared/providers/gemini-image.provider';
+import { OPENAI_NO_SDK_RETRY, withOpenAiRetry } from '../../../shared/providers/openai-errors';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { MascotsService } from '../../mascots/mascots.service';
@@ -25,19 +26,27 @@ import {
   KIT_CANDIDATES_MAX,
   KIT_CANDIDATES_MIN,
 } from '../domain/kit-prompts';
+import { kitProviderCost, openAiUsage } from '../domain/mc-kit-costs';
 import { McKitIdentityMode, McKitStyle } from '../domain/mc-kit-identity';
 import { decideMouthGate, McKitMouthGate } from '../domain/mc-mouth-gate';
+import { mcKitCandidatesExpireS, mcKitReferencesExpireS } from '../domain/mc-pipeline.config';
 import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McKitCandidate, McKitCandidateKind } from '../entities/mc-kit-candidate.entity';
+import { recordKitProviderCost } from './mc-kit-costs';
 import { McKitTileService } from './mc-kit-tile.service';
 import { kitUseAsIsAvailable, McKitView, McKitViewService } from './mc-kit-view.service';
 import { McStorageService } from './mc-storage.service';
 
-/** Geração do kit (4 imagens + descrição) leva minutos, não 15 — expiração própria da fila mc.image. */
-export const MC_IMAGE_EXPIRE_S = 300;
-/** Uma rodada = 4 a 6 chamadas de imagem em sequência: expiração própria, acima da do kit. */
-export const MC_CANDIDATES_EXPIRE_S = 600;
+/**
+ * Expiração do job de referências do kit (descrição + 4 imagens) e da
+ * regeneração de uma célula, na fila mc.image: acima do pior caso das chamadas
+ * com re-tentativas (`mcKitReferencesExpireS`, 1380 s) — com 300 s o pg-boss re-entregava
+ * o job no meio da geração e as referências eram pagas de novo (2.6).
+ */
+export const MC_IMAGE_EXPIRE_S = mcKitReferencesExpireS();
+/** Uma rodada = 4 a 6 chamadas de imagem em sequência: 6 × pior caso + folga (`mcKitCandidatesExpireS`, 1560 s). */
+export const MC_CANDIDATES_EXPIRE_S = mcKitCandidatesExpireS();
 
 /** Payload do job de rodada na fila mc.image (despachado pelo módulo por `candidates: true`). */
 export interface McKitCandidatesJob {
@@ -237,7 +246,7 @@ export class McKitCandidatesService {
     if (kit.status !== McKitStatus.CANDIDATES) throw this.notInCandidates(kit);
     if (!kit.style) throw this.styleRequired();
     const text = adjustments?.trim() || null;
-    const adjustmentsEn = text ? await this.translateAdjustments(text) : null;
+    const adjustmentsEn = text ? await this.translateAdjustments(text, kit) : null;
 
     assertKitTransition(McKitStatus.CANDIDATES, McKitStatus.GENERATING);
     const job = await this.dataSource.transaction(async (manager) => {
@@ -546,28 +555,53 @@ export class McKitCandidatesService {
   /**
    * Ajuste do usuário chega em pt-BR e os motores de imagem leem inglês.
    * Tradução best-effort: sem chave (ou em modo mock, ou se a API falhar) o
-   * texto original segue como está — pior prompt, nunca erro na tela.
+   * texto original segue como está — pior prompt, nunca erro na tela. Sem
+   * retry do SDK (conta sem crédito cai no texto original na primeira
+   * resposta); com `kit`, o custo da chamada é registrado nele (2.6).
    */
-  async translateAdjustments(textPt: string): Promise<string> {
+  async translateAdjustments(
+    textPt: string,
+    kit?: Pick<McCharacterKit, 'id' | 'userId'>,
+  ): Promise<string> {
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
     if (!apiKey || (process.env.MC_KIT_PROVIDER ?? 'mock') === 'mock') return textPt;
     try {
       const openai = new OpenAI({ apiKey });
       const model = this.config.get<string>('OPENAI_FAST_TEXT_MODEL', 'gpt-4o-mini');
-      const response = await openai.chat.completions.create({
-        model,
-        max_tokens: 300,
-        messages: [
+      const response = await withOpenAiRetry(() =>
+        openai.chat.completions.create(
           {
-            role: 'system',
-            content:
-              'Translate the user instruction about a cartoon mascot from Brazilian ' +
-              'Portuguese to English. It will be appended to an image generation prompt. ' +
-              'Reply with the translation only, imperative and literal, no quotes.',
+            model,
+            max_tokens: 300,
+            messages: [
+              {
+                role: 'system',
+                content:
+                  'Translate the user instruction about a cartoon mascot from Brazilian ' +
+                  'Portuguese to English. It will be appended to an image generation prompt. ' +
+                  'Reply with the translation only, imperative and literal, no quotes.',
+              },
+              { role: 'user', content: textPt },
+            ],
           },
-          { role: 'user', content: textPt },
-        ],
-      });
+          OPENAI_NO_SDK_RETRY,
+        ),
+      );
+      if (kit) {
+        const cost = kitProviderCost({
+          call: 'adjustments_translation',
+          provider: 'openai',
+          model: response.model || model,
+          usage: openAiUsage(response.usage),
+        });
+        await this.dataSource
+          .transaction((manager) =>
+            recordKitProviderCost(manager, this.commercials, kit, cost, { requestedModel: model }),
+          )
+          .catch((err: unknown) =>
+            this.logger.warn(`Custo da tradução do ajuste não registrado: ${String(err)}`),
+          );
+      }
       const out = response.choices[0]?.message?.content?.trim();
       return out && out.length > 0 ? out.slice(0, 600) : textPt;
     } catch (err) {

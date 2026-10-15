@@ -203,6 +203,30 @@ export function computeKitReferenceHash(input: KitReferenceHashInput): string {
   });
 }
 
+/**
+ * Chave de IDEMPOTÊNCIA de uma referência (tarefa 2.6): a mesma requisição de
+ * `computeKitReferenceHash`, mas com o modelo PEDIDO (`GEMINI_IMAGE_MODEL_REFS`)
+ * no lugar do efetivo — o efetivo só se conhece depois de gerar (fallback do
+ * provider), e a chave precisa existir ANTES, para um job re-entregue achar a
+ * referência que já pagou e pular o slot. Gravada no metadata do asset
+ * (`requestHash`); o `contentHash` continua sendo o hash do modelo efetivo.
+ */
+export type KitReferenceRequestHashInput = Omit<KitReferenceHashInput, 'model'> & {
+  requestedModel: string;
+};
+
+export function computeKitReferenceRequestHash(input: KitReferenceRequestHashInput): string {
+  return computeInputHash('kit_reference_request', MC_KIT_REFERENCE_BUILDER_VERSION, {
+    slot: input.slot,
+    prompt: input.prompt,
+    sourceImageHash: input.sourceImageHash,
+    source: input.source,
+    style: input.style,
+    backgroundColor: input.backgroundColor,
+    requestedModel: input.requestedModel,
+  });
+}
+
 export interface TtsHashInputV2 {
   dialogue: string;
   voiceId: string | null;

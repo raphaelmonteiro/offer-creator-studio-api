@@ -2,7 +2,9 @@ import { ConfigService } from '@nestjs/config';
 import {
   GEMINI_IMAGE_FALLBACK_MODEL,
   GEMINI_IMAGE_MODEL,
+  geminiBilledFailure,
   GeminiImageProvider,
+  parseGeminiUsage,
   sniffImageMime,
 } from './gemini-image.provider';
 import { TerminalProviderError } from './provider-errors';
@@ -216,5 +218,176 @@ describe('GeminiImageProvider — cadeia de modelos (GEMINI_IMAGE_MODEL_REFS)', 
       provider.generateImageWithModel({ prompt: 'p', model: 'gemini-nano-banana-2.1' }),
     ).rejects.toMatchObject({ code: 'model_not_found' });
     expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  describe('uso de tokens da chamada (custo do kit, tarefa 2.6)', () => {
+    const usageMetadata = {
+      promptTokenCount: 1500,
+      candidatesTokenCount: 1140,
+      thoughtsTokenCount: 200,
+      totalTokenCount: 2840,
+      candidatesTokensDetails: [
+        { modality: 'IMAGE', tokenCount: 1120 },
+        { modality: 'TEXT', tokenCount: 20 },
+      ],
+    };
+
+    it('parseGeminiUsage lê usageMetadata (com e sem detalhe por modalidade); ausente → null', () => {
+      expect(parseGeminiUsage(usageMetadata)).toEqual({
+        promptTokens: 1500,
+        candidatesTokens: 1140,
+        thoughtsTokens: 200,
+        outputImageTokens: 1120,
+        totalTokens: 2840,
+      });
+      expect(parseGeminiUsage({ promptTokenCount: 10, candidatesTokenCount: 5 })).toEqual({
+        promptTokens: 10,
+        candidatesTokens: 5,
+        thoughtsTokens: 0,
+        outputImageTokens: null,
+        totalTokens: null,
+      });
+      expect(parseGeminiUsage(undefined)).toBeNull();
+    });
+
+    it('generateImageWithModel devolve o uso da chamada que deu certo', async () => {
+      const response = imageResponse();
+      const body = await response.json();
+      fetchSpy.mockResolvedValue(jsonResponse(200, { ...(body as object), usageMetadata }));
+      const result = await provider.generateImageWithModel({ prompt: 'p' });
+      expect(result.usage).toMatchObject({ promptTokens: 1500, outputImageTokens: 1120 });
+    });
+
+    it('describeImagesWithUsage devolve texto, modelo e uso; describeImages segue devolvendo só o texto', async () => {
+      fetchSpy.mockResolvedValue(
+        jsonResponse(200, {
+          candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+          usageMetadata: { promptTokenCount: 900, candidatesTokenCount: 30 },
+        }),
+      );
+      const result = await provider.describeImagesWithUsage({
+        prompt: 'p',
+        images: [Buffer.from('x')],
+      });
+      expect(result).toEqual({
+        text: '{"ok":true}',
+        model: 'gemini-3.8-flash',
+        usage: {
+          promptTokens: 900,
+          candidatesTokens: 30,
+          thoughtsTokens: 0,
+          outputImageTokens: null,
+          totalTokens: null,
+        },
+      });
+      await expect(
+        provider.describeImages({ prompt: 'p', images: [Buffer.from('x')] }),
+      ).resolves.toBe('{"ok":true}');
+    });
+
+    it('200 com finishReason IMAGE_SAFETY + usageMetadata: content_policy terminal com a cobrança anexada (modelo + uso)', async () => {
+      fetchSpy.mockResolvedValue(
+        jsonResponse(200, {
+          candidates: [{ finishReason: 'IMAGE_SAFETY', content: { parts: [] } }],
+          usageMetadata: {
+            promptTokenCount: 1800,
+            candidatesTokenCount: 0,
+            thoughtsTokenCount: 150,
+          },
+        }),
+      );
+      const err = await provider
+        .generateImageWithModel({ prompt: 'p', model: 'gemini-nano-banana-2.1' })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TerminalProviderError);
+      expect(err).toMatchObject({ code: 'content_policy' });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(geminiBilledFailure(err)).toEqual({
+        model: 'gemini-nano-banana-2.1',
+        usage: expect.objectContaining({ promptTokens: 1800, thoughtsTokens: 150 }),
+      });
+    });
+
+    it('200 sem imagem e sem finishReason de safety: no_image_returned com a cobrança anexada', async () => {
+      fetchSpy.mockResolvedValue(
+        jsonResponse(200, {
+          candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'sem imagem' }] } }],
+          usageMetadata: { promptTokenCount: 1000, candidatesTokenCount: 12 },
+        }),
+      );
+      const err = await provider.generateImageWithModel({ prompt: 'p' }).catch((e: unknown) => e);
+      expect(err).toMatchObject({ code: 'no_image_returned' });
+      expect(geminiBilledFailure(err)?.usage).toMatchObject({ promptTokens: 1000 });
+    });
+
+    it('visão 200 sem texto: invalid_provider_output com a cobrança anexada', async () => {
+      fetchSpy.mockResolvedValue(
+        jsonResponse(200, {
+          candidates: [{ content: { parts: [] } }],
+          usageMetadata: { promptTokenCount: 700, candidatesTokenCount: 0 },
+        }),
+      );
+      const err = await provider
+        .describeImagesWithUsage({ prompt: 'p', images: [Buffer.from('x')] })
+        .catch((e: unknown) => e);
+      expect(err).toMatchObject({ code: 'invalid_provider_output' });
+      expect(geminiBilledFailure(err)).toEqual({
+        model: 'gemini-3.8-flash',
+        usage: expect.objectContaining({ promptTokens: 700 }),
+      });
+    });
+
+    it('erro sem resposta cobrada (403, rede) não leva cobrança', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse(403, {}));
+      const err = await provider.generateImageWithModel({ prompt: 'p' }).catch((e: unknown) => e);
+      expect(err).toMatchObject({ code: 'quota' });
+      expect(geminiBilledFailure(err)).toBeNull();
+      expect(geminiBilledFailure(new Error('x'))).toBeNull();
+      expect(geminiBilledFailure(null)).toBeNull();
+    });
+  });
+
+  describe('timeout do cliente (2.6: a requisição abortada pode ter sido cobrada)', () => {
+    /** fetch que só termina quando o AbortController do provider aborta. */
+    const hangingFetch = (_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(new Error('This operation was aborted')),
+        );
+      });
+
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it('retryOnTimeout: false → provider_timeout terminal após UMA requisição, cobrança estimada anexada (timedOut)', async () => {
+      fetchSpy.mockImplementation(hangingFetch);
+      const pending = provider
+        .generateImageWithModel({
+          prompt: 'p',
+          model: 'gemini-nano-banana-2.1',
+          retryOnTimeout: false,
+        })
+        .catch((e: unknown) => e);
+      await jest.advanceTimersByTimeAsync(120_000);
+      const err = await pending;
+      expect(err).toBeInstanceOf(TerminalProviderError);
+      expect(err).toMatchObject({ code: 'provider_timeout' });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(geminiBilledFailure(err)).toEqual({
+        model: 'gemini-nano-banana-2.1',
+        usage: null,
+        timedOut: true,
+      });
+    });
+
+    it('sem a opção (legado: keyframes) o timeout segue transitório e re-tenta', async () => {
+      fetchSpy.mockImplementation(hangingFetch);
+      const pending = provider.generateImageWithModel({ prompt: 'p' }).catch((e: unknown) => e);
+      for (let i = 0; i < 10; i++) await jest.advanceTimersByTimeAsync(60_000);
+      const err = await pending;
+      expect(err).not.toBeInstanceOf(TerminalProviderError);
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(geminiBilledFailure(err)).toBeNull();
+    });
   });
 });

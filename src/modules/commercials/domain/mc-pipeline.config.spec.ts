@@ -1,9 +1,18 @@
 import { QUEUES } from '../../../shared/queue/animation-queue.service';
+import { GEMINI_IMAGE_REQUEST_TIMEOUT_MS } from '../../../shared/providers/gemini-image.provider';
+import {
+  PROVIDER_RETRY_AFTER_MAX_S,
+  PROVIDER_RETRY_ATTEMPTS,
+} from '../../../shared/providers/provider-errors';
 import {
   isAllowedFalVideoUrl,
+  KIT_CANONICAL_DESC_TIMEOUT_MS,
+  MC_KIT_JOB_EXPIRE_MARGIN_S,
   MC_QUEUE_CONCURRENCY,
   MC_QUEUE_EXPIRE_S,
   mcExpireForQueue,
+  mcKitCandidatesExpireS,
+  mcKitReferencesExpireS,
   mcPollBackoffS,
   mcQueueForStep,
 } from './mc-pipeline.config';
@@ -76,6 +85,27 @@ describe('mc-pipeline.config — filas, expiração e allowlist (plano §6.4/§6
       expect(isAllowedFalVideoUrl('not a url')).toBe(false);
       expect(isAllowedFalVideoUrl('file:///etc/passwd')).toBe(false);
       expect(isAllowedFalVideoUrl('ftp://fal.media/x.mp4')).toBe(false);
+    });
+  });
+
+  describe('expiração dos jobs do kit (tarefa 2.6)', () => {
+    it('referências: acima do pior caso com re-tentativas (descrição 3 × 60 s + 2 esperas de 60 s; 4 × (120 s + 2 × 60 s); folga) = 1380 s', () => {
+      expect(GEMINI_IMAGE_REQUEST_TIMEOUT_MS).toBe(120_000);
+      expect(KIT_CANONICAL_DESC_TIMEOUT_MS).toBe(60_000);
+      expect(PROVIDER_RETRY_ATTEMPTS).toBe(3);
+      expect(PROVIDER_RETRY_AFTER_MAX_S).toBe(60);
+      expect(mcKitReferencesExpireS()).toBe(1380);
+      // o cálculo antigo (cada chamada no timeout UMA vez) ignorava as re-tentativas
+      expect(mcKitReferencesExpireS()).toBeGreaterThan(
+        (3 * KIT_CANONICAL_DESC_TIMEOUT_MS + 4 * GEMINI_IMAGE_REQUEST_TIMEOUT_MS) / 1000,
+      );
+      // 1 slot, imagem 90 s, descrição 30 s: 3 × 30 + 2 × 60 + (90 + 2 × 60) = 420
+      expect(mcKitReferencesExpireS(1, 90_000, 30_000)).toBe(420 + MC_KIT_JOB_EXPIRE_MARGIN_S);
+    });
+
+    it('rodada de candidatos: 6 × (120 s + 2 × 60 s) + folga = 1560 s', () => {
+      expect(mcKitCandidatesExpireS()).toBe(1560);
+      expect(mcKitCandidatesExpireS(4, 100_000)).toBe(4 * 220 + MC_KIT_JOB_EXPIRE_MARGIN_S);
     });
   });
 });

@@ -2,6 +2,7 @@ import {
   computeAssemblyHash,
   computeKeyframeHashV2,
   computeKitReferenceHash,
+  computeKitReferenceRequestHash,
   computeSceneStepHashes,
   computeTalkHashV2,
   KeyframeHashInputV2,
@@ -145,6 +146,33 @@ describe('mc-step-hashes — estilo e cor de fundo (D1/D5)', () => {
     expect(computeKitReferenceHash({ ...input, prompt: 'other' })).not.toBe(h);
     expect(computeKitReferenceHash({ ...input, source: 'logo' })).not.toBe(h);
     expect(computeKitReferenceHash({ ...input, model: 'other' })).not.toBe(h);
+  });
+
+  it('chave de idempotência da referência (2.6): modelo PEDIDO no lugar do efetivo; mesmos invalidadores', () => {
+    const { model: _model, ...rest } = {
+      slot: 2,
+      prompt: 'Expression reference: front view',
+      sourceImageHash: 'a'.repeat(64),
+      source: 'mascot' as const,
+      style: 'cartoon_2d' as const,
+      backgroundColor: 'light gray',
+      model: 'nano-banana-pro-preview',
+    };
+    const input = { ...rest, requestedModel: 'gemini-nano-banana-2.1' };
+    const h = computeKitReferenceRequestHash(input);
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
+    expect(computeKitReferenceRequestHash({ ...input })).toBe(h);
+    // não colide com o hash do conteúdo, mesmo com o mesmo modelo
+    expect(h).not.toBe(computeKitReferenceHash({ ...rest, model: 'gemini-nano-banana-2.1' }));
+    expect(computeKitReferenceRequestHash({ ...input, requestedModel: 'x' })).not.toBe(h);
+    expect(computeKitReferenceRequestHash({ ...input, slot: 1 })).not.toBe(h);
+    expect(computeKitReferenceRequestHash({ ...input, prompt: 'other' })).not.toBe(h);
+    expect(computeKitReferenceRequestHash({ ...input, sourceImageHash: 'b'.repeat(64) })).not.toBe(
+      h,
+    );
+    expect(computeKitReferenceRequestHash({ ...input, style: null })).not.toBe(h);
+    expect(computeKitReferenceRequestHash({ ...input, backgroundColor: '#fff' })).not.toBe(h);
+    expect(computeKitReferenceRequestHash({ ...input, source: 'logo' })).not.toBe(h);
   });
 });
 

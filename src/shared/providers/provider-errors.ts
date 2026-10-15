@@ -27,9 +27,21 @@ export class TerminalProviderError extends Error {
   }
 }
 
+/** Tentativas padrão do `withRetry` (base do cálculo de expiração dos jobs do kit). */
+export const PROVIDER_RETRY_ATTEMPTS = 3;
+
+/**
+ * Teto da espera pedida pelo fornecedor (Retry-After) entre tentativas: um
+ * valor enorme (ou malformado) não segura o job além da expiração da fila.
+ */
+export const PROVIDER_RETRY_AFTER_MAX_S = 60;
+
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  { attempts = 3, baseDelayMs = 1000 }: { attempts?: number; baseDelayMs?: number } = {},
+  {
+    attempts = PROVIDER_RETRY_ATTEMPTS,
+    baseDelayMs = 1000,
+  }: { attempts?: number; baseDelayMs?: number } = {},
 ): Promise<T> {
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -38,9 +50,13 @@ export async function withRetry<T>(
     } catch (err) {
       lastError = err;
       if (!(err instanceof TransientProviderError)) throw err;
+      // sem espera depois da última tentativa: ninguém mais vai chamar
+      if (i === attempts - 1) break;
       const delay =
-        err.retryAfterSeconds != null
-          ? err.retryAfterSeconds * 1000
+        err.retryAfterSeconds != null &&
+        Number.isFinite(err.retryAfterSeconds) &&
+        err.retryAfterSeconds >= 0
+          ? Math.min(err.retryAfterSeconds, PROVIDER_RETRY_AFTER_MAX_S) * 1000
           : baseDelayMs * 2 ** i + Math.random() * 250;
       await new Promise((r) => setTimeout(r, delay));
     }
