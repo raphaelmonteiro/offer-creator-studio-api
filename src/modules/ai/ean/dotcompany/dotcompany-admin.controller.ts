@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Controller,
-  ForbiddenException,
   Get,
   Headers,
   HttpCode,
@@ -11,18 +10,23 @@ import {
   Post,
   Query,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../../../../common/decorators/public.decorator';
 import { SkipValidation } from '../../../../common/decorators/skip-validation.decorator';
-import { createFileInterceptor } from '../../../../common/utils/multer.util';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { assertAdminToken, DotcompanyAdminTokenGuard } from './dotcompany-admin-token.guard';
 import { DotcompanyBudgetService } from './dotcompany-budget.service';
 import { DotcompanyLookupService } from './dotcompany-lookup.service';
 import { IMPORT_ITEM_RESULTS, ImportItemResult } from './dotcompany.types';
 import { EanImportJobService } from './ean-import-job.service';
 import { EanImportRunner } from './ean-import.runner';
+
+/** Cadastro de cliente em CSV/XLSX: 20 MB sobra; o limite padrão de 50 MB não se justifica aqui. */
+export const IMPORT_FILE_MAX_BYTES = 20 * 1024 * 1024;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -52,10 +56,7 @@ export class DotcompanyAdminController {
   ) {}
 
   protected assertAdminToken(token: string | undefined): void {
-    const expected = this.config.get<string>('ADMIN_API_TOKEN');
-    if (!expected) throw new ForbiddenException('ADMIN_API_TOKEN não configurado no servidor.');
-    if (!token || token !== expected)
-      throw new ForbiddenException('Token administrativo inválido.');
+    assertAdminToken(this.config.get<string>('ADMIN_API_TOKEN'), token);
   }
 
   @Public()
@@ -112,7 +113,9 @@ export class DotcompanyAdminController {
   @Post('import-jobs')
   @HttpCode(HttpStatus.CREATED)
   @SkipValidation()
-  @UseInterceptors(createFileInterceptor('file'))
+  // O guard roda antes do interceptor: sem token válido o arquivo nem é lido.
+  @UseGuards(DotcompanyAdminTokenGuard)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: IMPORT_FILE_MAX_BYTES } }))
   @ApiOperation({
     summary:
       '[Admin] Sobe o cadastro do cliente (CSV/XLSX com EAN) e cria o job de importação (roda em 2º plano)',

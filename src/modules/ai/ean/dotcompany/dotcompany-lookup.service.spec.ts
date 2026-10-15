@@ -83,7 +83,7 @@ d('DotcompanyLookupService (Postgres real)', () => {
               retryAt: new Date('2026-10-10T12:15:00Z'),
               message: 'reserva',
             }
-          : { ok: true, reason: null, retryAt: null, message: null },
+          : { ok: true, reason: null, retryAt: null, message: null, reserved: 4 },
       ),
       release: jest.fn(async () => undefined),
       onNoCredit: jest.fn(async () => undefined),
@@ -166,5 +166,86 @@ d('DotcompanyLookupService (Postgres real)', () => {
     expect(client.lookupBatch).toHaveBeenCalledWith(['0036000291452'], expect.anything());
     expect(r.outcomes.get('036000291452')).toMatchObject({ status: 'found', ean: '0036000291452' });
     await ds.query(`DELETE FROM dotcompany_lookups WHERE ean = '0036000291452'`);
+  });
+
+  it('o mesmo EAN consultado em paralelo (encarte + job) paga uma vez só', async () => {
+    const e = eanTeste(900);
+    const { svc, client, budget } = criar(new Set([e]));
+    client.lookupBatch.mockImplementationOnce(async (gtins: string[]) => {
+      await new Promise((r) => setTimeout(r, 80));
+      return {
+        items: gtins.map((g) => ({
+          gtin: g,
+          encontrado: true,
+          produto: { gtin: g, nome: `PRODUTO ${g}`, imagem_url: null },
+        })),
+        creditsCharged: null,
+        rate: null,
+        requestId: 'r',
+        status: 200,
+      };
+    });
+    const [a, b] = await Promise.all([
+      svc.resolve([e], { kind: 'interactive' }),
+      svc.resolve([e], { kind: 'batch' }),
+    ]);
+    expect(client.lookupBatch).toHaveBeenCalledTimes(1);
+    expect(budget.acquire).toHaveBeenCalledTimes(1);
+    expect(a.outcomes.get(e)).toMatchObject({ status: 'found', cached: false });
+    expect(b.outcomes.get(e)).toMatchObject({ status: 'found', cached: true });
+    expect(a.credits + b.credits).toBe(4);
+  });
+
+  it('EAN em voo + EAN novo: o segundo chamador consulta só o que ninguém consultou', async () => {
+    const e1 = eanTeste(910);
+    const e2 = eanTeste(911);
+    const { svc, client } = criar(new Set([e1, e2]));
+    const original = client.lookupBatch.getMockImplementation()!;
+    client.lookupBatch.mockImplementationOnce(async (g: string[]) => {
+      await new Promise((r) => setTimeout(r, 60));
+      return original(g);
+    });
+    await Promise.all([
+      svc.resolve([e1], { kind: 'interactive' }),
+      svc.resolve([e1, e2], { kind: 'batch' }),
+    ]);
+    const pedidos = (client.lookupBatch.mock.calls as unknown as string[][][]).map((c) => c[0]);
+    expect(pedidos.flat().filter((x) => x === e1)).toHaveLength(1);
+    expect(pedidos.flat().filter((x) => x === e2)).toHaveLength(1);
+  });
+
+  it('consulta em voo que falhou: quem esperava tenta por conta própria', async () => {
+    const e = eanTeste(920);
+    const { svc, client } = criar(new Set([e]));
+    client.lookupBatch.mockImplementationOnce(async () => {
+      await new Promise((r) => setTimeout(r, 40));
+      throw new Error('rede');
+    });
+    const [a, b] = await Promise.all([
+      svc.resolve([e], { kind: 'interactive' }),
+      svc.resolve([e], { kind: 'batch' }),
+    ]);
+    // Quem chegou primeiro à frente da fila é o dono da consulta que falhou.
+    expect([a, b].map((r) => r.outcomes.get(e)?.status).sort()).toEqual(['error', 'found']);
+    expect(client.lookupBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('chamada interrompida (AbortError) registra o custo estimado por segurança', async () => {
+    const e = eanTeste(930);
+    const { svc, client, budget } = criar(new Set([e]));
+    const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    client.lookupBatch.mockRejectedValueOnce(abort);
+    const r = await svc.resolve([e], { kind: 'interactive' });
+    expect(r.outcomes.get(e)?.status).toBe('error');
+    expect(budget.release).toHaveBeenCalledWith(
+      expect.objectContaining({ credits: 4, errors: 1, reserved: 4 }),
+    );
+  });
+
+  it('o lote devolvido repassa a reserva ao release', async () => {
+    const e = eanTeste(940);
+    const { svc, budget } = criar(new Set([e]));
+    await svc.resolve([e], { kind: 'batch' });
+    expect(budget.release).toHaveBeenCalledWith(expect.objectContaining({ reserved: 4 }));
   });
 });

@@ -3,7 +3,9 @@ jest.mock('sharp', () => jest.fn());
 
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
-import { DotcompanyAdminController } from './dotcompany-admin.controller';
+import * as request from 'supertest';
+import { INestApplication } from '@nestjs/common';
+import { DotcompanyAdminController, IMPORT_FILE_MAX_BYTES } from './dotcompany-admin.controller';
 import { DotcompanyBudgetService } from './dotcompany-budget.service';
 import { DotcompanyLookupService } from './dotcompany-lookup.service';
 import { EanImportJobService } from './ean-import-job.service';
@@ -11,7 +13,11 @@ import { EanImportRunner } from './ean-import.runner';
 
 const JOB_ID = '0b5c7a3e-0000-4000-8000-000000000000';
 
-async function criar() {
+async function criar(): Promise<Awaited<ReturnType<typeof montar>>['pronto']> {
+  return (await montar()).pronto;
+}
+
+async function montar() {
   const relatorio = { state: 'ok', balance: { available: 2960, checkedAt: null } };
   const budget = {
     report: jest.fn().mockResolvedValue(relatorio),
@@ -47,7 +53,10 @@ async function criar() {
       { provide: DotcompanyLookupService, useValue: lookups },
     ],
   }).compile();
-  return { ctrl: mod.get(DotcompanyAdminController), budget, jobs, runner, lookups, relatorio };
+  return {
+    mod,
+    pronto: { ctrl: mod.get(DotcompanyAdminController), budget, jobs, runner, lookups, relatorio },
+  };
 }
 
 const arquivo = (conteudo = 'nome;ean\nA;7891000100103\n') =>
@@ -136,5 +145,63 @@ describe('DotcompanyAdminController — jobs de importação', () => {
     const r = await ctrl.lookup('tok', '7891000100103');
     expect(lookups.resolve).toHaveBeenCalledWith(['7891000100103'], { kind: 'interactive' });
     expect(r).toMatchObject({ status: 'found', cached: true, product: { nome: 'MOÇA' } });
+  });
+});
+
+describe('POST /ai/dotcompany/import-jobs — token antes do upload (HTTP)', () => {
+  let app: INestApplication;
+  let jobs: Awaited<ReturnType<typeof criar>>['jobs'];
+
+  beforeAll(async () => {
+    const { mod, pronto } = await montar();
+    jobs = pronto.jobs;
+    app = mod.createNestApplication();
+    await app.init();
+  });
+  afterAll(async () => app.close());
+  beforeEach(() => jobs.criarJobDeArquivo.mockClear());
+
+  const csv = () => Buffer.from('nome;ean\nA;7891000100103\n');
+  const grande = () => Buffer.alloc(IMPORT_FILE_MAX_BYTES + 1024, 65);
+
+  it('sem token → 403 e o arquivo não é processado', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/ai/dotcompany/import-jobs')
+      .attach('file', csv(), 'arcos.csv');
+    expect(res.status).toBe(403);
+    expect(jobs.criarJobDeArquivo).not.toHaveBeenCalled();
+  });
+
+  it('sem token e arquivo acima do limite → 403 (o guard roda antes do multer; senão seria 413)', async () => {
+    // O servidor responde 403 sem ler o corpo; conforme o timing, o cliente vê a
+    // resposta ou o reset da conexão. O que não pode acontecer é o 413 do multer.
+    const res = await request(app.getHttpServer())
+      .post('/ai/dotcompany/import-jobs')
+      .attach('file', grande(), 'enorme.csv')
+      .then(
+        (r) => ({ status: r.status as number | undefined, code: undefined as string | undefined }),
+        (e: { status?: number; code?: string }) => ({ status: e.status, code: e.code }),
+      );
+    if (res.status !== undefined) expect(res.status).toBe(403);
+    else expect(res.code).toMatch(/ECONNRESET|EPIPE/);
+    expect(jobs.criarJobDeArquivo).not.toHaveBeenCalled();
+  });
+
+  it('token válido e arquivo acima de 20 MB → 413', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/ai/dotcompany/import-jobs')
+      .set('x-admin-token', 'tok')
+      .attach('file', grande(), 'enorme.csv');
+    expect(res.status).toBe(413);
+    expect(jobs.criarJobDeArquivo).not.toHaveBeenCalled();
+  });
+
+  it('token válido e CSV pequeno → 201 e job criado', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/ai/dotcompany/import-jobs')
+      .set('x-admin-token', 'tok')
+      .attach('file', csv(), 'arcos.csv');
+    expect(res.status).toBe(201);
+    expect(jobs.criarJobDeArquivo).toHaveBeenCalledTimes(1);
   });
 });

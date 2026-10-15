@@ -188,4 +188,56 @@ d('DotcompanyBudgetService (Postgres real)', () => {
     expect(r.state).toBe('ok');
     expect(r.limits.rpm).toBe(30);
   });
+
+  it('acquire simultâneos não passam do RPM (31 chamadas ao mesmo tempo → 30 ok)', async () => {
+    const { svc } = criar({ DOTCOMPANY_MAX_REQUESTS_HOUR: '1000' });
+    const rs = await Promise.all(
+      Array.from({ length: 31 }, () => svc.acquire({ kind: 'batch', estimatedCredits: 0 })),
+    );
+    expect(rs.filter((r) => r.ok)).toHaveLength(30);
+    expect(rs.filter((r) => !r.ok && r.reason === 'rate_window')).toHaveLength(1);
+  });
+
+  it('acquire simultâneos não passam do limite de créditos por hora (reserva em memória)', async () => {
+    const { svc } = criar({ DOTCOMPANY_MAX_CREDITS_HOUR: '400' });
+    const rs = await Promise.all(
+      Array.from({ length: 6 }, () => svc.acquire({ kind: 'interactive', estimatedCredits: 100 })),
+    );
+    expect(rs.filter((r) => r.ok)).toHaveLength(4);
+    expect(rs.filter((r) => !r.ok).every((r) => r.reason === 'hour_limit')).toBe(true);
+  });
+
+  it('acquire simultâneos não passam do limite de requisições por hora', async () => {
+    const { svc } = criar({ DOTCOMPANY_MAX_REQUESTS_HOUR: '5' });
+    const rs = await Promise.all(
+      Array.from({ length: 12 }, () => svc.acquire({ kind: 'interactive', estimatedCredits: 4 })),
+    );
+    expect(rs.filter((r) => r.ok)).toHaveLength(5);
+  });
+
+  it('release devolve a reserva: depois dele só vale o consumo gravado', async () => {
+    const { svc } = criar({ DOTCOMPANY_MAX_CREDITS_HOUR: '400' });
+    const a = await svc.acquire({ kind: 'interactive', estimatedCredits: 400 });
+    expect(a).toMatchObject({ ok: true, reserved: 400 });
+    expect((await svc.acquire({ kind: 'interactive', estimatedCredits: 4 })).ok).toBe(false);
+    // O lote achou só 10 itens (40 créditos): a reserva de 400 some e fica o gasto real.
+    await svc.release({ kind: 'interactive', credits: 40, reserved: a.reserved });
+    expect((await svc.acquire({ kind: 'interactive', estimatedCredits: 300 })).ok).toBe(true);
+  });
+
+  it('peek não ocupa vaga nem apaga as vagas ocupadas por acquire concorrentes', async () => {
+    const { svc } = criar({ DOTCOMPANY_MAX_REQUESTS_HOUR: '1000' });
+    const [, , , peeked] = await Promise.all([
+      svc.acquire({ kind: 'batch', estimatedCredits: 0 }),
+      svc.acquire({ kind: 'batch', estimatedCredits: 0 }),
+      svc.acquire({ kind: 'batch', estimatedCredits: 0 }),
+      svc.peek({ kind: 'batch', estimatedCredits: 0 }),
+    ]);
+    expect(peeked.ok).toBe(true);
+    // 3 vagas continuam ocupadas e o peek não ocupou nenhuma: restam 27.
+    const rs = await Promise.all(
+      Array.from({ length: 28 }, () => svc.acquire({ kind: 'batch', estimatedCredits: 0 })),
+    );
+    expect(rs.filter((r) => r.ok)).toHaveLength(27);
+  });
 });

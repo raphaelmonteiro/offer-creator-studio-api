@@ -14,6 +14,28 @@ export const DOTCOMPANY_GALLERY_FOLDER = 'DotCompany';
 
 const DOWNLOAD_TIMEOUT_MS = 20_000;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_REDIRECTS = 3;
+/** Teto de pixels decodificados pelo sharp (proteção contra imagem-bomba). */
+export const MAX_INPUT_PIXELS = 40_000_000;
+/** Hosts de onde a foto pode vir: DotCompany e o Backblaze para onde ela redireciona. */
+const ALLOWED_HOSTS = ['app.dotcompany.com.br', 'erp.dotcompany.com.br'];
+const ALLOWED_HOST_SUFFIXES = ['.backblazeb2.com'];
+
+/** A `imagem_url` é dado de terceiro: só https e só hosts conhecidos (evita SSRF). */
+export function isAllowedImageUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password) return false;
+  if (url.port && url.port !== '443') return false;
+  const host = url.hostname.toLowerCase();
+  return (
+    ALLOWED_HOSTS.includes(host) || ALLOWED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))
+  );
+}
 
 export type PhotoImportStatus = 'imported' | 'already_exists' | 'no_image' | 'error';
 
@@ -41,6 +63,7 @@ export class DotcompanyPhotoImporter {
   private readonly logger = new Logger(DotcompanyPhotoImporter.name);
   /** Injetável para testes. */
   fetchImpl: typeof fetch = (input, init) => fetch(input, init);
+  private readonly importing = new Map<string, Promise<PhotoImportResult>>();
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -52,13 +75,14 @@ export class DotcompanyPhotoImporter {
 
   /**
    * Importa as fotos de vários EANs já encontrados (concorrência limitada).
-   * `clientIds` marca as fotos (novas ou já existentes) como preferidas.
+   * A foto DotCompany NÃO vira preferida de cliente: a preferência é só do que o
+   * cliente escolhe. O prazo de quem chamou não cancela download nem importação:
+   * `signal` só impede começar novos itens.
    */
   async importMany(
     items: Array<{ ean: string; lookup: DotcompanyLookup }>,
     options: {
       kind: ConsumerKind;
-      clientIds?: string[];
       concurrency?: number;
       signal?: AbortSignal;
     },
@@ -70,8 +94,6 @@ export class DotcompanyPhotoImporter {
     for (const item of items) {
       const existing = await this.existingImageId(item.lookup);
       if (existing) {
-        if (options.clientIds?.length)
-          await this.gallery.ensureClientPreferred(existing, options.clientIds);
         results.set(item.ean, {
           ean: item.ean,
           status: 'already_exists',
@@ -135,11 +157,27 @@ export class DotcompanyPhotoImporter {
     return results;
   }
 
-  private async importOne(
+  /** Um EAN importado por vez neste processo: encarte e job não baixam a mesma foto em paralelo. */
+  private importOne(
     ean: string,
     lookup: DotcompanyLookup,
     metadata: Record<string, unknown> & { ean?: string | null },
-    options: { kind: ConsumerKind; clientIds?: string[]; signal?: AbortSignal },
+    options: { kind: ConsumerKind; signal?: AbortSignal },
+  ): Promise<PhotoImportResult> {
+    const running = this.importing.get(ean);
+    if (running) return running;
+    const promise = this.importNow(ean, lookup, metadata, options).finally(() =>
+      this.importing.delete(ean),
+    );
+    this.importing.set(ean, promise);
+    return promise;
+  }
+
+  private async importNow(
+    ean: string,
+    lookup: DotcompanyLookup,
+    metadata: Record<string, unknown> & { ean?: string | null },
+    options: { kind: ConsumerKind; signal?: AbortSignal },
   ): Promise<PhotoImportResult> {
     let url = lookup.raw?.produto?.imagem_url ?? null;
     try {
@@ -166,7 +204,10 @@ export class DotcompanyPhotoImporter {
         buffer = await this.download(url, options.signal);
       }
 
-      const png = await sharp(buffer).flatten({ background: '#ffffff' }).png().toBuffer();
+      const png = await sharp(buffer, { limitInputPixels: MAX_INPUT_PIXELS })
+        .flatten({ background: '#ffffff' })
+        .png()
+        .toBuffer();
       const filename = `dotcompany-${ean}.png`;
       const uploaded = await this.uploads.uploadFile(
         {
@@ -187,7 +228,6 @@ export class DotcompanyPhotoImporter {
         size: png.length,
         metadata,
         folderName: DOTCOMPANY_GALLERY_FOLDER,
-        clientIds: options.clientIds,
       });
       if (!created) {
         // Outro processo importou o mesmo EAN no meio do caminho: descarta o arquivo duplicado.
@@ -236,24 +276,83 @@ export class DotcompanyPhotoImporter {
     if (outer?.aborted) onAbort();
     else outer?.addEventListener('abort', onAbort, { once: true });
     try {
-      const res = await this.fetchImpl(url, { signal: ctrl.signal, redirect: 'follow' });
+      const res = await this.fetchFollowingAllowedRedirects(url, ctrl.signal);
       if ([401, 403, 404, 410].includes(res.status)) {
+        await res.body?.cancel().catch(() => undefined);
         throw new ExpiredImageUrlError(`download da foto → ${res.status}`);
       }
-      if (!res.ok) throw new Error(`download da foto → ${res.status}`);
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => undefined);
+        throw new Error(`download da foto → ${res.status}`);
+      }
       const type = (res.headers.get('content-type') ?? '').toLowerCase();
-      if (!type.startsWith('image/'))
+      if (!type.startsWith('image/')) {
+        await res.body?.cancel().catch(() => undefined);
         throw new Error(`conteúdo não é imagem (${type || 'sem content-type'})`);
+      }
       const declared = Number(res.headers.get('content-length') ?? 0);
-      if (declared > MAX_IMAGE_BYTES) throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
-      const buffer = Buffer.from(await res.arrayBuffer());
-      if (buffer.length > MAX_IMAGE_BYTES)
+      if (declared > MAX_IMAGE_BYTES) {
+        await res.body?.cancel().catch(() => undefined);
         throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
+      }
+      const buffer = await this.readLimited(res);
       if (buffer.length === 0) throw new Error('imagem vazia');
       return buffer;
     } finally {
       clearTimeout(timer);
       outer?.removeEventListener('abort', onAbort);
     }
+  }
+
+  /** Segue redirects à mão (máx. 3), validando esquema e host a cada salto. */
+  private async fetchFollowingAllowedRedirects(
+    startUrl: string,
+    signal: AbortSignal,
+  ): Promise<Response> {
+    let url = startUrl;
+    for (let hop = 0; ; hop++) {
+      if (!isAllowedImageUrl(url)) {
+        throw new Error(`URL da foto fora da lista permitida (${safeHost(url)})`);
+      }
+      const res = await this.fetchImpl(url, { signal, redirect: 'manual' });
+      if (![301, 302, 303, 307, 308].includes(res.status)) return res;
+      await res.body?.cancel().catch(() => undefined);
+      const location = res.headers.get('location');
+      if (!location) throw new Error(`redirect sem Location (${res.status})`);
+      if (hop >= MAX_REDIRECTS) throw new Error(`redirects demais (mais de ${MAX_REDIRECTS})`);
+      url = new URL(location, url).toString();
+    }
+  }
+
+  /** Lê o corpo por stream e aborta ao passar de 5 MB, sem carregar o excedente. */
+  private async readLimited(res: Response): Promise<Buffer> {
+    const reader = res.body?.getReader();
+    if (!reader) {
+      const all = Buffer.from(await res.arrayBuffer());
+      if (all.length > MAX_IMAGE_BYTES)
+        throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
+      return all;
+    }
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_IMAGE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, total);
+  }
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return 'URL inválida';
   }
 }

@@ -53,9 +53,17 @@ export interface AcquireResult {
   reason: BudgetDenyReason | null;
   retryAt: Date | null;
   message: string | null;
+  /** Créditos reservados nos totais até o `release` (devolva-os em `release({ reserved })`). */
+  reserved?: number;
 }
 
-const ALLOWED: AcquireResult = { ok: true, reason: null, retryAt: null, message: null };
+const ALLOWED: AcquireResult = {
+  ok: true,
+  reason: null,
+  retryAt: null,
+  message: null,
+  reserved: 0,
+};
 
 export interface ReleaseInput {
   kind: ConsumerKind;
@@ -66,6 +74,8 @@ export interface ReleaseInput {
   notFound?: number;
   errors?: number;
   rate?: RateInfo | null;
+  /** `reserved` devolvido pelo `acquire` desta chamada: libera a reserva em memória. */
+  reserved?: number;
 }
 
 export interface UsageTotals {
@@ -108,6 +118,11 @@ export class DotcompanyBudgetService {
   private blockedUntil = 0;
   private balance: { available: number | null; checkedAt: Date | null } | null = null;
   private refreshing: Promise<void> | null = null;
+  /** Fila das decisões de `acquire`/`peek` (uma de cada vez). */
+  private gate: Promise<void> = Promise.resolve();
+  /** Autorizado e ainda sem `release`: conta nos limites de hora/dia e no saldo. */
+  private reservedRequests = 0;
+  private reservedCredits = 0;
 
   constructor(
     configService: ConfigService,
@@ -132,9 +147,35 @@ export class DotcompanyBudgetService {
 
   /**
    * Pede autorização para UMA chamada. `estimatedCredits` é o pior caso (ex.:
-   * 4 × itens do lote). Quando autoriza, já ocupa a vaga na janela do minuto.
+   * 4 × itens do lote). Quando autoriza, já ocupa a vaga na janela do minuto e
+   * reserva requisição e créditos nos totais de hora/dia até o `release`
+   * correspondente (`reserved`). As decisões são serializadas: chamadas
+   * simultâneas nunca passam todas pela mesma vaga.
    */
   async acquire(input: { kind: ConsumerKind; estimatedCredits: number }): Promise<AcquireResult> {
+    if (this.client.isConfigured()) await this.ensureFreshBalance();
+    return this.exclusive(() => this.evaluate(input, true));
+  }
+
+  /** Executa `fn` depois de todas as decisões anteriores terminarem. */
+  private async exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.gate;
+    let done!: () => void;
+    this.gate = new Promise<void>((resolve) => {
+      done = resolve;
+    });
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      done();
+    }
+  }
+
+  private async evaluate(
+    input: { kind: ConsumerKind; estimatedCredits: number },
+    reserve: boolean,
+  ): Promise<AcquireResult> {
     const now = this.now();
     const t = now.getTime();
 
@@ -173,29 +214,30 @@ export class DotcompanyBudgetService {
     ]);
     const nextHour = new Date(spHourStart(now).getTime() + HOUR_MS);
     const nextDay = new Date(spDayStart(now).getTime() + DAY_MS);
+    // O que já foi autorizado e ainda não teve release também conta.
+    const held = { requests: this.reservedRequests, credits: this.reservedCredits };
 
     if (
-      day.requests + 1 > this.limits.maxRequestsDay ||
-      day.credits + est > this.limits.maxCreditsDay
+      day.requests + held.requests + 1 > this.limits.maxRequestsDay ||
+      day.credits + held.credits + est > this.limits.maxCreditsDay
     ) {
       void this.alertDayLimit(now, day);
       return this.deny('day_limit', nextDay, 'Limite diário de consumo DotCompany atingido.');
     }
     if (
-      hour.requests + 1 > this.limits.maxRequestsHour ||
-      hour.credits + est > this.limits.maxCreditsHour
+      hour.requests + held.requests + 1 > this.limits.maxRequestsHour ||
+      hour.credits + held.credits + est > this.limits.maxCreditsHour
     ) {
       return this.deny('hour_limit', nextHour, 'Limite por hora de consumo DotCompany atingido.');
     }
 
-    await this.ensureFreshBalance();
     const available = this.balance?.available ?? null;
     const nextCheck = new Date(t + this.limits.balanceRefreshMs);
     if (available !== null) {
       if (available <= 0) {
         return this.deny('no_credit', nextCheck, 'Sem crédito na DotCompany.');
       }
-      if (input.kind === 'batch' && available - est < this.limits.reserveCredits) {
+      if (input.kind === 'batch' && available - held.credits - est < this.limits.reserveCredits) {
         return this.deny(
           'reserve',
           nextCheck,
@@ -204,12 +246,28 @@ export class DotcompanyBudgetService {
       }
     }
 
-    this.windowCount += 1;
-    return { ...ALLOWED };
+    if (reserve) {
+      this.windowCount += 1;
+      this.reservedRequests += 1;
+      this.reservedCredits += est;
+    }
+    return { ...ALLOWED, reserved: reserve ? est : 0 };
   }
 
   /** Registra o resultado de uma chamada autorizada (sucesso ou erro). */
   async release(input: ReleaseInput): Promise<void> {
+    try {
+      await this.recordUsage(input);
+    } finally {
+      // Só depois de gravar o consumo: a reserva em memória cede lugar ao contador do banco.
+      if (input.reserved !== undefined) {
+        this.reservedRequests = Math.max(0, this.reservedRequests - 1);
+        this.reservedCredits = Math.max(0, this.reservedCredits - input.reserved);
+      }
+    }
+  }
+
+  private async recordUsage(input: ReleaseInput): Promise<void> {
     const now = this.now();
     const requests = input.requests ?? 1;
     const credits = Math.max(0, Math.round(input.credits ?? 0));
@@ -337,13 +395,10 @@ export class DotcompanyBudgetService {
     };
   }
 
-  /** Mesmo julgamento de `acquire`, sem ocupar vaga na janela. */
+  /** Mesmo julgamento de `acquire`, sem ocupar vaga nem reservar nada. */
   async peek(input: { kind: ConsumerKind; estimatedCredits: number }): Promise<AcquireResult> {
-    const saved = { start: this.windowStart, count: this.windowCount };
-    const r = await this.acquire(input);
-    this.windowStart = saved.start;
-    this.windowCount = saved.count;
-    return r;
+    if (this.client.isConfigured()) await this.ensureFreshBalance();
+    return this.exclusive(() => this.evaluate(input, false));
   }
 
   private deny(reason: BudgetDenyReason, retryAt: Date | null, message: string): AcquireResult {

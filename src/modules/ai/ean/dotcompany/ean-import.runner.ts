@@ -208,7 +208,7 @@ export class EanImportRunner implements OnModuleInit, OnModuleDestroy {
       if (encontrados.length) {
         const fotos = await this.photos.importMany(
           encontrados.map((e) => ({ ean: e.ean, lookup: e.outcome.lookup! })),
-          { kind, clientIds: job.clientId ? [job.clientId] : [], concurrency: 4 },
+          { kind, concurrency: 4 },
         );
         const importados: string[] = [];
         for (const e of encontrados) {

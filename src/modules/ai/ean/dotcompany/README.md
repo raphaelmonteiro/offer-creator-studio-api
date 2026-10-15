@@ -78,7 +78,7 @@ curl -s -H "$H" -F "file=@arcos.csv" "$B/import-jobs?clientId=<uuid-do-cliente>&
 ```
 
 - `costCapCredits` é o teto do job (padrão `EAN_IMPORT_DEFAULT_CAP_CREDITS`; 0 = sem teto próprio).
-- Com `clientId`, as fotos do cadastro viram **preferidas** daquele cliente.
+- O `clientId` fica só no relatório do job: as fotos DotCompany **não** viram preferidas do cliente (a preferência é só o que o cliente escolhe).
 - Enviar o **mesmo arquivo** de novo devolve o job existente (`created: false`).
 
 Acompanhar:

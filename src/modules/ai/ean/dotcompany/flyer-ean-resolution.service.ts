@@ -240,16 +240,87 @@ export class FlyerEanResolutionService {
       return { images, status, pending };
     }
 
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(new Error('prazo da busca por EAN')), this.timeoutMs);
-    const toBackground: typeof items = [];
+    // O prazo só faz o encarte parar de ESPERAR: a consulta paga e a importação da
+    // foto seguem até o fim em segundo plano (cache e consumo gravados; nada de
+    // cobrança em dobro). Quem estourou o prazo vira job `flyer`, que lê o cache.
+    const work = this.lookupAndImport(missing, clientId);
+    const result = await this.withDeadline(work);
+    let toBackground: typeof items;
+    if (result) {
+      for (const [id, entry] of result.status) status.set(id, entry);
+      for (const [id, rows] of result.images) images.set(id, rows);
+      toBackground = result.toBackground;
+    } else {
+      this.logger.warn(
+        `Prazo da busca por EAN (${this.timeoutMs} ms) esgotado: ${missing.length} produto(s) seguem em segundo plano.`,
+      );
+      toBackground = missing;
+    }
+
+    if (toBackground.length) {
+      const unique = [...new Map(toBackground.map((t) => [t.product.id, t])).values()];
+      try {
+        await this.jobs.criarJobDoEncarte(
+          unique.map((t) => ({ ean: t.ean, description: t.product.name })),
+          clientId,
+        );
+        this.runner.wake();
+        for (const t of unique) {
+          pending.push(t.product.id);
+          status.set(t.product.id, { productId: t.product.id, ean: t.ean, status: 'pending' });
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Não consegui agendar os EANs pendentes do encarte: ${(err as Error).message}`,
+        );
+        for (const t of unique) {
+          status.set(t.product.id, {
+            productId: t.product.id,
+            ean: t.ean,
+            status: 'not_found',
+            reason: 'falha ao agendar',
+          });
+        }
+      }
+    }
+
+    return { images, status, pending };
+  }
+
+  /** Resolve com `null` se `work` não terminar no prazo (sem cancelar `work`). */
+  private async withDeadline<T>(work: Promise<T>): Promise<T | null> {
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), this.timeoutMs);
+    });
+    try {
+      return await Promise.race([work, deadline]);
+    } finally {
+      clearTimeout(timer);
+      // Se perdeu a corrida, o resultado tardio só precisa não virar rejeição solta.
+      work.catch(() => undefined);
+    }
+  }
+
+  /** Consulta a DotCompany e importa as fotos dos faltantes; nunca lança. */
+  private async lookupAndImport(
+    missing: Array<{ product: ProductMatchInputV2; ean: string }>,
+    clientId: string | null,
+  ): Promise<{
+    images: Map<string, GalleryEanRow[]>;
+    status: Map<string, EanStatusEntry>;
+    toBackground: typeof missing;
+  }> {
+    const images = new Map<string, GalleryEanRow[]>();
+    const status = new Map<string, EanStatusEntry>();
+    const toBackground: typeof missing = [];
     try {
       const summary = await this.lookups.resolve(
         missing.map((m) => m.ean),
-        { kind: 'interactive', signal: ctrl.signal },
+        { kind: 'interactive' },
       );
       const found: Array<{
-        item: (typeof items)[number];
+        item: (typeof missing)[number];
         lookup: NonNullable<ReturnType<typeof summary.outcomes.get>>['lookup'];
       }> = [];
       for (const item of missing) {
@@ -276,14 +347,9 @@ export class FlyerEanResolutionService {
       if (found.length) {
         const imported = await this.photos.importMany(
           found.map((f) => ({ ean: f.item.ean, lookup: f.lookup! })),
-          {
-            kind: 'interactive',
-            clientIds: clientId ? [clientId] : [],
-            concurrency: 6,
-            signal: ctrl.signal,
-          },
+          { kind: 'interactive', concurrency: 6 },
         );
-        const ok: typeof items = [];
+        const ok: typeof missing = [];
         for (const f of found) {
           const r = imported.get(f.item.ean);
           if (r?.status === 'imported' || r?.status === 'already_exists') ok.push(f.item);
@@ -315,38 +381,8 @@ export class FlyerEanResolutionService {
     } catch (err) {
       this.logger.warn(`Resolução por EAN do encarte falhou: ${(err as Error).message}`);
       for (const m of missing) if (!status.has(m.product.id)) toBackground.push(m);
-    } finally {
-      clearTimeout(timer);
     }
-
-    if (toBackground.length) {
-      const unique = [...new Map(toBackground.map((t) => [t.product.id, t])).values()];
-      try {
-        await this.jobs.criarJobDoEncarte(
-          unique.map((t) => ({ ean: t.ean, description: t.product.name })),
-          clientId,
-        );
-        this.runner.wake();
-        for (const t of unique) {
-          pending.push(t.product.id);
-          status.set(t.product.id, { productId: t.product.id, ean: t.ean, status: 'pending' });
-        }
-      } catch (err) {
-        this.logger.warn(
-          `Não consegui agendar os EANs pendentes do encarte: ${(err as Error).message}`,
-        );
-        for (const t of unique) {
-          status.set(t.product.id, {
-            productId: t.product.id,
-            ean: t.ean,
-            status: 'not_found',
-            reason: 'falha ao agendar',
-          });
-        }
-      }
-    }
-
-    return { images, status, pending };
+    return { images, status, toBackground };
   }
 
   /** Imagens da galeria por EAN (todas as fontes), com a marca de preferida do cliente. */

@@ -101,6 +101,21 @@ export interface LookupSummary {
   authError: string | null;
 }
 
+/** Máximo de vezes que um chamador espera a consulta de outro antes de consultar por conta própria. */
+const MAX_WAIT_ROUNDS = 3;
+
+interface ResolveCtx {
+  kind: ConsumerKind;
+  now: Date;
+  summary: LookupSummary;
+  setFor: (ean: string, partial: Omit<LookupOutcome, 'ean' | 'input'>) => void;
+}
+
+function isAbortLike(err: unknown): boolean {
+  const name = (err as { name?: string } | null)?.name;
+  return name === 'AbortError' || name === 'TimeoutError';
+}
+
 function productOf(raw: DotcompanyLookupItem | null | undefined): DotcompanyProduct | null {
   return raw?.encontrado && raw.produto ? raw.produto : null;
 }
@@ -113,6 +128,8 @@ function productOf(raw: DotcompanyLookupItem | null | undefined): DotcompanyProd
 @Injectable()
 export class DotcompanyLookupService {
   private readonly logger = new Logger(DotcompanyLookupService.name);
+  /** EAN → consulta em andamento neste processo (1 processo PM2 em produção). */
+  private readonly inflight = new Map<string, Promise<void>>();
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -142,11 +159,14 @@ export class DotcompanyLookupService {
   /**
    * Resolve uma lista de EANs. A chave do mapa devolvido é o valor de entrada
    * (como veio), para o chamador casar com suas linhas.
+   *
+   * A chamada HTTP ao lote NUNCA é cancelada por prazo de quem chamou: a
+   * DotCompany pode já ter processado e cobrado. Quem tem pressa deixa de
+   * esperar (Promise.race) e a consulta termina em segundo plano, gravando
+   * cache e consumo. EANs já em consulta por outro chamador (encarte, job)
+   * esperam essa mesma consulta em vez de pagar de novo.
    */
-  async resolve(
-    inputs: string[],
-    options: { kind: ConsumerKind; signal?: AbortSignal },
-  ): Promise<LookupSummary> {
+  async resolve(inputs: string[], options: { kind: ConsumerKind }): Promise<LookupSummary> {
     const summary: LookupSummary = {
       outcomes: new Map(),
       credits: 0,
@@ -169,137 +189,235 @@ export class DotcompanyLookupService {
       byEan.set(c.ean, list);
     }
 
-    const setFor = (ean: string, partial: Omit<LookupOutcome, 'ean' | 'input'>) => {
-      for (const input of byEan.get(ean) ?? [])
-        summary.outcomes.set(input, { ean, input, ...partial });
+    const ctx: ResolveCtx = {
+      kind: options.kind,
+      now,
+      summary,
+      setFor: (ean, partial) => {
+        for (const input of byEan.get(ean) ?? [])
+          summary.outcomes.set(input, { ean, input, ...partial });
+      },
     };
 
-    const cache = await this.findCached([...byEan.keys()]);
-    const toFetch: string[] = [];
-    for (const ean of byEan.keys()) {
+    const missing = await this.applyCache([...byEan.keys()], ctx);
+    await this.fetchMissing(missing, ctx, 0);
+    return summary;
+  }
+
+  /** Preenche o que o cache resolve e devolve o que ainda precisa de consulta. */
+  private async applyCache(eans: string[], ctx: ResolveCtx): Promise<string[]> {
+    const cache = await this.findCached(eans);
+    const missing: string[] = [];
+    for (const ean of eans) {
       const row = cache.get(ean);
       if (row?.status === 'found') {
-        setFor(ean, { status: 'found', product: productOf(row.raw), lookup: row, cached: true });
-      } else if (row?.status === 'not_found' && row.retryAfter && row.retryAfter > now) {
-        setFor(ean, {
+        ctx.setFor(ean, {
+          status: 'found',
+          product: productOf(row.raw),
+          lookup: row,
+          cached: true,
+        });
+      } else if (row?.status === 'not_found' && row.retryAfter && row.retryAfter > ctx.now) {
+        ctx.setFor(ean, {
           status: 'not_found',
           lookup: row,
           cached: true,
           reason: 'não encontrado na DotCompany',
         });
       } else {
-        toFetch.push(ean);
+        missing.push(ean);
       }
     }
+    return missing;
+  }
 
-    for (let i = 0; i < toFetch.length; i += DOTCOMPANY_BATCH_MAX) {
-      const chunk = toFetch.slice(i, i + DOTCOMPANY_BATCH_MAX);
-      const rest = toFetch.slice(i);
+  /**
+   * Consulta o que falta: o que outro chamador já está consultando é esperado
+   * (e relido do cache); o resto vai à DotCompany, registrado como "em voo".
+   */
+  private async fetchMissing(eans: string[], ctx: ResolveCtx, round: number): Promise<void> {
+    if (eans.length === 0) return;
+    // Síncrono do início ao registro: ninguém passa entre a checagem e o registro.
+    const waitFor: Array<{ ean: string; promise: Promise<void> }> = [];
+    const mine: string[] = [];
+    for (const ean of eans) {
+      const promise = this.inflight.get(ean);
+      if (promise && round < MAX_WAIT_ROUNDS) waitFor.push({ ean, promise });
+      else mine.push(ean);
+    }
+    const chunks: string[][] = [];
+    for (let i = 0; i < mine.length; i += DOTCOMPANY_BATCH_MAX)
+      chunks.push(mine.slice(i, i + DOTCOMPANY_BATCH_MAX));
+    const dones = chunks.map((chunk) => this.registerInflight(chunk));
 
-      if (options.signal?.aborted) {
-        for (const ean of rest) setFor(ean, { status: 'aborted', reason: 'prazo esgotado' });
-        break;
+    const waiting = (async () => {
+      if (waitFor.length === 0) return;
+      await Promise.all(waitFor.map((w) => w.promise));
+      const left = await this.applyCache(
+        waitFor.map((w) => w.ean),
+        ctx,
+      );
+      await this.fetchMissing(left, ctx, round + 1);
+    })();
+
+    try {
+      await Promise.all([this.fetchOwn(chunks, dones, ctx), waiting]);
+    } finally {
+      for (const done of dones) done();
+    }
+  }
+
+  private registerInflight(eans: string[]): () => void {
+    let finish!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    for (const ean of eans) this.inflight.set(ean, promise);
+    return () => {
+      for (const ean of eans) if (this.inflight.get(ean) === promise) this.inflight.delete(ean);
+      finish();
+    };
+  }
+
+  private async fetchOwn(
+    chunks: string[][],
+    dones: Array<() => void>,
+    ctx: ResolveCtx,
+  ): Promise<void> {
+    for (let i = 0; i < chunks.length; i++) {
+      const rest = chunks.slice(i).flat();
+      const stop = await this.fetchChunk(chunks[i], rest, ctx);
+      dones[i]();
+      if (stop) return;
+    }
+  }
+
+  /** Uma chamada ao lote. Devolve `true` quando os próximos lotes não devem ser tentados. */
+  private async fetchChunk(chunk: string[], rest: string[], ctx: ResolveCtx): Promise<boolean> {
+    const { kind, summary, setFor, now } = ctx;
+    const estimated = CREDITS_PER_FOUND * chunk.length;
+    const auth = await this.budget.acquire({ kind, estimatedCredits: estimated });
+    if (!auth.ok) {
+      summary.blocked = { reason: auth.reason!, retryAt: auth.retryAt, message: auth.message };
+      for (const ean of rest) {
+        setFor(ean, {
+          status: 'blocked',
+          blockReason: auth.reason,
+          retryAt: auth.retryAt,
+          reason: auth.message,
+        });
       }
+      return true;
+    }
+    const reserved = auth.reserved ?? 0;
 
-      const auth = await this.budget.acquire({
-        kind: options.kind,
-        estimatedCredits: CREDITS_PER_FOUND * chunk.length,
+    summary.requests += 1;
+    let res: Awaited<ReturnType<DotcompanyClient['lookupBatch']>>;
+    try {
+      res = await this.client.lookupBatch(chunk, { idempotencyKey: randomUUID() });
+    } catch (err) {
+      // Chamada interrompida (ex.: shutdown): pode ter sido processada e cobrada.
+      // Por segurança, registra o custo estimado do lote.
+      await this.budget.release({
+        kind,
+        errors: 1,
+        reserved,
+        credits: isAbortLike(err) ? estimated : 0,
       });
-      if (!auth.ok) {
-        summary.blocked = { reason: auth.reason!, retryAt: auth.retryAt, message: auth.message };
-        for (const ean of rest) {
-          setFor(ean, {
-            status: 'blocked',
-            blockReason: auth.reason,
-            retryAt: auth.retryAt,
-            reason: auth.message,
-          });
-        }
-        break;
-      }
-
-      summary.requests += 1;
-      try {
-        const res = await this.client.lookupBatch(chunk, {
-          idempotencyKey: randomUUID(),
-          signal: options.signal,
-        });
-        const found = await this.storeBatch(chunk, res.items, now);
-        const credits = res.creditsCharged ?? CREDITS_PER_FOUND * found.length;
-        summary.credits += credits;
-        await this.budget.release({
-          kind: options.kind,
-          credits,
-          found: found.length,
-          notFound: chunk.length - found.length,
-          rate: res.rate,
-        });
-        const rows = await this.findCached(chunk);
-        for (const ean of chunk) {
-          const row = rows.get(ean);
-          if (row?.status === 'found')
-            setFor(ean, {
-              status: 'found',
-              product: productOf(row.raw),
-              lookup: row,
-              cached: false,
-            });
-          else
-            setFor(ean, {
-              status: 'not_found',
-              lookup: row ?? null,
-              cached: false,
-              reason: 'não encontrado na DotCompany',
-            });
-        }
-      } catch (err) {
-        await this.budget.release({ kind: options.kind, errors: 1 });
-        if (err instanceof DotcompanyNoCreditError) {
-          await this.budget.onNoCredit();
-          summary.blocked = {
-            reason: 'no_credit',
-            retryAt: null,
-            message: 'Sem crédito na DotCompany.',
-          };
-          for (const ean of rest)
-            setFor(ean, { status: 'blocked', blockReason: 'no_credit', reason: 'sem crédito' });
-          break;
-        }
-        if (err instanceof DotcompanyRateLimitedError) {
-          this.budget.onRateLimited(err.retryAfterSec, err.rate);
-          const retryAt = new Date(this.now().getTime() + err.retryAfterSec * 1000);
-          summary.blocked = {
-            reason: 'rate_window',
-            retryAt,
-            message: 'Janela por minuto da DotCompany esgotada.',
-          };
-          for (const ean of rest)
-            setFor(ean, {
-              status: 'blocked',
-              blockReason: 'rate_window',
-              retryAt,
-              reason: 'limite por minuto',
-            });
-          break;
-        }
-        if (err instanceof DotcompanyAuthError) {
-          summary.authError = err.message;
-          for (const ean of rest)
-            setFor(ean, { status: 'error', reason: 'credencial DotCompany recusada' });
-          break;
-        }
-        if (options.signal?.aborted) {
-          for (const ean of rest) setFor(ean, { status: 'aborted', reason: 'prazo esgotado' });
-          break;
-        }
-        const msg = (err as Error).message;
-        this.logger.warn(`Lote DotCompany falhou (${chunk.length} EANs): ${msg}`);
-        await this.markError(chunk, msg);
-        for (const ean of chunk) setFor(ean, { status: 'error', reason: msg });
-      }
+      return this.handleBatchError(err, chunk, rest, ctx);
     }
 
-    return summary;
+    let released = false;
+    try {
+      const found = await this.storeBatch(chunk, res.items, now);
+      const credits = res.creditsCharged ?? CREDITS_PER_FOUND * found.length;
+      summary.credits += credits;
+      released = true;
+      await this.budget.release({
+        kind,
+        credits,
+        found: found.length,
+        notFound: chunk.length - found.length,
+        rate: res.rate,
+        reserved,
+      });
+      const rows = await this.findCached(chunk);
+      for (const ean of chunk) {
+        const row = rows.get(ean);
+        if (row?.status === 'found')
+          setFor(ean, { status: 'found', product: productOf(row.raw), lookup: row, cached: false });
+        else
+          setFor(ean, {
+            status: 'not_found',
+            lookup: row ?? null,
+            cached: false,
+            reason: 'não encontrado na DotCompany',
+          });
+      }
+    } catch (err) {
+      // A DotCompany respondeu (e pode ter cobrado), mas a gravação local falhou.
+      if (!released) {
+        await this.budget.release({
+          kind,
+          credits: res.creditsCharged ?? estimated,
+          errors: 1,
+          reserved,
+        });
+      }
+      const msg = (err as Error).message;
+      this.logger.warn(`Lote DotCompany não gravado (${chunk.length} EANs): ${msg}`);
+      for (const ean of chunk) setFor(ean, { status: 'error', reason: msg });
+    }
+    return false;
+  }
+
+  /** Falha da chamada ao lote → resultado por EAN. `true` = parar os próximos lotes. */
+  private async handleBatchError(
+    err: unknown,
+    chunk: string[],
+    rest: string[],
+    ctx: ResolveCtx,
+  ): Promise<boolean> {
+    const { summary, setFor } = ctx;
+    if (err instanceof DotcompanyNoCreditError) {
+      await this.budget.onNoCredit();
+      summary.blocked = {
+        reason: 'no_credit',
+        retryAt: null,
+        message: 'Sem crédito na DotCompany.',
+      };
+      for (const ean of rest)
+        setFor(ean, { status: 'blocked', blockReason: 'no_credit', reason: 'sem crédito' });
+      return true;
+    }
+    if (err instanceof DotcompanyRateLimitedError) {
+      this.budget.onRateLimited(err.retryAfterSec, err.rate);
+      const retryAt = new Date(this.now().getTime() + err.retryAfterSec * 1000);
+      summary.blocked = {
+        reason: 'rate_window',
+        retryAt,
+        message: 'Janela por minuto da DotCompany esgotada.',
+      };
+      for (const ean of rest)
+        setFor(ean, {
+          status: 'blocked',
+          blockReason: 'rate_window',
+          retryAt,
+          reason: 'limite por minuto',
+        });
+      return true;
+    }
+    if (err instanceof DotcompanyAuthError) {
+      summary.authError = err.message;
+      for (const ean of rest)
+        setFor(ean, { status: 'error', reason: 'credencial DotCompany recusada' });
+      return true;
+    }
+    const msg = (err as Error).message;
+    this.logger.warn(`Lote DotCompany falhou (${chunk.length} EANs): ${msg}`);
+    await this.markError(chunk, msg);
+    for (const ean of chunk) setFor(ean, { status: 'error', reason: msg });
+    return false;
   }
 
   /**
@@ -327,7 +445,12 @@ export class DotcompanyLookupService {
       });
       const now = this.now();
       if (res.notModified) {
-        await this.budget.release({ kind: options.kind, credits: 0, rate: res.rate });
+        await this.budget.release({
+          kind: options.kind,
+          credits: 0,
+          rate: res.rate,
+          reserved: auth.reserved,
+        });
         await this.dataSource.query(
           `UPDATE dotcompany_lookups SET "fetchedAt" = $2, "updatedAt" = now() WHERE ean = $1`,
           [ean, now],
@@ -342,11 +465,12 @@ export class DotcompanyLookupService {
         found: found ? 1 : 0,
         notFound: found ? 0 : 1,
         rate: res.rate,
+        reserved: auth.reserved,
       });
       await this.upsert(ean, res.item, found, now, res.etag);
       return { status: 'updated', lookup: (await this.findCached([ean])).get(ean) ?? null };
     } catch (err) {
-      await this.budget.release({ kind: options.kind, errors: 1 });
+      await this.budget.release({ kind: options.kind, errors: 1, reserved: auth.reserved });
       if (err instanceof DotcompanyNoCreditError) await this.budget.onNoCredit();
       if (err instanceof DotcompanyRateLimitedError)
         this.budget.onRateLimited(err.retryAfterSec, err.rate);

@@ -3,7 +3,7 @@ jest.mock('sharp', () => jest.fn());
 
 import { DataSource } from 'typeorm';
 import { criarDataSourceDeTeste, EAN_IT_ENABLED, inserirImagem } from '../ean-test-db';
-import { LookupOutcome } from './dotcompany-lookup.service';
+import { DotcompanyLookupService, LookupOutcome } from './dotcompany-lookup.service';
 import { FlyerEanResolutionService } from './flyer-ean-resolution.service';
 
 /**
@@ -93,19 +93,8 @@ d('FlyerEanResolutionService (Postgres real)', () => {
       })),
     };
     const lookups = {
-      resolve: jest.fn(async (eans: string[], o: { signal?: AbortSignal }) => {
-        if (opts.lento) {
-          await new Promise((r) => setTimeout(r, 300));
-          if (o.signal?.aborted) {
-            return {
-              outcomes: new Map(eans.map((e) => [e, { ean: e, input: e, status: 'aborted' }])),
-              credits: 0,
-              requests: 0,
-              blocked: null,
-              authError: null,
-            };
-          }
-        }
+      resolve: jest.fn(async (eans: string[], _o: { kind: string }) => {
+        if (opts.lento) await new Promise((r) => setTimeout(r, 300));
         const m = opts.lookup?.(eans) ?? new Map();
         const outcomes = new Map(
           eans.map((e) => [e, { ean: e, input: e, status: 'not_found', ...(m.get(e) ?? {}) }]),
@@ -198,7 +187,12 @@ d('FlyerEanResolutionService (Postgres real)', () => {
     );
     expect(photos.importMany).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ kind: 'interactive', clientIds: [CLIENTE] }),
+      expect.objectContaining({ kind: 'interactive' }),
+    );
+    // A foto DotCompany não vira preferida do cliente: o importador nem recebe o cliente.
+    expect(photos.importMany).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.not.objectContaining({ clientIds: expect.anything(), signal: expect.anything() }),
     );
     expect(r.matches[0]).toMatchObject({
       productId: 'p2',
@@ -280,5 +274,74 @@ d('FlyerEanResolutionService (Postgres real)', () => {
       CLIENTE,
     );
     expect(runner.wake).toHaveBeenCalled();
+  });
+
+  it('prazo estoura com consulta paga em voo: uma única chamada, cache gravado, job lê o cache', async () => {
+    const ean = '7896000000019'; // válido (checksum conferido abaixo)
+    await ds.query(`DELETE FROM dotcompany_lookups WHERE ean = $1`, [ean]);
+    let chamadas = 0;
+    const client = {
+      lookupBatch: jest.fn(async (gtins: string[]) => {
+        chamadas += 1;
+        await new Promise((r) => setTimeout(r, 400)); // mais lenta que o prazo do encarte (100 ms)
+        return {
+          items: gtins.map((g) => ({
+            gtin: g,
+            encontrado: true,
+            produto: { gtin: g, nome: 'PRODUTO LENTO', imagem_url: null },
+          })),
+          creditsCharged: null,
+          rate: null,
+          requestId: 'r',
+          status: 200,
+        };
+      }),
+    };
+    const budget = {
+      now: () => new Date('2026-10-10T12:00:00Z'),
+      acquire: jest.fn(async () => ({
+        ok: true,
+        reason: null,
+        retryAt: null,
+        message: null,
+        reserved: 4,
+      })),
+      release: jest.fn(async () => undefined),
+      onNoCredit: jest.fn(),
+      onRateLimited: jest.fn(),
+    };
+    const real = new DotcompanyLookupService(ds, client as never, budget as never);
+    const base = criar({ lento: true });
+    const svc = new FlyerEanResolutionService(
+      ds,
+      base.matcher as never,
+      real,
+      { importMany: jest.fn(async () => new Map()) } as never,
+      base.jobs as never,
+      base.runner as never,
+      { get: (k: string) => (k === 'EAN_FLYER_RESOLVE_TIMEOUT_MS' ? '100' : undefined) } as never,
+    );
+
+    const t0 = Date.now();
+    const r = await svc.findImages([{ id: 'p9', name: 'Lento', ean }], CLIENTE);
+    expect(Date.now() - t0).toBeLessThan(380);
+    expect(r.pending).toEqual(['p9']);
+    expect(client.lookupBatch).toHaveBeenCalledTimes(1);
+
+    // O runner do job `flyer` chega antes de a primeira consulta terminar: espera a mesma.
+    const doJob = await real.resolve([ean], { kind: 'interactive' });
+    expect(doJob.outcomes.get(ean)).toMatchObject({ status: 'found', cached: true });
+    expect(chamadas).toBe(1);
+    expect(budget.release).toHaveBeenCalledTimes(1);
+    expect(budget.release).toHaveBeenCalledWith(
+      expect.objectContaining({ credits: 4, reserved: 4 }),
+    );
+    const [row] = await ds.query(`SELECT status FROM dotcompany_lookups WHERE ean = $1`, [ean]);
+    expect(row.status).toBe('found');
+
+    // E uma nova rodada do job, depois de tudo, sai do cache.
+    await real.resolve([ean], { kind: 'batch' });
+    expect(chamadas).toBe(1);
+    await ds.query(`DELETE FROM dotcompany_lookups WHERE ean = $1`, [ean]);
   });
 });

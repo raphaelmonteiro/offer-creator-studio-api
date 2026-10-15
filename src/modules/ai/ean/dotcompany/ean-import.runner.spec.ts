@@ -82,6 +82,9 @@ class FakeFotos {
 }
 
 d('EanImportRunner (Postgres real)', () => {
+  // Com várias suítes de integração em paralelo o banco divide a carga (R13).
+  jest.setTimeout(30_000);
+
   let ds: DataSource;
   let store: EanImportStore;
   const jobs: string[] = [];
