@@ -1,3 +1,4 @@
+import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
@@ -214,6 +215,27 @@ describe('TTS por fala com prosódia (change video-formatos-personagem, D7, tare
         expect.objectContaining({ id: 'st-tts' }),
         expect.objectContaining({ outputAssetId: 'asset-tts', consumeOnSuccess: true }),
       );
+    });
+
+    it.each(['provider_response_lost', 'provider_timeout'])(
+      'resposta ambígua (%s) → sem fallback: a geração pode ter sido cobrada (achado 2 da 3.7)',
+      async (code) => {
+        elevenLabs.synthesizeWithTimestamps.mockRejectedValue(
+          new TerminalProviderError('perdida', code),
+        );
+        await processor.process({ stepId: 'st-tts' }).catch(() => undefined);
+        expect(elevenLabs.synthesizeWithTimestamps).toHaveBeenCalledTimes(1);
+        expect(pipeline.completeStepAndAdvance).not.toHaveBeenCalled();
+      },
+    );
+
+    it('recusa do modelo (provider_rejected) segue caindo no modelo de fallback', async () => {
+      elevenLabs.synthesizeWithTimestamps
+        .mockRejectedValueOnce(new TerminalProviderError('HTTP 400', 'provider_rejected'))
+        .mockResolvedValueOnce({ audio: Buffer.from('mp3'), alignment: null });
+      await processor.process({ stepId: 'st-tts' });
+      expect(elevenLabs.synthesizeWithTimestamps).toHaveBeenCalledTimes(2);
+      expect(pipeline.failStep).not.toHaveBeenCalled();
     });
 
     it('cena presenter do F3 (vizinha falada) → TTS de sempre: SEM previous_text/next_text (L2)', async () => {

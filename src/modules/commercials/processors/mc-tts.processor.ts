@@ -6,6 +6,7 @@ import * as path from 'path';
 import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import {
+  ELEVENLABS_AMBIGUOUS_CODES,
   ElevenLabsCharacterAlignment,
   ElevenLabsProvider,
 } from '../../../shared/providers/elevenlabs.provider';
@@ -232,6 +233,9 @@ export class McTtsProcessor {
       });
     } catch (err) {
       if (!(err instanceof TerminalProviderError)) throw err;
+      // Resposta perdida/timeout: a geração pode ter sido feita e cobrada —
+      // o fallback seria outra geração paga do mesmo texto (achado 2 da 3.7).
+      if ((ELEVENLABS_AMBIGUOUS_CODES as readonly string[]).includes(err.code)) throw err;
       this.logger.warn(`TTS ${MC_TTS_PRIMARY_MODEL} falhou (${err.message}) — fallback.`);
       return this.elevenLabs.synthesizeWithTimestamps({
         text,

@@ -23,6 +23,49 @@ export interface ElevenLabsVoice {
   labels?: Record<string, string>;
 }
 
+/** Teto do cliente para UMA geração de TTS (fala curta leva poucos segundos). */
+export const ELEVENLABS_TTS_TIMEOUT_MS = 120_000;
+
+/** Códigos terminais de uma geração que PODE ter sido feita e cobrada (nunca re-tentar nem cair no fallback). */
+export const ELEVENLABS_AMBIGUOUS_CODES = ['provider_timeout', 'provider_response_lost'] as const;
+
+/** Erro de rede ANTES de a requisição chegar ao servidor (sem geração possível). */
+const PRE_REQUEST_NETWORK_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'CERT_HAS_EXPIRED',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+
+function networkErrorCodes(err: unknown): string[] {
+  const codes: string[] = [];
+  const visit = (value: unknown, depth: number) => {
+    if (!value || typeof value !== 'object' || depth > 4) return;
+    const v = value as { code?: unknown; cause?: unknown; errors?: unknown };
+    if (typeof v.code === 'string') codes.push(v.code);
+    if (Array.isArray(v.errors)) v.errors.forEach((e) => visit(e, depth + 1));
+    visit(v.cause, depth + 1);
+  };
+  visit(err, 0);
+  return codes;
+}
+
+/**
+ * A falha do `fetch` aconteceu antes de a requisição ser entregue (conexão
+ * recusada, DNS, timeout de CONEXÃO)? Só aí o retry é seguro: a ElevenLabs não
+ * tem chave de idempotência (`previous_request_ids` só condiciona a prosódia),
+ * então uma requisição entregue cuja resposta se perdeu (socket fechado,
+ * reset, timeout de resposta) pode ter sido gerada e cobrada — achado 2 da 3.7.
+ */
+export function isPreRequestNetworkError(err: unknown): boolean {
+  const codes = networkErrorCodes(err);
+  return codes.length > 0 && codes.every((code) => PRE_REQUEST_NETWORK_CODES.has(code));
+}
+
 /**
  * ElevenLabs TTS (TDD §5.3) — síncrono: retorna o áudio direto (mp3).
  * Extraído de modules/animations/providers para src/shared/ (plano-comerciais
@@ -45,35 +88,12 @@ export class ElevenLabsProvider {
     /** Default eleven_multilingual_v2 (comportamento original do animations). */
     modelId?: string;
   }): Promise<Buffer> {
-    return withRetry(async () => {
-      const response = await fetch(`${this.baseUrl}/text-to-speech/${params.voiceId}`, {
-        method: 'POST',
-        headers: {
-          'xi-api-key': this.config.get('ELEVENLABS_API_KEY') ?? '',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: params.text,
-          model_id: params.modelId ?? ELEVENLABS_DEFAULT_MODEL,
-          voice_settings: params.settings ?? { stability: 0.5, similarity_boost: 0.75 },
-        }),
-      }).catch((err) => {
-        throw new TransientProviderError(`Falha de rede: ${(err as Error).message}`);
-      });
-      if (response.status === 429 || response.status >= 500) {
-        throw new TransientProviderError(`HTTP ${response.status}`);
-      }
-      if (!response.ok) {
-        // O corpo da ElevenLabs diz o MOTIVO (ex.: invalid_uid) — sem ele o
-        // "HTTP 400" seco já mascarou diagnóstico em produção real.
-        const body = await response.text().catch(() => '');
-        throw new TerminalProviderError(
-          `HTTP ${response.status}: ${body.slice(0, 300)}`,
-          'provider_rejected',
-        );
-      }
-      return Buffer.from(await response.arrayBuffer());
+    const response = await this.postGeneration(`${this.baseUrl}/text-to-speech/${params.voiceId}`, {
+      text: params.text,
+      model_id: params.modelId ?? ELEVENLABS_DEFAULT_MODEL,
+      voice_settings: params.settings ?? { stability: 0.5, similarity_boost: 0.75 },
     });
+    return this.readGenerated(response, async (r) => Buffer.from(await r.arrayBuffer()));
   }
 
   /**
@@ -99,52 +119,125 @@ export class ElevenLabsProvider {
     previousText?: string | null;
     nextText?: string | null;
   }): Promise<{ audio: Buffer; alignment: ElevenLabsCharacterAlignment | null }> {
-    return withRetry(async () => {
-      const response = await fetch(
-        `${this.baseUrl}/text-to-speech/${params.voiceId}/with-timestamps`,
-        {
-          method: 'POST',
-          headers: {
-            'xi-api-key': this.config.get('ELEVENLABS_API_KEY') ?? '',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            text: params.text,
-            model_id: params.modelId ?? ELEVENLABS_DEFAULT_MODEL,
-            voice_settings: params.settings ?? { stability: 0.5, similarity_boost: 0.75 },
-            ...(params.previousText?.trim() ? { previous_text: params.previousText.trim() } : {}),
-            ...(params.nextText?.trim() ? { next_text: params.nextText.trim() } : {}),
-          }),
-        },
-      ).catch((err) => {
-        throw new TransientProviderError(`Falha de rede: ${(err as Error).message}`);
-      });
-      if (response.status === 429 || response.status >= 500) {
-        throw new TransientProviderError(`HTTP ${response.status}`);
-      }
-      if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw new TerminalProviderError(
-          `HTTP ${response.status}: ${body.slice(0, 300)}`,
-          'provider_rejected',
-        );
-      }
-      const body = (await response.json().catch(() => null)) as {
-        audio_base64?: string;
-        alignment?: ElevenLabsCharacterAlignment | null;
-        normalized_alignment?: ElevenLabsCharacterAlignment | null;
-      } | null;
-      if (!body?.audio_base64) {
-        throw new TerminalProviderError(
-          'Resposta com timestamps sem audio_base64',
-          'invalid_provider_output',
-        );
-      }
-      return {
-        audio: Buffer.from(body.audio_base64, 'base64'),
-        alignment: body.normalized_alignment ?? body.alignment ?? null,
-      };
-    });
+    const response = await this.postGeneration(
+      `${this.baseUrl}/text-to-speech/${params.voiceId}/with-timestamps`,
+      {
+        text: params.text,
+        model_id: params.modelId ?? ELEVENLABS_DEFAULT_MODEL,
+        voice_settings: params.settings ?? { stability: 0.5, similarity_boost: 0.75 },
+        ...(params.previousText?.trim() ? { previous_text: params.previousText.trim() } : {}),
+        ...(params.nextText?.trim() ? { next_text: params.nextText.trim() } : {}),
+      },
+    );
+    const body = await this.readGenerated(
+      response,
+      async (r) =>
+        (await r.json()) as {
+          audio_base64?: string;
+          alignment?: ElevenLabsCharacterAlignment | null;
+          normalized_alignment?: ElevenLabsCharacterAlignment | null;
+        } | null,
+    );
+    if (!body?.audio_base64) {
+      throw new TerminalProviderError(
+        'Resposta com timestamps sem audio_base64',
+        'invalid_provider_output',
+      );
+    }
+    return {
+      audio: Buffer.from(body.audio_base64, 'base64'),
+      alignment: body.normalized_alignment ?? body.alignment ?? null,
+    };
+  }
+
+  /**
+   * POST de uma geração paga SEM duplicata (achado 2 da 3.7). A ElevenLabs não
+   * tem idempotência, então só re-tenta o que certamente não gerou nada:
+   * - rede antes da entrega (conexão recusada, DNS, timeout de conexão) → retry;
+   * - 429 e 5xx (resposta de erro, sem áudio) → retry;
+   * - qualquer outra falha depois do envio (reset/socket fechado, timeout do
+   *   cliente) → `TerminalProviderError` `provider_response_lost` /
+   *   `provider_timeout`, sem nova requisição: a geração pode ter sido cobrada.
+   * Cada retry é logado.
+   */
+  private async postGeneration(url: string, payload: Record<string, unknown>): Promise<Response> {
+    return withRetry(
+      async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs());
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'xi-api-key': this.config.get('ELEVENLABS_API_KEY') ?? '',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+        } catch (err) {
+          if (controller.signal.aborted) {
+            throw new TerminalProviderError(
+              `TTS sem resposta em ${this.timeoutMs()} ms — a geração pode ter sido feita; sem nova tentativa automática`,
+              'provider_timeout',
+            );
+          }
+          if (isPreRequestNetworkError(err)) {
+            throw new TransientProviderError(`Falha de rede: ${(err as Error).message}`);
+          }
+          throw new TerminalProviderError(
+            `Resposta do TTS perdida (${(err as Error).message}${networkErrorCodes(err).length ? ` ${networkErrorCodes(err).join(',')}` : ''}) — a geração pode ter sido feita; sem nova tentativa automática`,
+            'provider_response_lost',
+          );
+        } finally {
+          clearTimeout(timer);
+        }
+        if (response.status === 429 || response.status >= 500) {
+          const retryAfter = Number(response.headers.get('retry-after'));
+          throw new TransientProviderError(
+            `HTTP ${response.status}`,
+            Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+          );
+        }
+        if (!response.ok) {
+          // O corpo da ElevenLabs diz o MOTIVO (ex.: invalid_uid) — sem ele o
+          // "HTTP 400" seco já mascarou diagnóstico em produção real.
+          const body = await response.text().catch(() => '');
+          throw new TerminalProviderError(
+            `HTTP ${response.status}: ${body.slice(0, 300)}`,
+            'provider_rejected',
+          );
+        }
+        return response;
+      },
+      {
+        onRetry: (err, nextAttempt, delayMs) =>
+          this.logger.warn(
+            `ElevenLabs TTS: ${err.message} antes da geração — tentativa ${nextAttempt} em ${Math.round(delayMs)} ms`,
+          ),
+      },
+    );
+  }
+
+  /** Lê o corpo de uma resposta 200: falhar aqui é áudio já gerado (e cobrado) perdido — terminal. */
+  private async readGenerated<T>(
+    response: Response,
+    read: (r: Response) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await read(response);
+    } catch (err) {
+      throw new TerminalProviderError(
+        `Corpo da resposta do TTS perdido (${(err as Error).message}) — a geração foi feita; sem nova tentativa automática`,
+        'provider_response_lost',
+      );
+    }
+  }
+
+  private timeoutMs(): number {
+    const raw = Number(this.config.get('ELEVENLABS_TTS_TIMEOUT_MS'));
+    return Number.isFinite(raw) && raw > 0 ? raw : ELEVENLABS_TTS_TIMEOUT_MS;
   }
 
   /**

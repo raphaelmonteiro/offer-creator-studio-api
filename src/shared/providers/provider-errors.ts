@@ -41,7 +41,13 @@ export async function withRetry<T>(
   {
     attempts = PROVIDER_RETRY_ATTEMPTS,
     baseDelayMs = 1000,
-  }: { attempts?: number; baseDelayMs?: number } = {},
+    onRetry,
+  }: {
+    attempts?: number;
+    baseDelayMs?: number;
+    /** Chamado antes de cada nova tentativa (log do retry: o worker não registrava nenhum). */
+    onRetry?: (err: TransientProviderError, nextAttempt: number, delayMs: number) => void;
+  } = {},
 ): Promise<T> {
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -58,6 +64,7 @@ export async function withRetry<T>(
         err.retryAfterSeconds >= 0
           ? Math.min(err.retryAfterSeconds, PROVIDER_RETRY_AFTER_MAX_S) * 1000
           : baseDelayMs * 2 ** i + Math.random() * 250;
+      onRetry?.(err, i + 2, delay);
       await new Promise((r) => setTimeout(r, delay));
     }
   }
