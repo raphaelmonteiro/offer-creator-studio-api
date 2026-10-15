@@ -1,6 +1,10 @@
 import { DataSource } from 'typeorm';
 import { criarDataSourceDeTeste, EAN_IT_ENABLED } from '../ean-test-db';
-import { DotcompanyNoCreditError } from './dotcompany.client';
+import {
+  DotcompanyIdempotencyError,
+  DotcompanyNoCreditError,
+  DotcompanyTransientError,
+} from './dotcompany.client';
 import { classifyEan, DotcompanyLookupService } from './dotcompany-lookup.service';
 
 describe('classifyEan', () => {
@@ -47,9 +51,13 @@ d('DotcompanyLookupService (Postgres real)', () => {
     ds = criarDataSourceDeTeste();
     await ds.initialize();
   });
-  beforeEach(async () => ds.query(`DELETE FROM dotcompany_lookups WHERE ean LIKE '789699%'`));
-  afterAll(async () => {
+  const limpar = async () => {
     await ds.query(`DELETE FROM dotcompany_lookups WHERE ean LIKE '789699%'`);
+    await ds.query(`DELETE FROM dotcompany_pending_batches WHERE gtins::text LIKE '%789699%'`);
+  };
+  beforeEach(limpar);
+  afterAll(async () => {
+    await limpar();
     await ds.destroy();
   });
 
@@ -230,16 +238,263 @@ d('DotcompanyLookupService (Postgres real)', () => {
     expect(client.lookupBatch).toHaveBeenCalledTimes(2);
   });
 
-  it('chamada interrompida (AbortError) registra o custo estimado por segurança', async () => {
+  /** Timeout do próprio cliente: o que o DotcompanyClient real lança depois das tentativas. */
+  const timeoutDoCliente = () =>
+    new DotcompanyTransientError(
+      'DotCompany POST /catalogo/gtin/batch: falha de rede (timeout de 15000ms).',
+      null,
+      null,
+      null,
+    );
+
+  function respostaOk(gtins: string[], extra: { replay?: boolean; credits?: number | null } = {}) {
+    return {
+      items: gtins.map((g) => ({
+        gtin: g,
+        encontrado: true,
+        produto: { gtin: g, nome: `PRODUTO ${g}`, imagem_url: null },
+      })),
+      creditsCharged: extra.credits ?? null,
+      rate: null,
+      requestId: 'r',
+      status: 200,
+      replay: extra.replay ?? false,
+    };
+  }
+
+  const creditosLancados = (release: jest.Mock) =>
+    (release.mock.calls as unknown as Array<[{ credits?: number }]>).map((c) => c[0].credits);
+
+  const pendentes = (e: string) =>
+    ds.query(
+      `SELECT idempotency_key, gtins, attempts, credits_recorded FROM dotcompany_pending_batches WHERE gtins ? $1`,
+      [e],
+    );
+
+  it('timeout do cliente: grava o lote pendente com a chave e lança o custo estimado', async () => {
     const e = eanTeste(930);
     const { svc, client, budget } = criar(new Set([e]));
-    const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
-    client.lookupBatch.mockRejectedValueOnce(abort);
+    client.lookupBatch.mockRejectedValueOnce(timeoutDoCliente());
     const r = await svc.resolve([e], { kind: 'interactive' });
     expect(r.outcomes.get(e)?.status).toBe('error');
     expect(budget.release).toHaveBeenCalledWith(
       expect.objectContaining({ credits: 4, errors: 1, reserved: 4 }),
     );
+    const [p] = await pendentes(e);
+    const chave = (client.lookupBatch.mock.calls[0] as unknown[])[1] as { idempotencyKey: string };
+    expect(p).toMatchObject({ idempotency_key: chave.idempotencyKey, gtins: [e], attempts: 1 });
+    expect(p.credits_recorded).toBe(4);
+  });
+
+  it('próxima resolução repete o MESMO lote com a MESMA chave; replay não soma custo de novo', async () => {
+    const [e, f] = [eanTeste(931), eanTeste(932)];
+    const { svc, client, budget } = criar(new Set([e, f]));
+    client.lookupBatch.mockRejectedValueOnce(timeoutDoCliente());
+    await svc.resolve([e, f], { kind: 'batch' });
+    const chave = (client.lookupBatch.mock.calls[0] as unknown[])[1] as { idempotencyKey: string };
+    client.lookupBatch.mockImplementationOnce(async (g: string[]) =>
+      respostaOk(g, { replay: true, credits: 8 }),
+    );
+    budget.release.mockClear();
+
+    // Só um dos dois EANs é pedido agora: o lote repetido continua sendo o original, inteiro.
+    const r = await svc.resolve([f], { kind: 'batch' });
+    expect(client.lookupBatch).toHaveBeenCalledTimes(2);
+    expect(client.lookupBatch).toHaveBeenLastCalledWith([e, f], {
+      idempotencyKey: chave.idempotencyKey,
+    });
+    expect(r.outcomes.get(f)).toMatchObject({ status: 'found', cached: false });
+    // 8 créditos reais - 8 já lançados na incerteza (4 × 2 itens) = nada novo no consumo.
+    expect(budget.release).toHaveBeenCalledTimes(1);
+    expect(budget.release).toHaveBeenCalledWith(
+      expect.objectContaining({ credits: 0, found: 2, reserved: 4 }),
+    );
+    expect(await pendentes(e)).toHaveLength(0);
+    // Resolvido e em cache: uma terceira resolução não chama de novo.
+    await svc.resolve([e], { kind: 'batch' });
+    expect(client.lookupBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('o servidor não tinha processado (sem replay): só a diferença sobre o estimado é lançada', async () => {
+    const e = eanTeste(933);
+    const { svc, client, budget } = criar(new Set([e]));
+    client.lookupBatch.mockRejectedValueOnce(timeoutDoCliente());
+    await svc.resolve([e], { kind: 'batch' });
+    budget.release.mockClear();
+    const r = await svc.resolve([e], { kind: 'batch' });
+    expect(r.outcomes.get(e)?.status).toBe('found');
+    expect(budget.release).toHaveBeenCalledWith(expect.objectContaining({ credits: 0, found: 1 }));
+  });
+
+  it('o job que chega com os mesmos EANs não monta lote novo enquanto há pendente', async () => {
+    const [a, b, c] = [eanTeste(934), eanTeste(935), eanTeste(936)];
+    const { svc, client } = criar(new Set([a, b, c]));
+    client.lookupBatch.mockRejectedValueOnce(timeoutDoCliente());
+    await svc.resolve([a, b], { kind: 'interactive' }); // encarte: incerto
+    const chave = (client.lookupBatch.mock.calls[0] as unknown[])[1] as { idempotencyKey: string };
+    await svc.resolve([a, c], { kind: 'batch' }); // job `flyer`
+    const chamadas = client.lookupBatch.mock.calls as unknown as Array<
+      [string[], { idempotencyKey: string }]
+    >;
+    expect(chamadas).toHaveLength(3);
+    expect(chamadas[1]).toEqual([[a, b], { idempotencyKey: chave.idempotencyKey }]);
+    expect(chamadas[2][0]).toEqual([c]);
+    expect(chamadas[2][1].idempotencyKey).not.toBe(chave.idempotencyKey);
+  });
+
+  it.each(['IDEMPOTENCY_IN_FLIGHT', 'IDEMPOTENCY_KEY_ORPHANED'])(
+    '409 %s na repetição: chave descartada, nova consulta com chave nova, sem lançar o estimado de novo',
+    async (codigo) => {
+      const e = eanTeste(937);
+      const { svc, client, budget } = criar(new Set([e]));
+      client.lookupBatch.mockRejectedValueOnce(timeoutDoCliente());
+      await svc.resolve([e], { kind: 'batch' });
+      const chave = (client.lookupBatch.mock.calls[0] as unknown[])[1] as {
+        idempotencyKey: string;
+      };
+      client.lookupBatch.mockRejectedValueOnce(
+        new DotcompanyIdempotencyError('409', 409, codigo, null),
+      );
+      budget.release.mockClear();
+
+      const r = await svc.resolve([e], { kind: 'batch' });
+      const chamadas = client.lookupBatch.mock.calls as unknown as Array<
+        [string[], { idempotencyKey: string }]
+      >;
+      expect(chamadas).toHaveLength(3);
+      expect(chamadas[1][1].idempotencyKey).toBe(chave.idempotencyKey);
+      expect(chamadas[2][0]).toEqual([e]);
+      expect(chamadas[2][1].idempotencyKey).not.toBe(chave.idempotencyKey);
+      expect(r.outcomes.get(e)?.status).toBe('found');
+      // O estimado já estava lançado pela incerteza: o 409 não soma outro, o sucesso novo cobra o real.
+      const lancado = creditosLancados(budget.release);
+      expect(lancado).toEqual([0, 4]);
+      expect(await pendentes(e)).toHaveLength(0);
+    },
+  );
+
+  it('409 na primeira chamada (reserva presa depois de 5xx): lança o estimado e consulta com chave nova', async () => {
+    const e = eanTeste(938);
+    const { svc, client, budget } = criar(new Set([e]));
+    client.lookupBatch.mockRejectedValueOnce(
+      new DotcompanyIdempotencyError('409', 409, 'IDEMPOTENCY_IN_FLIGHT', null),
+    );
+    const r = await svc.resolve([e], { kind: 'batch' });
+    expect(r.outcomes.get(e)?.status).toBe('found');
+    const lancado = creditosLancados(budget.release);
+    expect(lancado).toEqual([4, 4]); // possível cobrança + a consulta nova
+  });
+
+  it('IDEMPOTENCY_KEY_CONFLICT é bug nosso: loga, não lança custo e usa chave nova', async () => {
+    const e = eanTeste(939);
+    const { svc, client, budget } = criar(new Set([e]));
+    client.lookupBatch.mockRejectedValueOnce(
+      new DotcompanyIdempotencyError('409', 409, 'IDEMPOTENCY_KEY_CONFLICT', null),
+    );
+    const r = await svc.resolve([e], { kind: 'batch' });
+    expect(r.outcomes.get(e)?.status).toBe('found');
+    const lancado = creditosLancados(budget.release);
+    expect(lancado).toEqual([0, 4]);
+  });
+
+  it('erro conclusivo (402) descarta o pendente', async () => {
+    const e = eanTeste(941);
+    const { svc, client } = criar(new Set([e]));
+    client.lookupBatch.mockRejectedValueOnce(
+      new DotcompanyNoCreditError('402', 402, 'INSUFFICIENT_CREDITS', null),
+    );
+    await svc.resolve([e], { kind: 'batch' });
+    expect(await pendentes(e)).toHaveLength(0);
+  });
+
+  it('pendente mais velho que 24 h é descartado em vez de repetido', async () => {
+    const e = eanTeste(942);
+    const { svc, client, setNow } = criar(new Set([e]));
+    client.lookupBatch.mockRejectedValueOnce(timeoutDoCliente());
+    await svc.resolve([e], { kind: 'batch' });
+    setNow(new Date('2026-10-12T12:00:00Z'));
+    await ds.query(`UPDATE dotcompany_pending_batches SET created_at = $2 WHERE gtins ? $1`, [
+      e,
+      new Date('2026-10-10T12:00:00Z'),
+    ]);
+    await svc.resolve([e], { kind: 'batch' });
+    const chamadas = client.lookupBatch.mock.calls as unknown as Array<
+      [string[], { idempotencyKey: string }]
+    >;
+    expect(chamadas[1][1].idempotencyKey).not.toBe(chamadas[0][1].idempotencyKey);
+  });
+
+  it('orçamento negado: chamadores com mais de 100 EANs sobrepostos terminam (sem espera infinita)', async () => {
+    const eans = Array.from({ length: 220 }, (_, i) => eanTeste(2000 + i));
+    const y = eanTeste(1999);
+    const { svc, budget } = criar(new Set(eans));
+    // 1ª chamada ao controlador (o "runner" que consulta y) fica presa e depois é negada.
+    let soltar!: () => void;
+    const presa = new Promise<void>((r) => (soltar = r));
+    const negado = {
+      ok: false,
+      reason: 'reserve',
+      retryAt: new Date('2026-10-10T12:15:00Z'),
+      message: 'reserva',
+    };
+    budget.acquire.mockImplementationOnce(async () => {
+      await presa;
+      return negado as never;
+    });
+    budget.acquire.mockImplementation(async () => negado as never);
+
+    const runner = svc.resolve([y], { kind: 'batch' });
+    await new Promise((r) => setTimeout(r, 30));
+    // C espera y (do runner) e é dono de 2 lotes; o 1º é negado e o 2º ficaria preso.
+    const c = svc.resolve([y, ...eans.slice(0, 200)], { kind: 'batch' });
+    await new Promise((r) => setTimeout(r, 100));
+    // P sobrepõe o 2º lote de C e passa de 100 EANs.
+    const p = svc.resolve([...eans.slice(100, 200), ...eans.slice(200, 220)], { kind: 'batch' });
+    const prazo = new Promise<string>((r) => setTimeout(() => r('travou'), 3000));
+    expect(await Promise.race([p.then(() => 'ok'), prazo])).toBe('ok'); // runner ainda preso
+    soltar();
+    const todos = await Promise.race([
+      Promise.all([runner, c, p]).then(() => 'ok'),
+      new Promise<string>((r) => setTimeout(() => r('travou'), 3000)),
+    ]);
+    expect(todos).toBe('ok');
+  });
+
+  it('refreshOne: consulta paga sem resposta lança o estimado (4) e não repete sozinha', async () => {
+    const e = eanTeste(943);
+    const { svc, client, budget } = criar(new Set([e]));
+    client.lookupSingle.mockRejectedValueOnce(timeoutDoCliente());
+    const r = await svc.refreshOne(e, { kind: 'batch' });
+    expect(r.status).toBe('error');
+    expect(client.lookupSingle).toHaveBeenCalledTimes(1);
+    expect(budget.release).toHaveBeenCalledTimes(1);
+    expect(budget.release).toHaveBeenCalledWith(
+      expect.objectContaining({ credits: 4, errors: 1, reserved: 4 }),
+    );
+  });
+
+  it('refreshOne: falha ao gravar depois do release não libera a reserva duas vezes', async () => {
+    const e = eanTeste(944);
+    const { client, budget } = criar(new Set([e]));
+    client.lookupSingle.mockResolvedValueOnce({
+      notModified: false,
+      item: { gtin: e, encontrado: true, produto: { gtin: e, nome: 'X', imagem_url: null } },
+      etag: 'W/"1"',
+      creditsCharged: 4,
+      rate: null,
+      requestId: 'r',
+      status: 200,
+      replay: false,
+    });
+    const quebrado = Object.create(ds) as DataSource;
+    quebrado.query = (async (sql: string, params?: unknown[]) => {
+      if (String(sql).includes('INSERT INTO dotcompany_lookups')) throw new Error('disco cheio');
+      return ds.query(sql, params);
+    }) as DataSource['query'];
+    const svc2 = new DotcompanyLookupService(quebrado, client as never, budget as never);
+    const r = await svc2.refreshOne(e, { kind: 'batch' });
+    expect(r.status).toBe('error');
+    expect(budget.release).toHaveBeenCalledTimes(1);
   });
 
   it('o lote devolvido repassa a reserva ao release', async () => {

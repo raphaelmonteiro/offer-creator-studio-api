@@ -95,7 +95,6 @@ function criar(opts: { existente?: string | null; created?: boolean } = {}) {
       image: { id: 'img-1' },
       created: opts.created ?? true,
     })),
-    ensureClientPreferred: jest.fn(async () => undefined),
   };
   const svc = new DotcompanyPhotoImporter(
     ds as never,
@@ -140,7 +139,6 @@ describe('DotcompanyPhotoImporter', () => {
     expect(gallery.registerImportedImage).toHaveBeenCalledWith(
       expect.not.objectContaining({ clientIds: expect.anything() }),
     );
-    expect(gallery.ensureClientPreferred).not.toHaveBeenCalled();
     expect(sharpMock).toHaveBeenCalledWith(expect.any(Buffer), {
       limitInputPixels: MAX_INPUT_PIXELS,
     });
@@ -193,15 +191,14 @@ describe('DotcompanyPhotoImporter', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('foto DotCompany já na galeria: "já existente", sem baixar e sem marcar preferência', async () => {
-    const { svc, fetchMock, gallery } = criar({ existente: 'img-antiga' });
+  it('foto DotCompany já na galeria: "já existente", sem baixar', async () => {
+    const { svc, fetchMock } = criar({ existente: 'img-antiga' });
     const r = await svc.importMany(
       [{ ean: EAN, lookup: lookup({ galleryImageId: 'img-antiga' }) }],
       { kind: 'batch' },
     );
     expect(r.get(EAN)).toMatchObject({ status: 'already_exists', galleryImageId: 'img-antiga' });
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(gallery.ensureClientPreferred).not.toHaveBeenCalled();
   });
 
   it('corrida: outro processo importou no meio → apaga o arquivo duplicado', async () => {

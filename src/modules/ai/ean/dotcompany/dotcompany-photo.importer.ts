@@ -148,7 +148,9 @@ export class DotcompanyPhotoImporter {
           }
           results.set(
             next.ean,
-            await this.importOne(next.ean, next.lookup, metadataByEan.get(next.ean)!, options),
+            await this.importOne(next.ean, next.lookup, metadataByEan.get(next.ean)!, {
+              kind: options.kind,
+            }),
           );
         }
       },
@@ -162,7 +164,7 @@ export class DotcompanyPhotoImporter {
     ean: string,
     lookup: DotcompanyLookup,
     metadata: Record<string, unknown> & { ean?: string | null },
-    options: { kind: ConsumerKind; signal?: AbortSignal },
+    options: { kind: ConsumerKind },
   ): Promise<PhotoImportResult> {
     const running = this.importing.get(ean);
     if (running) return running;
@@ -177,20 +179,17 @@ export class DotcompanyPhotoImporter {
     ean: string,
     lookup: DotcompanyLookup,
     metadata: Record<string, unknown> & { ean?: string | null },
-    options: { kind: ConsumerKind; signal?: AbortSignal },
+    options: { kind: ConsumerKind },
   ): Promise<PhotoImportResult> {
     let url = lookup.raw?.produto?.imagem_url ?? null;
     try {
       let buffer: Buffer;
       try {
-        buffer = await this.download(url!, options.signal);
+        buffer = await this.download(url!);
       } catch (err) {
         if (!(err instanceof ExpiredImageUrlError)) throw err;
         // URL vencida: reconsulta o EAN (com ETag) para pegar uma URL nova.
-        const refreshed = await this.lookups.refreshOne(ean, {
-          kind: options.kind,
-          signal: options.signal,
-        });
+        const refreshed = await this.lookups.refreshOne(ean, { kind: options.kind });
         const newUrl = refreshed.lookup?.raw?.produto?.imagem_url ?? null;
         if (refreshed.status !== 'updated' || !newUrl || newUrl === url) {
           return {
@@ -201,7 +200,7 @@ export class DotcompanyPhotoImporter {
           };
         }
         url = newUrl;
-        buffer = await this.download(url, options.signal);
+        buffer = await this.download(url);
       }
 
       const png = await sharp(buffer, { limitInputPixels: MAX_INPUT_PIXELS })
@@ -266,15 +265,12 @@ export class DotcompanyPhotoImporter {
     return null;
   }
 
-  private async download(url: string, outer?: AbortSignal): Promise<Buffer> {
+  private async download(url: string): Promise<Buffer> {
     const ctrl = new AbortController();
     const timer = setTimeout(
       () => ctrl.abort(new Error(`timeout de ${DOWNLOAD_TIMEOUT_MS}ms`)),
       DOWNLOAD_TIMEOUT_MS,
     );
-    const onAbort = () => ctrl.abort(outer?.reason ?? new Error('aborted'));
-    if (outer?.aborted) onAbort();
-    else outer?.addEventListener('abort', onAbort, { once: true });
     try {
       const res = await this.fetchFollowingAllowedRedirects(url, ctrl.signal);
       if ([401, 403, 404, 410].includes(res.status)) {
@@ -300,7 +296,6 @@ export class DotcompanyPhotoImporter {
       return buffer;
     } finally {
       clearTimeout(timer);
-      outer?.removeEventListener('abort', onAbort);
     }
   }
 

@@ -190,7 +190,7 @@ export class EanImportRunner implements OnModuleInit, OnModuleDestroy {
       }> = [];
       for (const item of consultar) {
         const o = summary.outcomes.get(item.ean);
-        if (!o || o.status === 'blocked' || o.status === 'aborted') {
+        if (!o || o.status === 'blocked') {
           liberar.push(item.id);
         } else if (o.status === 'found') {
           encontrados.push({ item, ean: o.ean, outcome: o });

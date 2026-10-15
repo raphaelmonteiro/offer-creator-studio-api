@@ -3,6 +3,7 @@ import {
   DotcompanyAuthError,
   DotcompanyClient,
   DotcompanyError,
+  DotcompanyIdempotencyError,
   DotcompanyNoCreditError,
   DotcompanyRateLimitedError,
   DotcompanyTransientError,
@@ -196,6 +197,40 @@ describe('DotcompanyClient', () => {
       .mockResolvedValueOnce(resposta(200, { itens: [] }));
     const { client } = criar(f);
     await expect(client.lookupBatch(['7891000100103'])).resolves.toMatchObject({ items: [] });
+  });
+
+  it('X-Idempotency-Replay: true marca a resposta como replay (sem novo débito)', async () => {
+    const f = jest
+      .fn()
+      .mockResolvedValue(
+        resposta(
+          200,
+          { itens: [] },
+          { 'X-Idempotency-Replay': 'true', 'X-DotCompany-Credits-Charged': '0' },
+        ),
+      );
+    const { client } = criar(f);
+    const r = await client.lookupBatch(['7891000100103'], { idempotencyKey: 'k' });
+    expect(r.replay).toBe(true);
+    expect(r.creditsCharged).toBe(0);
+    const normal = criar(jest.fn().mockResolvedValue(resposta(200, { itens: [] })));
+    expect((await normal.client.lookupBatch(['7891000100103'])).replay).toBe(false);
+  });
+
+  it.each([
+    ['IDEMPOTENCY_IN_FLIGHT', false],
+    ['IDEMPOTENCY_KEY_ORPHANED', false],
+    ['IDEMPOTENCY_KEY_CONFLICT', true],
+  ])('409 %s vira DotcompanyIdempotencyError, sem nova tentativa', async (code, conflito) => {
+    const f = jest.fn().mockResolvedValue(resposta(409, { detail: 'x' }, { 'X-Error-Code': code }));
+    const { client } = criar(f);
+    const err = await client
+      .lookupBatch(['7891000100103'], { idempotencyKey: 'k' })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DotcompanyIdempotencyError);
+    expect((err as DotcompanyIdempotencyError).errorCode).toBe(code);
+    expect((err as DotcompanyIdempotencyError).keyConflict).toBe(conflito);
+    expect(f).toHaveBeenCalledTimes(1);
   });
 
   it('422 é erro de uso: não repete', async () => {

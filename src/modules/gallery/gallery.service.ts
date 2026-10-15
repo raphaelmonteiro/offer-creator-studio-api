@@ -321,7 +321,6 @@ export class GalleryService implements OnModuleInit {
     size: number;
     metadata: Record<string, unknown> & { ean?: string | null };
     folderName?: string | null;
-    clientIds?: string[];
   }): Promise<{ image: GalleryImage; created: boolean }> {
     const folderId = params.folderName ? await this.ensureFolder(params.folderName) : null;
 
@@ -358,20 +357,11 @@ export class GalleryService implements OnModuleInit {
     if (!id) throw new Error('Falha ao registrar imagem importada na galeria.');
 
     const image = await this.imagesRepository.findOneOrFail({ where: { id } });
-    if (params.clientIds?.length) {
-      await this.clientPreferredImages.bulkAssign([id], params.clientIds, 'add');
-    }
     if (created) {
       this.triggerEmbedding(image);
       this.triggerMetadataEmbedding(image.id, params.metadata);
     }
     return { image, created };
-  }
-
-  /** Marca a imagem como preferida dos clientes (sem tirar marcações existentes). */
-  async ensureClientPreferred(imageId: string, clientIds: string[]): Promise<void> {
-    if (clientIds.length === 0) return;
-    await this.clientPreferredImages.bulkAssign([imageId], clientIds, 'add');
   }
 
   private folderLocks = new Map<string, Promise<string>>();

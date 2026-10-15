@@ -102,14 +102,12 @@ d('GalleryService.registerImportedImage (Postgres real)', () => {
     expect(b.image.id).toBe(a.image.id);
   });
 
-  it('pasta criada uma vez só, mesmo com registros em paralelo; cliente vira preferido', async () => {
+  it('pasta criada uma vez só, mesmo com registros em paralelo; ninguém vira preferido', async () => {
     const { svc, clientPreferred } = criar();
-    const client = '0b5c7a3e-0000-4000-8000-000000000001';
     await Promise.all([
       svc.registerImportedImage({
         ...params('it-dotcompany-c.png'),
         metadata: { ...META, ean: '7896437900012' },
-        clientIds: [client],
       }),
       svc.registerImportedImage({
         ...params('it-dotcompany-d.png'),
@@ -120,6 +118,6 @@ d('GalleryService.registerImportedImage (Postgres real)', () => {
       `SELECT count(*)::int AS n FROM gallery_folders WHERE name = 'DotCompany IT'`,
     );
     expect(n).toBe(1);
-    expect(clientPreferred.bulkAssign).toHaveBeenCalledWith([expect.any(String)], [client], 'add');
+    expect(clientPreferred.bulkAssign).not.toHaveBeenCalled();
   });
 });

@@ -24,6 +24,8 @@ export interface CallMeta {
   creditsCharged: number | null;
   rate: RateInfo | null;
   requestId: string | null;
+  /** `X-Idempotency-Replay: true`: resposta guardada de uma chamada anterior com a mesma chave (sem novo débito). */
+  replay: boolean;
 }
 
 export interface BatchResult extends CallMeta {
@@ -69,6 +71,15 @@ export class DotcompanyRateLimitedError extends DotcompanyError {
     requestId: string | null,
   ) {
     super(message, 429, errorCode, requestId);
+  }
+}
+/**
+ * 409 de idempotência. `IDEMPOTENCY_IN_FLIGHT` / `IDEMPOTENCY_KEY_ORPHANED`: a chave não serve mais
+ * (reserva presa depois de 5xx/429); `IDEMPOTENCY_KEY_CONFLICT`: mesma chave com corpo diferente.
+ */
+export class DotcompanyIdempotencyError extends DotcompanyError {
+  get keyConflict(): boolean {
+    return this.errorCode === 'IDEMPOTENCY_KEY_CONFLICT';
   }
 }
 /** 5xx, timeout ou rede depois das tentativas. */
@@ -286,6 +297,7 @@ export class DotcompanyClient {
         creditsCharged: intHeader(response.headers, 'x-dotcompany-credits-charged'),
         rate: this.readRate(response.headers),
         requestId: response.headers.get('x-request-id'),
+        replay: response.headers.get('x-idempotency-replay')?.toLowerCase() === 'true',
       };
       const errorCode = response.headers.get('x-error-code');
 
@@ -303,6 +315,9 @@ export class DotcompanyClient {
       }
       if (response.status === 401 || response.status === 403) {
         throw new DotcompanyAuthError(msg, response.status, errorCode, meta.requestId);
+      }
+      if (response.status === 409) {
+        throw new DotcompanyIdempotencyError(msg, 409, errorCode, meta.requestId);
       }
       if (response.status === 429) {
         const retryAfter = intHeader(response.headers, 'retry-after') ?? 60;

@@ -8,8 +8,10 @@ import {
   DOTCOMPANY_BATCH_MAX,
   DotcompanyAuthError,
   DotcompanyClient,
+  DotcompanyIdempotencyError,
   DotcompanyNoCreditError,
   DotcompanyRateLimitedError,
+  DotcompanyTransientError,
 } from './dotcompany.client';
 import type {
   BudgetDenyReason,
@@ -17,6 +19,11 @@ import type {
   DotcompanyLookupItem,
   DotcompanyProduct,
 } from './dotcompany.types';
+import {
+  DotcompanyPendingBatchStore,
+  PENDING_BATCH_MAX_ATTEMPTS,
+  PendingBatchRow,
+} from './dotcompany-pending-batch.store';
 import { DotcompanyLookup } from './entities/dotcompany-lookup.entity';
 
 /** Preço por item encontrado quando a DotCompany não informa no header (4 créditos = R$ 0,04). */
@@ -70,8 +77,6 @@ export type LookupOutcomeStatus =
   | 'internal_use'
   /** O controlador de consumo negou (ou a DotCompany respondeu 402/429). */
   | 'blocked'
-  /** Abortado pelo chamador (prazo do encarte). */
-  | 'aborted'
   | 'error';
 
 export interface LookupOutcome {
@@ -111,9 +116,28 @@ interface ResolveCtx {
   setFor: (ean: string, partial: Omit<LookupOutcome, 'ean' | 'input'>) => void;
 }
 
-function isAbortLike(err: unknown): boolean {
+/** Chamada paga sem resposta conclusiva (timeout do cliente, rede, 5xx esgotado, abort): pode ter sido cobrada. */
+function isUncertainFailure(err: unknown): boolean {
+  if (err instanceof DotcompanyTransientError) return true;
   const name = (err as { name?: string } | null)?.name;
   return name === 'AbortError' || name === 'TimeoutError';
+}
+
+/** Um lote a enviar; `pending` quando repete um lote de resultado incerto. */
+interface Chunk {
+  gtins: string[];
+  pending: PendingBatchRow | null;
+}
+
+interface Attempt {
+  chunk: Chunk;
+  pending: PendingBatchRow;
+  rest: string[];
+  ctx: ResolveCtx;
+  reserved: number;
+  estimated: number;
+  /** Já é a repetição com chave nova depois de descartar uma chave morta. */
+  fresh: boolean;
 }
 
 function productOf(raw: DotcompanyLookupItem | null | undefined): DotcompanyProduct | null {
@@ -131,11 +155,15 @@ export class DotcompanyLookupService {
   /** EAN → consulta em andamento neste processo (1 processo PM2 em produção). */
   private readonly inflight = new Map<string, Promise<void>>();
 
+  private readonly pending: DotcompanyPendingBatchStore;
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly client: DotcompanyClient,
     private readonly budget: DotcompanyBudgetService,
-  ) {}
+  ) {
+    this.pending = new DotcompanyPendingBatchStore(dataSource);
+  }
 
   now(): Date {
     return this.budget.now();
@@ -234,21 +262,15 @@ export class DotcompanyLookupService {
   /**
    * Consulta o que falta: o que outro chamador já está consultando é esperado
    * (e relido do cache); o resto vai à DotCompany, registrado como "em voo".
+   * Lote de resultado incerto de uma tentativa anterior é repetido idêntico
+   * (mesmos GTINs, mesma `Idempotency-Key`) em vez de montar um lote novo.
    */
   private async fetchMissing(eans: string[], ctx: ResolveCtx, round: number): Promise<void> {
     if (eans.length === 0) return;
-    // Síncrono do início ao registro: ninguém passa entre a checagem e o registro.
-    const waitFor: Array<{ ean: string; promise: Promise<void> }> = [];
-    const mine: string[] = [];
-    for (const ean of eans) {
-      const promise = this.inflight.get(ean);
-      if (promise && round < MAX_WAIT_ROUNDS) waitFor.push({ ean, promise });
-      else mine.push(ean);
-    }
-    const chunks: string[][] = [];
-    for (let i = 0; i < mine.length; i += DOTCOMPANY_BATCH_MAX)
-      chunks.push(mine.slice(i, i + DOTCOMPANY_BATCH_MAX));
-    const dones = chunks.map((chunk) => this.registerInflight(chunk));
+    const pendings = await this.pending.findFor(eans, this.now());
+    // Síncrono daqui ao registro: ninguém passa entre a checagem e o registro.
+    const { waitFor, chunks } = this.planChunks(eans, pendings, round);
+    const dones = chunks.map((chunk) => this.registerInflight(chunk.gtins));
 
     const waiting = (async () => {
       if (waitFor.length === 0) return;
@@ -267,6 +289,38 @@ export class DotcompanyLookupService {
     }
   }
 
+  private planChunks(
+    eans: string[],
+    pendings: PendingBatchRow[],
+    round: number,
+  ): { waitFor: Array<{ ean: string; promise: Promise<void> }>; chunks: Chunk[] } {
+    const waitFor: Array<{ ean: string; promise: Promise<void> }> = [];
+    const chunks: Chunk[] = [];
+    const claimed = new Set<string>();
+    const wanted = new Set(eans);
+    for (const p of pendings) {
+      const members = p.gtins.filter((g) => wanted.has(g) && !claimed.has(g));
+      if (members.length === 0) continue;
+      for (const m of members) claimed.add(m);
+      const flying = p.gtins.map((g) => this.inflight.get(g)).find(Boolean);
+      if (flying && round < MAX_WAIT_ROUNDS) {
+        for (const ean of members) waitFor.push({ ean, promise: flying });
+      } else {
+        chunks.push({ gtins: p.gtins, pending: p });
+      }
+    }
+    const mine: string[] = [];
+    for (const ean of eans) {
+      if (claimed.has(ean)) continue;
+      const promise = this.inflight.get(ean);
+      if (promise && round < MAX_WAIT_ROUNDS) waitFor.push({ ean, promise });
+      else mine.push(ean);
+    }
+    for (let i = 0; i < mine.length; i += DOTCOMPANY_BATCH_MAX)
+      chunks.push({ gtins: mine.slice(i, i + DOTCOMPANY_BATCH_MAX), pending: null });
+    return { waitFor, chunks };
+  }
+
   private registerInflight(eans: string[]): () => void {
     let finish!: () => void;
     const promise = new Promise<void>((resolve) => {
@@ -280,22 +334,31 @@ export class DotcompanyLookupService {
   }
 
   private async fetchOwn(
-    chunks: string[][],
+    chunks: Chunk[],
     dones: Array<() => void>,
     ctx: ResolveCtx,
   ): Promise<void> {
     for (let i = 0; i < chunks.length; i++) {
-      const rest = chunks.slice(i).flat();
+      const rest = chunks.slice(i).flatMap((c) => c.gtins);
       const stop = await this.fetchChunk(chunks[i], rest, ctx);
       dones[i]();
-      if (stop) return;
+      if (stop) {
+        // Os lotes restantes não serão consultados por esta resolução: acorda quem espera por eles.
+        for (let j = i + 1; j < dones.length; j++) dones[j]();
+        return;
+      }
     }
   }
 
   /** Uma chamada ao lote. Devolve `true` quando os próximos lotes não devem ser tentados. */
-  private async fetchChunk(chunk: string[], rest: string[], ctx: ResolveCtx): Promise<boolean> {
-    const { kind, summary, setFor, now } = ctx;
-    const estimated = CREDITS_PER_FOUND * chunk.length;
+  private async fetchChunk(
+    chunk: Chunk,
+    rest: string[],
+    ctx: ResolveCtx,
+    fresh = false,
+  ): Promise<boolean> {
+    const { kind, summary, setFor } = ctx;
+    const estimated = CREDITS_PER_FOUND * chunk.gtins.length;
     const auth = await this.budget.acquire({ kind, estimatedCredits: estimated });
     if (!auth.ok) {
       summary.blocked = { reason: auth.reason!, retryAt: auth.retryAt, message: auth.message };
@@ -311,38 +374,63 @@ export class DotcompanyLookupService {
     }
     const reserved = auth.reserved ?? 0;
 
+    let pending: PendingBatchRow;
+    try {
+      pending = await this.startAttempt(chunk);
+    } catch (err) {
+      await this.budget.release({ kind, requests: 0, errors: 1, reserved });
+      const msg = (err as Error).message;
+      this.logger.warn(`Lote DotCompany não iniciado (${chunk.gtins.length} EANs): ${msg}`);
+      for (const ean of chunk.gtins) setFor(ean, { status: 'error', reason: msg });
+      return false;
+    }
+    const attempt: Attempt = { chunk, pending, rest, ctx, reserved, estimated, fresh };
+
     summary.requests += 1;
     let res: Awaited<ReturnType<DotcompanyClient['lookupBatch']>>;
     try {
-      res = await this.client.lookupBatch(chunk, { idempotencyKey: randomUUID() });
+      res = await this.client.lookupBatch(pending.gtins, { idempotencyKey: pending.key });
     } catch (err) {
-      // Chamada interrompida (ex.: shutdown): pode ter sido processada e cobrada.
-      // Por segurança, registra o custo estimado do lote.
-      await this.budget.release({
-        kind,
-        errors: 1,
-        reserved,
-        credits: isAbortLike(err) ? estimated : 0,
-      });
-      return this.handleBatchError(err, chunk, rest, ctx);
+      return this.onBatchFailure(err, attempt);
     }
+    await this.onBatchSuccess(res, attempt);
+    return false;
+  }
 
+  /** Grava o lote ANTES de enviar (ou conta mais uma tentativa do pendente repetido). */
+  private async startAttempt(chunk: Chunk): Promise<PendingBatchRow> {
+    if (!chunk.pending) return this.pending.create(randomUUID(), chunk.gtins, this.now());
+    await this.pending.addAttempt(chunk.pending.id);
+    return { ...chunk.pending, attempts: chunk.pending.attempts + 1 };
+  }
+
+  /** O servidor respondeu: grava cache e consumo (só a diferença sobre o custo estimado já lançado). */
+  private async onBatchSuccess(
+    res: Awaited<ReturnType<DotcompanyClient['lookupBatch']>>,
+    a: Attempt,
+  ): Promise<void> {
+    const { chunk, pending, ctx, reserved, estimated } = a;
+    const { kind, summary, setFor, now } = ctx;
+    const recorded = pending.creditsRecorded ?? 0;
     let released = false;
     try {
-      const found = await this.storeBatch(chunk, res.items, now);
-      const credits = res.creditsCharged ?? CREDITS_PER_FOUND * found.length;
-      summary.credits += credits;
+      const found = await this.storeBatch(chunk.gtins, res.items, now);
+      const actual = res.creditsCharged ?? CREDITS_PER_FOUND * found.length;
+      if (res.replay)
+        this.logger.log(`Lote DotCompany repetido: replay (${pending.attempts}ª chamada).`);
+      summary.credits += actual;
       released = true;
       await this.budget.release({
         kind,
-        credits,
+        credits: Math.max(0, actual - recorded),
         found: found.length,
-        notFound: chunk.length - found.length,
+        notFound: chunk.gtins.length - found.length,
         rate: res.rate,
         reserved,
       });
-      const rows = await this.findCached(chunk);
-      for (const ean of chunk) {
+      await this.quiet(this.pending.remove(pending.id));
+      const rows = await this.findCached(chunk.gtins);
+      for (const ean of chunk.gtins) {
         const row = rows.get(ean);
         if (row?.status === 'found')
           setFor(ean, { status: 'found', product: productOf(row.raw), lookup: row, cached: false });
@@ -356,19 +444,80 @@ export class DotcompanyLookupService {
       }
     } catch (err) {
       // A DotCompany respondeu (e pode ter cobrado), mas a gravação local falhou.
+      // O pendente fica: a próxima resolução repete a chave e recebe o replay, sem novo débito.
       if (!released) {
-        await this.budget.release({
-          kind,
-          credits: res.creditsCharged ?? estimated,
-          errors: 1,
-          reserved,
-        });
+        const owed = Math.max(0, (res.creditsCharged ?? estimated) - recorded);
+        await this.budget.release({ kind, credits: owed, errors: 1, reserved });
+        if (owed > 0) await this.quiet(this.pending.setRecorded(pending.id, recorded + owed));
       }
       const msg = (err as Error).message;
-      this.logger.warn(`Lote DotCompany não gravado (${chunk.length} EANs): ${msg}`);
-      for (const ean of chunk) setFor(ean, { status: 'error', reason: msg });
+      this.logger.warn(`Lote DotCompany não gravado (${chunk.gtins.length} EANs): ${msg}`);
+      for (const ean of chunk.gtins) setFor(ean, { status: 'error', reason: msg });
     }
-    return false;
+  }
+
+  /**
+   * A chamada ao lote falhou. Sem resposta conclusiva (timeout, rede, 5xx) o
+   * lote pode ter sido processado e cobrado: lança o custo estimado uma vez e
+   * guarda chave + GTINs para repetir o MESMO lote. Com resposta conclusiva
+   * (402, 429, 401/403, outro 4xx) a chave é descartada.
+   */
+  private async onBatchFailure(err: unknown, a: Attempt): Promise<boolean> {
+    const { chunk, pending, rest, ctx, reserved, estimated } = a;
+    const { kind } = ctx;
+    if (err instanceof DotcompanyIdempotencyError) return this.onIdempotencyConflict(err, a);
+
+    if (isUncertainFailure(err)) {
+      const first = pending.creditsRecorded === null;
+      await this.budget.release({ kind, errors: 1, credits: first ? estimated : 0, reserved });
+      if (first) await this.quiet(this.pending.setRecorded(pending.id, estimated));
+      if (pending.attempts >= PENDING_BATCH_MAX_ATTEMPTS) {
+        this.logger.warn(
+          `Lote DotCompany abandonado após ${pending.attempts} chamadas sem resposta.`,
+        );
+        await this.quiet(this.pending.remove(pending.id));
+      } else {
+        await this.quiet(this.pending.setError(pending.id, (err as Error).message));
+      }
+    } else {
+      await this.quiet(this.pending.remove(pending.id));
+      await this.budget.release({ kind, errors: 1, reserved });
+    }
+    return this.handleBatchError(err, chunk.gtins, rest, ctx);
+  }
+
+  /**
+   * 409 de idempotência. IN_FLIGHT/ORPHANED: a reserva do servidor ficou presa e
+   * a chave não serve mais; pode ter havido cobrança (lança o estimado, se ainda
+   * não lançado) e o lote é consultado de novo com chave nova. KEY_CONFLICT:
+   * corpo diferente com a mesma chave é bug nosso; nada foi processado.
+   */
+  private async onIdempotencyConflict(
+    err: DotcompanyIdempotencyError,
+    a: Attempt,
+  ): Promise<boolean> {
+    const { chunk, pending, rest, ctx, reserved, estimated, fresh } = a;
+    if (err.keyConflict) {
+      this.logger.error(`Idempotency-Key reutilizada com corpo diferente (bug): ${err.message}`);
+    } else {
+      this.logger.warn(
+        `Chave de idempotência descartada (${err.errorCode}); pode ter havido cobrança.`,
+      );
+    }
+    const owed = err.keyConflict ? 0 : Math.max(0, estimated - (pending.creditsRecorded ?? 0));
+    await this.budget.release({ kind: ctx.kind, errors: 1, credits: owed, reserved });
+    await this.quiet(this.pending.remove(pending.id));
+    if (!fresh) return this.fetchChunk({ gtins: chunk.gtins, pending: null }, rest, ctx, true);
+    return this.handleBatchError(err, chunk.gtins, rest, ctx);
+  }
+
+  /** Falha de gravação do pendente não derruba a resolução (o pior caso é uma chave a menos para repetir). */
+  private async quiet(work: Promise<unknown>): Promise<void> {
+    try {
+      await work;
+    } catch (err) {
+      this.logger.warn(`Lote pendente DotCompany: ${(err as Error).message}`);
+    }
   }
 
   /** Falha da chamada ao lote → resultado por EAN. `true` = parar os próximos lotes. */
@@ -423,10 +572,13 @@ export class DotcompanyLookupService {
   /**
    * Reconsulta 1 EAN encontrado com o ETag guardado (renova a URL assinada da
    * foto quando ela expirou). 304 mantém o cache e renova a data, sem custo.
+   * O GET único não tem `Idempotency-Key` na API: se a resposta se perder, o
+   * custo estimado (4 créditos) é lançado e a chamada NÃO é repetida sozinha.
+   * Nenhum prazo de chamador cancela esta consulta paga.
    */
   async refreshOne(
     ean: string,
-    options: { kind: ConsumerKind; signal?: AbortSignal },
+    options: { kind: ConsumerKind },
   ): Promise<{
     status: 'updated' | 'not_modified' | 'blocked' | 'error';
     lookup: DotcompanyLookup | null;
@@ -438,13 +590,12 @@ export class DotcompanyLookupService {
       estimatedCredits: CREDITS_PER_FOUND,
     });
     if (!auth.ok) return { status: 'blocked', lookup: current, reason: auth.message ?? undefined };
+    let released = false;
     try {
-      const res = await this.client.lookupSingle(ean, {
-        etag: current?.etag ?? null,
-        signal: options.signal,
-      });
+      const res = await this.client.lookupSingle(ean, { etag: current?.etag ?? null });
       const now = this.now();
       if (res.notModified) {
+        released = true;
         await this.budget.release({
           kind: options.kind,
           credits: 0,
@@ -459,6 +610,7 @@ export class DotcompanyLookupService {
       }
       const found = Boolean(res.item?.encontrado && res.item.produto);
       const credits = res.creditsCharged ?? (found ? CREDITS_PER_FOUND : 0);
+      released = true;
       await this.budget.release({
         kind: options.kind,
         credits,
@@ -470,7 +622,15 @@ export class DotcompanyLookupService {
       await this.upsert(ean, res.item, found, now, res.etag);
       return { status: 'updated', lookup: (await this.findCached([ean])).get(ean) ?? null };
     } catch (err) {
-      await this.budget.release({ kind: options.kind, errors: 1, reserved: auth.reserved });
+      if (!released) {
+        await this.budget.release({
+          kind: options.kind,
+          errors: 1,
+          // Sem resposta conclusiva a consulta pode ter sido cobrada.
+          credits: isUncertainFailure(err) ? CREDITS_PER_FOUND : 0,
+          reserved: auth.reserved,
+        });
+      }
       if (err instanceof DotcompanyNoCreditError) await this.budget.onNoCredit();
       if (err instanceof DotcompanyRateLimitedError)
         this.budget.onRateLimited(err.retryAfterSec, err.rate);

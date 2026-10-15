@@ -327,7 +327,6 @@ export class FlyerEanResolutionService {
         const o = summary.outcomes.get(item.ean);
         const base = { productId: item.product.id, ean: item.ean };
         if (o?.status === 'found' && o.lookup) found.push({ item, lookup: o.lookup });
-        else if (o?.status === 'aborted') toBackground.push(item);
         else if (o?.status === 'blocked') {
           status.set(item.product.id, {
             ...base,

@@ -4,6 +4,7 @@ import { EanMatchJob } from './entities/ean-match-job.entity';
 import { EanReference } from './entities/ean-reference.entity';
 import { DotcompanyBalance } from './dotcompany/entities/dotcompany-balance.entity';
 import { DotcompanyLookup } from './dotcompany/entities/dotcompany-lookup.entity';
+import { DotcompanyPendingBatch } from './dotcompany/entities/dotcompany-pending-batch.entity';
 import { DotcompanyUsageHourly } from './dotcompany/entities/dotcompany-usage-hourly.entity';
 import { EanImportItem } from './dotcompany/entities/ean-import-item.entity';
 import { EanImportJob } from './dotcompany/entities/ean-import-job.entity';
@@ -35,6 +36,7 @@ export function criarDataSourceDeTeste(): DataSource {
       EanImportItem,
       DotcompanyUsageHourly,
       DotcompanyBalance,
+      DotcompanyPendingBatch,
       GalleryImage,
       GalleryFolder,
     ],
