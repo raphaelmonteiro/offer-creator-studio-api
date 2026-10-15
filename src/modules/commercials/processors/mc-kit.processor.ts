@@ -66,6 +66,40 @@ type KitIdentity = Required<KitReferencePromptOptions> & {
  */
 export const MIN_KIT_REFERENCES = 2;
 
+/** Lado das referências mock derivadas da identidade (as reais do Gemini saem 1:1). */
+export const MOCK_REFERENCE_SIZE = 1024;
+
+/**
+ * Referência mock a partir da imagem de identidade (ver
+ * `McKitProcessor.mockReferenceImage`): puro sharp, lança se a imagem não abre.
+ */
+export async function mockReferenceFromIdentity(
+  slot: KitReferenceSlot,
+  identityImage: Buffer,
+  backgroundColor: string,
+): Promise<Buffer> {
+  const size = MOCK_REFERENCE_SIZE;
+  // a cor do kit é #RRGGBB; o default legado do prompt ("light gray") não é cor do sharp
+  const kitColor = /^#[0-9a-f]{6}$/i.test(backgroundColor.trim())
+    ? backgroundColor.trim()
+    : '#D3D3D3';
+  const flat = await sharp(identityImage).flatten({ background: kitColor }).png().toBuffer();
+  const corner = await sharp(flat)
+    .extract({ left: 0, top: 0, width: 1, height: 1 })
+    .raw()
+    .toBuffer();
+  const background = { r: corner[0], g: corner[1], b: corner[2] };
+  const left = Math.round(size * 0.1);
+  const top = Math.round(size * 0.12);
+  let fitted = sharp(flat).resize(size - 2 * left, size - top, { fit: 'contain', background });
+  if (slot === 1) fitted = fitted.flop();
+  const body = await fitted.png().toBuffer();
+  return sharp({ create: { width: size, height: size, channels: 3, background } })
+    .composite([{ input: body, left, top }])
+    .png()
+    .toBuffer();
+}
+
 /** Cores de fundo dos PNGs sintéticos do provider mock (1 por slot). */
 const MOCK_SLOT_COLORS = ['#4F86C6', '#6BAA75', '#C68C4F', '#A05FB5'] as const;
 
@@ -90,8 +124,9 @@ const MOCK_SLOT_COLORS = ['#4F86C6', '#6BAA75', '#C68C4F', '#A05FB5'] as const;
  * referências e ficha intactas, evento `references_regeneration_failed` (M3).
  * `failed` terminal fica só para a primeira geração.
  *
- * MC_KIT_PROVIDER=mock (default em dev): descrição fixa + 4 PNGs sintéticos
- * via sharp — pipeline inteiro sem gastar API. 'gemini' liga o real.
+ * MC_KIT_PROVIDER=mock (default em dev): descrição fixa + 4 referências
+ * montadas com sharp a partir da imagem de identidade enviada (o tile sai do
+ * personagem real) — pipeline inteiro sem gastar API. 'gemini' liga o real.
  *
  * CUSTO (tarefa 2.6): cada chamada paga (descrição canônica e cada referência
  * pelo modelo EFETIVO) grava um evento `provider_cost` e soma em
@@ -616,7 +651,11 @@ export class McKitProcessor {
     const costContext = { slot, requestedModel, requestHash, generationKey };
     let generated: { image: Buffer; model: string; usage?: GeminiUsage | null };
     if (mock) {
-      generated = { image: await this.mockReferenceImage(slot), model: 'mock', usage: null };
+      generated = {
+        image: await this.mockReferenceImage(slot, mascotImage, identity.backgroundColor),
+        model: 'mock',
+        usage: null,
+      };
     } else {
       try {
         generated = await this.gemini.generateImageWithModel({
@@ -773,8 +812,34 @@ export class McKitProcessor {
     };
   }
 
+  /**
+   * Referência MOCK (sem custo) DERIVADA da imagem de identidade enviada
+   * (achado 6 da 3.7): sem isso o tile do kit mock era um círculo sintético e
+   * nenhum teste local de fala usava o personagem real. A imagem é achatada
+   * sobre a cor do kit, encaixada (contain) num quadro 1024×1024 do mesmo fundo
+   * da imagem (cor do canto), deixando 12% de margem no topo e 10% nas laterais,
+   * para a caixa do rosto do gate de boca mock (x 0,30–0,70, y 0,15–0,55) cair na
+   * parte de cima do personagem e a borda do tile ficar lisa. O perfil (slot 1)
+   * sai espelhado, só para as células não serem idênticas. Imagem ilegível →
+   * o PNG sintético de antes.
+   */
+  private async mockReferenceImage(
+    slot: KitReferenceSlot,
+    identityImage: Buffer,
+    backgroundColor: string,
+  ): Promise<Buffer> {
+    try {
+      return await mockReferenceFromIdentity(slot, identityImage, backgroundColor);
+    } catch (err) {
+      this.logger.warn(
+        `Kit mock: identidade ilegível (${(err as Error).message}) — referência sintética no slot ${slot}.`,
+      );
+      return this.syntheticReferenceImage(slot);
+    }
+  }
+
   /** PNG sintético (sem custo): fundo colorido + rótulo do slot, via sharp. */
-  private async mockReferenceImage(slot: KitReferenceSlot): Promise<Buffer> {
+  private async syntheticReferenceImage(slot: KitReferenceSlot): Promise<Buffer> {
     const color = MOCK_SLOT_COLORS[slot];
     const label = KIT_REFERENCE_SLOTS[slot];
     const svg =

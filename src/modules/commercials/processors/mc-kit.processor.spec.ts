@@ -14,11 +14,13 @@ import { TaskTransitionService } from '../../../shared/state/task-transition.ser
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import { McKitMouthGate, McMouthVerdict } from '../domain/mc-mouth-gate';
+import { computeTileCrop, edgeUniformity } from '../domain/mc-tile';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McEvent } from '../entities/mc-event.entity';
 import { McKitViewService } from '../services/mc-kit-view.service';
-import { McKitProcessor } from './mc-kit.processor';
+import * as sharp from 'sharp';
+import { McKitProcessor, MOCK_REFERENCE_SIZE, mockReferenceFromIdentity } from './mc-kit.processor';
 
 /** `JsonContains` do TypeORM (`@>` no Postgres) avaliado em memória: subconjunto raso. */
 function jsonContains(value: unknown, operator: unknown): boolean {
@@ -231,6 +233,99 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       MC_EVENTS_CHANNEL,
     );
     expect(gemini.generateImageWithModel).not.toHaveBeenCalled(); // mock não gasta API
+  });
+
+  describe('referências mock derivadas da identidade enviada (achado 6 da 3.7)', () => {
+    /** Mascote de teste: círculo vermelho sobre fundo transparente, 400×600. */
+    const mascot = () =>
+      sharp(
+        Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600">' +
+            '<circle cx="200" cy="160" r="140" fill="#E01010"/></svg>',
+        ),
+      )
+        .png()
+        .toBuffer();
+    const pixel = async (png: Buffer, x: number, y: number) => {
+      const raw = await sharp(png)
+        .extract({ left: x, top: y, width: 1, height: 1 })
+        .raw()
+        .toBuffer();
+      return [raw[0], raw[1], raw[2]];
+    };
+
+    it('compõe a imagem do mascote no quadro, com o fundo do kit e o rosto na caixa do gate mock', async () => {
+      const png = await mockReferenceFromIdentity(2, await mascot(), '#FFCC00');
+      const meta = await sharp(png).metadata();
+      expect([meta.width, meta.height]).toEqual([MOCK_REFERENCE_SIZE, MOCK_REFERENCE_SIZE]);
+      // borda lisa na cor do kit (o tile é recortado com fundo uniforme)
+      expect(await pixel(png, 0, 0)).toEqual([255, 204, 0]);
+      expect(await pixel(png, MOCK_REFERENCE_SIZE - 1, MOCK_REFERENCE_SIZE - 1)).toEqual([
+        255, 204, 0,
+      ]);
+      // centro da caixa do rosto do gate mock (x 0,5 · y 0,35) cai no personagem
+      const [r, g, b] = await pixel(png, 512, Math.round(0.35 * MOCK_REFERENCE_SIZE));
+      expect(r).toBeGreaterThan(200);
+      expect(g).toBeLessThan(40);
+      expect(b).toBeLessThan(40);
+    });
+
+    it('o tile recortado pela caixa do gate mock tem borda lisa (sem TILE_BORDER_NOT_UNIFORM)', async () => {
+      const png = await mockReferenceFromIdentity(2, await mascot(), '#FFCC00');
+      const plan = computeTileCrop({
+        width: MOCK_REFERENCE_SIZE,
+        height: MOCK_REFERENCE_SIZE,
+        bbox: { x: 0.3, y: 0.15, w: 0.4, h: 0.4 },
+      });
+      const { data, info } = await sharp(png)
+        .ensureAlpha()
+        .extract(plan.extract)
+        .resize(64, 64, { fit: 'fill' })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const edge = edgeUniformity({ data, width: info.width, height: info.height, channels: 4 });
+      expect(edge.uniform).toBe(true);
+      expect(edge.hex?.toUpperCase()).toBe('#FFCC00');
+    });
+
+    it('imagem opaca: o fundo do quadro é a cor do canto da própria imagem; cor legada não-hex não quebra', async () => {
+      const opaque = await sharp({
+        create: { width: 300, height: 300, channels: 3, background: { r: 250, g: 250, b: 250 } },
+      })
+        .composite([
+          {
+            input: await sharp({
+              create: { width: 100, height: 100, channels: 3, background: '#0000FF' },
+            })
+              .png()
+              .toBuffer(),
+            left: 100,
+            top: 40,
+          },
+        ])
+        .png()
+        .toBuffer();
+      const png = await mockReferenceFromIdentity(0, opaque, 'light gray');
+      expect(await pixel(png, 0, 0)).toEqual([250, 250, 250]);
+    });
+
+    it('processo mock: a referência frontal (slot 2) gravada é a do mascote, não o círculo sintético', async () => {
+      await fs.writeFile(path.join(tmpDir, 'mascots', 'real.png'), await mascot());
+      mascots.findOne.mockResolvedValue({
+        id: 'mascot-1',
+        cutoutUrl: '/uploads/mascots/real.png',
+        sourceImageUrl: '/uploads/mascots/real.png',
+      });
+      await processor.process({ kitId: 'kit-1' });
+      const front = savedAssets.find((a) => (a.metadata as { slot: number }).slot === 2);
+      const file = path.join(tmpDir, (front?.fileUrl as string).replace(/^\/uploads\//, ''));
+      const png = await fs.readFile(file);
+      const [r, g, b] = await pixel(png, 512, Math.round(0.35 * MOCK_REFERENCE_SIZE));
+      expect(r).toBeGreaterThan(200);
+      expect(g).toBeLessThan(40);
+      expect(b).toBeLessThan(40);
+      expect(gemini.generateImageWithModel).not.toHaveBeenCalled();
+    });
   });
 
   it('gemini: falha de UMA imagem não derruba o kit — segue para review com 3 referências', async () => {
