@@ -323,6 +323,79 @@ export function buildKitReferencePrompt(
   return lines.join('\n');
 }
 
+// ───────────────────── descrição canônica (gpt-4o visão) ─────────────────────
+
+/**
+ * Regra de identidade ancorada na IMAGEM de referência — vai como primeiro
+ * `doNot` pedido ao modelo de visão, no lugar de uma espécie adivinhada.
+ */
+export const KIT_IDENTITY_ANCHOR_RULE =
+  'keep the exact character from the reference image (same face, anatomy, proportions and outfit)';
+
+/** Teto do nome do mascote usado como pista no prompt da descrição. */
+const DESC_HINT_NAME_MAX = 80;
+
+/**
+ * Prompt de sistema da descrição canônica. Achado da execução real da 2.6
+ * (15/10/2026): o gpt-4o chamou a capivara de "beaver" e gravou "do not
+ * change beaver species" nos `doNots`. Por isso: espécie só quando
+ * inequívoca, senão a incerteza dita ou um termo neutro; e as regras de
+ * identidade se ancoram na imagem de referência, nunca numa espécie.
+ */
+export function buildCanonicalDescSystemPrompt(): string {
+  return (
+    'You describe brand mascots for faithful reproduction by image models. ' +
+    'The reference image always travels with your description: the IMAGE is the source of truth ' +
+    'and your text only supports it, so a wrong guess is worse than a neutral word.\n' +
+    'Separate WHAT THE CHARACTER IS from WHAT IT IS HOLDING:\n' +
+    '- "traits": inherent features only — kind of creature, anatomy, proportions, fur/skin, ' +
+    'facial features, clothing and worn items (apron, scarf, badge, hat).\n' +
+    '- Species: name a specific species or animal ONLY when you are certain from the image. ' +
+    'If you are not certain, say so explicitly (e.g. "rodent-like animal, exact species uncertain") ' +
+    'or use a neutral term ("furry animal character", "creature"). Never invent or guess a species; ' +
+    'describe the visible features (teeth, snout, ears, tail, fur color) instead.\n' +
+    '- "accessories": removable props the character carries or holds in the ' +
+    'reference art (shopping basket, box, phone, tray, bag, product). These are ' +
+    'NOT part of the character — never list them in "traits" or "doNots".\n' +
+    '- "colors": dominant colors, hex codes when possible.\n' +
+    '- "style": the visual style.\n' +
+    `- "doNots": identity rules that must never change. The FIRST rule is exactly "${KIT_IDENTITY_ANCHOR_RULE}". ` +
+    'Anchor every identity rule on the reference image ("the character in the reference image"), ' +
+    'not on a species name: never write a doNot that names a species or animal (write ' +
+    '"do not change the character into another animal" instead). Other rules: outfit colors, ' +
+    'proportions. Never write a doNot that requires keeping an accessory.\n' +
+    'Write these fields in English (they feed image models). Then fill "pt" with ' +
+    'the Brazilian Portuguese translation of traits, accessories, style and doNots, ' +
+    'in the SAME order and with the SAME number of items — it is what the user reads.'
+  );
+}
+
+/** Pista do usuário para a descrição (nome do mascote/logo cadastrado). */
+export interface CanonicalDescHint {
+  name?: string | null;
+}
+
+/**
+ * Mensagem do usuário da descrição canônica. O nome do mascote entra como
+ * PISTA (pode indicar a espécie: "Capi, a capivara"), nunca como verdade
+ * acima da imagem; sanitizado (uma linha, sem aspas, com teto).
+ */
+export function buildCanonicalDescUserPrompt(hint: CanonicalDescHint = {}): string {
+  const base = 'Describe this mascot character for a character reference sheet.';
+  const name = (hint.name ?? '')
+    .replace(/[\r\n\t"“”]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, DESC_HINT_NAME_MAX)
+    .trim();
+  if (!name) return base;
+  return (
+    `${base} The user registered it as "${name}". Use the name only as a hint (it may tell ` +
+    'what animal the character is); if it does not clearly agree with the image, trust the image ' +
+    'and keep the species neutral or marked as uncertain.'
+  );
+}
+
 // ───────────────────── candidatos de mascotização e variante com boca (D4) ─────────────────────
 
 /** Cor de fundo padrão do tile e dos candidatos de um kit de logo (cinza claro, uniforme). */

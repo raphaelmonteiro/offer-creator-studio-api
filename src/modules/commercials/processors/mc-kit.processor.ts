@@ -22,6 +22,8 @@ import { TaskTransitionService } from '../../../shared/state/task-transition.ser
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import {
+  buildCanonicalDescSystemPrompt,
+  buildCanonicalDescUserPrompt,
   buildKitReferencePrompt,
   isKitReferenceSlot,
   KIT_FRONT_SLOT,
@@ -500,6 +502,7 @@ export class McKitProcessor {
       throw new Error('OPENAI_API_KEY não configurada — necessária para a descrição canônica');
     }
     const model = this.config.get<string>('OPENAI_TEXT_MODEL', 'gpt-4o');
+    const mascotName = kit ? await this.mascotNameHint(kit) : null;
     const dataUri = `data:${sniffImageMime(mascotImage)};base64,${mascotImage.toString('base64')}`;
     const openai = this.openai;
     const response = await withOpenAiRetry(() =>
@@ -542,29 +545,12 @@ export class McKitProcessor {
           messages: [
             {
               role: 'system',
-              content:
-                'You describe brand mascots for faithful reproduction by image models. ' +
-                'Separate WHAT THE CHARACTER IS from WHAT IT IS HOLDING:\n' +
-                '- "traits": inherent features only — species, anatomy, proportions, fur/skin, ' +
-                'facial features, clothing and worn items (apron, scarf, badge, hat).\n' +
-                '- "accessories": removable props the character carries or holds in the ' +
-                'reference art (shopping basket, box, phone, tray, bag, product). These are ' +
-                'NOT part of the character — never list them in "traits" or "doNots".\n' +
-                '- "colors": dominant colors, hex codes when possible.\n' +
-                '- "style": the visual style.\n' +
-                '- "doNots": identity rules that must never change (species, outfit colors, ' +
-                'proportions). Never write a doNot that requires keeping an accessory.\n' +
-                'Write these fields in English (they feed image models). Then fill "pt" with ' +
-                'the Brazilian Portuguese translation of traits, accessories, style and doNots, ' +
-                'in the SAME order and with the SAME number of items — it is what the user reads.',
+              content: buildCanonicalDescSystemPrompt(),
             },
             {
               role: 'user',
               content: [
-                {
-                  type: 'text',
-                  text: 'Describe this mascot character for a character reference sheet.',
-                },
+                { type: 'text', text: buildCanonicalDescUserPrompt({ name: mascotName }) },
                 { type: 'image_url', image_url: { url: dataUri } },
               ],
             },
@@ -872,6 +858,19 @@ export class McKitProcessor {
       return buffer;
     }
     return this.loadMascotImage(kit);
+  }
+
+  /**
+   * Nome do mascote/logo como pista da descrição canônica; sem ele a
+   * descrição segue só pela imagem (falha aqui nunca derruba o kit).
+   */
+  private async mascotNameHint(kit: McCharacterKit): Promise<string | null> {
+    try {
+      const mascot = await this.mascots.findOne(kit.userId, kit.mascotId);
+      return typeof mascot?.name === 'string' ? mascot.name : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Imagem do mascote (recorte, senão a fonte) lida do bucket local. */

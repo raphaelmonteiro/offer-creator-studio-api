@@ -12,6 +12,10 @@ import {
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { MascotsService } from '../../mascots/mascots.service';
+import {
+  buildCanonicalDescSystemPrompt,
+  buildCanonicalDescUserPrompt,
+} from '../domain/kit-prompts';
 import { CommercialsService } from '../commercials.service';
 import { McKitMouthGate, McMouthVerdict } from '../domain/mc-mouth-gate';
 import { computeTileCrop, edgeUniformity } from '../domain/mc-tile';
@@ -831,6 +835,32 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       env.GEMINI_IMAGE_MODEL_REFS = 'gemini-nano-banana-2.1';
     });
 
+    it('descrição canônica: prompt de sistema seguro quanto à espécie e o nome do mascote como pista (achado da 2.6)', async () => {
+      mascots.findOne.mockResolvedValue({
+        id: 'mascot-1',
+        name: 'Capi, a capivara',
+        cutoutUrl: '/uploads/mascots/cutout.png',
+        sourceImageUrl: '/uploads/mascots/cutout.png',
+      });
+      const create = jest.fn().mockResolvedValue(descResponse);
+      withOpenAi(processor, create);
+      gemini.generateImageWithModel.mockResolvedValue(image('gemini-nano-banana-2.1'));
+
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+
+      const { messages } = create.mock.calls[0][0] as {
+        messages: Array<{ role: string; content: unknown }>;
+      };
+      expect(messages[0]).toEqual({ role: 'system', content: buildCanonicalDescSystemPrompt() });
+      const userParts = messages[1].content as Array<{ type: string; text?: string }>;
+      expect(userParts[0]).toEqual({
+        type: 'text',
+        text: buildCanonicalDescUserPrompt({ name: 'Capi, a capivara' }),
+      });
+      expect(userParts[0].text).toContain('"Capi, a capivara"');
+      expect(userParts[1].type).toBe('image_url');
+    });
+
     it('cada chamada paga vira uma linha de custo: descrição pelos tokens do usage (gpt-4o) e cada referência pelo modelo EFETIVO; a soma vai para o kit', async () => {
       const create = jest.fn().mockResolvedValue(descResponse);
       withOpenAi(processor, create);
@@ -1182,7 +1212,42 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
       expect(incrementTotal()).toBeCloseTo(0.034 + 3 * 0.036, 6);
     });
 
-    it('erro sem resposta cobrada (rede, quota) não grava linha de custo', async () => {
+    it('falha de rede DEPOIS do envio numa referência: terminal, SEM nova requisição, linha de custo ESTIMADA (failure network)', async () => {
+      jest
+        .spyOn(
+          processor as unknown as { generateCanonicalDesc: () => Promise<unknown> },
+          'generateCanonicalDesc',
+        )
+        .mockResolvedValue(desc);
+      gemini.generateImageWithModel
+        .mockResolvedValueOnce(image('gemini-nano-banana-2.1'))
+        .mockRejectedValueOnce(
+          withGeminiBilling(
+            new TerminalProviderError('Falha de rede depois do envio', 'provider_response_lost'),
+            { model: 'gemini-nano-banana-2.1', usage: null, networkFailure: true },
+          ),
+        )
+        .mockResolvedValue(image('gemini-nano-banana-2.1'));
+
+      await processor.process({ kitId: 'kit-1' }, 'job-1');
+
+      expect(gemini.generateImageWithModel).toHaveBeenCalledTimes(4); // 1 chamada por slot
+      const lost = costEvents()
+        .map((e) => e.detail as Record<string, unknown>)
+        .find((d) => d.failure === 'network');
+      expect(lost).toMatchObject({
+        call: 'reference',
+        slot: 1,
+        assetId: null,
+        estimated: true,
+        costUsd: 0.034,
+        usage: { inputTokens: 0, outputTokens: 0, images: 1 },
+        providerErrorCode: 'provider_response_lost',
+      });
+      expect(incrementTotal()).toBeCloseTo(0.034 + 3 * 0.036, 6);
+    });
+
+    it('erro sem resposta cobrada (rede antes do envio, quota) não grava linha de custo', async () => {
       jest
         .spyOn(
           processor as unknown as { generateCanonicalDesc: () => Promise<unknown> },
