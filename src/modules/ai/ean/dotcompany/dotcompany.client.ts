@@ -74,16 +74,38 @@ export class DotcompanyRateLimitedError extends DotcompanyError {
   }
 }
 /**
- * 409 de idempotência. `IDEMPOTENCY_IN_FLIGHT` / `IDEMPOTENCY_KEY_ORPHANED`: a chave não serve mais
- * (reserva presa depois de 5xx/429); `IDEMPOTENCY_KEY_CONFLICT`: mesma chave com corpo diferente.
+ * 409 de idempotência. `IDEMPOTENCY_IN_FLIGHT`: o servidor ainda processa essa chave (NÃO é chave morta:
+ * repetir mais tarde com a mesma); `IDEMPOTENCY_KEY_ORPHANED`: reserva abandonada (única que autoriza chave
+ * nova); `IDEMPOTENCY_KEY_CONFLICT`: mesma chave com corpo diferente (bug nosso).
  */
 export class DotcompanyIdempotencyError extends DotcompanyError {
   get keyConflict(): boolean {
     return this.errorCode === 'IDEMPOTENCY_KEY_CONFLICT';
   }
+  get orphaned(): boolean {
+    return this.errorCode === 'IDEMPOTENCY_KEY_ORPHANED';
+  }
 }
-/** 5xx, timeout ou rede depois das tentativas. */
-export class DotcompanyTransientError extends DotcompanyError {}
+/** Último desfecho conhecido de uma chamada ao lote sem resposta conclusiva (guardado no lote pendente). */
+export type TransientOutcome = 'timeout' | 'network' | 'http_5xx';
+
+/**
+ * 5xx, timeout ou rede. `outcome` separa o que NÃO foi cobrado (resposta 5xx do servidor) do que é
+ * incerto (timeout nosso ou rede cortada: o servidor pode ter completado e cobrado).
+ */
+export class DotcompanyTransientError extends DotcompanyError {
+  readonly outcome: TransientOutcome;
+  constructor(
+    message: string,
+    status: number | null,
+    errorCode: string | null,
+    requestId: string | null,
+    outcome?: TransientOutcome,
+  ) {
+    super(message, status, errorCode, requestId);
+    this.outcome = outcome ?? (status !== null && status >= 500 ? 'http_5xx' : 'network');
+  }
+}
 
 type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
 
@@ -112,14 +134,19 @@ function intHeader(headers: Headers, name: string): number | null {
 function combinedSignal(
   timeoutMs: number,
   outer?: AbortSignal,
-): { signal: AbortSignal; done: () => void } {
+): { signal: AbortSignal; done: () => void; timedOut: () => boolean } {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(new Error(`timeout de ${timeoutMs}ms`)), timeoutMs);
+  let timeout = false;
+  const timer = setTimeout(() => {
+    timeout = true;
+    ctrl.abort(new Error(`timeout de ${timeoutMs}ms`));
+  }, timeoutMs);
   const onAbort = () => ctrl.abort(outer?.reason ?? new Error('aborted'));
   if (outer?.aborted) onAbort();
   else outer?.addEventListener('abort', onAbort, { once: true });
   return {
     signal: ctrl.signal,
+    timedOut: () => timeout,
     done: () => {
       clearTimeout(timer);
       outer?.removeEventListener('abort', onAbort);
@@ -171,6 +198,9 @@ export class DotcompanyClient {
       headers,
       body: JSON.stringify({ gtins }),
       signal: options.signal,
+      // Lote pago com Idempotency-Key: quem decide repetir (sempre com a MESMA chave) é o
+      // DotcompanyLookupService. Repetir aqui esconderia o desfecho (5xx, 429, timeout) de quem sabe o custo.
+      retry: false,
     });
     const itens = (body as { itens?: DotcompanyLookupItem[] } | null)?.itens;
     if (!Array.isArray(itens)) {
@@ -246,7 +276,13 @@ export class DotcompanyClient {
   private async request(
     method: 'GET' | 'POST',
     path: string,
-    init: { headers?: Record<string, string>; body?: string; signal?: AbortSignal },
+    init: {
+      headers?: Record<string, string>;
+      body?: string;
+      signal?: AbortSignal;
+      /** `false`: uma única tentativa (sem repetir 429, 5xx nem falha de rede). Padrão: repete. */
+      retry?: boolean;
+    },
   ): Promise<{ response: Response; body: unknown; meta: CallMeta }> {
     if (!this.token) {
       throw new DotcompanyAuthError(
@@ -257,10 +293,11 @@ export class DotcompanyClient {
       );
     }
     const url = `${this.baseUrl}${path}`;
+    const retry = init.retry !== false;
     let rateRetried = false;
 
     for (let attempt = 0; ; attempt++) {
-      const { signal, done } = combinedSignal(REQUEST_TIMEOUT_MS, init.signal);
+      const { signal, done, timedOut } = combinedSignal(REQUEST_TIMEOUT_MS, init.signal);
       let response: Response;
       try {
         response = await this.fetchImpl(url, {
@@ -276,7 +313,7 @@ export class DotcompanyClient {
       } catch (err) {
         done();
         if (init.signal?.aborted) throw err;
-        if (attempt < TRANSIENT_BACKOFF_MS.length) {
+        if (retry && attempt < TRANSIENT_BACKOFF_MS.length) {
           this.logger.warn(
             `DotCompany ${method} ${path}: falha de rede (${(err as Error).message}); nova tentativa.`,
           );
@@ -288,6 +325,7 @@ export class DotcompanyClient {
           null,
           null,
           null,
+          timedOut() ? 'timeout' : 'network',
         );
       }
       done();
@@ -321,7 +359,7 @@ export class DotcompanyClient {
       }
       if (response.status === 429) {
         const retryAfter = intHeader(response.headers, 'retry-after') ?? 60;
-        if (!rateRetried && retryAfter <= INLINE_RATE_RETRY_MAX_SEC) {
+        if (retry && !rateRetried && retryAfter <= INLINE_RATE_RETRY_MAX_SEC) {
           rateRetried = true;
           await this.sleep(retryAfter * 1000, init.signal);
           attempt--;
@@ -329,12 +367,18 @@ export class DotcompanyClient {
         }
         throw new DotcompanyRateLimitedError(msg, retryAfter, meta.rate, errorCode, meta.requestId);
       }
-      if (response.status >= 500 && attempt < TRANSIENT_BACKOFF_MS.length) {
+      if (retry && response.status >= 500 && attempt < TRANSIENT_BACKOFF_MS.length) {
         await this.sleep(TRANSIENT_BACKOFF_MS[attempt], init.signal);
         continue;
       }
       if (response.status >= 500) {
-        throw new DotcompanyTransientError(msg, response.status, errorCode, meta.requestId);
+        throw new DotcompanyTransientError(
+          msg,
+          response.status,
+          errorCode,
+          meta.requestId,
+          'http_5xx',
+        );
       }
       // Demais 4xx (422 etc.): erro de uso nosso, não adianta repetir.
       throw new DotcompanyError(msg, response.status, errorCode, meta.requestId);

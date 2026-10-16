@@ -158,6 +158,10 @@ Sem crédito ou com limite atingido, o encarte não quebra: o produto segue o ca
   - `dotcompany_lookups`: cache por EAN, com `status`, `raw`, `galleryImageId` e `lastError`;
   - `ean_import_jobs` / `ean_import_items`;
   - `dotcompany_usage_hourly`;
-  - `dotcompany_balance`.
+  - `dotcompany_balance`;
+  - `dotcompany_pending_batches`: lotes pagos sem resposta conclusiva, com a `Idempotency-Key`, `"lastOutcome"`
+    (`timeout`/`network`/`http_5xx`/`http_4xx`), `"lastError"` e `"retryNotBefore"` (409 em voo: reenvio só depois).
+    A linha some quando o lote fecha; mais de 24 h ou 5 chamadas sem resposta, é descartada. Linha parada = a
+    DotCompany ainda segura a chave (espera até 3 min para virar `ORPHANED`).
 - Fotos importadas: pasta **DotCompany** da galeria, com `metadata.eanSource = 'dotcompany'` e
   `eanVerifiedBy = 'exact'`.

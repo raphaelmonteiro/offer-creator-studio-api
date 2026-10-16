@@ -267,6 +267,33 @@ export class DotcompanyBudgetService {
     }
   }
 
+  /**
+   * Desfaz créditos estimados que se mostraram sem cobrança (a DotCompany não cobra 5xx/4xx): tira dos
+   * contadores por hora (das horas mais recentes para trás, sem passar de zero) e devolve ao saldo local.
+   * Nunca deixa contador negativo.
+   */
+  async refundCredits(credits: number): Promise<void> {
+    let left = Math.max(0, Math.round(credits));
+    if (left === 0) return;
+    const rows: Array<{ hour: Date; credits: number }> = await this.dataSource.query(
+      `SELECT hour, credits FROM dotcompany_usage_hourly WHERE credits > 0 ORDER BY hour DESC LIMIT 48`,
+    );
+    for (const row of rows) {
+      if (left === 0) break;
+      const take = Math.min(left, row.credits);
+      await this.dataSource.query(
+        `UPDATE dotcompany_usage_hourly SET credits = credits - $2 WHERE hour = $1`,
+        [row.hour, take],
+      );
+      left -= take;
+    }
+    await this.dataSource.query(
+      `UPDATE dotcompany_balance SET available = available + $1 WHERE id = 1 AND available IS NOT NULL`,
+      [Math.round(credits)],
+    );
+    if (this.balance?.available != null) this.balance.available += Math.round(credits);
+  }
+
   private async recordUsage(input: ReleaseInput): Promise<void> {
     const now = this.now();
     const requests = input.requests ?? 1;

@@ -240,4 +240,25 @@ d('DotcompanyBudgetService (Postgres real)', () => {
     );
     expect(rs.filter((r) => r.ok)).toHaveLength(27);
   });
+
+  it('refundCredits desfaz o estimado das horas mais recentes (sem negativo) e devolve ao saldo', async () => {
+    const { svc, setNow } = criar({}, { saldo: 1000 });
+    await svc.refreshBalance();
+    await svc.release({ kind: 'batch', credits: 8 });
+    setNow(new Date('2099-03-10T14:05:00Z'));
+    await svc.release({ kind: 'batch', credits: 4 });
+    await svc.refundCredits(6);
+    const rows: Array<{ credits: number }> = await ds.query(
+      `SELECT credits FROM dotcompany_usage_hourly WHERE hour >= '2099-01-01' ORDER BY hour`,
+    );
+    expect(rows.map((r) => r.credits)).toEqual([6, 0]);
+    const [b] = await ds.query(`SELECT available FROM dotcompany_balance WHERE id = 1`);
+    expect(b.available).toBe(1000 - 12 + 6);
+    // Pedir mais do que existe nunca deixa contador negativo.
+    await svc.refundCredits(100);
+    const after: Array<{ credits: number }> = await ds.query(
+      `SELECT credits FROM dotcompany_usage_hourly WHERE hour >= '2099-01-01'`,
+    );
+    expect(after.every((r) => r.credits >= 0)).toBe(true);
+  });
 });

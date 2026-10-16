@@ -156,47 +156,109 @@ describe('DotcompanyClient', () => {
     expect(f).toHaveBeenCalledTimes(1);
   });
 
-  it('429 com Retry-After curto: espera e repete uma vez', async () => {
-    const f = jest
-      .fn()
-      .mockResolvedValueOnce(resposta(429, {}, { 'Retry-After': '2' }))
-      .mockResolvedValueOnce(resposta(200, { itens: [] }));
-    const { client, sleep } = criar(f);
-    await client.lookupBatch(['7891000100103']);
-    expect(sleep).toHaveBeenCalledWith(2000, undefined);
-    expect(f).toHaveBeenCalledTimes(2);
+  describe('lote: o cliente NÃO repete sozinho (quem decide é o lookup, com a mesma chave)', () => {
+    it('429 com Retry-After curto: devolve o tempo ao chamador, sem dormir nem repetir', async () => {
+      const f = jest.fn().mockResolvedValue(resposta(429, {}, { 'Retry-After': '2' }));
+      const { client, sleep } = criar(f);
+      const err = await client
+        .lookupBatch(['7891000100103'], { idempotencyKey: 'k' })
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(DotcompanyRateLimitedError);
+      expect(err.retryAfterSec).toBe(2);
+      expect(f).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it('429 com Retry-After longo: devolve o tempo ao chamador sem dormir', async () => {
+      const f = jest
+        .fn()
+        .mockResolvedValue(
+          resposta(429, {}, { 'Retry-After': '40', 'X-Error-Code': 'RATE_LIMITED' }),
+        );
+      const { client, sleep } = criar(f);
+      const err = await client.lookupBatch(['7891000100103']).catch((e) => e);
+      expect(err).toBeInstanceOf(DotcompanyRateLimitedError);
+      expect(err.retryAfterSec).toBe(40);
+      expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it('5xx: uma única chamada, erro transitório http_5xx (não cobrado), sem espera', async () => {
+      const f = jest.fn().mockResolvedValue(resposta(503, {}));
+      const { client, sleep } = criar(f);
+      const err = await client
+        .lookupBatch(['7891000100103'], { idempotencyKey: 'k' })
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(DotcompanyTransientError);
+      expect(err.outcome).toBe('http_5xx');
+      expect(f).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it('falha de rede: uma única chamada, erro transitório network (incerto)', async () => {
+      const f = jest.fn().mockRejectedValue(new TypeError('fetch failed'));
+      const { client, sleep } = criar(f);
+      const err = await client
+        .lookupBatch(['7891000100103'], { idempotencyKey: 'k' })
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(DotcompanyTransientError);
+      expect(err.outcome).toBe('network');
+      expect(f).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it('timeout de 15 s: uma única chamada, erro transitório timeout (incerto)', async () => {
+      jest.useFakeTimers();
+      try {
+        const f = jest.fn(
+          (_url: string, init: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+              init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+            }),
+        );
+        const { client, sleep } = criar(f as never);
+        const pending = client
+          .lookupBatch(['7891000100103'], { idempotencyKey: 'k' })
+          .catch((e: unknown) => e);
+        await jest.advanceTimersByTimeAsync(15_000);
+        const err = (await pending) as DotcompanyTransientError;
+        expect(err).toBeInstanceOf(DotcompanyTransientError);
+        expect(err.outcome).toBe('timeout');
+        expect(f).toHaveBeenCalledTimes(1);
+        expect(sleep).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
-  it('429 com Retry-After longo: devolve o tempo ao chamador sem dormir', async () => {
-    const f = jest
-      .fn()
-      .mockResolvedValue(
-        resposta(429, {}, { 'Retry-After': '40', 'X-Error-Code': 'RATE_LIMITED' }),
-      );
-    const { client, sleep } = criar(f);
-    const err = await client.lookupBatch(['7891000100103']).catch((e) => e);
-    expect(err).toBeInstanceOf(DotcompanyRateLimitedError);
-    expect(err.retryAfterSec).toBe(40);
-    expect(sleep).not.toHaveBeenCalled();
-  });
+  describe('GET (/usage e single, sem Idempotency-Key): mantém o retry', () => {
+    it('429 com Retry-After curto: espera e repete uma vez', async () => {
+      const f = jest
+        .fn()
+        .mockResolvedValueOnce(resposta(429, {}, { 'Retry-After': '2' }))
+        .mockResolvedValueOnce(resposta(200, { saldo: { disponivel: 10 } }));
+      const { client, sleep } = criar(f);
+      await client.usage();
+      expect(sleep).toHaveBeenCalledWith(2000, undefined);
+      expect(f).toHaveBeenCalledTimes(2);
+    });
 
-  it('5xx: tenta de novo com espera crescente e desiste depois de 3 novas tentativas', async () => {
-    const f = jest.fn().mockResolvedValue(resposta(503, {}));
-    const { client, sleep } = criar(f);
-    await expect(client.lookupBatch(['7891000100103'])).rejects.toBeInstanceOf(
-      DotcompanyTransientError,
-    );
-    expect(f).toHaveBeenCalledTimes(4);
-    expect(sleep.mock.calls.map((c) => c[0])).toEqual([2000, 4000, 8000]);
-  });
+    it('5xx: tenta de novo com espera crescente e desiste depois de 3 novas tentativas', async () => {
+      const f = jest.fn().mockResolvedValue(resposta(503, {}));
+      const { client, sleep } = criar(f);
+      await expect(client.usage()).rejects.toBeInstanceOf(DotcompanyTransientError);
+      expect(f).toHaveBeenCalledTimes(4);
+      expect(sleep.mock.calls.map((c) => c[0])).toEqual([2000, 4000, 8000]);
+    });
 
-  it('falha de rede recupera na tentativa seguinte', async () => {
-    const f = jest
-      .fn()
-      .mockRejectedValueOnce(new TypeError('fetch failed'))
-      .mockResolvedValueOnce(resposta(200, { itens: [] }));
-    const { client } = criar(f);
-    await expect(client.lookupBatch(['7891000100103'])).resolves.toMatchObject({ items: [] });
+    it('falha de rede recupera na tentativa seguinte', async () => {
+      const f = jest
+        .fn()
+        .mockRejectedValueOnce(new TypeError('fetch failed'))
+        .mockResolvedValueOnce(resposta(200, { saldo: { disponivel: 10 } }));
+      const { client } = criar(f);
+      await expect(client.usage()).resolves.toMatchObject({ available: 10 });
+    });
   });
 
   it('X-Idempotency-Replay: true marca a resposta como replay (sem novo débito)', async () => {

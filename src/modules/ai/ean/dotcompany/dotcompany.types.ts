@@ -41,7 +41,9 @@ export type BudgetDenyReason =
   | 'hour_limit'
   | 'day_limit'
   | 'reserve'
-  | 'no_credit';
+  | 'no_credit'
+  /** Lote já enviado que a DotCompany ainda processa (409 IDEMPOTENCY_IN_FLIGHT): reenvio com a mesma chave depois. */
+  | 'batch_in_flight';
 
 export type ImportJobKind = 'file' | 'flyer';
 

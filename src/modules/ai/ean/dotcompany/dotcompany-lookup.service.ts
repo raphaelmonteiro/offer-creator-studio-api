@@ -21,10 +21,12 @@ import type {
 } from './dotcompany.types';
 import {
   DotcompanyPendingBatchStore,
+  IN_FLIGHT_RETRY_MS,
   PENDING_BATCH_MAX_ATTEMPTS,
   PendingBatchRow,
 } from './dotcompany-pending-batch.store';
 import { DotcompanyLookup } from './entities/dotcompany-lookup.entity';
+import type { PendingBatchOutcome } from './entities/dotcompany-pending-batch.entity';
 
 /** Preço por item encontrado quando a DotCompany não informa no header (4 créditos = R$ 0,04). */
 export const CREDITS_PER_FOUND = 4;
@@ -116,11 +118,20 @@ interface ResolveCtx {
   setFor: (ean: string, partial: Omit<LookupOutcome, 'ean' | 'input'>) => void;
 }
 
-/** Chamada paga sem resposta conclusiva (timeout do cliente, rede, 5xx esgotado, abort): pode ter sido cobrada. */
+/**
+ * Chamada paga sem resposta do servidor (timeout nosso, rede cortada, abort): pode ter sido cobrada. Uma
+ * resposta 5xx NÃO entra aqui: a DotCompany não cobra 4xx/5xx.
+ */
 function isUncertainFailure(err: unknown): boolean {
-  if (err instanceof DotcompanyTransientError) return true;
+  if (err instanceof DotcompanyTransientError) return err.outcome !== 'http_5xx';
   const name = (err as { name?: string } | null)?.name;
   return name === 'AbortError' || name === 'TimeoutError';
+}
+
+function uncertainOutcome(err: unknown): 'timeout' | 'network' {
+  if (err instanceof DotcompanyTransientError)
+    return err.outcome === 'timeout' ? 'timeout' : 'network';
+  return (err as { name?: string } | null)?.name === 'TimeoutError' ? 'timeout' : 'network';
 }
 
 /** Um lote a enviar; `pending` quando repete um lote de resultado incerto. */
@@ -269,8 +280,9 @@ export class DotcompanyLookupService {
     if (eans.length === 0) return;
     const pendings = await this.pending.findFor(eans, this.now());
     // Síncrono daqui ao registro: ninguém passa entre a checagem e o registro.
-    const { waitFor, chunks } = this.planChunks(eans, pendings, round);
+    const { waitFor, chunks, deferred } = this.planChunks(eans, pendings, round);
     const dones = chunks.map((chunk) => this.registerInflight(chunk.gtins));
+    this.deferBatches(deferred, ctx);
 
     const waiting = (async () => {
       if (waitFor.length === 0) return;
@@ -293,9 +305,15 @@ export class DotcompanyLookupService {
     eans: string[],
     pendings: PendingBatchRow[],
     round: number,
-  ): { waitFor: Array<{ ean: string; promise: Promise<void> }>; chunks: Chunk[] } {
+  ): {
+    waitFor: Array<{ ean: string; promise: Promise<void> }>;
+    chunks: Chunk[];
+    deferred: Array<{ eans: string[]; retryAt: Date }>;
+  } {
     const waitFor: Array<{ ean: string; promise: Promise<void> }> = [];
     const chunks: Chunk[] = [];
+    const deferred: Array<{ eans: string[]; retryAt: Date }> = [];
+    const now = this.now();
     const claimed = new Set<string>();
     const wanted = new Set(eans);
     for (const p of pendings) {
@@ -305,6 +323,12 @@ export class DotcompanyLookupService {
       const flying = p.gtins.map((g) => this.inflight.get(g)).find(Boolean);
       if (flying && round < MAX_WAIT_ROUNDS) {
         for (const ean of members) waitFor.push({ ean, promise: flying });
+      } else if (flying) {
+        // A chave está em voo neste processo: reenviá-la agora só devolveria 409 IN_FLIGHT. Fica para depois.
+        deferred.push({ eans: members, retryAt: new Date(now.getTime() + IN_FLIGHT_RETRY_MS) });
+      } else if (p.retryNotBefore && p.retryNotBefore > now) {
+        // 409 IN_FLIGHT recente: o servidor ainda processa; respeita o intervalo mínimo com a MESMA chave.
+        deferred.push({ eans: members, retryAt: p.retryNotBefore });
       } else {
         chunks.push({ gtins: p.gtins, pending: p });
       }
@@ -318,7 +342,23 @@ export class DotcompanyLookupService {
     }
     for (let i = 0; i < mine.length; i += DOTCOMPANY_BATCH_MAX)
       chunks.push({ gtins: mine.slice(i, i + DOTCOMPANY_BATCH_MAX), pending: null });
-    return { waitFor, chunks };
+    return { waitFor, chunks, deferred };
+  }
+
+  /** EANs de um lote ainda em processamento na DotCompany: bloqueados por pouco tempo (sem custo, sem erro). */
+  private deferBatches(deferred: Array<{ eans: string[]; retryAt: Date }>, ctx: ResolveCtx): void {
+    for (const d of deferred) {
+      const message =
+        'Lote ainda em processamento na DotCompany; repetido com a mesma chave depois.';
+      ctx.summary.blocked ??= { reason: 'batch_in_flight', retryAt: d.retryAt, message };
+      for (const ean of d.eans)
+        ctx.setFor(ean, {
+          status: 'blocked',
+          blockReason: 'batch_in_flight',
+          retryAt: d.retryAt,
+          reason: message,
+        });
+    }
   }
 
   private registerInflight(eans: string[]): () => void {
@@ -374,7 +414,7 @@ export class DotcompanyLookupService {
     }
     const reserved = auth.reserved ?? 0;
 
-    let pending: PendingBatchRow;
+    let pending: PendingBatchRow | null;
     try {
       pending = await this.startAttempt(chunk);
     } catch (err) {
@@ -382,6 +422,17 @@ export class DotcompanyLookupService {
       const msg = (err as Error).message;
       this.logger.warn(`Lote DotCompany não iniciado (${chunk.gtins.length} EANs): ${msg}`);
       for (const ean of chunk.gtins) setFor(ean, { status: 'error', reason: msg });
+      return false;
+    }
+    if (!pending) {
+      // Outro chamador fechou este lote (apagou o pendente) depois da leitura: nada a enviar, o cache já tem a resposta.
+      await this.budget.release({ kind, requests: 0, reserved });
+      const left = await this.applyCache(chunk.gtins, ctx);
+      for (const ean of left)
+        setFor(ean, {
+          status: 'error',
+          reason: 'lote já fechado por outra consulta, sem resultado',
+        });
       return false;
     }
     const attempt: Attempt = { chunk, pending, rest, ctx, reserved, estimated, fresh };
@@ -398,10 +449,10 @@ export class DotcompanyLookupService {
   }
 
   /** Grava o lote ANTES de enviar (ou conta mais uma tentativa do pendente repetido). */
-  private async startAttempt(chunk: Chunk): Promise<PendingBatchRow> {
+  private async startAttempt(chunk: Chunk): Promise<PendingBatchRow | null> {
     if (!chunk.pending) return this.pending.create(randomUUID(), chunk.gtins, this.now());
-    await this.pending.addAttempt(chunk.pending.id);
-    return { ...chunk.pending, attempts: chunk.pending.attempts + 1 };
+    // Devolve a linha ATUAL (custo já lançado, desfecho): ou `null` se outro chamador a fechou.
+    return this.pending.startResend(chunk.pending.id);
   }
 
   /** O servidor respondeu: grava cache e consumo (só a diferença sobre o custo estimado já lançado). */
@@ -457,10 +508,12 @@ export class DotcompanyLookupService {
   }
 
   /**
-   * A chamada ao lote falhou. Sem resposta conclusiva (timeout, rede, 5xx) o
-   * lote pode ter sido processado e cobrado: lança o custo estimado uma vez e
-   * guarda chave + GTINs para repetir o MESMO lote. Com resposta conclusiva
-   * (402, 429, 401/403, outro 4xx) a chave é descartada.
+   * A chamada ao lote falhou. O cliente não repete lote sozinho: o desfecho chega aqui como foi.
+   * - timeout/rede: resultado incerto (pode ter cobrado). Lança o estimado uma vez; o lote fica pendente.
+   * - 5xx: a DotCompany não cobra erro. Nada lançado; o lote fica pendente (a chave segue reservada lá).
+   * - 429: janela bloqueada pelo controlador, EANs `blocked/rate_window`, nada lançado; o lote fica pendente.
+   * - 409: ver `onIdempotencyConflict`. 402, 401/403 e outros 4xx: conclusivos, pendente apagado.
+   * Em todos os casos que mantêm o pendente, a repetição usa a MESMA chave.
    */
   private async onBatchFailure(err: unknown, a: Attempt): Promise<boolean> {
     const { chunk, pending, rest, ctx, reserved, estimated } = a;
@@ -471,14 +524,17 @@ export class DotcompanyLookupService {
       const first = pending.creditsRecorded === null;
       await this.budget.release({ kind, errors: 1, credits: first ? estimated : 0, reserved });
       if (first) await this.quiet(this.pending.setRecorded(pending.id, estimated));
-      if (pending.attempts >= PENDING_BATCH_MAX_ATTEMPTS) {
-        this.logger.warn(
-          `Lote DotCompany abandonado após ${pending.attempts} chamadas sem resposta.`,
-        );
-        await this.quiet(this.pending.remove(pending.id));
-      } else {
-        await this.quiet(this.pending.setError(pending.id, (err as Error).message));
-      }
+      await this.keepPending(a, uncertainOutcome(err), (err as Error).message);
+    } else if (
+      err instanceof DotcompanyTransientError ||
+      err instanceof DotcompanyRateLimitedError
+    ) {
+      await this.budget.release({ kind, errors: 1, reserved });
+      await this.keepPending(
+        a,
+        err instanceof DotcompanyTransientError ? 'http_5xx' : 'http_4xx',
+        (err as Error).message,
+      );
     } else {
       await this.quiet(this.pending.remove(pending.id));
       await this.budget.release({ kind, errors: 1, reserved });
@@ -486,26 +542,80 @@ export class DotcompanyLookupService {
     return this.handleBatchError(err, chunk.gtins, rest, ctx);
   }
 
+  /** Mantém o lote pendente com o desfecho; abandona (e acerta o custo) depois de muitas chamadas sem resposta. */
+  private async keepPending(
+    a: Attempt,
+    outcome: PendingBatchOutcome,
+    message: string,
+  ): Promise<void> {
+    const { pending } = a;
+    if (pending.attempts >= PENDING_BATCH_MAX_ATTEMPTS) {
+      this.logger.warn(
+        `Lote DotCompany abandonado após ${pending.attempts} chamadas sem resposta.`,
+      );
+      await this.settleDeadKey(pending, outcome);
+      await this.quiet(this.pending.remove(pending.id));
+    } else {
+      await this.quiet(this.pending.setOutcome(pending.id, outcome, message));
+    }
+  }
+
   /**
-   * 409 de idempotência. IN_FLIGHT/ORPHANED: a reserva do servidor ficou presa e
-   * a chave não serve mais; pode ter havido cobrança (lança o estimado, se ainda
-   * não lançado) e o lote é consultado de novo com chave nova. KEY_CONFLICT:
-   * corpo diferente com a mesma chave é bug nosso; nada foi processado.
+   * A chave não será mais usada. Se o último desfecho conhecido foi resposta 4xx/5xx, o lote NÃO foi cobrado:
+   * o estimado lançado antes (por um timeout) é desfeito. Se foi timeout/rede, não dá para saber: mantém o
+   * estimado (conservador).
+   */
+  private async settleDeadKey(
+    pending: PendingBatchRow,
+    lastOutcome: PendingBatchOutcome | null,
+  ): Promise<void> {
+    const recorded = pending.creditsRecorded ?? 0;
+    if (recorded <= 0) return;
+    if (lastOutcome === 'http_5xx' || lastOutcome === 'http_4xx') {
+      this.logger.log(
+        `Chave descartada após ${lastOutcome}: estimado de ${recorded} créditos desfeito.`,
+      );
+      await this.quiet(this.budget.refundCredits(recorded));
+    } else {
+      this.logger.warn(
+        `Chave descartada com resultado incerto (${lastOutcome ?? 'sem desfecho'}): estimado de ${recorded} créditos mantido.`,
+      );
+    }
+  }
+
+  /**
+   * 409 de idempotência.
+   * - `IDEMPOTENCY_IN_FLIGHT` (e qualquer 409 desconhecido): o servidor ainda processa. NÃO é chave morta:
+   *   o pendente continua com a mesma chave, é reenviado depois de `IN_FLIGHT_RETRY_MS`, e os EANs ficam
+   *   `blocked/batch_in_flight`. Nada é lançado.
+   * - `IDEMPOTENCY_KEY_ORPHANED`: a única que autoriza chave nova. Se o último desfecho conhecido foi 4xx/5xx
+   *   o estimado lançado antes é desfeito; se foi timeout/rede, é mantido.
+   * - `IDEMPOTENCY_KEY_CONFLICT`: bug nosso (corpo diferente com a mesma chave); log, nada lançado, chave nova.
    */
   private async onIdempotencyConflict(
     err: DotcompanyIdempotencyError,
     a: Attempt,
   ): Promise<boolean> {
-    const { chunk, pending, rest, ctx, reserved, estimated, fresh } = a;
+    const { chunk, pending, rest, ctx, reserved, fresh } = a;
+    if (!err.keyConflict && !err.orphaned) {
+      const retryAt = new Date(this.now().getTime() + IN_FLIGHT_RETRY_MS);
+      this.logger.warn(
+        `Lote DotCompany ainda em processamento (${err.errorCode}); reenvio com a mesma chave.`,
+      );
+      await this.budget.release({ kind: ctx.kind, credits: 0, reserved });
+      await this.quiet(this.pending.deferInFlight(pending.id, retryAt, err.message));
+      this.deferBatches([{ eans: chunk.gtins, retryAt }], ctx);
+      return false;
+    }
     if (err.keyConflict) {
       this.logger.error(`Idempotency-Key reutilizada com corpo diferente (bug): ${err.message}`);
     } else {
       this.logger.warn(
-        `Chave de idempotência descartada (${err.errorCode}); pode ter havido cobrança.`,
+        `Chave de idempotência órfã (${err.errorCode}); lote reenviado com chave nova.`,
       );
+      await this.settleDeadKey(pending, pending.lastOutcome);
     }
-    const owed = err.keyConflict ? 0 : Math.max(0, estimated - (pending.creditsRecorded ?? 0));
-    await this.budget.release({ kind: ctx.kind, errors: 1, credits: owed, reserved });
+    await this.budget.release({ kind: ctx.kind, errors: 1, reserved });
     await this.quiet(this.pending.remove(pending.id));
     if (!fresh) return this.fetchChunk({ gtins: chunk.gtins, pending: null }, rest, ctx, true);
     return this.handleBatchError(err, chunk.gtins, rest, ctx);
@@ -626,8 +736,12 @@ export class DotcompanyLookupService {
         await this.budget.release({
           kind: options.kind,
           errors: 1,
-          // Sem resposta conclusiva a consulta pode ter sido cobrada.
-          credits: isUncertainFailure(err) ? CREDITS_PER_FOUND : 0,
+          // Sem resposta conclusiva a consulta pode ter sido cobrada. O GET repete sozinho no cliente, então
+          // um 5xx final pode vir depois de um timeout: continua conservador (4 créditos).
+          credits:
+            isUncertainFailure(err) || err instanceof DotcompanyTransientError
+              ? CREDITS_PER_FOUND
+              : 0,
           reserved: auth.reserved,
         });
       }
