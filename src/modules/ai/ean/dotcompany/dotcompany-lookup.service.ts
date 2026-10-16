@@ -499,7 +499,8 @@ export class DotcompanyLookupService {
       if (!released) {
         const owed = Math.max(0, (res.creditsCharged ?? estimated) - recorded);
         await this.budget.release({ kind, credits: owed, errors: 1, reserved });
-        if (owed > 0) await this.quiet(this.pending.setRecorded(pending.id, recorded + owed));
+        if (owed > 0)
+          await this.quiet(this.pending.setRecorded(pending.id, recorded + owed, this.now()));
       }
       const msg = (err as Error).message;
       this.logger.warn(`Lote DotCompany não gravado (${chunk.gtins.length} EANs): ${msg}`);
@@ -523,7 +524,7 @@ export class DotcompanyLookupService {
     if (isUncertainFailure(err)) {
       const first = pending.creditsRecorded === null;
       await this.budget.release({ kind, errors: 1, credits: first ? estimated : 0, reserved });
-      if (first) await this.quiet(this.pending.setRecorded(pending.id, estimated));
+      if (first) await this.quiet(this.pending.setRecorded(pending.id, estimated, this.now()));
       await this.keepPending(a, uncertainOutcome(err), (err as Error).message);
     } else if (
       err instanceof DotcompanyTransientError ||
@@ -575,7 +576,9 @@ export class DotcompanyLookupService {
       this.logger.log(
         `Chave descartada após ${lastOutcome}: estimado de ${recorded} créditos desfeito.`,
       );
-      await this.quiet(this.budget.refundCredits(recorded));
+      await this.quiet(
+        this.budget.refundCredits(recorded, pending.creditsRecordedAt ?? this.now()),
+      );
     } else {
       this.logger.warn(
         `Chave descartada com resultado incerto (${lastOutcome ?? 'sem desfecho'}): estimado de ${recorded} créditos mantido.`,

@@ -36,6 +36,10 @@ export class DotcompanyPendingBatch {
   @Column({ type: 'int', nullable: true })
   creditsRecorded: number | null;
 
+  /** Instante em que o estimado foi lançado: o estorno volta para a hora e o saldo dessa data. */
+  @Column({ type: 'timestamptz', nullable: true })
+  creditsRecordedAt: Date | null;
+
   /**
    * Último desfecho conhecido com resposta ou erro de transporte (409 em voo não o sobrescreve): decide o
    * que fazer com o custo estimado se a chave virar ORPHANED (5xx/4xx não cobram; timeout/rede é incerto).

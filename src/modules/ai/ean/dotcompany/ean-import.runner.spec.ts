@@ -23,7 +23,10 @@ const E3 = '7894900011517';
 /** DotCompany falsa: sabe quais EANs existem e pode recusar por orçamento. */
 class FakeDotcompany {
   existentes = new Set([E1, E2, E3]);
-  bloqueio: { reason: 'no_credit' | 'day_limit' | 'reserve'; retryAt: Date | null } | null = null;
+  bloqueio: {
+    reason: 'no_credit' | 'day_limit' | 'reserve' | 'batch_in_flight';
+    retryAt: Date | null;
+  } | null = null;
   consultas = 0;
 
   async findCached() {
@@ -194,6 +197,28 @@ d('EanImportRunner (Postgres real)', () => {
     );
     await rodar(r);
     expect((await store.buscarJob(j.id))?.status).toBe('done');
+  });
+
+  it('job do encarte com lote em processamento (batch_in_flight): espera até o retryAt sem consultar de novo', async () => {
+    const dc = new FakeDotcompany();
+    const depois = new Date(Date.now() + 30_000);
+    dc.bloqueio = { reason: 'batch_in_flight', retryAt: depois };
+    const r = runner(dc, new FakeFotos());
+    const j = await store.criarJob({
+      kind: 'flyer',
+      costCapCredits: 0,
+      rows: [{ rowNumber: 1, ean: E1, description: 'P0' }],
+    });
+    jobs.push(j.id);
+    await r.tick();
+    const s = await store.buscarJob(j.id);
+    expect(s).toMatchObject({ status: 'waiting_budget', waitReason: 'batch_in_flight' });
+    expect(s?.waitUntil?.getTime()).toBe(depois.getTime());
+    expect(await store.contarAbertos(j.id)).toBe(1); // item liberado, sem tentativa gasta
+
+    // Dentro da espera: o runner nem toca no job.
+    await r.tick();
+    expect(dc.consultas).toBe(0);
   });
 
   it('pausa manual não volta sozinha', async () => {

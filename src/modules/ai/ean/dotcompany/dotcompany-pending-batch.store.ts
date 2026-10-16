@@ -14,6 +14,7 @@ export interface PendingBatchRow {
   gtins: string[];
   attempts: number;
   creditsRecorded: number | null;
+  creditsRecordedAt: Date | null;
   lastOutcome: PendingBatchOutcome | null;
   retryNotBefore: Date | null;
 }
@@ -24,11 +25,12 @@ interface RawRow {
   gtins: string[];
   attempts: number;
   creditsRecorded: number | null;
+  creditsRecordedAt: Date | null;
   lastOutcome: PendingBatchOutcome | null;
   retryNotBefore: Date | null;
 }
 
-const COLUMNS = `id, "idempotencyKey", gtins, attempts, "creditsRecorded", "lastOutcome", "retryNotBefore"`;
+const COLUMNS = `id, "idempotencyKey", gtins, attempts, "creditsRecorded", "creditsRecordedAt", "lastOutcome", "retryNotBefore"`;
 
 function toRow(r: RawRow): PendingBatchRow {
   return {
@@ -37,6 +39,7 @@ function toRow(r: RawRow): PendingBatchRow {
     gtins: r.gtins,
     attempts: r.attempts,
     creditsRecorded: r.creditsRecorded,
+    creditsRecordedAt: r.creditsRecordedAt,
     lastOutcome: r.lastOutcome,
     retryNotBefore: r.retryNotBefore,
   };
@@ -105,10 +108,12 @@ export class DotcompanyPendingBatchStore {
     );
   }
 
-  async setRecorded(id: string, credits: number): Promise<void> {
+  /** Guarda o total lançado e QUANDO o estimado foi lançado (o primeiro lançamento fixa a hora do estorno). */
+  async setRecorded(id: string, credits: number, at: Date): Promise<void> {
     await this.dataSource.query(
-      `UPDATE dotcompany_pending_batches SET "creditsRecorded" = $2 WHERE id = $1`,
-      [id, credits],
+      `UPDATE dotcompany_pending_batches
+          SET "creditsRecorded" = $2, "creditsRecordedAt" = COALESCE("creditsRecordedAt", $3) WHERE id = $1`,
+      [id, credits, at],
     );
   }
 

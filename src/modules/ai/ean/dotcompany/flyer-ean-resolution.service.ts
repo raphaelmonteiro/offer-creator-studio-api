@@ -327,7 +327,11 @@ export class FlyerEanResolutionService {
         const o = summary.outcomes.get(item.ean);
         const base = { productId: item.product.id, ean: item.ean };
         if (o?.status === 'found' && o.lookup) found.push({ item, lookup: o.lookup });
-        else if (o?.status === 'blocked') {
+        else if (o?.status === 'blocked' && o.blockReason === 'batch_in_flight') {
+          // Lote já enviado e ainda processando na DotCompany: o job `flyer` retoma com a MESMA chave
+          // (respeita o `retryNotBefore`) e o encarte devolve o EAN como pendente.
+          toBackground.push(item);
+        } else if (o?.status === 'blocked') {
           status.set(item.product.id, {
             ...base,
             status: 'budget_blocked',

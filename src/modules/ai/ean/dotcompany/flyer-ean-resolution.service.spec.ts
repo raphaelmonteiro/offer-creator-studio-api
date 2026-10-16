@@ -262,6 +262,31 @@ d('FlyerEanResolutionService (Postgres real)', () => {
     });
   });
 
+  it('lote em processamento na DotCompany (batch_in_flight): vai para o job do encarte e volta pending, não budget_blocked', async () => {
+    const { svc, jobs, runner } = criar({
+      lookup: () =>
+        new Map([
+          [
+            NOVO,
+            {
+              status: 'blocked',
+              blockReason: 'batch_in_flight',
+              retryAt: new Date(Date.now() + 30_000),
+              reason: 'Lote ainda em processamento na DotCompany.',
+            },
+          ],
+        ]),
+    });
+    const r = await svc.findImages([{ id: 'p2', name: 'Oreo', ean: NOVO }], CLIENTE);
+    expect(r.pending).toEqual(['p2']);
+    expect(r.eanStatus[0]).toMatchObject({ status: 'pending' });
+    expect(jobs.criarJobDoEncarte).toHaveBeenCalledWith(
+      [{ ean: NOVO, description: 'Oreo' }],
+      CLIENTE,
+    );
+    expect(runner.wake).toHaveBeenCalled();
+  });
+
   it('prazo esgotado: responde no prazo e manda os EANs para um job do encarte', async () => {
     const { svc, jobs, runner } = criar({ lento: true });
     const t0 = Date.now();

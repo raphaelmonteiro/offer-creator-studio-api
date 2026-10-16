@@ -241,24 +241,70 @@ d('DotcompanyBudgetService (Postgres real)', () => {
     expect(rs.filter((r) => r.ok)).toHaveLength(27);
   });
 
-  it('refundCredits desfaz o estimado das horas mais recentes (sem negativo) e devolve ao saldo', async () => {
+  it('refundCredits volta para a hora do lançamento (atravessando hora e dia), com piso zero', async () => {
     const { svc, setNow } = criar({}, { saldo: 1000 });
     await svc.refreshBalance();
+    // Estimado lançado às 23:05 de SP (02:05Z do dia seguinte); depois, consumo em outra hora e outro dia.
+    const lancadoEm = new Date('2099-03-11T02:05:00Z');
+    setNow(lancadoEm);
     await svc.release({ kind: 'batch', credits: 8 });
-    setNow(new Date('2099-03-10T14:05:00Z'));
+    setNow(new Date('2099-03-11T03:05:00Z')); // 00:05 do dia seguinte em SP
     await svc.release({ kind: 'batch', credits: 4 });
-    await svc.refundCredits(6);
+    setNow(new Date('2099-03-11T04:05:00Z'));
+    await svc.refundCredits(6, lancadoEm);
     const rows: Array<{ credits: number }> = await ds.query(
       `SELECT credits FROM dotcompany_usage_hourly WHERE hour >= '2099-01-01' ORDER BY hour`,
     );
-    expect(rows.map((r) => r.credits)).toEqual([6, 0]);
-    const [b] = await ds.query(`SELECT available FROM dotcompany_balance WHERE id = 1`);
-    expect(b.available).toBe(1000 - 12 + 6);
-    // Pedir mais do que existe nunca deixa contador negativo.
-    await svc.refundCredits(100);
+    expect(rows.map((r) => r.credits)).toEqual([2, 4]);
+    // Pedir mais do que existe na hora nunca deixa contador negativo.
+    await svc.refundCredits(100, lancadoEm);
     const after: Array<{ credits: number }> = await ds.query(
+      `SELECT credits FROM dotcompany_usage_hourly WHERE hour >= '2099-01-01' ORDER BY hour`,
+    );
+    expect(after.map((r) => r.credits)).toEqual([0, 4]);
+  });
+
+  it('dois estornos concorrentes não deixam contador negativo nem somam o saldo duas vezes além do devido', async () => {
+    const { svc } = criar({}, { saldo: 1000 });
+    await svc.refreshBalance();
+    await svc.release({ kind: 'batch', credits: 4 });
+    await Promise.all([svc.refundCredits(4, T0), svc.refundCredits(4, T0)]);
+    const rows: Array<{ credits: number }> = await ds.query(
       `SELECT credits FROM dotcompany_usage_hourly WHERE hour >= '2099-01-01'`,
     );
-    expect(after.every((r) => r.credits >= 0)).toBe(true);
+    expect(rows.every((r) => r.credits >= 0)).toBe(true);
+    expect(rows[0].credits).toBe(0);
+  });
+
+  it('refundCredits devolve ao saldo se ele não foi conferido depois do lançamento e rearma os alertas', async () => {
+    const { svc, setNow } = criar({ DOTCOMPANY_ALERT_CREDITS: '1000' }, { saldo: 1002 });
+    await svc.refreshBalance(); // conferido em T0
+    setNow(new Date(T0.getTime() + 60_000));
+    const lancadoEm = new Date(T0.getTime() + 60_000);
+    await svc.release({ kind: 'batch', credits: 4 }); // 998: abaixo do limiar
+    await ds.query(`UPDATE dotcompany_balance SET "lowAlertSentAt" = now() WHERE id = 1`);
+    await svc.refundCredits(4, lancadoEm);
+    const [b] = await ds.query(
+      `SELECT available, "lowAlertSentAt" FROM dotcompany_balance WHERE id = 1`,
+    );
+    expect(b.available).toBe(1002);
+    expect(b.lowAlertSentAt).toBeNull(); // voltou acima do limiar: alerta rearmado
+    expect((await svc.report()).balance.available).toBe(1002);
+  });
+
+  it('refundCredits não mexe no saldo conferido na DotCompany depois do lançamento', async () => {
+    const { svc, setNow } = criar({}, { saldo: 1000 });
+    const lancadoEm = T0;
+    setNow(T0);
+    await svc.release({ kind: 'batch', credits: 4 });
+    setNow(new Date(T0.getTime() + 60_000));
+    await svc.refreshBalance(); // /usage depois do lançamento: 1000 já é o real
+    await svc.refundCredits(4, lancadoEm);
+    const [b] = await ds.query(`SELECT available FROM dotcompany_balance WHERE id = 1`);
+    expect(b.available).toBe(1000);
+    const rows: Array<{ credits: number }> = await ds.query(
+      `SELECT credits FROM dotcompany_usage_hourly WHERE hour >= '2099-01-01'`,
+    );
+    expect(rows[0].credits).toBe(0); // o contador por hora ainda é nosso e é desfeito
   });
 });

@@ -285,7 +285,7 @@ d('DotcompanyLookupService (Postgres real)', () => {
 
   const pendentes = (e: string) =>
     ds.query(
-      `SELECT "idempotencyKey", gtins, attempts, "creditsRecorded", "lastOutcome", "retryNotBefore"
+      `SELECT "idempotencyKey", gtins, attempts, "creditsRecorded", "creditsRecordedAt", "lastOutcome", "retryNotBefore"
          FROM dotcompany_pending_batches WHERE gtins ? $1`,
       [e],
     );
@@ -436,12 +436,13 @@ d('DotcompanyLookupService (Postgres real)', () => {
     await svc.resolve([e], { kind: 'batch' });
     const [p] = await pendentes(e);
     expect(p).toMatchObject({ lastOutcome: 'http_5xx', creditsRecorded: 4 });
+    expect(p.creditsRecordedAt).toBeInstanceOf(Date);
 
     client.lookupBatch.mockRejectedValueOnce(conflito('IDEMPOTENCY_KEY_ORPHANED'));
     const r = await svc.resolve([e], { kind: 'batch' });
     expect(r.outcomes.get(e)?.status).toBe('found');
     expect(budget.refundCredits).toHaveBeenCalledTimes(1);
-    expect(budget.refundCredits).toHaveBeenCalledWith(4);
+    expect(budget.refundCredits).toHaveBeenCalledWith(4, expect.any(Date));
     const lancado = (creditosLancados(budget.release) as number[]).reduce((a, b) => a + b, 0);
     expect(lancado - 4).toBe(4); // 4 (estimado) + 4 (real) − 4 (estorno) = só o real
     expect(chaveDaChamada(client, 3)).not.toBe(chaveDaChamada(client, 0));
