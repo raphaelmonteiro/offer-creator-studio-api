@@ -24,6 +24,7 @@ async function montar() {
     refreshBalance: jest.fn().mockResolvedValue(undefined),
   };
   const jobs = {
+    previewArquivo: jest.fn().mockResolvedValue({ dryRun: true, totalRows: 1 }),
     criarJobDeArquivo: jest.fn().mockResolvedValue({ job: { id: JOB_ID }, created: true }),
     listar: jest.fn().mockResolvedValue([]),
     detalhe: jest.fn().mockResolvedValue({ id: JOB_ID }),
@@ -91,6 +92,15 @@ describe('DotcompanyAdminController — consumo', () => {
 });
 
 describe('DotcompanyAdminController — jobs de importação', () => {
+  it('simulação exige token, valida arquivo e não acorda o runner', async () => {
+    const { ctrl, jobs, runner } = await criar();
+    await expect(ctrl.previewJob(undefined, arquivo())).rejects.toMatchObject({ status: 403 });
+    await expect(ctrl.previewJob('tok', undefined)).rejects.toMatchObject({ status: 400 });
+    await expect(ctrl.previewJob('tok', arquivo())).resolves.toMatchObject({ dryRun: true });
+    expect(jobs.previewArquivo).toHaveBeenCalledWith(expect.any(Buffer));
+    expect(jobs.criarJobDeArquivo).not.toHaveBeenCalled();
+    expect(runner.wake).not.toHaveBeenCalled();
+  });
   it('todas as rotas exigem o token', async () => {
     const { ctrl } = await criar();
     await expect(ctrl.criarJob(undefined, arquivo())).rejects.toMatchObject({ status: 403 });
@@ -163,6 +173,14 @@ describe('POST /ai/dotcompany/import-jobs — token antes do upload (HTTP)', () 
 
   const csv = () => Buffer.from('nome;ean\nA;7891000100103\n');
   const grande = () => Buffer.alloc(IMPORT_FILE_MAX_BYTES + 1024, 65);
+  const uploadSemToken = (path: string) =>
+    request(app.getHttpServer())
+      .post(path)
+      .attach('file', grande(), 'enorme.csv')
+      .then(
+        (r) => ({ status: r.status as number | undefined, code: undefined as string | undefined }),
+        (e: { status?: number; code?: string }) => ({ status: e.status, code: e.code }),
+      );
 
   it('sem token → 403 e o arquivo não é processado', async () => {
     const res = await request(app.getHttpServer())
@@ -175,13 +193,7 @@ describe('POST /ai/dotcompany/import-jobs — token antes do upload (HTTP)', () 
   it('sem token e arquivo acima do limite → 403 (o guard roda antes do multer; senão seria 413)', async () => {
     // O servidor responde 403 sem ler o corpo; conforme o timing, o cliente vê a
     // resposta ou o reset da conexão. O que não pode acontecer é o 413 do multer.
-    const res = await request(app.getHttpServer())
-      .post('/ai/dotcompany/import-jobs')
-      .attach('file', grande(), 'enorme.csv')
-      .then(
-        (r) => ({ status: r.status as number | undefined, code: undefined as string | undefined }),
-        (e: { status?: number; code?: string }) => ({ status: e.status, code: e.code }),
-      );
+    const res = await uploadSemToken('/ai/dotcompany/import-jobs');
     if (res.status !== undefined) expect(res.status).toBe(403);
     else expect(res.code).toMatch(/ECONNRESET|EPIPE/);
     expect(jobs.criarJobDeArquivo).not.toHaveBeenCalled();
@@ -203,5 +215,25 @@ describe('POST /ai/dotcompany/import-jobs — token antes do upload (HTTP)', () 
       .attach('file', csv(), 'arcos.csv');
     expect(res.status).toBe(201);
     expect(jobs.criarJobDeArquivo).toHaveBeenCalledTimes(1);
+  });
+
+  it('preview protege o upload e responde 200 sem criar job', async () => {
+    const server = app.getHttpServer();
+    const denied = await uploadSemToken('/ai/dotcompany/import-jobs/preview');
+    if (denied.status !== undefined) expect(denied.status).toBe(403);
+    else expect(denied.code).toMatch(/ECONNRESET|EPIPE/);
+    expect(jobs.previewArquivo).not.toHaveBeenCalled();
+    const tooLarge = await request(server)
+      .post('/ai/dotcompany/import-jobs/preview')
+      .set('x-admin-token', 'tok')
+      .attach('file', grande(), 'enorme.csv');
+    expect(tooLarge.status).toBe(413);
+    const ok = await request(server)
+      .post('/ai/dotcompany/import-jobs/preview')
+      .set('x-admin-token', 'tok')
+      .attach('file', csv(), 'arcos.csv');
+    expect(ok.status).toBe(200);
+    expect(ok.body.dryRun).toBe(true);
+    expect(jobs.criarJobDeArquivo).not.toHaveBeenCalled();
   });
 });

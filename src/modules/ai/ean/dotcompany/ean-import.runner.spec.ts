@@ -2,7 +2,7 @@
 jest.mock('sharp', () => jest.fn());
 
 import { DataSource } from 'typeorm';
-import { criarDataSourceDeTeste, EAN_IT_ENABLED } from '../ean-test-db';
+import { criarDataSourceDeTeste, EAN_IT_ENABLED, inserirImagem } from '../ean-test-db';
 import { classifyEan, LookupOutcome, LookupSummary } from './dotcompany-lookup.service';
 import { EanImportStore } from './ean-import.store';
 import { EanImportRunner } from './ean-import.runner';
@@ -101,6 +101,26 @@ d('EanImportRunner (Postgres real)', () => {
     if (jobs.length) await ds.getRepository(EanImportJob).delete(jobs.splice(0));
   });
   afterAll(async () => ds.destroy());
+
+  it('EAN de qualquer fonte na galeria evita DotCompany e importação de foto', async () => {
+    const imageId = await inserirImagem(ds, 'teste-import-gallery-first.png', {
+      ean: `0${E1}`,
+      eanSource: 'off',
+    });
+    try {
+      const dc = new FakeDotcompany();
+      const fotos = new FakeFotos();
+      const j = await job([E1]);
+      await rodar(runner(dc, fotos));
+      expect(dc.consultas).toBe(0);
+      expect(fotos.galeria.size).toBe(0);
+      expect((await store.contagens(j.id)).already_exists).toBe(1);
+      const result = await store.listarItens(j.id, {});
+      expect(result.items[0].galleryImageId).toBe(imageId);
+    } finally {
+      await ds.query('DELETE FROM gallery_images WHERE id = $1', [imageId]);
+    }
+  });
 
   function runner(dc: FakeDotcompany, fotos: FakeFotos) {
     const budget = { now: () => new Date(), limits: { balanceRefreshMs: 15 * 60_000 } };

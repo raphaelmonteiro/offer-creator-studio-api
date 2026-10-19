@@ -3,8 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import type { ImportItemResult, ImportJobStatus } from './dotcompany.types';
 import { parseImportFile } from './ean-import-file.parser';
-import { EanImportStore, JobCounts } from './ean-import.store';
+import { EanImportStore, JobCounts, NewImportRow } from './ean-import.store';
 import { EanImportJob } from './entities/ean-import-job.entity';
+import { classifyEan, CREDITS_PER_FOUND } from './dotcompany-lookup.service';
 
 export interface JobView extends EanImportJob {
   counts: JobCounts;
@@ -26,6 +27,52 @@ export class EanImportJobService {
       10,
     );
     this.defaultCapCredits = Number.isFinite(cap) && cap >= 0 ? cap : 12_000;
+  }
+
+  /** Simula contra a galeria: não cria job, não grava nem chama provedores. */
+  async previewArquivo(buffer: Buffer) {
+    const parsed = parseImportFile(buffer);
+    const classified = parsed.rows.map((row) => ({ row, code: classifyEan(row.ean) }));
+    const gallery = await this.store.buscarImagensPorEan(
+      classified
+        .filter(({ row, code }) => !row.result && code.status === 'valid')
+        .map(({ code }) => code.ean),
+    );
+    const items = parsed.rows.map((row) => this.previewItem(row, gallery));
+    const counts = {
+      already_exists: 0,
+      needs_lookup: 0,
+      invalid: 0,
+      internal_use: 0,
+      duplicate: 0,
+    };
+    for (const item of items) counts[item.result] += 1;
+    const maxCredits = counts.needs_lookup * CREDITS_PER_FOUND;
+    return {
+      dryRun: true,
+      totalRows: items.length,
+      columns: parsed.columns,
+      counts,
+      maxCredits,
+      maxCostBrl: (maxCredits / 100).toFixed(2),
+      items,
+    };
+  }
+
+  private previewItem(row: NewImportRow, gallery: Map<string, string>) {
+    const code = classifyEan(row.ean);
+    const galleryImageId = gallery.get(code.ean) ?? null;
+    const result =
+      row.result ??
+      (code.status !== 'valid' ? code.status : galleryImageId ? 'already_exists' : 'needs_lookup');
+    return {
+      rowNumber: row.rowNumber,
+      ean: code.ean,
+      description: row.description,
+      result,
+      galleryImageId: result === 'already_exists' ? galleryImageId : null,
+      reason: row.reason ?? (code.status !== 'valid' ? code.reason : null),
+    };
   }
 
   /** Cria o job de um cadastro (CSV/XLSX). O mesmo arquivo devolve o job que já existe. */

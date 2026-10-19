@@ -9,6 +9,7 @@ import type {
 } from './dotcompany.types';
 import { EanImportItem } from './entities/ean-import-item.entity';
 import { EanImportJob } from './entities/ean-import-job.entity';
+import { classifyEan } from './dotcompany-lookup.service';
 
 /** Um item travado há mais que isso é considerado abandonado (processo morreu). */
 export const STALE_LOCK_MINUTES = 10;
@@ -53,6 +54,32 @@ function flatRows<T>(rows: unknown): T[] {
 @Injectable()
 export class EanImportStore {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  /** Todas as fontes da galeria, antes de qualquer consulta paga ao catálogo. */
+  async buscarImagensPorEan(eans: string[]): Promise<Map<string, string>> {
+    if (!eans.length) return new Map();
+    const variants = new Set<string>();
+    for (const ean of eans) {
+      variants.add(ean);
+      if (ean.length === 13) {
+        variants.add(`0${ean}`);
+        if (ean.startsWith('0')) variants.add(ean.slice(1));
+      }
+    }
+    const rows: Array<{ id: string; ean: string }> = await this.dataSource.query(
+      `SELECT id, metadata->>'ean' AS ean FROM gallery_images
+        WHERE metadata->>'ean' = ANY($1::text[])
+          AND COALESCE(url, '') <> ''
+        ORDER BY "createdAt" ASC, id ASC`,
+      [[...variants]],
+    );
+    const found = new Map<string, string>();
+    for (const row of rows) {
+      const code = classifyEan(row.ean);
+      if (code.status === 'valid' && !found.has(code.ean)) found.set(code.ean, row.id);
+    }
+    return found;
+  }
 
   async buscarPorHash(fileHash: string): Promise<EanImportJob | null> {
     return this.dataSource.getRepository(EanImportJob).findOne({ where: { fileHash } });

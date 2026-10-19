@@ -110,6 +110,25 @@ export class DotcompanyAdminController {
   }
 
   @Public()
+  @Post('import-jobs/preview')
+  @HttpCode(HttpStatus.OK)
+  @SkipValidation()
+  @UseGuards(DotcompanyAdminTokenGuard)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: IMPORT_FILE_MAX_BYTES } }))
+  @ApiOperation({
+    summary: '[Admin] Simula o CSV/XLSX contra a galeria, sem gravar nem chamar APIs externas',
+  })
+  async previewJob(
+    @Headers('x-admin-token') token: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    this.assertAdminToken(token);
+    if (!file?.buffer?.length)
+      throw new BadRequestException('Envie o arquivo no campo "file" (CSV ou XLSX).');
+    return this.jobs.previewArquivo(file.buffer);
+  }
+
+  @Public()
   @Post('import-jobs')
   @HttpCode(HttpStatus.CREATED)
   @SkipValidation()

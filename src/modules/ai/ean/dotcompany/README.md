@@ -73,6 +73,23 @@ O arquivo pode ser:
 
 Ele precisa de uma coluna de EAN (`EAN`, `GTIN`, `Código de barras`…) e, de preferência, uma de descrição.
 
+O padrão consolidado é `ean;descricao`, uma linha por EAN. Preserve os códigos como texto,
+inclusive zeros iniciais. No XLSX, a primeira aba contém os produtos; abas auxiliares não são importadas.
+PDFs devem ser convertidos e conferidos antes do envio. Produtos sem EAN válido ficam em pendências,
+sem inventar códigos a partir do nome ou do PLU.
+
+Antes de importar, simule contra a galeria inteira, sem criar job, gravar dados ou chamar APIs externas:
+
+```bash
+curl -s -H "$H" -F "file=@produtos-unicos.csv" "$B/import-jobs/preview" | jq .data
+```
+
+O retorno traz `counts` (`already_exists`, `needs_lookup`, `invalid`, `internal_use`, `duplicate`),
+`items` e `maxCredits`/`maxCostBrl`: limite superior do custo DotCompany dos EANs ausentes da galeria,
+antes do reaproveitamento do cache. Não inclui o parser de nomes e embeddings da OpenAI usados ao
+importar fotos. Esse limite é uma estimativa no instante da simulação, não uma reserva de orçamento.
+Ambas as rotas de upload exigem `x-admin-token` antes de ler o arquivo, limitado a 20 MB.
+
 ```bash
 curl -s -H "$H" -F "file=@arcos.csv" "$B/import-jobs?clientId=<uuid-do-cliente>&costCapCredits=12000" | jq .data
 ```
@@ -80,6 +97,11 @@ curl -s -H "$H" -F "file=@arcos.csv" "$B/import-jobs?clientId=<uuid-do-cliente>&
 - `costCapCredits` é o teto do job (padrão `EAN_IMPORT_DEFAULT_CAP_CREDITS`; 0 = sem teto próprio).
 - O `clientId` fica só no relatório do job: as fotos DotCompany **não** viram preferidas do cliente (a preferência é só o que o cliente escolhe).
 - Enviar o **mesmo arquivo** de novo devolve o job existente (`created: false`).
+- O runner procura primeiro o EAN na **galeria inteira**, incluindo fotos OFF, ERP e manuais,
+  com equivalência UPC-A/EAN-13/GTIN-14 de zero inicial. Se encontrar, conclui como `already_exists`
+  sem consultar a DotCompany ou importar outra foto. Depois usa o cache e só então o catálogo externo.
+- Semelhança por descrição não grava EAN em uma imagem existente. O fluxo de vínculo com adjudicação
+  continua separado em `/ai/gallery/match-ean-from-spreadsheet` e `/ai/ean/jobs`.
 
 Acompanhar:
 
@@ -94,7 +116,7 @@ curl -s -H "$H" "$B/import-jobs/<id>/items?result=not_found&limit=50" | jq .data
 | result | significado |
 |---|---|
 | `imported` | foto DotCompany baixada para a galeria |
-| `already_exists` | a foto DotCompany desse EAN já estava na galeria |
+| `already_exists` | já havia foto desse EAN na galeria, de qualquer fonte |
 | `no_image` | a DotCompany conhece o EAN, mas não tem foto |
 | `not_found` | a DotCompany não conhece o EAN (grátis; consulta de novo depois de 30 dias) |
 | `invalid` | dígito verificador ou comprimento inválido (sem consulta) |

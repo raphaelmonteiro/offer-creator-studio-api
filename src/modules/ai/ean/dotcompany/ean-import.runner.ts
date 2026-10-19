@@ -117,13 +117,6 @@ export class EanImportRunner implements OnModuleInit, OnModuleDestroy {
       if (!ok) return false;
     }
 
-    if (job.costCapCredits > 0 && job.costCredits >= job.costCapCredits) {
-      await this.store.mudarStatus(job.id, ['running'], 'paused_cap', {
-        error: 'teto de gasto do job atingido',
-      });
-      return false;
-    }
-
     const itens = await this.store.travarPendentes(job.id, STEP_ITEMS);
     if (itens.length === 0) {
       if ((await this.store.contarAbertos(job.id)) === 0) {
@@ -142,6 +135,19 @@ export class EanImportRunner implements OnModuleInit, OnModuleDestroy {
       else if (c.status === 'internal_use')
         concluir.push([item, { result: 'internal_use', reason: c.reason }]);
       else consultar.push(item);
+    }
+
+    // A galeria inteira vem antes do cache DotCompany: OFF, ERP e fotos manuais
+    // também evitam uma consulta paga e uma foto duplicada.
+    const gallery = await this.store.buscarImagensPorEan(
+      consultar.map((item) => classifyEan(item.ean).ean),
+    );
+    for (let i = consultar.length - 1; i >= 0; i--) {
+      const item = consultar[i];
+      const imageId = gallery.get(classifyEan(item.ean).ean);
+      if (!imageId) continue;
+      concluir.push([item, { result: 'already_exists', galleryImageId: imageId }]);
+      consultar.splice(i, 1);
     }
 
     // Teto do job: estima só o que ainda não está no cache (cache não custa).
