@@ -11,6 +11,12 @@ export interface ResourceGuardState {
   reason: DegradedReason | null;
 }
 
+/** Linux conta cache recuperável em MemAvailable; MemFree sozinho bloqueia renders saudáveis. */
+export function availableMemoryFromMeminfo(meminfo: string, fallback: number): number {
+  const match = meminfo.match(/^MemAvailable:\s+(\d+)\s+kB\s*$/m);
+  return match ? Number(match[1]) * 1024 : fallback;
+}
+
 /**
  * Admission control (TDD §6.5 camada 2) — infraestrutura compartilhada
  * (plano-comerciais §11): amostra CPU (/proc/stat no Linux, loadavg como
@@ -123,7 +129,22 @@ export class ResourceGuardService implements OnModuleInit, OnModuleDestroy {
   }
 
   private sample(): void {
-    this.evaluate(this.readCpuUsage(), os.freemem(), Date.now(), this.readFreeDiskBytes());
+    this.evaluate(
+      this.readCpuUsage(),
+      this.readAvailableMemory(),
+      Date.now(),
+      this.readFreeDiskBytes(),
+    );
+  }
+
+  private readAvailableMemory(): number {
+    const fallback = os.freemem();
+    if (process.platform !== 'linux') return fallback;
+    try {
+      return availableMemoryFromMeminfo(fs.readFileSync('/proc/meminfo', 'utf8'), fallback);
+    } catch {
+      return fallback;
+    }
   }
 
   private readCpuUsage(): number {

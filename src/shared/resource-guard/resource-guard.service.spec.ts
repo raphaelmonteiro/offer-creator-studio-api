@@ -1,6 +1,23 @@
-import { ResourceGuardService } from './resource-guard.service';
+import { availableMemoryFromMeminfo, ResourceGuardService } from './resource-guard.service';
 
 const GB = 1024 * 1024 * 1024;
+
+describe('RAM disponível no Linux', () => {
+  it('inclui cache recuperável sem confundir MemFree com MemAvailable', () => {
+    expect(availableMemoryFromMeminfo('MemFree: 100000 kB\nMemAvailable: 800000 kB\n', 1)).toBe(
+      800000 * 1024,
+    );
+  });
+
+  it('preserva o fallback quando o kernel não informa MemAvailable válido', () => {
+    expect(availableMemoryFromMeminfo('MemFree: 100000 kB\n', 123)).toBe(123);
+    expect(availableMemoryFromMeminfo('MemAvailable: invalid kB\n', 123)).toBe(123);
+  });
+
+  it('não mascara falta real de memória', () => {
+    expect(availableMemoryFromMeminfo('MemAvailable: 0 kB\n', GB)).toBe(0);
+  });
+});
 
 describe('ResourceGuardService — admission control com histerese (TDD §6.5)', () => {
   let guard: ResourceGuardService;
