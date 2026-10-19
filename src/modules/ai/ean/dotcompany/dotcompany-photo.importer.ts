@@ -13,12 +13,16 @@ import { DotcompanyLookup } from './entities/dotcompany-lookup.entity';
 export const DOTCOMPANY_GALLERY_FOLDER = 'DotCompany';
 
 const DOWNLOAD_TIMEOUT_MS = 20_000;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 /** Teto de pixels decodificados pelo sharp (proteção contra imagem-bomba). */
 export const MAX_INPUT_PIXELS = 40_000_000;
-/** Hosts de onde a foto pode vir: DotCompany e o Backblaze para onde ela redireciona. */
-const ALLOWED_HOSTS = ['app.dotcompany.com.br', 'erp.dotcompany.com.br'];
+/** Hosts observados nas fotos devolvidas pelo catálogo, sem liberar domínios arbitrários. */
+const ALLOWED_HOSTS = [
+  'app.dotcompany.com.br',
+  'erp.dotcompany.com.br',
+  'images.openfoodfacts.org',
+];
 const ALLOWED_HOST_SUFFIXES = ['.backblazeb2.com'];
 
 /** A `imagem_url` é dado de terceiro: só https e só hosts conhecidos (evita SSRF). */
@@ -319,7 +323,7 @@ export class DotcompanyPhotoImporter {
     }
   }
 
-  /** Lê o corpo por stream e aborta ao passar de 5 MB, sem carregar o excedente. */
+  /** Lê o corpo por stream e aborta ao passar de 10 MB, sem carregar o excedente. */
   private async readLimited(res: Response): Promise<Buffer> {
     const reader = res.body?.getReader();
     if (!reader) {

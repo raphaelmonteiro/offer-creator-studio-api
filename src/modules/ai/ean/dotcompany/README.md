@@ -102,6 +102,9 @@ curl -s -H "$H" -F "file=@arcos.csv" "$B/import-jobs?clientId=<uuid-do-cliente>&
   sem consultar a DotCompany ou importar outra foto. Depois usa o cache e só então o catálogo externo.
 - Semelhança por descrição não grava EAN em uma imagem existente. O fluxo de vínculo com adjudicação
   continua separado em `/ai/gallery/match-ean-from-spreadsheet` e `/ai/ean/jobs`.
+- As fotos retornadas pelo catálogo podem apontar para DotCompany, Backblaze ou o host exato
+  `images.openfoodfacts.org`. O download exige HTTPS, valida cada redirecionamento e mantém teto
+  de 10 MiB e 40 milhões de pixels decodificados; hosts arbitrários continuam recusados.
 
 Acompanhar:
 

@@ -168,9 +168,9 @@ describe('DotcompanyPhotoImporter', () => {
     expect(r.get(EAN)?.reason).toContain('expirada');
   });
 
-  it('imagem maior que 5 MB é recusada', async () => {
+  it('imagem maior que 10 MB é recusada', async () => {
     const { svc, fetchMock, uploads } = criar();
-    fetchMock.mockResolvedValue(imagem(200, 5 * 1024 * 1024 + 1));
+    fetchMock.mockResolvedValue(imagem(200, 10 * 1024 * 1024 + 1));
     const r = await svc.importMany([{ ean: EAN, lookup: lookup() }], { kind: 'batch' });
     expect(r.get(EAN)?.status).toBe('error');
     expect(uploads.uploadFile).not.toHaveBeenCalled();
@@ -222,6 +222,9 @@ describe('DotcompanyPhotoImporter', () => {
     it.each([
       ['https://app.dotcompany.com.br/publico/img.png', true],
       ['https://erp.dotcompany.com.br/x.png', true],
+      ['https://images.openfoodfacts.org/images/products/789/100/010/0103/front.jpg', true],
+      ['https://images.openfoodfacts.org.evil.test/x.png', false],
+      ['https://evil.images.openfoodfacts.org/x.png', false],
       ['https://f005.backblazeb2.com/file/b/x.png?Authorization=1', true],
       ['http://app.dotcompany.com.br/x.png', false],
       ['https://127.0.0.1/x.png', false],
@@ -294,7 +297,17 @@ describe('DotcompanyPhotoImporter', () => {
       expect(fetchMock).toHaveBeenCalledTimes(4);
     });
 
-    it('corpo sem content-length é lido em stream e abortado ao passar de 5 MB', async () => {
+    it('foto de catálogo com 6 MB é importada sem abrir mão do limite de download', async () => {
+      const { svc, fetchMock } = criar();
+      fetchMock.mockResolvedValue(imagem(200, 6 * 1024 * 1024));
+      const r = await svc.importMany(
+        [{ ean: EAN, lookup: lookup({}, 'https://images.openfoodfacts.org/images/front.jpg') }],
+        { kind: 'batch' },
+      );
+      expect(r.get(EAN)?.status).toBe('imported');
+    });
+
+    it('corpo sem content-length é lido em stream e abortado ao passar de 10 MB', async () => {
       const { svc, fetchMock } = criar();
       let lidos = 0;
       let cancelado = false;
@@ -314,7 +327,7 @@ describe('DotcompanyPhotoImporter', () => {
       expect(r.get(EAN)?.status).toBe('error');
       expect(r.get(EAN)?.reason).toContain('maior que');
       expect(cancelado).toBe(true);
-      expect(lidos).toBeLessThan(10); // parou perto de 5 MB, não leu "tudo"
+      expect(lidos).toBeLessThan(15); // parou perto de 10 MB, não leu "tudo"
     });
 
     it('o mesmo EAN importado em paralelo baixa uma vez só', async () => {
