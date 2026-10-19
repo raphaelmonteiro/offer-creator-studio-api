@@ -43,4 +43,6 @@ pm2-*.log
 /uploads
 !/uploads/.gitkeep
 /dist
-/docs
+# docs gerados ficam fora; o padrão de código entra no repositório
+/docs/*
+!/docs/padroes.md
