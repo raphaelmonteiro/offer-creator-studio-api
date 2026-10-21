@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as fs from 'fs/promises';
-import { FalQueueClient, FalStatusResult } from '../../../shared/providers/fal-queue.client';
+import {
+  FalQueueClient,
+  FalStatusResult,
+  falRequestResponseUrl,
+  falRequestStatusUrl,
+} from '../../../shared/providers/fal-queue.client';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
@@ -139,13 +144,17 @@ export class McPollProcessor {
     );
   }
 
-  /** Reconstrução determinística das URLs da fila fal (provider = modelo, jobId = request_id). */
+  /**
+   * Reconstrução determinística das URLs da fila fal (provider = modelo,
+   * jobId = request_id) — pelo app `owner/alias` do modelo, nunca pelo id
+   * completo com subcaminho (`falQueueAppId`).
+   */
   private defaultStatusUrl(step: McStep): string {
-    return `https://queue.fal.run/${step.provider}/requests/${step.providerJobId}/status`;
+    return falRequestStatusUrl(step.provider ?? '', step.providerJobId ?? '');
   }
 
   private defaultResponseUrl(step: McStep): string {
-    return `https://queue.fal.run/${step.provider}/requests/${step.providerJobId}`;
+    return falRequestResponseUrl(step.provider ?? '', step.providerJobId ?? '');
   }
 
   /** Mock: o clipe existe em mock-jobs/ e "fica pronto" após a latência simulada. */

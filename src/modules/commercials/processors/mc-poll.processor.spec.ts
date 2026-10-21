@@ -103,7 +103,10 @@ describe('McPollProcessor — polling com backoff e timeout duro (plano §6.4)',
 
     fal.status.mockClear();
     await processor.process({ stepId: 'st-1', attempt: 1 });
-    expect(fal.status).toHaveBeenCalledWith(`https://queue.fal.run/${model}/requests/req-1/status`);
+    // pelo app `fal-ai/kling-video` (owner/alias): o subcaminho do modelo fica de fora
+    expect(fal.status).toHaveBeenCalledWith(
+      'https://queue.fal.run/fal-ai/kling-video/requests/req-1/status',
+    );
   });
 
   it('COMPLETED → CAS provider_wait→ingesting + job mc.ingest com a responseUrl', async () => {

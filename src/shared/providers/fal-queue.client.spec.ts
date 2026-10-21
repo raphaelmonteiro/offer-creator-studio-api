@@ -1,5 +1,10 @@
 import { ConfigService } from '@nestjs/config';
-import { FalQueueClient } from './fal-queue.client';
+import {
+  FalQueueClient,
+  falQueueAppId,
+  falRequestResponseUrl,
+  falRequestStatusUrl,
+} from './fal-queue.client';
 import { TerminalProviderError, TransientProviderError } from './provider-errors';
 
 /**
@@ -55,6 +60,23 @@ describe('FalQueueClient — cliente genérico da fila fal (plano §5.2)', () =>
     const result = await client.submit('fal-ai/seedance', {});
     expect(result.statusUrl).toBe('https://queue.fal.run/fal-ai/seedance/requests/req-2/status');
     expect(result.responseUrl).toBe('https://queue.fal.run/fal-ai/seedance/requests/req-2');
+  });
+
+  it('URLs reconstruídas usam o app owner/alias — o subcaminho do modelo fica de fora', async () => {
+    // Resposta real do fal (21/10/2026) para fal-ai/kling-video/ai-avatar/v2/pro:
+    // status_url = https://queue.fal.run/fal-ai/kling-video/requests/{id}/status
+    fetchSpy.mockResolvedValue(jsonResponse(200, { request_id: 'req-3' }));
+    const result = await client.submit('fal-ai/kling-video/ai-avatar/v2/pro', {});
+    expect(result.statusUrl).toBe('https://queue.fal.run/fal-ai/kling-video/requests/req-3/status');
+    expect(result.responseUrl).toBe('https://queue.fal.run/fal-ai/kling-video/requests/req-3');
+    expect(falQueueAppId('minimax/h3-max/lip-sync/image-to-video')).toBe('minimax/h3-max');
+    expect(falQueueAppId('fal-ai/kling')).toBe('fal-ai/kling');
+    expect(falRequestStatusUrl('fal-ai/bytedance/omnihuman/v1.5', 'r')).toBe(
+      'https://queue.fal.run/fal-ai/bytedance/requests/r/status',
+    );
+    expect(falRequestResponseUrl('fal-ai/bytedance/omnihuman/v1.5', 'r')).toBe(
+      'https://queue.fal.run/fal-ai/bytedance/requests/r',
+    );
   });
 
   it('submit sem request_id na resposta → erro de validação terminal', async () => {

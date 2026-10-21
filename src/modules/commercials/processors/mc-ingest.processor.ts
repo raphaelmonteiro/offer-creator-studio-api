@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as sharp from 'sharp';
 import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
-import { FalQueueClient } from '../../../shared/providers/fal-queue.client';
+import { FalQueueClient, falRequestResponseUrl } from '../../../shared/providers/fal-queue.client';
 import {
   TerminalProviderError,
   TransientProviderError,
@@ -168,7 +168,7 @@ export class McIngestProcessor {
         await this.copyMockClip(step.providerJobId as string, videoPath);
       } else {
         const videoUrl = await this.fal.resultVideoUrl(
-          responseUrl ?? `https://queue.fal.run/${step.provider}/requests/${step.providerJobId}`,
+          responseUrl ?? falRequestResponseUrl(step.provider ?? '', step.providerJobId ?? ''),
         );
         this.assertAllowedUrl(videoUrl);
         await this.downloadStream(videoUrl, videoPath);

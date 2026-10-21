@@ -1,3 +1,4 @@
+import { falRequestResponseUrl } from '../../../shared/providers/fal-queue.client';
 import { QUEUES, QueueName } from '../../../shared/queue/animation-queue.service';
 import { McStepStatus } from './mc-state-machines';
 import { mcExpireForQueue, mcQueueForStep } from './mc-pipeline.config';
@@ -31,9 +32,12 @@ export interface McWatchdogTarget {
 /** Idade mínima (ms) para considerar um step órfão — evita corrida com publishes em voo. */
 export const MC_WATCHDOG_MIN_AGE_MS = 120_000;
 
-/** Reconstrução determinística da URL de resultado da fila fal (mesma regra do poll). */
+/**
+ * Reconstrução determinística da URL de resultado da fila fal (mesma regra do
+ * poll): pelo app `owner/alias` do modelo — o subcaminho do modelo não entra.
+ */
 export function mcDefaultResponseUrl(step: McOrphanStep): string {
-  return `https://queue.fal.run/${step.provider}/requests/${step.providerJobId}`;
+  return falRequestResponseUrl(step.provider ?? '', step.providerJobId ?? '');
 }
 
 /**

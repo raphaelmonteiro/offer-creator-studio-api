@@ -5,6 +5,32 @@ import { TerminalProviderError } from './provider-errors';
 
 const FAL_QUEUE_BASE_URL = 'https://queue.fal.run';
 
+/**
+ * App da fila fal a partir do id do modelo: `owner/alias` (dois primeiros
+ * segmentos). Os subcaminhos do modelo (`ai-avatar/v2/pro`, `lip-sync/
+ * image-to-video`) são rotas DENTRO do app e NÃO entram nas URLs de
+ * status/resultado — o fal responde `.../fal-ai/kling-video/requests/{id}`
+ * para `fal-ai/kling-video/ai-avatar/v2/pro`; a URL com o subcaminho devolve
+ * 405 vazio (foi o que derrubou o poll reposto pelo watchdog em produção).
+ */
+export function falQueueAppId(model: string): string {
+  const parts = model
+    .split('/')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return parts.slice(0, 2).join('/');
+}
+
+/** URL de status de um request da fila fal, reconstruída de modelo + request_id. */
+export function falRequestStatusUrl(model: string, requestId: string): string {
+  return `${FAL_QUEUE_BASE_URL}/${falQueueAppId(model)}/requests/${requestId}/status`;
+}
+
+/** URL de resultado de um request da fila fal, reconstruída de modelo + request_id. */
+export function falRequestResponseUrl(model: string, requestId: string): string {
+  return `${FAL_QUEUE_BASE_URL}/${falQueueAppId(model)}/requests/${requestId}`;
+}
+
 /** Estados da fila fal (docs oficiais) — qualquer outro valor é tratado como desconhecido. */
 export type FalQueueStatus = 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED';
 
@@ -63,9 +89,8 @@ export class FalQueueClient extends HttpProviderBase {
     }
     return {
       requestId: res.request_id,
-      statusUrl:
-        res.status_url ?? `${FAL_QUEUE_BASE_URL}/${model}/requests/${res.request_id}/status`,
-      responseUrl: res.response_url ?? `${FAL_QUEUE_BASE_URL}/${model}/requests/${res.request_id}`,
+      statusUrl: res.status_url ?? falRequestStatusUrl(model, res.request_id),
+      responseUrl: res.response_url ?? falRequestResponseUrl(model, res.request_id),
     };
   }
 

@@ -31,10 +31,11 @@ describe('mcWatchdogTarget', () => {
   it('ingesting → refila o ingest com a responseUrl reconstruída', () => {
     const t = mcWatchdogTarget(base({}), 1000);
     expect(t?.queue).toBe(QUEUES.MC_INGEST);
+    // pelo app `fal-ai/kling-video`: o subcaminho `ai-avatar/v2/standard` NÃO entra
+    // (com ele o fal responde 405 vazio — produção, 21/10/2026)
     expect(t?.payload).toEqual({
       stepId: 'step-1',
-      responseUrl:
-        'https://queue.fal.run/fal-ai/kling-video/ai-avatar/v2/standard/requests/req-123',
+      responseUrl: 'https://queue.fal.run/fal-ai/kling-video/requests/req-123',
     });
   });
 
@@ -49,7 +50,15 @@ describe('mcWatchdogTarget', () => {
     }
   });
 
-  it('mcDefaultResponseUrl segue a mesma regra determinística do poll', () => {
-    expect(mcDefaultResponseUrl(base({}))).toContain('/requests/req-123');
+  it('mcDefaultResponseUrl segue a mesma regra determinística do poll (app owner/alias)', () => {
+    expect(mcDefaultResponseUrl(base({}))).toBe(
+      'https://queue.fal.run/fal-ai/kling-video/requests/req-123',
+    );
+    expect(mcDefaultResponseUrl(base({ provider: 'minimax/h3-max/lip-sync/image-to-video' }))).toBe(
+      'https://queue.fal.run/minimax/h3-max/requests/req-123',
+    );
+    expect(mcDefaultResponseUrl(base({ provider: 'fal-ai/bytedance/omnihuman/v1.5' }))).toBe(
+      'https://queue.fal.run/fal-ai/bytedance/requests/req-123',
+    );
   });
 });
