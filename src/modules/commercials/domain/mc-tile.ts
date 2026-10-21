@@ -49,8 +49,16 @@ function clampRect(rect: McPixelRect, width: number, height: number): McPixelRec
   return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
 }
 
-/** Tile pela caixa do rosto: rosto ≥ 60% da altura (quando a largura permite), proporção 3:4..1:1. */
-function tileFromFace(width: number, height: number, bbox: McNormalizedBox): McPixelRect {
+/**
+ * Tile pela caixa do rosto: rosto ≥ 60% da altura (quando a largura permite),
+ * proporção `ratio` (3:4 por padrão; até 1:1 quando o corpo cruza as laterais).
+ */
+function tileFromFace(
+  width: number,
+  height: number,
+  bbox: McNormalizedBox,
+  ratio: number,
+): McPixelRect {
   const faceW = Math.max(1, bbox.w * width);
   const faceH = Math.max(1, bbox.h * height);
   const faceLeft = bbox.x * width;
@@ -59,7 +67,7 @@ function tileFromFace(width: number, height: number, bbox: McNormalizedBox): McP
   // que isso força a altura a acompanhar a largura (proporção nunca passa de
   // 1:1) e a fração cai abaixo de 60% — registrada em `faceFraction`.
   const tileH = Math.max(Math.floor(faceH / MC_TILE_MIN_FACE_FRACTION), Math.ceil(faceW));
-  const tileW = Math.min(tileH, Math.ceil(Math.max(faceW, tileH * MC_TILE_MIN_RATIO)));
+  const tileW = Math.min(tileH, Math.ceil(Math.max(faceW, tileH * ratio)));
   const left = Math.round(faceLeft + faceW / 2 - tileW / 2);
   const top = Math.round(faceTop - tileH * MC_TILE_HEADROOM);
   return { left, top, width: tileW, height: tileH };
@@ -82,12 +90,23 @@ export function computeTileCrop(input: {
   width: number;
   height: number;
   bbox: McNormalizedBox | null;
+  /**
+   * Proporção largura/altura pedida para o tile pelo rosto (clampada a
+   * 3:4..1:1; default 3:4, a mais estreita). O service pede 1:1 quando o
+   * corpo (ombros, capuz, cabelo) cruza as laterais do tile estreito: mesma
+   * altura e mesmo rosto, só mais folga de fundo dos lados.
+   */
+  ratio?: number;
 }): McTileCropPlan {
   const { width, height, bbox } = input;
   if (!(width > 0) || !(height > 0)) {
     throw new Error(`Dimensões inválidas para o tile: ${width}×${height}`);
   }
-  const tile = bbox ? tileFromFace(width, height, bbox) : tileFromWholeImage(width, height);
+  const ratio = Math.min(
+    MC_TILE_MAX_RATIO,
+    Math.max(MC_TILE_MIN_RATIO, input.ratio ?? MC_TILE_MIN_RATIO),
+  );
+  const tile = bbox ? tileFromFace(width, height, bbox, ratio) : tileFromWholeImage(width, height);
   const extract = clampRect(tile, width, height);
   const extend = {
     top: extract.top - tile.top,
@@ -129,6 +148,13 @@ export interface McEdgeUniformity {
   hex: string | null;
   /** Fração de pixels de cada borda dentro da tolerância. */
   fractions: { top: number; left: number; right: number; bottom: number };
+  /** Fração da zona da cabeça (topo de cada lateral, `MC_TILE_EDGE_HEAD_ZONE`) dentro da tolerância. */
+  headZone: { left: number; right: number };
+  /**
+   * Fração de pixels "à deriva" em cada lateral: quase a cor de fundo, mas
+   * fora da tolerância (assinatura de gradiente/vinheta, não de personagem).
+   */
+  drift: { left: number; right: number };
 }
 
 /** Distância máxima por canal (0..255) para o pixel contar como "a mesma cor de fundo". */
@@ -136,6 +162,18 @@ export const MC_TILE_EDGE_TOLERANCE = 28;
 /** A borda superior precisa ser quase toda fundo; as laterais só na metade (o corpo pode sair por baixo). */
 export const MC_TILE_EDGE_MIN_TOP = 0.97;
 export const MC_TILE_EDGE_MIN_SIDE = 0.5;
+/**
+ * Lateral com MENOS da metade de fundo ainda passa quando é o corpo que a
+ * cruza (ombros largos, capuz, cabelo — comum num busto realista com o rosto
+ * a 60% da altura): a zona da cabeça (fração superior da lateral, acima dos
+ * ombros) precisa ser fundo como a borda de cima, e o que cruza a lateral
+ * precisa ser personagem (cor longe do fundo), não um fundo à deriva.
+ */
+export const MC_TILE_EDGE_HEAD_ZONE = 0.3;
+/** Pixel "à deriva": distância do fundo entre a tolerância e este múltiplo dela. */
+export const MC_TILE_EDGE_DRIFT_RATIO = 2.5;
+/** Teto de pixels à deriva por lateral para o corpo cruzando a lateral ser aceito. */
+export const MC_TILE_EDGE_MAX_DRIFT = 0.2;
 /** Alpha abaixo disso é "transparente": o RGB do pixel é ignorado. */
 const TRANSPARENT_ALPHA = 16;
 
@@ -162,6 +200,67 @@ function fraction(pixels: Rgba[], reference: Rgba, tolerance: number): number {
   return pixels.filter((p) => within(p, reference, tolerance)).length / pixels.length;
 }
 
+/** Distância máxima por canal (RGBA) entre o pixel e a referência. */
+function distance(a: Rgba, b: Rgba): number {
+  return Math.max(
+    Math.abs(a[0] - b[0]),
+    Math.abs(a[1] - b[1]),
+    Math.abs(a[2] - b[2]),
+    Math.abs(a[3] - b[3]),
+  );
+}
+
+interface McSideUniformity {
+  fraction: number;
+  headZone: number;
+  drift: number;
+  uniform: boolean;
+}
+
+/**
+ * Uma lateral (de cima para baixo): fundo em ≥ metade — ou, com o corpo
+ * cruzando mais da metade, zona da cabeça limpa como a borda de cima e pouca
+ * cor à deriva (um gradiente que se afasta do fundo gera uma faixa longa de
+ * pixels quase-fundo; o contorno do personagem salta para longe de uma vez).
+ */
+function sideUniformity(
+  pixels: Rgba[],
+  reference: Rgba,
+  tolerance: number,
+  bodyMayCross: boolean,
+): McSideUniformity {
+  const fractionWithin = fraction(pixels, reference, tolerance);
+  const headPixels = pixels.slice(0, Math.ceil(pixels.length * MC_TILE_EDGE_HEAD_ZONE));
+  const headZone = fraction(headPixels, reference, tolerance);
+  const outer = tolerance * MC_TILE_EDGE_DRIFT_RATIO;
+  const drift =
+    pixels.length === 0
+      ? 0
+      : pixels.filter((p) => {
+          const d = distance(p, reference);
+          return d > tolerance && d <= outer;
+        }).length / pixels.length;
+  return {
+    fraction: fractionWithin,
+    headZone,
+    drift,
+    uniform:
+      fractionWithin >= MC_TILE_EDGE_MIN_SIDE ||
+      (bodyMayCross && headZone >= MC_TILE_EDGE_MIN_TOP && drift <= MC_TILE_EDGE_MAX_DRIFT),
+  };
+}
+
+export interface McEdgeUniformityOptions {
+  tolerance?: number;
+  /**
+   * Personagem gerado: o corpo pode cruzar as laterais além da metade
+   * (`sideUniformity`). Falso (default, e sempre no logo como está): lateral
+   * precisa de ≥ metade de fundo — num logo, o que cruza a lateral pode ser
+   * a própria marca cortada pelo recorte.
+   */
+  bodyMayCrossSides?: boolean;
+}
+
 function toHex(value: number): string {
   return Math.round(value).toString(16).padStart(2, '0').toUpperCase();
 }
@@ -170,14 +269,17 @@ function toHex(value: number): string {
  * Amostra as quatro bordas: a cor de referência é a média da borda superior
  * (num retrato a cabeça fica abaixo da margem de folga); uniforme quando a
  * borda superior é ≥ 97% fundo e cada lateral ≥ 50% (o corpo pode cruzar a
- * metade de baixo e a borda inferior). Gradiente, foto ou cenário atrás do
- * personagem reprovam.
+ * metade de baixo e a borda inferior) — ou, com `bodyMayCrossSides`, lateral
+ * cruzada além da metade pelo corpo (ombros, capuz), quando a zona da cabeça
+ * dela é fundo e o que a cruza não é cor à deriva (`sideUniformity`).
+ * Gradiente, foto ou cenário atrás do personagem reprovam.
  */
 export function edgeUniformity(
   image: McRawImage,
-  options: { tolerance?: number } = {},
+  options: McEdgeUniformityOptions = {},
 ): McEdgeUniformity {
   const tolerance = options.tolerance ?? MC_TILE_EDGE_TOLERANCE;
+  const bodyMayCross = options.bodyMayCrossSides === true;
   const { width, height } = image;
   if (width < 2 || height < 2) throw new Error('Imagem pequena demais para amostrar a borda');
   const top: Rgba[] = [];
@@ -199,21 +301,22 @@ export function edgeUniformity(
     )
     .map((sum) => sum / top.length) as Rgba;
   const transparent = reference[3] < TRANSPARENT_ALPHA;
+  const leftSide = sideUniformity(left, reference, tolerance, bodyMayCross);
+  const rightSide = sideUniformity(right, reference, tolerance, bodyMayCross);
   const fractions = {
     top: fraction(top, reference, tolerance),
-    left: fraction(left, reference, tolerance),
-    right: fraction(right, reference, tolerance),
+    left: leftSide.fraction,
+    right: rightSide.fraction,
     bottom: fraction(bottom, reference, tolerance),
   };
   return {
-    uniform:
-      fractions.top >= MC_TILE_EDGE_MIN_TOP &&
-      fractions.left >= MC_TILE_EDGE_MIN_SIDE &&
-      fractions.right >= MC_TILE_EDGE_MIN_SIDE,
+    uniform: fractions.top >= MC_TILE_EDGE_MIN_TOP && leftSide.uniform && rightSide.uniform,
     background: { r: reference[0], g: reference[1], b: reference[2], alpha: reference[3] },
     transparent,
     hex: transparent ? null : `#${toHex(reference[0])}${toHex(reference[1])}${toHex(reference[2])}`,
     fractions,
+    headZone: { left: leftSide.headZone, right: rightSide.headZone },
+    drift: { left: leftSide.drift, right: rightSide.drift },
   };
 }
 

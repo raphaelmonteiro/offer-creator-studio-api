@@ -1,4 +1,6 @@
 import {
+  MC_TILE_EDGE_MAX_DRIFT,
+  MC_TILE_EDGE_MIN_SIDE,
   MC_TILE_EDGE_TOLERANCE,
   MC_TILE_MAX_RATIO,
   MC_TILE_MIN_FACE_FRACTION,
@@ -99,6 +101,23 @@ describe('mc-tile — geometria do recorte (spec "Tile do personagem")', () => {
     expect(plan.faceFraction).toBeLessThan(MC_TILE_MIN_FACE_FRACTION);
   });
 
+  it('ratio pedido: 1:1 mantém altura e rosto, só alarga; fora da faixa é clampado', () => {
+    const bbox = { x: 0.3, y: 0.15, w: 0.4, h: 0.4 };
+    const narrow = computeTileCrop({ width: 1000, height: 1000, bbox });
+    const wide = computeTileCrop({ width: 1000, height: 1000, bbox, ratio: MC_TILE_MAX_RATIO });
+    expect(wide.tile.height).toBe(narrow.tile.height);
+    expect(wide.tile.top).toBe(narrow.tile.top);
+    expect(wide.tile.width).toBe(wide.tile.height);
+    expect(wide.ratio).toBe(1);
+    expect(wide.faceFraction).toBe(narrow.faceFraction);
+    // centrado no rosto (300..700): alargou igualmente para os dois lados
+    expect(wide.tile.left + wide.tile.width / 2).toBeCloseTo(500, 0);
+    expect(computeTileCrop({ width: 1000, height: 1000, bbox, ratio: 2 }).ratio).toBe(1);
+    expect(computeTileCrop({ width: 1000, height: 1000, bbox, ratio: 0.1 }).ratio).toBe(
+      narrow.ratio,
+    );
+  });
+
   it('sem caixa (logo como está): imagem inteira estendida à proporção válida mais próxima', () => {
     const landscape = computeTileCrop({ width: 1200, height: 800, bbox: null });
     expect(landscape.tile).toEqual({ left: 0, top: -200, width: 1200, height: 1200 });
@@ -150,6 +169,46 @@ describe('mc-tile — guarda de uniformidade da borda', () => {
     const result = edgeUniformity(raw(60, 60, (x) => [x * 4, x * 4, x * 4, 255]));
     expect(result.uniform).toBe(false);
     expect(result.fractions.top).toBeLessThan(0.97);
+  });
+
+  it('busto largo (capuz/ombros) cruzando mais da metade das laterais, fundo liso: uniforme só com bodyMayCrossSides', () => {
+    // cabeça no topo (fundo em volta), corpo de x=0 a x=40 a partir de 35% da altura
+    const image = raw(40, 100, (x, y) => (y >= 35 ? BLUE : GRAY));
+    const result = edgeUniformity(image, { bodyMayCrossSides: true });
+    expect(result.fractions.left).toBeCloseTo(0.35, 1);
+    expect(result.fractions.right).toBeCloseTo(0.35, 1);
+    expect(result.headZone).toEqual({ left: 1, right: 1 });
+    expect(result.drift).toEqual({ left: 0, right: 0 });
+    expect(result.uniform).toBe(true);
+    // logo como está (default): a lateral cruzada além da metade continua reprovando
+    expect(edgeUniformity(image).uniform).toBe(false);
+  });
+
+  it('gradiente vertical com o topo liso reprova: a lateral deriva do fundo em vez de saltar', () => {
+    // 229 em cima → 139 embaixo (90 por canal): zona da cabeça dentro da tolerância, resto à deriva
+    const result = edgeUniformity(
+      raw(40, 100, (_, y) => {
+        const v = Math.round(0xe5 - (90 * y) / 99);
+        return [v, v, v, 255];
+      }),
+      { bodyMayCrossSides: true },
+    );
+    expect(result.fractions.top).toBe(1);
+    expect(result.fractions.left).toBeLessThan(MC_TILE_EDGE_MIN_SIDE);
+    expect(result.headZone.left).toBeGreaterThanOrEqual(0.97);
+    expect(result.drift.left).toBeGreaterThan(MC_TILE_EDGE_MAX_DRIFT);
+    expect(result.uniform).toBe(false);
+  });
+
+  it('corpo cruzando a lateral já na zona da cabeça reprova', () => {
+    const result = edgeUniformity(
+      raw(40, 100, (x, y) => (y >= 20 && x < 3 ? BLUE : GRAY)),
+      {
+        bodyMayCrossSides: true,
+      },
+    );
+    expect(result.headZone.left).toBeLessThan(0.97);
+    expect(result.uniform).toBe(false);
   });
 
   it('personagem cruzando o topo ou toda a lateral reprova', () => {

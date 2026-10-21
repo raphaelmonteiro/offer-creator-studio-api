@@ -9,7 +9,9 @@ import {
   computeTileCrop,
   edgeUniformity,
   keyEdgeBackground,
+  MC_TILE_EDGE_MIN_TOP,
   MC_TILE_EDGE_TOLERANCE,
+  MC_TILE_MAX_RATIO,
   McEdgeKeyResult,
   McEdgeUniformity,
   McTileCropPlan,
@@ -31,12 +33,17 @@ export interface McKitTileResult {
 /** Lado da amostra em que a borda é inspecionada (limita memória em identidades grandes). */
 const EDGE_SAMPLE_SIZE = 256;
 
+const pct = (value: number): string => `${Math.round(value * 100)}%`;
+
 /**
  * Tile do personagem (D1 / spec "Tile do personagem"): recorte da identidade
  * pela caixa do rosto (gate de boca), com rosto ≥ 60% da altura, proporção
  * 3:4..1:1, ≥ 720 px no lado menor, alfa preservado. Guarda de uniformidade
  * da borda ANTES de aceitar: fundo não liso (gradiente, cenário) reprova com
- * 422 TILE_BORDER_NOT_UNIFORM e o kit fica em revisão. Em `logo_as_is` o
+ * 422 TILE_BORDER_NOT_UNIFORM e o kit fica em revisão. O corpo pode sair
+ * pela borda de baixo e pelas laterais (ombros, capuz): o que precisa ser
+ * fundo é a borda de cima e a zona da cabeça das laterais; quando o tile
+ * 3:4 é cruzado, o 1:1 é tentado antes de recusar. Em `logo_as_is` o
  * recorte é dos pixels originais do logo — nenhuma regeneração.
  *
  * O fundo liso detectado na borda vira TRANSPARÊNCIA real (inundação a
@@ -87,23 +94,60 @@ export class McKitTileService {
         details: { actions: ['mouth_variant', 'choose_candidate'] },
       });
     }
+    // Personagem gerado: o corpo pode cruzar as laterais (ombros, capuz). No
+    // logo como está, o que cruza a lateral pode ser a própria marca cortada.
+    const generated = kit.identityMode !== 'logo_as_is';
     let plan = computeTileCrop({ width: meta.width, height: meta.height, bbox });
-    let uniformity = await this.inspectBorder(source, plan);
+    let uniformity = await this.inspectBorder(source, plan, generated);
     // Logo como está: se o recorte pelo rosto corta o próprio logo (marca,
     // letras em volta do rosto), o tile volta a ser o logo INTEIRO — ainda os
     // pixels originais, com a margem do próprio logo como borda.
-    if (!uniformity.uniform && kit.identityMode === 'logo_as_is' && bbox) {
+    if (!uniformity.uniform && !generated && bbox) {
       this.logger.log(`Kit ${kit.id}: recorte pelo rosto corta o logo — tile com o logo inteiro.`);
       plan = computeTileCrop({ width: meta.width, height: meta.height, bbox: null });
-      uniformity = await this.inspectBorder(source, plan);
+      uniformity = await this.inspectBorder(source, plan, false);
+    }
+    // Identidade gerada com fundo liso em cima mas corpo largo (ombros, capuz,
+    // cabelo) cruzando as laterais do tile 3:4: tenta o tile 1:1 — mesma
+    // altura e mesmo rosto, só mais folga de fundo dos lados.
+    if (
+      !uniformity.uniform &&
+      bbox &&
+      generated &&
+      uniformity.fractions.top >= MC_TILE_EDGE_MIN_TOP &&
+      plan.ratio < MC_TILE_MAX_RATIO
+    ) {
+      const wide = computeTileCrop({
+        width: meta.width,
+        height: meta.height,
+        bbox,
+        ratio: MC_TILE_MAX_RATIO,
+      });
+      const wideUniformity = await this.inspectBorder(source, wide, true);
+      if (wideUniformity.uniform) {
+        this.logger.log(
+          `Kit ${kit.id}: corpo cruza as laterais do tile 3:4 (esq. ${pct(
+            uniformity.fractions.left,
+          )}, dir. ${pct(uniformity.fractions.right)} de fundo) — tile 1:1.`,
+        );
+        plan = wide;
+        uniformity = wideUniformity;
+      }
     }
     if (!uniformity.uniform) {
       throw new UnprocessableEntityException({
         code: 'TILE_BORDER_NOT_UNIFORM',
         message:
-          'O fundo em volta do personagem não é liso (gradiente, cenário ou o personagem ' +
-          'encosta na borda). Escolha outra identidade ou gere uma variante antes de aprovar.',
-        details: { fractions: uniformity.fractions, faceFraction: plan.faceFraction },
+          'O fundo em volta da cabeça do personagem não é liso (gradiente, cenário ou a cabeça ' +
+          'encosta na borda). Escolha outra identidade, refaça a imagem de frente ou gere uma ' +
+          'variante antes de aprovar.',
+        details: {
+          fractions: uniformity.fractions,
+          headZone: uniformity.headZone,
+          drift: uniformity.drift,
+          faceFraction: plan.faceFraction,
+          ratio: Number(plan.ratio.toFixed(4)),
+        },
       });
     }
 
@@ -186,19 +230,21 @@ export class McKitTileService {
   }
 
   /** Borda amostrada sobre a região extraída, reduzida a 256×256 (só a uniformidade importa). */
-  private async inspectBorder(source: Buffer, plan: McTileCropPlan): Promise<McEdgeUniformity> {
+  private async inspectBorder(
+    source: Buffer,
+    plan: McTileCropPlan,
+    bodyMayCrossSides: boolean,
+  ): Promise<McEdgeUniformity> {
     const { data, info } = await sharp(source)
       .ensureAlpha()
       .extract(plan.extract)
       .resize(EDGE_SAMPLE_SIZE, EDGE_SAMPLE_SIZE, { fit: 'fill' })
       .raw()
       .toBuffer({ resolveWithObject: true });
-    return edgeUniformity({
-      data,
-      width: info.width,
-      height: info.height,
-      channels: info.channels as 3 | 4,
-    });
+    return edgeUniformity(
+      { data, width: info.width, height: info.height, channels: info.channels as 3 | 4 },
+      { bodyMayCrossSides },
+    );
   }
 
   /**

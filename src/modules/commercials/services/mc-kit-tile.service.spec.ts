@@ -232,10 +232,11 @@ describe('McKitTileService — tile do personagem na aprovação (D1)', () => {
         metadata: expect.objectContaining({ detectedBackgroundColor: '#FFFFFF' }),
       }),
     );
-    // identidade GERADA não tem esse fallback: o recorte sujo é recusado
-    await expect(
-      service.build(kit, identity, { x: 0.3, y: 0.15, w: 0.4, h: 0.4 }),
-    ).rejects.toMatchObject({ response: { code: 'TILE_BORDER_NOT_UNIFORM' } });
+    // identidade GERADA não tem esse fallback: o círculo cortado pelas laterais abaixo da
+    // zona da cabeça é "corpo cruzando a lateral" — recorte pelo rosto, 3:4, nada de logo inteiro
+    const generated = await service.build(kit, identity, { x: 0.3, y: 0.15, w: 0.4, h: 0.4 });
+    expect(generated.faceFraction).toBeGreaterThanOrEqual(0.6);
+    expect(generated.ratio).toBeCloseTo(MC_TILE_MIN_RATIO, 2);
   });
 
   it('cor pedida no kit vence a detectada em identidade gerada', async () => {
@@ -246,6 +247,75 @@ describe('McKitTileService — tile do personagem na aprovação (D1)', () => {
       FACE_BBOX,
     );
     expect(result.backgroundColor).toBe('#ABCDEF');
+  });
+
+  it('busto com capuz/ombros largos cruzando as laterais do tile 3:4 (fundo liso): tile aceito', async () => {
+    // tile 3:4 pela caixa: x 200..1000, y 112..1178; corpo de x 100..1100 a partir de y=450
+    // → laterais com ~32% de fundo (abaixo da metade), zona da cabeça limpa
+    const identity = await writePng(
+      'hooded.png',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1600">' +
+        '<rect width="1200" height="1600" fill="#E5E7EB"/>' +
+        '<rect x="100" y="450" width="1000" height="1150" fill="#1E50C8"/>' +
+        '<circle cx="600" cy="560" r="320" fill="#1E50C8"/>' +
+        '</svg>',
+    );
+    const result = await service.build(kit, identity, FACE_BBOX);
+    expect(result.ratio).toBeCloseTo(MC_TILE_MIN_RATIO, 2);
+    expect(result.faceFraction).toBeGreaterThanOrEqual(0.6);
+    expect(result.backgroundColor).toBe('#E5E7EB');
+    expect(assetRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          edge: expect.objectContaining({ top: 1, bottom: 0 }),
+        }),
+      }),
+    );
+    const edge = assetRepo.save.mock.calls[0][0].metadata.edge;
+    expect(edge.left).toBeLessThan(0.5);
+    expect(edge.right).toBeLessThan(0.5);
+  });
+
+  it('cabelo/capuz cruzando as laterais do 3:4 já na altura da cabeça: cai para o tile 1:1', async () => {
+    // capuz x 150..1050 desde y=200: cruza as laterais do 3:4 (x 200..1000) logo abaixo do topo,
+    // mas cabe dentro do 1:1 (x 67..1133)
+    const identity = await writePng(
+      'big-hair.png',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1600">' +
+        '<rect width="1200" height="1600" fill="#E5E7EB"/>' +
+        '<rect x="150" y="200" width="900" height="1400" fill="#1E50C8"/>' +
+        '<circle cx="600" cy="560" r="320" fill="#1E50C8"/>' +
+        '</svg>',
+    );
+    const result = await service.build(kit, identity, FACE_BBOX);
+    expect(result.ratio).toBe(1);
+    expect(result.width).toBe(result.height);
+    expect(result.faceFraction).toBeGreaterThanOrEqual(0.6);
+    expect(assetRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ ratio: 1 }) }),
+    );
+  });
+
+  it('gradiente vertical com o topo liso → 422 TILE_BORDER_NOT_UNIFORM (3:4 e 1:1 derivam igual)', async () => {
+    const identity = await writePng(
+      'vgradient.png',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1600">' +
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E5E7EB"/>' +
+        '<stop offset="1" stop-color="#8A8A8A"/></linearGradient></defs>' +
+        '<rect width="1200" height="1600" fill="url(#g)"/>' +
+        '<circle cx="600" cy="560" r="320" fill="#1E50C8"/></svg>',
+    );
+    await expect(service.build(kit, identity, FACE_BBOX)).rejects.toMatchObject({
+      status: 422,
+      response: {
+        code: 'TILE_BORDER_NOT_UNIFORM',
+        details: expect.objectContaining({
+          fractions: expect.objectContaining({ top: 1 }),
+          drift: expect.any(Object),
+        }),
+      },
+    });
+    expect(assetRepo.save).not.toHaveBeenCalled();
   });
 
   it('borda não uniforme (gradiente atrás do personagem) → 422 TILE_BORDER_NOT_UNIFORM, nada gravado', async () => {
