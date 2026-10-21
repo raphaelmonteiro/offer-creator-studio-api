@@ -54,7 +54,8 @@ export class McScene {
   /**
    * Nº de re-rolls pedidos pelo usuário (plano §8: o 1º é grátis — embutido no
    * preço da cena; do 2º em diante há mini-reserva de custoDaCena). Edição de
-   * fala NÃO conta (é edição, não re-roll). Prod: coluna nova via SQL manual.
+   * fala NÃO conta (é edição, não re-roll). Coluna criada pela migration
+   * AddSceneRerollCount (1766900000000).
    */
   @Column({ type: 'int', default: 0 })
   rerollCount: number;
