@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 
 export class LinkImageProductDto {
   @ApiProperty({
@@ -20,4 +20,13 @@ export class LinkImageProductDto {
   @IsString()
   @MaxLength(32)
   ean?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Cliente do encarte em edição. A imagem passa a ser preferida dele (client_preferred_images): bônus na porcentagem e desempate nas próximas buscas.',
+    example: '3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  clientId?: string | null;
 }

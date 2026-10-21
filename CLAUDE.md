@@ -399,7 +399,7 @@ Follow the existing pattern: `module.ts` → `controller.ts` → `service.ts` �
 | PUT | `/images/:imageId/clients` | JWT | Body: `{ clientIds[] }` — replaces the image's client tags |
 | POST | `/images/clients/bulk` | JWT | Body: `{ imageIds[], clientIds[], mode: 'add'\|'remove'\|'replace' }` |
 | PUT | `/images/:imageId/ean` | JWT | Body: `{ ean, productName? }` — grava na imagem o EAN do produto para o qual ela foi escolhida (`GalleryImageEanService`) |
-| PUT | `/images/:imageId/product-link` | JWT | Body: `{ productName, ean? }` — grava na imagem o nome do produto (sempre, em `metadata.aliases`) e o EAN (quando houver). É a rota que o fluxo guiado V2 usa ao escolher uma foto (`GalleryProductLinkService`) |
+| PUT | `/images/:imageId/product-link` | JWT | Body: `{ productName, ean?, clientId? }` — grava na imagem o nome do produto (sempre, em `metadata.aliases`), o EAN (quando houver) e marca a imagem como preferida do `clientId` (`client_preferred_images`). É a rota que o fluxo guiado V2 usa ao escolher uma foto (`GalleryProductLinkService`) |
 | POST | `/upload` | JWT | multipart/form-data — `files[]` (multiple), `folderId?` |
 | DELETE | `/:id` | JWT | |
 | POST | `/delete-many` | JWT | Body: `{ ids: string[] }` |
@@ -444,6 +444,12 @@ client filter is the single place to view and edit these links.
   só → match direto com o motivo `nome escolhido antes` e as parecidas em `alternatives`; várias →
   `reviewCandidates` com as 3 melhores pelo score. EAN resolvido tem precedência. `aliasStatus[]` na
   resposta lista o que foi resolvido assim.
+- **Cliente que escolheu a foto:** a mesma escolha, com o `clientId` do encarte, marca a imagem como
+  preferida do cliente em `client_preferred_images` (não em `metadata`: é a tabela que o matching,
+  a resolução por EAN/nome e a tela da Galeria já leem). Efeito nas próximas buscas desse cliente:
+  bônus na porcentagem (`PREFERENCE_SCORE_BUMP` + `AI_CLIENT_IMAGE_PREF_BOOST`), motivo
+  `preferida do cliente`, e desempate (preferida plausível é aplicada direto; nas fotos por EAN e por
+  nome ela vem primeiro).
 - **Feature 13 — cliente como tag:** `clientId` in the list query filters by client tag
   (`'none'` = images with no client). Uses `EXISTS` (not JOIN) so an image tagged for several
   clients isn't duplicated and the fuzzy-search ranking is untouched. Folder (storage) and
