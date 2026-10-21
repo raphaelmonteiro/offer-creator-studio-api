@@ -1,11 +1,21 @@
-import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
-import { Response } from 'express';
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { Request, Response } from 'express';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request | undefined>();
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let errorResponse: any = {
@@ -113,6 +123,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
           },
         };
       }
+    }
+
+    // Todo 5xx vai para o log em QUALQUER ambiente, com a rota e o stack: em
+    // produção o cliente só recebe "Erro interno do servidor", e sem esta
+    // linha o pm2 não tinha nenhum rastro do que estourou.
+    if (status >= 500) {
+      const route = `${request?.method ?? ''} ${request?.originalUrl ?? request?.url ?? ''}`.trim();
+      const message = exception instanceof Error ? exception.message : String(exception);
+      const stack = exception instanceof Error ? exception.stack : undefined;
+      this.logger.error(`${status} em ${route || '(rota desconhecida)'}: ${message}`, stack);
     }
 
     response.status(status).json(errorResponse);

@@ -453,7 +453,10 @@ export class McFromArtService {
   /**
    * Decora a visão do projeto (GET /commercials/projects/:id) com o status da
    * origem e, no F2, `offersCatalogChanged` (preço do catálogo mudou depois da
-   * criação — tarefa 6.8). A comparação com o catálogo nunca derruba a leitura.
+   * criação — tarefa 6.8). Nem a comparação com o catálogo nem a releitura da
+   * arte de origem derrubam a leitura: são decoração — falha inesperada
+   * (tabela/coluna ausente, payload fora do esperado) vai para o log e o
+   * projeto responde como "origem não verificada" (`sourceArtChanged: false`).
    */
   async withSourceArtStatus<T extends Pick<McProject, 'sourceArt' | 'backgroundArtAssetId'>>(
     view: T,
@@ -467,7 +470,24 @@ export class McFromArtService {
     } catch (err) {
       this.logger.warn(`Catálogo indisponível para comparar ofertas: ${(err as Error).message}`);
     }
-    return { ...view, ...(await this.sourceArtStatus(view)), offersCatalogChanged };
+    let status: McSourceArtStatus;
+    try {
+      status = await this.sourceArtStatus(view);
+    } catch (err) {
+      const error = err as Error;
+      this.logger.error(
+        `Arte de origem não verificada (${view.sourceArt?.kind ?? '?'} ${
+          view.sourceArt?.id ?? '?'
+        }): ${error?.message ?? err}`,
+        error?.stack,
+      );
+      status = {
+        sourceArt: view.sourceArt ?? null,
+        sourceArtChanged: false,
+        sourceArtMissing: false,
+      };
+    }
+    return { ...view, ...status, offersCatalogChanged };
   }
 
   // ───────────────────────── caixa do logo (D9b, tarefa 4.6) ─────────────────────────

@@ -1,4 +1,4 @@
-import { HttpException } from '@nestjs/common';
+import { HttpException, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -659,6 +659,25 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
       repos.get(Flyer)!.findOne.mockResolvedValue(flyerRow(LEGACY_FLYER_CONFIGURATION));
       const view = await service.withSourceArtStatus({ id: 'p1', scenes: [], ...project } as never);
       expect(view).toMatchObject({ id: 'p1', scenes: [], sourceArtChanged: false });
+    });
+
+    it('withSourceArtStatus: falha inesperada ao reler a origem NÃO derruba o GET (vai para o log)', async () => {
+      repos.get(Flyer)!.findOne.mockRejectedValue(new Error('relation "flyers" does not exist'));
+      const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      try {
+        const view = await service.withSourceArtStatus({ id: 'p1', ...project } as never);
+        expect(view).toMatchObject({
+          id: 'p1',
+          sourceArt: project.sourceArt,
+          sourceArtChanged: false,
+          sourceArtMissing: false,
+          offersCatalogChanged: [],
+        });
+        expect(logError).toHaveBeenCalledTimes(1);
+        expect(String(logError.mock.calls[0][0])).toContain('relation "flyers" does not exist');
+      } finally {
+        logError.mockRestore();
+      }
     });
   });
 
