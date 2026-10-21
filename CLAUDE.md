@@ -398,6 +398,7 @@ Follow the existing pattern: `module.ts` → `controller.ts` → `service.ts` �
 | GET | `/` | JWT | Query: `page, limit, search, folderId, clientId`. Each image includes `clients: [{id,name}]` (Feature 13) |
 | PUT | `/images/:imageId/clients` | JWT | Body: `{ clientIds[] }` — replaces the image's client tags |
 | POST | `/images/clients/bulk` | JWT | Body: `{ imageIds[], clientIds[], mode: 'add'\|'remove'\|'replace' }` |
+| PUT | `/images/:imageId/ean` | JWT | Body: `{ ean, productName? }` — grava na imagem o EAN do produto para o qual ela foi escolhida (`GalleryImageEanService`) |
 | POST | `/upload` | JWT | multipart/form-data — `files[]` (multiple), `folderId?` |
 | DELETE | `/:id` | JWT | |
 | POST | `/delete-many` | JWT | Body: `{ ids: string[] }` |
@@ -425,6 +426,14 @@ client filter is the single place to view and edit these links.
 - `client_preferred_images` (SQL-managed, in `sql/001_pgvector_setup.sql`): `(client_id, image_id)` PK, both FKs `ON DELETE CASCADE`. Not a TypeORM entity.
 
 **Business rules:**
+- **EAN escolhido no encarte:** quando o usuário escolhe a foto de um produto que tem EAN (revisão
+  de imagens, "trocar imagem" ou galeria/upload no fluxo guiado V2), o front chama
+  `PUT /gallery/images/:imageId/ean` e a imagem recebe o bloco EAN com `eanSource: 'manual'`,
+  `eanVerifiedBy: 'human'`. Mesmo EAN já gravado (qualquer fonte) → nada muda; EAN diferente → a
+  escolha humana vence (precedência de `canOverwriteEan`), o anterior vai para `eanCandidates` e
+  `warnings` (`ean-anterior:<ean>:<fonte>`). Na próxima lista com esse EAN,
+  `FlyerEanResolutionService` encontra a foto pelo `metadata->>'ean'` antes da busca por nome.
+  EAN com dígito verificador inválido → 422 `EAN_INVALID`.
 - **Feature 13 — cliente como tag:** `clientId` in the list query filters by client tag
   (`'none'` = images with no client). Uses `EXISTS` (not JOIN) so an image tagged for several
   clients isn't duplicated and the fuzzy-search ranking is untouched. Folder (storage) and

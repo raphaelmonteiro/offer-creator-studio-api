@@ -34,7 +34,9 @@ import { UpdateFolderDto } from './dto/update-folder.dto';
 import { UpdateImageDto } from './dto/update-image.dto';
 import { SetImageClientsDto } from './dto/set-image-clients.dto';
 import { BulkImageClientsDto } from './dto/bulk-image-clients.dto';
+import { SetImageEanDto } from './dto/set-image-ean.dto';
 import { ClientPreferredImagesService } from './client-preferred-images.service';
+import { GalleryImageEanService } from './gallery-image-ean.service';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { fileUploadOptions } from '../../common/utils/multer.util';
 import { SkipValidation } from '../../common/decorators/skip-validation.decorator';
@@ -47,6 +49,7 @@ export class GalleryController {
   constructor(
     private readonly galleryService: GalleryService,
     private readonly clientPreferredImages: ClientPreferredImagesService,
+    private readonly imageEan: GalleryImageEanService,
   ) {}
 
   // Imagens
@@ -144,6 +147,23 @@ export class GalleryController {
   @ApiResponse({ status: 200, description: 'Marcação aplicada' })
   bulkImageClients(@Body() dto: BulkImageClientsDto) {
     return this.clientPreferredImages.bulkAssign(dto.imageIds, dto.clientIds, dto.mode ?? 'add');
+  }
+
+  // Vínculo EAN↔imagem
+  //
+  // Quando o usuário escolhe a foto de um produto do encarte que tem EAN, a
+  // escolha fica gravada na imagem: na próxima lista com o mesmo EAN a foto é
+  // encontrada direto, sem revisão.
+
+  @Put('images/:imageId/ean')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Registra na imagem o EAN do produto para o qual ela foi escolhida',
+  })
+  @ApiResponse({ status: 200, description: 'Vínculo gravado (ou já existente)' })
+  @ApiResponse({ status: 422, description: 'EAN inválido' })
+  setImageEan(@Param('imageId', ParseUUIDPipe) imageId: string, @Body() dto: SetImageEanDto) {
+    return this.imageEan.linkEan(imageId, dto.ean, { productName: dto.productName });
   }
 
   // Pastas
