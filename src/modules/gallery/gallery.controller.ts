@@ -35,8 +35,10 @@ import { UpdateImageDto } from './dto/update-image.dto';
 import { SetImageClientsDto } from './dto/set-image-clients.dto';
 import { BulkImageClientsDto } from './dto/bulk-image-clients.dto';
 import { SetImageEanDto } from './dto/set-image-ean.dto';
+import { LinkImageProductDto } from './dto/link-image-product.dto';
 import { ClientPreferredImagesService } from './client-preferred-images.service';
 import { GalleryImageEanService } from './gallery-image-ean.service';
+import { GalleryProductLinkService } from './gallery-product-link.service';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { fileUploadOptions } from '../../common/utils/multer.util';
 import { SkipValidation } from '../../common/decorators/skip-validation.decorator';
@@ -50,6 +52,7 @@ export class GalleryController {
     private readonly galleryService: GalleryService,
     private readonly clientPreferredImages: ClientPreferredImagesService,
     private readonly imageEan: GalleryImageEanService,
+    private readonly productLink: GalleryProductLinkService,
   ) {}
 
   // Imagens
@@ -164,6 +167,20 @@ export class GalleryController {
   @ApiResponse({ status: 422, description: 'EAN inválido' })
   setImageEan(@Param('imageId', ParseUUIDPipe) imageId: string, @Body() dto: SetImageEanDto) {
     return this.imageEan.linkEan(imageId, dto.ean, { productName: dto.productName });
+  }
+
+  @Put('images/:imageId/product-link')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Registra na imagem o produto para o qual ela foi escolhida: o nome (sempre) e o EAN (quando houver)',
+  })
+  @ApiResponse({ status: 200, description: 'Vínculo gravado' })
+  linkImageProduct(
+    @Param('imageId', ParseUUIDPipe) imageId: string,
+    @Body() dto: LinkImageProductDto,
+  ) {
+    return this.productLink.linkProduct(imageId, dto);
   }
 
   // Pastas

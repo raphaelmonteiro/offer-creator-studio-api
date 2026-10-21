@@ -86,6 +86,15 @@ export interface MatchV2Result {
   matched: number;
 }
 
+export interface MatchV2Options {
+  /**
+   * Por produto, imagens que entram no pool de candidatas mesmo fora do top-N
+   * por similaridade (ex.: fotos já escolhidas antes para aquele nome), para
+   * receberem o score híbrido como as demais.
+   */
+  pinnedImageIds?: Map<string, string[]>;
+}
+
 @Injectable()
 export class ProductImageMatchV2Service {
   private readonly logger = new Logger(ProductImageMatchV2Service.name);
@@ -115,6 +124,7 @@ export class ProductImageMatchV2Service {
   async matchWithCandidates(
     products: ProductMatchInputV2[],
     clientId?: string | null,
+    options: MatchV2Options = {},
   ): Promise<{ result: MatchV2Result; candidates: Map<string, ScoredCandidateV2[]> }> {
     const byProduct = new Map<string, ScoredCandidateV2[]>();
     const scanned = products.length;
@@ -136,7 +146,12 @@ export class ProductImageMatchV2Service {
       const product = products[i];
       const metadata = parsed[i];
 
-      const candidates = await this.scoreCandidatesForProduct(product, metadata, clientId);
+      const candidates = await this.scoreCandidatesForProduct(
+        product,
+        metadata,
+        clientId,
+        options.pinnedImageIds?.get(product.id),
+      );
       byProduct.set(product.id, candidates);
 
       if (this.debugEnabled) {
@@ -211,6 +226,7 @@ export class ProductImageMatchV2Service {
     product: ProductMatchInputV2,
     metadata: ProductMetadata | null,
     clientId?: string | null,
+    includeIds?: string[],
   ): Promise<ScoredCandidateV2[]> {
     const queryText = metadata
       ? buildEmbeddingText(metadata)
@@ -225,6 +241,7 @@ export class ProductImageMatchV2Service {
 
     const pool = await this.embedding.searchByMetadataEmbedding(queryEmbedding, CANDIDATE_POOL, {
       clientId,
+      includeIds,
     });
 
     const scored = pool.map((row) => this.scoreCandidate(metadata, row));

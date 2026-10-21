@@ -12,11 +12,17 @@ import { classifyEan, DotcompanyLookupService } from './dotcompany-lookup.servic
 import { DotcompanyPhotoImporter } from './dotcompany-photo.importer';
 import { EanImportJobService } from './ean-import-job.service';
 import { EanImportRunner } from './ean-import.runner';
+import { productAliasKey } from '../../../gallery/product-alias';
 
 /** Mesmo patamar de revisão do match-v2: abaixo disso a "parecida" não vale mostrar. */
 const SIMILAR_MIN_SCORE = 0.5;
 const SIMILAR_TOP_N = 3;
+/** Fotos escolhidas antes para o mesmo nome que vão para a revisão quando há mais de uma. */
+const ALIAS_REVIEW_TOP_N = 3;
 const DEFAULT_TIMEOUT_MS = 20_000;
+
+/** Motivo que marca, no match e nas candidatas, a foto já escolhida antes para este nome. */
+export const ALIAS_REASON = 'nome escolhido antes';
 
 export type EanResolutionStatus =
   | 'gallery'
@@ -38,12 +44,23 @@ export interface PhotoOption {
   url: string;
   thumbnailUrl: string | null;
   filename: string;
-  /** `same-ean`: outra foto com o mesmo EAN; `similar`: parecida pelo nome, sem o EAN. */
-  origin: 'same-ean' | 'similar';
+  /**
+   * `same-ean`: outra foto com o mesmo EAN; `same-name`: outra foto já escolhida
+   * antes para este nome; `similar`: parecida pelo nome, sem o EAN.
+   */
+  origin: 'same-ean' | 'same-name' | 'similar';
   /** Fonte do EAN (só em `same-ean`): dotcompany, manual, off… */
   source?: string | null;
   score?: number;
   isClientPreferred: boolean;
+}
+
+export interface AliasStatusEntry {
+  productId: string;
+  /** Quantas fotos já foram escolhidas antes para este nome. */
+  images: number;
+  /** `matched`: uma só, aplicada direto; `review`: várias, foram para a revisão. */
+  status: 'matched' | 'review';
 }
 
 export interface FlyerMatchResult extends MatchV2Result {
@@ -51,6 +68,18 @@ export interface FlyerMatchResult extends MatchV2Result {
   /** Produtos cuja consulta/importação continua em segundo plano. */
   pending: string[];
   eanStatus: EanStatusEntry[];
+  /** Produtos resolvidos pelo nome já escolhido antes (fora os resolvidos por EAN). */
+  aliasStatus: AliasStatusEntry[];
+}
+
+interface GalleryAliasRow {
+  id: string;
+  url: string;
+  thumbnailUrl: string | null;
+  filename: string;
+  key: string;
+  chosenAt: string | null;
+  preferred: boolean;
 }
 
 interface GalleryEanRow {
@@ -124,17 +153,97 @@ export class FlyerEanResolutionService {
         });
     }
 
+    // Fotos já escolhidas antes para o MESMO NOME: entram fixas no pool de
+    // candidatas do casamento por nome, para receberem o score híbrido real.
+    const byAlias = await this.galleryByAlias(products, clientId ?? null);
+    const pinnedImageIds = new Map<string, string[]>();
+    for (const [productId, rows] of byAlias) {
+      pinnedImageIds.set(
+        productId,
+        rows.map((r) => r.id),
+      );
+    }
+
     // Casamento por nome de TODOS os produtos, em paralelo com a resolução por EAN.
     const [byName, byEan] = await Promise.all([
-      this.matcher.matchWithCandidates(products, clientId),
+      this.matcher.matchWithCandidates(products, clientId, { pinnedImageIds }),
       this.resolveEans(withEan, clientId ?? null),
     ]);
 
-    const matches = byName.result.matches.filter((m) => !byEan.images.has(m.productId));
-    const reviewCandidates = byName.result.reviewCandidates.filter(
-      (r) => !byEan.images.has(r.productId),
+    // Quem tem EAN resolvido ou nome já escolhido antes não segue pela IA.
+    const aliasResolved = new Set(
+      [...byAlias.keys()].filter((productId) => !byEan.images.has(productId)),
     );
+    const decided = (productId: string) =>
+      byEan.images.has(productId) || aliasResolved.has(productId);
+    const matches = byName.result.matches.filter((m) => !decided(m.productId));
+    const reviewCandidates = byName.result.reviewCandidates.filter((r) => !decided(r.productId));
     const alternatives: FlyerMatchResult['alternatives'] = [];
+    const aliasStatus: AliasStatusEntry[] = [];
+
+    for (const productId of aliasResolved) {
+      const rows = byAlias.get(productId) ?? [];
+      const pool = byName.candidates.get(productId) ?? [];
+      const poolById = new Map(pool.map((c) => [c.imageId, c]));
+      const chosenAt = new Map(rows.map((r) => [r.id, r.chosenAt ?? '']));
+
+      const candidates: ScoredCandidateV2[] = rows
+        .map((r) => {
+          const scored = poolById.get(r.id);
+          return scored
+            ? { ...scored, reasons: [ALIAS_REASON, ...scored.reasons] }
+            : {
+                imageId: r.id,
+                url: r.url,
+                thumbnailUrl: r.thumbnailUrl,
+                filename: r.filename,
+                folderName: null,
+                score: 0,
+                reasons: [ALIAS_REASON],
+                isClientPreferred: r.preferred,
+              };
+        })
+        .sort(
+          (a, b) =>
+            Number(b.isClientPreferred) - Number(a.isClientPreferred) ||
+            b.score - a.score ||
+            (chosenAt.get(b.imageId) ?? '').localeCompare(chosenAt.get(a.imageId) ?? ''),
+        );
+
+      const aliasIds = new Set(rows.map((r) => r.id));
+      const similar = pool
+        .filter((c) => !aliasIds.has(c.imageId) && c.score >= SIMILAR_MIN_SCORE)
+        .slice(0, SIMILAR_TOP_N);
+
+      if (candidates.length === 1) {
+        // Uma foto só para este nome: vai direto para o card, como o EAN.
+        const [best] = candidates;
+        matches.push({
+          productId,
+          imageId: best.imageId,
+          imageUrl: best.url,
+          score: best.score,
+          reasons: best.reasons,
+          isClientPreferred: best.isClientPreferred,
+        });
+        const options: PhotoOption[] = similar.map((c) => ({
+          imageId: c.imageId,
+          url: c.url,
+          thumbnailUrl: c.thumbnailUrl,
+          filename: c.filename,
+          origin: 'similar' as const,
+          score: c.score,
+          isClientPreferred: c.isClientPreferred,
+        }));
+        if (options.length) alternatives.push({ productId, options });
+        aliasStatus.push({ productId, images: 1, status: 'matched' });
+      } else {
+        // Várias fotos já escolhidas para este nome (embalagens de épocas
+        // diferentes): o usuário escolhe entre as melhores pelo score.
+        reviewCandidates.push({ productId, candidates: candidates.slice(0, ALIAS_REVIEW_TOP_N) });
+        aliasStatus.push({ productId, images: candidates.length, status: 'review' });
+      }
+    }
 
     for (const { product, ean } of withEan) {
       eanStatus.push(
@@ -191,7 +300,49 @@ export class FlyerEanResolutionService {
       alternatives,
       pending: byEan.pending,
       eanStatus,
+      aliasStatus,
     };
+  }
+
+  /**
+   * Imagens já escolhidas antes para o nome de cada produto (`metadata.aliases`),
+   * com a marca de preferida do cliente. Produtos sem nome útil ficam de fora.
+   */
+  private async galleryByAlias(
+    products: ProductMatchInputV2[],
+    clientId: string | null,
+  ): Promise<Map<string, GalleryAliasRow[]>> {
+    const out = new Map<string, GalleryAliasRow[]>();
+    const productsByKey = new Map<string, string[]>();
+    for (const p of products) {
+      const key = productAliasKey(p.name);
+      if (!key) continue;
+      productsByKey.set(key, [...(productsByKey.get(key) ?? []), p.id]);
+    }
+    if (productsByKey.size === 0) return out;
+
+    const keys = [...productsByKey.keys()];
+    const rows: GalleryAliasRow[] = await this.dataSource.query(
+      `SELECT gi.id, gi.url, gi."thumbnailUrl", gi.filename,
+              a->>'key' AS key, a->>'chosenAt' AS "chosenAt",
+              ($2::uuid IS NOT NULL AND EXISTS (
+                 SELECT 1 FROM client_preferred_images cpi
+                  WHERE cpi.image_id = gi.id AND cpi.client_id = $2::uuid)) AS preferred
+         FROM gallery_images gi,
+              jsonb_array_elements(gi.metadata->'aliases') a
+        WHERE gi.metadata->'aliases' @> ANY (
+                SELECT jsonb_build_array(jsonb_build_object('key', k)) FROM unnest($1::text[]) k)
+          AND a->>'key' = ANY($1::text[])`,
+      [keys, clientId],
+    );
+    for (const r of rows) {
+      for (const productId of productsByKey.get(r.key) ?? []) {
+        const list = out.get(productId) ?? [];
+        if (!list.some((x) => x.id === r.id)) list.push({ ...r, preferred: Boolean(r.preferred) });
+        out.set(productId, list);
+      }
+    }
+    return out;
   }
 
   /**

@@ -399,6 +399,7 @@ Follow the existing pattern: `module.ts` → `controller.ts` → `service.ts` �
 | PUT | `/images/:imageId/clients` | JWT | Body: `{ clientIds[] }` — replaces the image's client tags |
 | POST | `/images/clients/bulk` | JWT | Body: `{ imageIds[], clientIds[], mode: 'add'\|'remove'\|'replace' }` |
 | PUT | `/images/:imageId/ean` | JWT | Body: `{ ean, productName? }` — grava na imagem o EAN do produto para o qual ela foi escolhida (`GalleryImageEanService`) |
+| PUT | `/images/:imageId/product-link` | JWT | Body: `{ productName, ean? }` — grava na imagem o nome do produto (sempre, em `metadata.aliases`) e o EAN (quando houver). É a rota que o fluxo guiado V2 usa ao escolher uma foto (`GalleryProductLinkService`) |
 | POST | `/upload` | JWT | multipart/form-data — `files[]` (multiple), `folderId?` |
 | DELETE | `/:id` | JWT | |
 | POST | `/delete-many` | JWT | Body: `{ ids: string[] }` |
@@ -434,6 +435,15 @@ client filter is the single place to view and edit these links.
   `warnings` (`ean-anterior:<ean>:<fonte>`). Na próxima lista com esse EAN,
   `FlyerEanResolutionService` encontra a foto pelo `metadata->>'ean'` antes da busca por nome.
   EAN com dígito verificador inválido → 422 `EAN_INVALID`.
+- **Nome escolhido antes (`metadata.aliases`):** a mesma escolha grava o nome do produto como veio
+  na lista (`{ name, key, chosenAt }`, chave = `productAliasKey`: maiúsculas, sem acento/pontuação,
+  quantidade mantida; teto de 50 por imagem, o mais antigo sai). Um nome pode apontar para VÁRIAS
+  fotos. Na próxima lista, `FlyerEanResolutionService` consulta os aliases (índice GIN
+  `idx_gallery_images_aliases`, criado no boot) antes da busca por nome com IA: as fotos entram fixas
+  no pool do match-v2 (`pinnedImageIds` → `includeIds` da busca vetorial) para ter score real; uma foto
+  só → match direto com o motivo `nome escolhido antes` e as parecidas em `alternatives`; várias →
+  `reviewCandidates` com as 3 melhores pelo score. EAN resolvido tem precedência. `aliasStatus[]` na
+  resposta lista o que foi resolvido assim.
 - **Feature 13 — cliente como tag:** `clientId` in the list query filters by client tag
   (`'none'` = images with no client). Uses `EXISTS` (not JOIN) so an image tagged for several
   clients isn't duplicated and the fuzzy-search ranking is untouched. Folder (storage) and

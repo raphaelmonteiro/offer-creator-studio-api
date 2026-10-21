@@ -22,6 +22,12 @@ const BOOTSTRAP_SQL_PATH = path.join(__dirname, '..', 'gallery', 'sql', '001_pgv
 export interface EmbeddingSearchOptions {
   /** Quando presente, prioriza as imagens preferidas deste cliente (Feature 12). */
   clientId?: string | null;
+  /**
+   * Imagens que entram no resultado mesmo fora do top-N por distância (ex.: fotos
+   * já escolhidas antes para este nome), com a distância real, para receberem o
+   * mesmo score híbrido das demais.
+   */
+  includeIds?: string[];
 }
 
 /** Linha crua devolvida por `querySimilarImages` (antes do mapeamento tipado). */
@@ -572,8 +578,32 @@ export class GalleryEmbeddingService implements OnModuleInit {
        ORDER BY gi.${column} <=> $1::vector
        LIMIT $2`;
 
+    const includeIds = [...new Set(options.includeIds ?? [])];
+    const pinnedSql = `
+      SELECT gi.id,
+             gi.filename,
+             gi.url,
+             gi."thumbnailUrl",
+             gi."folderId",
+             gf.name AS "folderName",
+             (gi.${column} <=> $1::vector) AS distance,
+             ($3::uuid IS NOT NULL AND EXISTS (
+                SELECT 1 FROM client_preferred_images cpi
+                 WHERE cpi.image_id = gi.id AND cpi.client_id = $3::uuid)) AS is_client_preferred${metaSelect}
+        FROM gallery_images gi
+        LEFT JOIN gallery_folders gf ON gf.id = gi."folderId"
+       WHERE gi.id = ANY($2::uuid[])
+         AND gi.${column} IS NOT NULL`;
+    const pinnedRows: Promise<SimilarImageRow[]> = includeIds.length
+      ? this.dataSource.query(pinnedSql, [vec, includeIds, clientId])
+      : Promise.resolve([]);
+
     if (!clientId) {
-      return this.dataSource.query(globalSql, [vec, limit]);
+      const [globalRows, pinned] = await Promise.all([
+        this.dataSource.query(globalSql, [vec, limit]) as Promise<SimilarImageRow[]>,
+        pinnedRows,
+      ]);
+      return this.withPinned(globalRows, pinned);
     }
 
     // Restrito às preferidas do cliente: o filtro por client_id usa o índice
@@ -596,9 +626,14 @@ export class GalleryEmbeddingService implements OnModuleInit {
        ORDER BY gi.${column} <=> $1::vector
        LIMIT $2`;
 
-    const [globalRows, preferredRows]: [SimilarImageRow[], SimilarImageRow[]] = await Promise.all([
+    const [globalRows, preferredRows, pinned]: [
+      SimilarImageRow[],
+      SimilarImageRow[],
+      SimilarImageRow[],
+    ] = await Promise.all([
       this.dataSource.query(globalSql, [vec, limit]),
       this.dataSource.query(preferredSql, [vec, limit, clientId]),
+      pinnedRows,
     ]);
 
     // As preferidas têm precedência no dedupe: uma imagem que aparece nas duas
@@ -609,8 +644,18 @@ export class GalleryEmbeddingService implements OnModuleInit {
 
     // Reproduz em memória o mesmo ranking do ORDER BY anterior
     // (distância − boost para as preferidas) e corta no limite pedido.
-    return [...byId.values()]
+    const ranked = [...byId.values()]
       .sort((a, b) => this.effectiveDistance(a) - this.effectiveDistance(b))
       .slice(0, limit);
+    return this.withPinned(ranked, pinned);
+  }
+
+  /** Junta as imagens fixadas (`includeIds`) ao ranking, sem cortá-las pelo limite. */
+  private withPinned(ranked: SimilarImageRow[], pinned: SimilarImageRow[]): SimilarImageRow[] {
+    if (pinned.length === 0) return ranked;
+    const byId = new Map<string, SimilarImageRow>();
+    for (const row of ranked) byId.set(row.id, row);
+    for (const row of pinned) if (!byId.has(row.id)) byId.set(row.id, row);
+    return [...byId.values()].sort((a, b) => this.effectiveDistance(a) - this.effectiveDistance(b));
   }
 }

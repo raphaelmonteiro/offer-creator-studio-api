@@ -61,36 +61,42 @@ d('FlyerEanResolutionService (Postgres real)', () => {
     } = {},
   ) {
     const matcher = {
-      matchWithCandidates: jest.fn(async (products: Array<{ id: string }>) => ({
-        result: {
-          matches: products.map((p) => ({
-            productId: p.id,
-            imageId: 'por-nome',
-            imageUrl: 'http://x/nome.png',
-            score: 0.8,
-            reasons: [],
-            isClientPreferred: false,
-          })),
-          reviewCandidates: [],
-          scanned: products.length,
-          matched: products.length,
-        },
-        candidates: new Map(
-          products.map((p) => [
-            p.id,
-            (opts.similares?.[p.id] ?? []).map((c) => ({
-              imageId: c.imageId,
-              url: `http://x/${c.imageId}.png`,
-              thumbnailUrl: null,
-              filename: `${c.imageId}.png`,
-              folderName: null,
-              score: c.score,
+      matchWithCandidates: jest.fn(
+        async (
+          products: Array<{ id: string }>,
+          _clientId?: string | null,
+          _options?: { pinnedImageIds?: Map<string, string[]> },
+        ) => ({
+          result: {
+            matches: products.map((p) => ({
+              productId: p.id,
+              imageId: 'por-nome',
+              imageUrl: 'http://x/nome.png',
+              score: 0.8,
               reasons: [],
               isClientPreferred: false,
             })),
-          ]),
-        ),
-      })),
+            reviewCandidates: [],
+            scanned: products.length,
+            matched: products.length,
+          },
+          candidates: new Map(
+            products.map((p) => [
+              p.id,
+              (opts.similares?.[p.id] ?? []).map((c) => ({
+                imageId: c.imageId,
+                url: `http://x/${c.imageId}.png`,
+                thumbnailUrl: null,
+                filename: `${c.imageId}.png`,
+                folderName: null,
+                score: c.score,
+                reasons: [],
+                isClientPreferred: false,
+              })),
+            ]),
+          ),
+        }),
+      ),
     };
     const lookups = {
       resolve: jest.fn(async (eans: string[], _o: { kind: string }) => {
@@ -224,6 +230,82 @@ d('FlyerEanResolutionService (Postgres real)', () => {
       [parecida],
     );
     expect(row.ean).toBeNull();
+  });
+
+  it('nome já escolhido antes, uma foto: vai direto para o card, com as parecidas como opção', async () => {
+    const escolhida = await img('ling-seara.png', {
+      aliases: [
+        {
+          name: 'LING TOSCANA SEARA KG',
+          key: 'LING TOSCANA SEARA KG',
+          chosenAt: '2026-09-01T00:00:00.000Z',
+        },
+      ],
+    });
+    const { svc, matcher } = criar({
+      similares: {
+        p1: [
+          { imageId: escolhida, score: 0.61 },
+          { imageId: 'parecida', score: 0.55 },
+        ],
+      },
+    });
+    const r = await svc.findImages([{ id: 'p1', name: 'Ling  Toscana Seara Kg' }]);
+    // A foto escolhida entra fixa no pool do casamento por nome, para ter score real.
+    expect(matcher.matchWithCandidates.mock.calls[0][2]).toEqual({
+      pinnedImageIds: new Map([['p1', [escolhida]]]),
+    });
+    expect(r.matches).toEqual([
+      expect.objectContaining({
+        productId: 'p1',
+        imageId: escolhida,
+        score: 0.61,
+        reasons: expect.arrayContaining(['nome escolhido antes']),
+      }),
+    ]);
+    expect(r.alternatives[0].options).toEqual([
+      expect.objectContaining({ imageId: 'parecida', origin: 'similar' }),
+    ]);
+    expect(r.aliasStatus).toEqual([{ productId: 'p1', images: 1, status: 'matched' }]);
+  });
+
+  it('nome já escolhido antes, várias fotos: vão para a revisão ranqueadas pelo score', async () => {
+    const alias = (chosenAt: string) => ({
+      aliases: [{ name: 'LING TOSCANA SEARA KG', key: 'LING TOSCANA SEARA KG', chosenAt }],
+    });
+    const antiga = await img('ling-2025.png', alias('2025-03-01T00:00:00.000Z'));
+    const nova = await img('ling-2026.png', alias('2026-09-01T00:00:00.000Z'));
+    const { svc } = criar({
+      similares: {
+        p1: [
+          { imageId: antiga, score: 0.7 },
+          { imageId: nova, score: 0.66 },
+        ],
+      },
+    });
+    const r = await svc.findImages([{ id: 'p1', name: 'LING TOSCANA SEARA KG' }]);
+    expect(r.matches).toEqual([]);
+    expect(r.reviewCandidates).toEqual([
+      {
+        productId: 'p1',
+        candidates: [
+          expect.objectContaining({ imageId: antiga, score: 0.7 }),
+          expect.objectContaining({ imageId: nova, score: 0.66 }),
+        ],
+      },
+    ]);
+    expect(r.aliasStatus).toEqual([{ productId: 'p1', images: 2, status: 'review' }]);
+  });
+
+  it('EAN resolvido vence o nome escolhido antes', async () => {
+    const porEan = await img('moca-ean.png', { ean: NA_GALERIA, eanSource: 'manual' });
+    await img('moca-nome.png', {
+      aliases: [{ name: 'LEITE MOCA', key: 'LEITE MOCA', chosenAt: '2026-09-01T00:00:00.000Z' }],
+    });
+    const { svc } = criar();
+    const r = await svc.findImages([{ id: 'p1', name: 'Leite Moça', ean: NA_GALERIA }]);
+    expect(r.matches).toEqual([expect.objectContaining({ productId: 'p1', imageId: porEan })]);
+    expect(r.aliasStatus).toEqual([]);
   });
 
   it('DotCompany não conhece: segue o casamento por nome', async () => {
