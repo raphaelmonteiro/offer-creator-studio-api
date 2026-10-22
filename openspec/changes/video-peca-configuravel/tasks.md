@@ -28,8 +28,8 @@ no worker.
 
 ## 3. Pacote compartilhado `@chroma/video-templates`
 
-- [ ] 3.1 `layoutProducts({ aspect, areaRect, count, featuredId })` → `rect` por item e por selo; distribuições 2/3/4/6/8 e regra das demais; tamanhos mínimos de texto (preço ≥ 36 px, nome ≥ 24 px a 1080 de largura); testes com números fixados por formato
-- [ ] 3.2 Componente `PieceCanvas({ document, width, height, assetBase })`: fundo (sólido, degradê, imagem com fit/blur/darken), blocos por `zIndex`, selo de preço de/por, rodapé faixa/pill, painel do personagem com o poster do tile; sem estado interno
+- [~] 3.1 `layoutProducts({ areaRect, width, height, itemIds, featuredId })` → rect por item (frações do quadro), colunas por quantidade (1/2/2+1 ou 3/2×2/3/4), destaque em duas colunas, folga de 2%, mínimos de texto (preço ≥ 36 px, nome ≥ 24 px a 1080); testes com números fixados — FEITO no lugar provisório (`offer-creator-studio/src/lib/video-templates/piece/layoutProducts.ts`) e COPIADO no backend (`domain/mc-piece-layout.ts`, spec com os mesmos números) para o quadro mock desenhar as mesmas células; falta mover para o pacote e apagar a cópia
+- [~] 3.2 `PieceCanvas({ document, width, height, assetBase, characterPosterUrl })`: fundo (sólido, degradê, imagem com fit/blur/darken), blocos por `zIndex`, selo de/por com unidade, rodapé faixa/pill, painel do personagem com o poster do tile, `@font-face` das fontes da conta; sem estado — FEITO no lugar provisório (`src/lib/video-templates/piece/PieceCanvas.tsx`, teste com `renderToStaticMarkup`); falta mover para o pacote
 - [ ] 3.3 Fontes: `@font-face` a partir de `document.fonts[]` (família + URL absoluta) com `delayRender`/`continueRender` no Remotion e carregamento normal no navegador
 - [ ] 3.4 Composição Remotion `OfferPieceStill` (um quadro) e `parsePieceDocument` (zod) exportados do `dist/cjs/core`; `COMPOSITION_VERSION` incrementada
 - [ ] 3.5 Publicar o pacote (ou fixar o checkout em `MC_VIDEO_TEMPLATES_DIR` também para o frontend via workspace) — a decisão de distribuição fica registrada no README do pacote
@@ -66,21 +66,28 @@ no worker.
 
 ## 7. Frontend: editor da peça
 
-- [ ] 7.1 Rotas `/commercials/pieces/new` e `/commercials/pieces/:id`; serviço `commercialsPiecesService` (criar, obter, `PATCH` com `expectedRevision`, listar modelos, salvar como modelo, `from-piece`); tipos espelhando o pacote
-- [ ] 7.2 Tela: painel de etapas à esquerda (Fundo, Produtos, Logo e textos, Rodapé, Personagem), prévia à direita com `PieceCanvas` do pacote em tamanho natural e `transform: scale`; formato e cliente no topo
-- [ ] 7.3 Fundo: cor (paleta + seletor), degradê (duas cores + ângulo), imagem (galeria ou upload → `piece_background`) com fit, blur e escurecimento
-- [ ] 7.4 Produtos: busca em `productsService.getAll`, foto por `GalleryProductPickerDialog` (obrigatória), edição de nome/gramatura/preço de/por/unidade na peça, marcação `spoken` (até 6), `layoutProducts` automático a cada mudança, "arrumar de novo"
-- [ ] 7.5 Edição livre com `react-rnd` (`scale`): mover/redimensionar qualquer bloco, reordenar produtos por arrasto (`layout: 'manual'`), destaque, estilo do selo, fundo da área; guias e área segura com `safeAreaFor`
-- [ ] 7.6 Logo (do cliente, `ClientLogoPicker`), textos soltos (até 5, fontes do `fontStore`), rodapé (dados do cliente, faixa/pill, validade)
-- [ ] 7.7 Personagem: kit aprovado com tile (`KIT_TILE_MISSING` explicado), modo `in_piece` com painel (card/círculo/cor) ou `logo_face` (só kit de logo); silhueta do tile na prévia; mínimo de 25% travado
-- [ ] 7.8 Autosave (debounce 1 s, `expectedRevision`, 409 → recarrega e avisa), `issues[]` do `PIECE_INVALID` apontando o bloco; salvar como modelo; abrir modelo com cliente
-- [ ] 7.9 "Gerar vídeo": resumo (kit, tier, canal, legendas, trilha, custo do `quote`) → `from-piece` → navega para o projeto
-- [ ] 7.10 Testes: lógica pura com `*.test.ts` (autosave, escopo de mudança, issues por bloco); componentes com `renderToStaticMarkup` como `offerCarouselComponents.test.tsx`
+> Grupos 3 e 7 — onde o código vive: o repo `chroma-video-templates` não estava acessível nesta frente, então
+> `layoutProducts`, `PieceCanvas` e os tipos do descritor foram escritos no FRONT em
+> `src/lib/video-templates/piece/` SEM dependências da aplicação (React + TS puros), para serem movidos para o
+> pacote como estão (3.1/3.2/3.6 ficam "feitos no lugar provisório"; 3.3/3.4/3.5 — `OfferPieceStill`,
+> `parsePieceDocument`, `COMPOSITION_VERSION`, publicação — continuam pendentes NO PACOTE). Até lá o worker só
+> renderiza o quadro com o mock (sharp); o renderizador Remotion falha com `RENDER_UNAVAILABLE` até a composição existir.
+
+- [x] 7.1 Rotas `/commercials/pieces/new` e `/commercials/pieces/:id` (`?projectId=` abre a peça congelada de um vídeo); serviço `commercialsPiecesService` (criar, obter, `PATCH` com `expectedRevision`, listar modelos, salvar como modelo, upload de fundo, `from-piece`, `PATCH projects/:id/piece`); tipos espelhando o descritor do backend em `src/lib/video-templates/piece/types.ts`
+- [x] 7.2 Tela `CommercialPieceEditor`: etapas à esquerda (Fundo, Produtos, Logo e textos, Rodapé, Personagem), prévia à direita (`PieceStage`: `PieceCanvas` em tamanho natural + `transform: scale`, zoom/ajustar); nome, formato e estado do autosave no topo
+- [x] 7.3 Fundo (`BackgroundPanel`): cor (paleta curta de vídeo + seletor), degradê (duas cores + ângulo), imagem (galeria ou upload → `POST pieces/backgrounds` = `piece_background`) com fit, desfoque e escurecimento
+- [x] 7.4 Produtos (`ProductsPanel`): catálogo (busca em `productsService.getAll`; produto sem foto pede a foto na galeria) ou galeria (`GalleryProductPickerDialog`), edição de nome/gramatura/preço de/por/unidade, fala (até 6, pelo menos 1), destaque, ordem, grade/imagem única, estilo da área e do selo, "arrumar de novo"
+- [x] 7.5 Edição livre com `react-rnd` (`scale`): camada de alças sobre o canvas — blocos e cada produto da grade (arrastar um produto congela `layout: 'manual'`); `clampRect` mantém no quadro e trava o personagem em 25%; guias da área segura (`safeAreaFor`)
+- [x] 7.6 Logo (do cliente por `clientsService.getById` ou da galeria), textos soltos (até 5, fontes do `fontStore` → `document.fonts`), rodapé (faixa/pill, endereço, telefone, validade, legal, cores)
+- [x] 7.7 Personagem (`CharacterPanel`): kits aprovados (sem tile desabilitados e explicados), modo `in_piece` com painel card/círculo/cor ou `logo_face` só com kit `logo_as_is`; tile como poster no painel da prévia
+- [x] 7.8 Autosave (`usePieceEditor`: debounce 1 s, `expectedRevision`, 409 → recarrega e avisa, 422 → toast), `issues[]` por bloco com atalho para a etapa (`PieceIssuesList`); salvar como modelo; nova peça a partir de modelo (`CommercialPieceNew`)
+- [x] 7.9 "Gerar vídeo" (`GeneratePieceVideoDialog`): título, qualidade, canal, legendas, trilha → `from-piece` → projeto; bloqueio pelo `GET /config` (formato/render) e pelas pendências; `PIECE_INVALID`/`KIT_TILE_MISSING` explicados. (O custo do `quote` fica na tela do projeto — não há projeto antes do `from-piece`.)
+- [~] 7.10 Testes: `layoutProducts.test.ts` (números fixados), `PieceCanvas.test.tsx` (renderToStaticMarkup), `pieceEditor.test.ts` (mutações, limites, escopos), `pieceProject.test.ts`; falta cobrir o hook de autosave e os painéis com render estático
 
 ## 8. Frontend: revisão e entrega do projeto
 
-- [ ] 8.1 `CommercialProject.tsx`: ramo `offer_piece` com `useOfferPieceProject` (mesma forma dos hooks do F1/F2) e `OfferPieceStoryboard` (frases por produto, editar/ouvir, abertura e fechamento), `OfferPieceReviewPanel` (prévia = still + clipes), ações `refazer` e `duplicar_como_economico`
-- [ ] 8.2 "Editar a peça" depois do roteiro → `PATCH projects/:id/piece` com o escopo explicado ao usuário (vai regravar a fala do produto X / só recompõe)
+- [x] 8.1 `CommercialProject.tsx`: ramo `offer_piece` reaproveitando `useOfferCarouselProject` (o roteiro tem a forma do F2); `OfferPieceStoryboard` (uma fala por produto falado + abertura/fechamento, prévia do quadro, "Editar a peça"; ordem/produtos mudam pela peça), `OfferPieceReviewPanel` (vozes medidas, alternativas, bloqueios inline, prévia do quadro); remontagem `assembly_only` pelo `AssemblyReviewPanel` genérico; pós-entrega com `TalkingArtDeliveredActions` (ajustar texto, regravar fala) + "Editar a peça"
+- [x] 8.2 "Editar a peça" → editor com `?projectId=` (peça congelada do vídeo, sem autosave) → "Aplicar no vídeo" = `PATCH projects/:id/piece`; o `pieceChange` da resposta vira o aviso (`describePieceChange`: "N falas foram reescritas" / "Só o quadro muda" / regrava pela cor do painel); `PIECE_INVALID` volta como pendências, `PIECE_ASPECT_MISMATCH`/`PIECE_KIT_CHANGED` explicam que é outro vídeo
 - [ ] 8.3 Duplicar em 4:5 (abre a peça re-layoutada para ajuste antes de gerar); legendas e trilha como opções antes da produção
 - [ ] 8.4 Banner "preço mudou no catálogo" para itens com `catalogId` (reaproveita `CatalogChangedBanner`)
 

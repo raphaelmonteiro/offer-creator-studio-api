@@ -6,6 +6,7 @@ import {
   McPieceProductItem,
   McPieceRect,
 } from './mc-piece';
+import { layoutPieceProducts, PieceLayoutResult } from './mc-piece-layout';
 
 /**
  * Props da composição `OfferPieceStill` (change video-peca-configuravel, 6.2)
@@ -300,10 +301,24 @@ export function buildMockStillPlan(props: OfferPieceStillProps): MockStillPlan {
           });
           break;
         }
+        // grade: rects manuais ou o MESMO auto-layout do editor (`layoutPieceProducts`)
         const manual = block.layout === 'manual' && items.every((i) => i.rect);
-        const cells = manual
-          ? items.map((item) => pieceRectToPx(item.rect as McPieceRect, W, H))
-          : mockGridCells(px, items.length);
+        const auto = manual
+          ? null
+          : layoutPieceProducts({
+              areaRect: block.rect,
+              width: W,
+              height: H,
+              itemIds: items.map((i) => i.id),
+              featuredId: items.find((i) => i.featured)?.id ?? null,
+            });
+        const cells = items.map((item) =>
+          pieceRectToPx(
+            manual ? (item.rect as McPieceRect) : (auto as PieceLayoutResult).rects[item.id],
+            W,
+            H,
+          ),
+        );
         items.forEach((item, i) => parts.push(productCellSvg(cells[i], item, tag)));
         break;
       }
