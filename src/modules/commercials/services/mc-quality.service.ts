@@ -57,6 +57,7 @@ import {
   upsertPhaseBudget,
 } from '../domain/mc-quality';
 import { assertLogoFaceReady } from '../domain/mc-logo-face';
+import { McProjectPieceExtras, pieceCanonicalHash } from '../domain/mc-piece';
 import { voiceoverPlanExcessMs } from '../domain/mc-scene-compose-graph';
 import { preparationComplete } from '../domain/mc-scheduler';
 import {
@@ -87,6 +88,7 @@ import {
   MC_OFFER_CAROUSEL_MAX_SPEECH_S,
   MC_TALKING_ART_MAX_S,
   MC_TALKING_ART_MIN_S,
+  McCharacterWindow,
   McProjectOptions,
   McScript,
   McScriptScene,
@@ -186,6 +188,8 @@ export class McQualityService {
     userId: string,
     projectId: string,
     dto: UpdateScriptV2Dto,
+    /** Peça de ofertas (5.4): descritor/caixa do logo/opções gravados na MESMA transação. */
+    pieceExtras?: McProjectPieceExtras,
   ): Promise<McProject> {
     const project = await this.getV2Project(userId, projectId);
     this.assertRevision(project, dto.expectedRevision);
@@ -197,7 +201,8 @@ export class McQualityService {
     ]);
     const previous = project.script;
     const prevById = new Map((previous?.scenes ?? []).map((s) => [s.sceneId as string, s]));
-    const carousel = project.format === 'offer_carousel';
+    // A peça de ofertas tem o roteiro do F2 (ofertas + uma fala por oferta).
+    const carousel = project.format === 'offer_carousel' || project.format === 'offer_piece';
     // BUG B: o produto do DTO é MESCLADO com o congelado de mesmo `id` — campo
     // omitido (catálogo, unidade, foto, preço anterior, badge) nunca se perde,
     // senão todo "salvar" parecia troca de produto e mudava o escopo da revisão.
@@ -358,6 +363,7 @@ export class McQualityService {
         revision: nextRevision,
         quality: nextQuality,
         moderation: this.moderationJson(moderation),
+        ...this.pieceExtrasPatch(pieceExtras),
       });
       if (!won) throw this.conflict();
       if (project.status === McProjectStatus.SUCCEEDED && !compositionOnly) {
@@ -1346,6 +1352,8 @@ export class McQualityService {
     userId: string,
     projectId: string,
     dto: UpdateCompositionDto,
+    /** Peça de ofertas (5.4): descritor novo (mudança só visual) gravado na MESMA transação. */
+    pieceExtras?: McProjectPieceExtras,
   ): Promise<McProject> {
     const project = await this.getV2Project(userId, projectId);
     this.assertRevision(project, dto.expectedRevision);
@@ -1366,8 +1374,16 @@ export class McQualityService {
     const previous = this.validatedScript(project, windowCtx);
     const options = resolveProjectOptions(project.options);
     const endcard = dto.endcard === undefined ? (previous.endcard ?? null) : dto.endcard;
+    // Peça (6.5): o quadro parado muda com o descritor — é mudança de composição
+    // mesmo com o roteiro igual (o compose leva o `pieceHash`).
+    const pieceChanged =
+      !!pieceExtras &&
+      format === 'offer_piece' &&
+      (!project.pieceSnapshot ||
+        pieceCanonicalHash(project.pieceSnapshot) !==
+          pieceCanonicalHash(pieceExtras.pieceSnapshot));
     let script: McScript;
-    if (format === 'talking_art') {
+    if (format === 'talking_art' || format === 'offer_piece') {
       script = {
         ...previous,
         version: previous.version + 1,
@@ -1416,7 +1432,8 @@ export class McQualityService {
       }) &&
       dto.musicEnabled === undefined &&
       dto.captionsEnabled === undefined &&
-      dto.lowerThirdBlur === undefined
+      dto.lowerThirdBlur === undefined &&
+      !pieceChanged
     ) {
       throw new UnprocessableEntityException({
         code: 'NO_COMPOSITION_CHANGE',
@@ -1443,6 +1460,7 @@ export class McQualityService {
           ...(format === 'offer_carousel' && script.layoutPreset
             ? { layoutPreset: script.layoutPreset }
             : {}),
+          ...this.pieceExtrasPatch(pieceExtras),
           quality: {
             ...quality,
             approval: null,
@@ -1494,6 +1512,18 @@ export class McQualityService {
         'talkBackgroundColor',
       ],
       offer_carousel: ['products', 'scenes', 'window', 'talkBackgroundColor', 'lowerThirdBlur'],
+      // Peça de ofertas: a composição vem do descritor (PATCH /piece); aqui só janela,
+      // cartela, legendas e trilha — a cor do painel está gravada nos clipes (regravar).
+      offer_piece: [
+        'products',
+        'scenes',
+        'order',
+        'offers',
+        'offerOrder',
+        'layoutPreset',
+        'lowerThirdBlur',
+        'talkBackgroundColor',
+      ],
     };
     const fields = (byFormat[format] ?? []).filter((key) => dto[key] !== undefined);
     if (fields.length > 0) {
@@ -1503,6 +1533,83 @@ export class McQualityService {
         details: { format, fields },
       });
     }
+  }
+
+  /** Colunas do projeto que uma edição da peça grava junto do roteiro (5.4). */
+  private pieceExtrasPatch(extras: McProjectPieceExtras | undefined): Record<string, unknown> {
+    if (!extras) return {};
+    return {
+      pieceSnapshot: extras.pieceSnapshot,
+      logoBox: extras.logoBox,
+      ...(extras.options ? { options: extras.options } : {}),
+    };
+  }
+
+  /**
+   * Peça de ofertas (5.4): mudança SÓ VISUAL antes da entrega (storyboard em
+   * revisão, revisão visual da produção ou pausa) — nada foi composto ainda,
+   * então o descritor, a caixa do logo, as opções e os campos de vídeo do
+   * roteiro (janela, rosto do logo, cor do painel) são gravados NO LUGAR, sem
+   * revisão nova nem troca de status: a materialização seguinte lê o
+   * descritor atualizado (quadro, compose e finalize ganham hash novo).
+   */
+  async updatePieceInPlace(
+    userId: string,
+    projectId: string,
+    input: {
+      expectedRevision: number;
+      extras: McProjectPieceExtras;
+      video: { window: McCharacterWindow; logoFace: boolean; talkBackgroundColor: string | null };
+    },
+  ): Promise<McProject> {
+    const project = await this.getV2Project(userId, projectId);
+    this.assertRevision(project, input.expectedRevision);
+    this.assertStatus(project, [
+      McProjectStatus.STORYBOARD_REVIEW,
+      McProjectStatus.VISUAL_REVIEW,
+      McProjectStatus.NEEDS_ATTENTION,
+    ]);
+    const previous = project.script;
+    const script: McScript | null = previous
+      ? {
+          ...previous,
+          version: previous.version + 1,
+          window: { ...input.video.window },
+          logoFace: input.video.logoFace,
+          talkBackgroundColor: input.video.talkBackgroundColor,
+        }
+      : null;
+    await this.dataSource.transaction(async (manager) => {
+      const result = await manager.update(
+        McProject,
+        { id: project.id, revision: project.revision },
+        { ...this.pieceExtrasPatch(input.extras), ...(script ? { script } : {}) },
+      );
+      if (!result.affected) throw this.conflict();
+      await this.commercials.appendEvent(manager, {
+        userId,
+        refKind: 'project',
+        refId: project.id,
+        kind: 'piece_updated',
+        detail: {
+          revision: project.revision,
+          scope: 'visual',
+          pieceHash: pieceCanonicalHash(input.extras.pieceSnapshot),
+        },
+      });
+      await this.transitions.notify(
+        manager,
+        userId,
+        {
+          kind: 'mc_project',
+          projectId: project.id,
+          status: project.status,
+          revision: project.revision,
+        },
+        MC_EVENTS_CHANNEL,
+      );
+    });
+    return this.reload(project.id);
   }
 
   /** F3: selos/produtos/ordem das cenas (produtos mesclados — campos omitidos preservados). */

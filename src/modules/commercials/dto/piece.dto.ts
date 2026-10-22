@@ -61,6 +61,19 @@ export class UpdatePieceDto {
   name?: string;
 }
 
+/**
+ * `PATCH projects/:id/piece` (tarefa 5.4): o descritor inteiro editado depois
+ * do vídeo existir; `expectedRevision` é a revisão do PROJETO.
+ */
+export class UpdateProjectPieceDto {
+  @IsObject()
+  document: McPieceDocument;
+
+  @IsInt()
+  @Min(0)
+  expectedRevision: number;
+}
+
 export class SaveAsTemplateDto {
   @IsString()
   @Length(1, 120)

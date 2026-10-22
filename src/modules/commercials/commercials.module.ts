@@ -53,6 +53,8 @@ import { McFromArtService } from './services/mc-from-art.service';
 import { McPiece } from './entities/mc-piece.entity';
 import { McPiecesService } from './services/mc-pieces.service';
 import { McFromPieceService } from './services/mc-from-piece.service';
+import { McPieceProjectController } from './mc-piece-project.controller';
+import { McPieceProjectService } from './services/mc-piece-project.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
 import { McQualityService } from './services/mc-quality.service';
 import { McReconcilerService } from './services/mc-reconciler.service';
@@ -108,6 +110,8 @@ import { McWindowPriceService } from './services/mc-window-price.service';
     CommercialsInsightsController,
     // F2 (6.8): correção por oferta e "atualizar oferta" a partir do catálogo.
     McOfferCarouselController,
+    // Peça de ofertas (5.4): edição da peça depois do vídeo existir.
+    McPieceProjectController,
   ],
   providers: [
     CommercialsService,
@@ -128,6 +132,7 @@ import { McWindowPriceService } from './services/mc-window-price.service';
     // Peça de ofertas configurável (change video-peca-configuravel): CRUD e modelos.
     McPiecesService,
     McFromPieceService,
+    McPieceProjectService,
     McLogoLocatorService,
     McTranslationService,
     McQualityService,

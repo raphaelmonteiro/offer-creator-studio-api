@@ -853,6 +853,8 @@ export function isCompositionOnlyChange(
       d.environmentChanged,
   );
   if (touchesMedia) return false;
+  // a cor da janela está gravada nos clipes de fala: trocá-la regrava, não é só composição
+  if (talkColorChanged(previous, next)) return false;
   const productsChanged =
     JSON.stringify(canonicalProducts(previous.products)) !==
     JSON.stringify(canonicalProducts(next.products));
@@ -928,21 +930,30 @@ export function canonicalProducts(
 
 /**
  * Campos de COMPOSIÇÃO dos formatos novos (não tocam TTS nem clipe — só
- * `compose_ffmpeg`/`render_remotion` + `finalize`): F1 janela, cor da janela e
- * rosto do logo; F2 preset de layout, legendas e ordem das falas.
+ * `compose_ffmpeg`/`render_remotion` + `finalize`): F1 janela e rosto do
+ * logo; F2 preset de layout, legendas e ordem das falas. A cor da janela
+ * (`talkBackgroundColor`) NÃO está aqui: ela é o fundo do tile achatado em
+ * cada clipe de fala (entra no hash do `talk`) — trocá-la regrava
+ * (`talkColorChanged`), como `assertCompositionFields` já recusa no PATCH
+ * /composition.
  */
 export function compositionFieldsChanged(previous: McScript, next: McScript): boolean {
   const pick = (s: McScript) =>
     JSON.stringify({
       window: s.window ?? null,
       logoFace: s.logoFace ?? null,
-      talkBackgroundColor: s.talkBackgroundColor ?? null,
       layoutPreset: s.layoutPreset ?? null,
       captions: s.captions ?? null,
       lines: s.lines ?? null,
       offers: s.offers ? canonicalProducts(s.offers) : null,
     });
   return pick(previous) !== pick(next);
+}
+
+/** Cor da janela/painel mudou (#RRGGBB sem distinção de caixa; ausente = null). */
+export function talkColorChanged(previous: McScript, next: McScript): boolean {
+  const norm = (s: McScript) => (s.talkBackgroundColor ?? null)?.trim().toUpperCase() ?? null;
+  return norm(previous) !== norm(next);
 }
 
 /**

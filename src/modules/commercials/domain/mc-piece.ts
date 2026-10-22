@@ -1,7 +1,8 @@
 import { computeContentHash } from './input-hash';
 import { McKitIdentityMode } from './mc-kit-identity';
+import type { McProjectLogoBox } from './mc-logo-face';
 import { parsePreco } from './mc-preco-extenso';
-import { McSealProduct } from './mc-types';
+import { McProjectOptions, McSealProduct } from './mc-types';
 
 /**
  * Peça de ofertas configurável (change video-peca-configuravel, grupo 2):
@@ -789,6 +790,36 @@ export function resolvePieceFonts(
     if (row) fonts.push({ family, url: row.fileUrl.trim() });
   }
   return fonts.sort((a, b) => a.family.localeCompare(b.family));
+}
+
+/**
+ * O que a peça fixa no ROTEIRO do vídeo (tarefa 5.3/5.4): janela = rect do
+ * personagem (frações do quadro de saída), modo rosto do logo e a cor do
+ * painel (fundo do tile de fala). Sem personagem devolve null.
+ */
+export function pieceCharacterVideoFields(document: McPieceDocument): {
+  window: McPieceRect;
+  logoFace: boolean;
+  talkBackgroundColor: string | null;
+} | null {
+  const character = pieceBlock(document, 'character');
+  if (!character) return null;
+  return {
+    window: { ...character.rect },
+    logoFace: character.mode === 'logo_face',
+    talkBackgroundColor: character.panel?.color ?? null,
+  };
+}
+
+/**
+ * O que uma edição da peça grava no PROJETO além do roteiro (`PATCH
+ * projects/:id/piece`, 5.4): o descritor congelado novo, a caixa do logo
+ * (modo rosto do logo) e as opções com as ofertas faladas atualizadas.
+ */
+export interface McProjectPieceExtras {
+  pieceSnapshot: McPieceDocument;
+  logoBox: McProjectLogoBox | null;
+  options?: McProjectOptions;
 }
 
 export type McPieceChangeScope = 'none' | 'visual' | 'spoken';
