@@ -235,15 +235,14 @@ legendas ligadas).
    mudou → reescrita parcial, imagem única com produtos citados, chroma key
    (fundo transparente) após bake-off.
 
-## Pontos para decidir na discussão
+## Decisões técnicas (fechadas em 22/10/2026)
 
-1. **Componente compartilhado**: o `PieceCanvas` e o `layoutProducts` no pacote
-   `@chroma/video-templates`, consumido pelo frontend (hoje o front não usa o
-   pacote; é o TODO 6.9). Alternativa: duplicar a regra no front, como o F2
-   faz hoje, abrindo mão da garantia "prévia = quadro final".
-2. **Peça como entidade própria (`mc_pieces`)** versus jsonb no projeto. A
-   entidade dá autosave antes do projeto e modelos sem tabela extra.
-3. **Personagem**: painel liso no lançamento e chroma na fase 2, ou já fazer
-   o bake-off de chroma antes de lançar.
-4. **`render_still` no worker** (Remotion) versus rasterizar no navegador do
-   cliente. A proposta é o worker, pela fidelidade e pela regeração.
+1. **Componente compartilhado**: `PieceCanvas` e `layoutProducts` vivem no
+   pacote `@chroma/video-templates` e são consumidos pelo frontend e pelo
+   worker (fecha o TODO 6.9 para este formato).
+2. **Peça como entidade própria** (`mc_pieces`), com `pieceId` + `pieceSnapshot`
+   no projeto.
+3. **Personagem em painel liso no lançamento**; chroma key ("fundo
+   transparente") na fase 2, depois do bake-off com os motores.
+4. **`render_still` no worker** (Remotion `renderStill`), nunca no navegador
+   do cliente.
