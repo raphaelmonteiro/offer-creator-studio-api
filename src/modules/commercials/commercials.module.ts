@@ -55,6 +55,7 @@ import { McPiecesService } from './services/mc-pieces.service';
 import { McFromPieceService } from './services/mc-from-piece.service';
 import { McPieceProjectController } from './mc-piece-project.controller';
 import { McPieceProjectService } from './services/mc-piece-project.service';
+import { McPieceBackgroundService } from './services/mc-piece-background.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
 import { McQualityService } from './services/mc-quality.service';
 import { McReconcilerService } from './services/mc-reconciler.service';
@@ -133,6 +134,7 @@ import { McWindowPriceService } from './services/mc-window-price.service';
     McPiecesService,
     McFromPieceService,
     McPieceProjectService,
+    McPieceBackgroundService,
     McLogoLocatorService,
     McTranslationService,
     McQualityService,

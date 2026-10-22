@@ -7,6 +7,7 @@ import { McArtService } from './services/mc-art.service';
 import { McFromArtService } from './services/mc-from-art.service';
 import { McPiecesService } from './services/mc-pieces.service';
 import { McFromPieceService } from './services/mc-from-piece.service';
+import { McPieceBackgroundService } from './services/mc-piece-background.service';
 import { McKitCandidatesService } from './services/mc-kit-candidates.service';
 import { McKitsService } from './services/mc-kits.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
@@ -56,6 +57,7 @@ describe('CommercialsController — ponte arte → projeto (D9)', () => {
       fromArt as unknown as McFromArtService,
       {} as McPiecesService,
       {} as McFromPieceService,
+      {} as McPieceBackgroundService,
     );
   });
 

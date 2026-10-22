@@ -43,6 +43,7 @@ import {
   UpdatePieceDto,
 } from './dto/piece.dto';
 import { McFromPieceService } from './services/mc-from-piece.service';
+import { McPieceBackgroundService } from './services/mc-piece-background.service';
 import { McPiecesService } from './services/mc-pieces.service';
 import { SystemSettingsService } from '../../shared/settings/system-settings.service';
 import { AdminPauseDto } from './dto/admin-pause.dto';
@@ -97,6 +98,7 @@ export class CommercialsController {
     private readonly fromArt: McFromArtService,
     private readonly pieces: McPiecesService,
     private readonly fromPiece: McFromPieceService,
+    private readonly pieceBackground: McPieceBackgroundService,
   ) {}
 
   /** Rotas compartilhadas entre executores despacham pelo `pipelineVersion` do projeto. */
@@ -367,6 +369,30 @@ export class CommercialsController {
   @Delete('pieces/:id')
   removePiece(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
     return this.pieces.remove(user.id, id);
+  }
+
+  /**
+   * Imagem de fundo da peça (PNG/JPEG/WebP, 50 MB) → asset `piece_background`
+   * com a URL para `document.background.imageUrl`. Multipart passa por
+   * @SkipValidation(); o service valida tipo/conteúdo (400 INVALID_IMAGE_FILE).
+   */
+  @Post('pieces/backgrounds')
+  @SkipValidation()
+  @UseInterceptors(createFileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Envia a imagem de fundo de uma peça de ofertas' })
+  uploadPieceBackground(
+    @CurrentUser() user: { id: string },
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.pieceBackground.upload(user.id, file);
   }
 
   /** Modelo da conta a partir da peça (sem produtos, logo e dados do cliente). */
