@@ -95,5 +95,5 @@ no worker.
 
 - [ ] 9.1 e2e mock `e2e-piece.mjs` na stack `docker-compose.e2e.yml`: criar peça, 4 produtos, personagem, `from-piece`, roteiro, prepare, aprovar, still mock, compose, entrega; sem chamadas pagas
 - [ ] 9.2 Teste de fidelidade: still renderizado pelo worker × captura do `PieceCanvas` no navegador da e2e, diferença média de pixels abaixo de um limiar fixado
-- [ ] 9.3 Preflight do worker para `offer_piece` (navegador + fontes) refletido em `/v1/health` e no `getConfig`; `.env.example` e CLAUDE.md atualizados (`MC_FORMATS=offer_piece`, `MC_VIDEO_TEMPLATES_DIR`)
+- [x] 9.3 Preflight do worker para `offer_piece` (ffmpeg, ffprobe, fontes, navegador) em `RENDER_REQUIREMENTS`, refletido em `/v1/health` (`worker.render.formats.offer_piece`) e no `getConfig`; `.env.example` (`MC_FORMATS` admite `offer_piece`) e CLAUDE.md (formato, rotas, `render_still`, preflight) atualizados
 - [ ] 9.4 Vídeo real com o cliente de referência (kit realista) em 9:16 e 4:5, revisão lado a lado com o Piccin; bake-off de chroma key com os três motores registrado em `docs/evidence` (entrada da fase 2)
