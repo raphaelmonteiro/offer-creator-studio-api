@@ -71,7 +71,7 @@ MC_ENABLED                    # liga rotas e consumers; sem isso as rotas respon
 MC_PIPELINE_V2                # off | all | cohort — executor v2 (ADR-001) congelado por projeto na criação
 MC_SCRIPT_PROVIDER / MC_KIT_PROVIDER / MC_PIPELINE_PROVIDER / MC_TRANSLATION_PROVIDER
                               # mock (default) | openai / gemini / real
-MC_FORMATS                    # formatos novos admitidos (talking_art, offer_carousel); vazio = nenhum;
+MC_FORMATS                    # formatos novos admitidos (talking_art, offer_carousel, offer_piece); vazio = nenhum;
                               # 'scenes' sempre passa; token desconhecido derruba o boot (parseMcFormats)
 MC_TALK_ENGINE_ECONOMICO / _PREMIUM / _LOGO
                               # "modelo fal | US$/s | máx. s por chamada" — motor de fala por tier e origem
@@ -79,7 +79,7 @@ GEMINI_IMAGE_MODEL_REFS       # modelo das referências do kit (default GEMINI_I
 MC_KIT_PRICES                 # tarifas do custo registrado do kit: "modelo|US$/imagem|US$/1M entrada|US$/1M saída",
                               # vírgula entre modelos; vazio = tabela padrão (domain/mc-kit-costs.ts); substitui/acrescenta
                               # por modelo; mal escrita derruba o boot
-MC_RENDER_BROWSER             # navegador do render Remotion (só offer_carousel); vazio = formato indisponível
+MC_RENDER_BROWSER             # navegador do render Remotion (offer_carousel e o quadro do offer_piece); vazio = formatos indisponíveis
 MC_RENDER_FONT_FILE           # dica só para o preflight (DejaVuSans.ttf fora dos caminhos usuais); o drawtext usa o fontconfig
 MC_CAROUSEL_RENDERER          # mock (default com pipeline mock) | remotion — renderizador do F2
 MC_RENDER_ASSET_BASE_URL      # base absoluta das mídias passadas ao Remotion (default http://127.0.0.1:3001)
@@ -552,6 +552,18 @@ Executor v2 (`pipelineVersion = 2`) para projetos novos com `MC_PIPELINE_V2=all`
 - `offer_carousel` (F2, "ofertas em sequência"): 3–6 ofertas em cards animados sincronizados com a fala.
   Steps: `tts → talk` por fala, depois `render_remotion → finalize`. A composição vive no pacote
   `@chroma/video-templates` (repo próprio; ainda local em `~/Sites/chroma-video-templates`, não publicado).
+- `offer_piece` ("peça de ofertas", change `video-peca-configuravel`): o cliente monta a PEÇA no editor
+  (fundo, produtos da galeria com preço de/por, logo, textos, rodapé, personagem em painel liso) — entidade
+  `mc_pieces` (`kind` peça|modelo, `document` jsonb em frações do quadro, `revision` com 409), domínio puro em
+  `domain/mc-piece.ts` (validação → `issues[]`, `pieceCanonicalHash`, `pieceSpokenOffers`, `pieceChangeScope`).
+  `POST projects/from-piece` congela o descritor em `mc_projects.pieceSnapshot`; o roteiro é o do F2 (uma fala por
+  item `spoken`, ≥ 1, validade do rodapé no fechamento). Steps: `tts → talk` por fala; projeto
+  `render_still` (quadro parado PNG do formato — Remotion `OfferPieceStill` com o bundle/navegador do F2, mock em
+  sharp; asset `piece_still`; não depende das cenas) `→ compose_ffmpeg` (quadro como arte, janela = rect do
+  personagem, hash leva `pieceHash`) `→ finalize`. `PATCH projects/:id/piece` edita a peça depois do vídeo:
+  mudança falada (ou cor do painel/modo) reescreve só as frases afetadas e volta ao roteiro; só visual → revisão
+  `assembly_only` (ou grava no lugar antes da entrega). Pendentes: `layoutProducts`/`PieceCanvas` no pacote de
+  templates (grupo 3), duplicação com re-layout (5.5), editor e revisão no front (grupos 7–8).
 
 **Kit do personagem**: origem `mascot` ou `logo` (logo vira `mascots.kind = 'logo'`), estilo `cartoon_2d |
 3d_render | realistic`, rodadas de candidatos de mascotização (`mc_kit_candidates`), "usar o logo como está"
@@ -596,6 +608,7 @@ com o TTS original e o custo conta os segundos enviados (uma fala de 2 s custa 5
 | Projetos | `POST projects`, `POST projects/from-art`, `GET projects[?sourceKind&sourceId]`, `GET projects/:id`, `POST projects/:id/duplicate`, `PATCH projects/:id/script`, `GET projects/:id/quote`, `POST projects/:id/prepare`, `POST projects/:id/approve-production`, `PATCH projects/:id/composition`, `POST projects/:id/approve-assembly`, `POST projects/:id/cancel` |
 | F1 | `POST projects/:id/logo-box/detect`, `PUT projects/:id/logo-box`, `GET projects/:id/window-warnings` |
 | F2 | `PATCH projects/:id/offers/:offerId`, `POST projects/:id/offers/:offerId/refresh` |
+| Peças | `POST/GET pieces`, `GET/PATCH/DELETE pieces/:id` (PATCH com `expectedRevision` → 409 `REVISION_CONFLICT`), `POST pieces/:id/save-as-template`, `POST projects/from-piece`, `PATCH projects/:id/piece` |
 | Admin (JWT + `x-admin-token`) | `POST admin/pause`, `GET admin/costs?month=YYYY-MM` |
 | SSE | `GET events` |
 
@@ -605,8 +618,8 @@ com o TTS original e o custo conta os segundos enviados (uma fala de 2 s custa 5
 lista o que a UI pode oferecer.
 
 **Worker e preflight**: o worker publica no heartbeat o preflight de render por formato (ffmpeg, ffprobe,
-fontes DejaVu; navegador só para `offer_carousel`); `/v1/health` expõe `worker.render.formats`, e a criação de
-projetos F1/F2 recusa com `RENDER_UNAVAILABLE` quando falta requisito do formato.
+fontes DejaVu; navegador para `offer_carousel` e `offer_piece`); `/v1/health` expõe `worker.render.formats`, e a
+criação de projetos F1/F2/peça recusa com `RENDER_UNAVAILABLE` quando falta requisito do formato.
 
 **e2e mock**: `docs/evidence/mascot-quality/e2e/run-e2e.sh` (raiz do monorepo) roda `e2e-v2.mjs` (cenas),
 `e2e-logo.mjs` (kit de logo), `e2e-f1.mjs` (arte que fala) e `e2e-f2.mjs` (ofertas em sequência) contra a
