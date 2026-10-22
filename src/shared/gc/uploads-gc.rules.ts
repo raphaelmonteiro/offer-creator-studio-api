@@ -97,13 +97,30 @@ export const COMMERCIALS_GC_KINDS = [
   'commercial_final',
   'commercial_composed',
   'video_art',
+  'piece_still',
+  'piece_background',
 ] as const;
+
+/**
+ * Entregas por projeto (ranking "3 mais recentes por tipo"): finais,
+ * composições e o quadro parado da peça de ofertas (change
+ * video-peca-configuravel, 6.6 — mesma regra do `commercial_composed`).
+ */
+export const COMMERCIALS_GC_DELIVERY_KINDS = [
+  'commercial_final',
+  'commercial_composed',
+  'piece_still',
+] as const;
+
+/** Fundo enviado para uma peça de ofertas: fora de qualquer `mc_pieces.document`/`pieceSnapshot` há 30 dias → sai. */
+export const PIECE_BACKGROUND_RETENTION_MS = 30 * DAY_MS;
 
 export type CommercialsGcReason =
   | 'kit_candidate_rejected'
   | 'kit_tile_superseded'
   | 'delivery_superseded'
-  | 'video_art_unreferenced';
+  | 'video_art_unreferenced'
+  | 'piece_background_unreferenced';
 
 export interface CommercialsGcAsset extends GcAssetCandidate {
   metadata: Record<string, unknown> | null;
@@ -153,6 +170,11 @@ export interface CommercialsGcContext {
   deliveries: CommercialsGcDelivery[];
   /** Assets referenciados por snapshots de steps (ex.: `inputSnapshot.tileAssetId` do talk). */
   stepReferencedAssetIds: string[];
+  /**
+   * Fundos (`piece_background`) cuja URL aparece em algum `mc_pieces.document`
+   * ou `mc_projects.pieceSnapshot` (6.6). Ausente = contexto antigo, nada sai.
+   */
+  referencedPieceBackgroundIds?: string[];
 }
 
 function str(value: unknown): string | null {
@@ -265,7 +287,8 @@ export function selectCommercialsGarbage(
         break;
       }
       case 'commercial_final':
-      case 'commercial_composed': {
+      case 'commercial_composed':
+      case 'piece_still': {
         if (age(asset) <= DELIVERY_RETENTION_MS) break;
         // fora do ranking do projeto (sem projectId, projeto não lido) = incerto → preserva
         if (!rankedDeliveries.has(asset.id) || keptDeliveries.has(asset.id)) break;
@@ -276,6 +299,14 @@ export function selectCommercialsGarbage(
         if (age(asset) <= VIDEO_ART_RETENTION_MS) break;
         if (usedArt.has(asset.id)) break;
         reason = 'video_art_unreferenced';
+        break;
+      }
+      case 'piece_background': {
+        if (age(asset) <= PIECE_BACKGROUND_RETENTION_MS) break;
+        // sem a consulta de referências (contexto antigo) = incerto → preserva
+        if (!ctx.referencedPieceBackgroundIds) break;
+        if (ctx.referencedPieceBackgroundIds.includes(asset.id)) break;
+        reason = 'piece_background_unreferenced';
         break;
       }
       default:

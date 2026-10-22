@@ -135,6 +135,8 @@ export const MC_STEP_QUEUE: Record<McStepType, QueueName> = {
   [McStepType.FINALIZE]: QUEUES.MC_FFMPEG,
   /** Render Remotion do F2 (tarefa 6.5): fila própria com navegador, concorrência 1. */
   [McStepType.RENDER_REMOTION]: QUEUES.MC_RENDER,
+  /** Quadro parado da peça de ofertas (6.1): mesmo navegador do render, mesma fila. */
+  [McStepType.RENDER_STILL]: QUEUES.MC_RENDER,
 };
 
 /**

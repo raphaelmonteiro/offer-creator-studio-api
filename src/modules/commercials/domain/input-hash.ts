@@ -18,6 +18,7 @@ export const MC_BUILDER_VERSIONS: Record<McStepType, number> = {
   [McStepType.COMPOSE_FFMPEG]: 1,
   [McStepType.FINALIZE]: 1,
   [McStepType.RENDER_REMOTION]: 1,
+  [McStepType.RENDER_STILL]: 1,
 };
 
 /**
@@ -50,6 +51,11 @@ export const MC_BUILDER_VERSIONS_V2: Record<McStepType, number> = {
    * desta versão — trocar o pacote de templates invalida o render.
    */
   [McStepType.RENDER_REMOTION]: 1,
+  /**
+   * Quadro parado da peça de ofertas (change video-peca-configuravel, 6.1): o
+   * hash leva o descritor canônico, a versão da composição e as fontes.
+   */
+  [McStepType.RENDER_STILL]: 1,
 };
 
 /**

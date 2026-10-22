@@ -87,6 +87,8 @@ describe('HealthService — preflight de render por formato (design D14)', () =>
         scenes: { available: true, missing: [] },
         talking_art: { available: true, missing: [] },
         offer_carousel: { available: false, missing: ['browser'] },
+        // peça de ofertas: o quadro parado é renderizado no navegador (render_still)
+        offer_piece: { available: false, missing: ['browser'] },
       },
     });
     // a lista bruta de checagens não vai para o health

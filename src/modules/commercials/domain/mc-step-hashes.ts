@@ -360,6 +360,13 @@ export interface ComposeFfmpegHashInput {
   /** Clipes conformados das falas, na ordem de montagem, por identidade de cena. */
   clips: Array<{ sceneId: string; finalAssetId: string }>;
   backgroundArtAssetId: string | null;
+  /**
+   * Peça de ofertas (change video-peca-configuravel, 6.5): hash canônico do
+   * descritor que o quadro parado desenha — a arte do compose É o quadro, então
+   * mudar a peça refaz o compose; mudar só a fala não refaz o quadro. Ausente
+   * nos outros formatos (não entra no hash: os composes do F1 ficam como estão).
+   */
+  pieceHash?: string | null;
   aspectRatio: string;
   window: { x: number; y: number; w: number; h: number } | null;
   logoFace: boolean;
@@ -380,6 +387,7 @@ export function computeComposeFfmpegHash(input: ComposeFfmpegHashInput): string 
   return computeInputHash(McStepType.COMPOSE_FFMPEG, MC_BUILDER_VERSIONS_V2.compose_ffmpeg, {
     clips: input.clips.map((c) => ({ sceneId: c.sceneId, finalAssetId: c.finalAssetId })),
     backgroundArtAssetId: input.backgroundArtAssetId,
+    ...(input.pieceHash ? { pieceHash: input.pieceHash } : {}),
     aspectRatio: input.aspectRatio,
     window: input.window
       ? { x: input.window.x, y: input.window.y, w: input.window.w, h: input.window.h }
@@ -390,6 +398,37 @@ export function computeComposeFfmpegHash(input: ComposeFfmpegHashInput): string 
     captionsEnabled: input.captionsEnabled,
     endcard: input.endcard,
     graphVersion: input.graphVersion,
+  });
+}
+
+// ───────────────── quadro parado da peça de ofertas (render_still) ─────────────────
+
+export interface RenderStillHashInput {
+  /** `pieceCanonicalHash(pieceSnapshot)` — o descritor inteiro, canônico. */
+  pieceHash: string;
+  aspectRatio: string;
+  /** Versão da composição `OfferPieceStill` do pacote (ou `MC_COMPOSITION_VERSION`). */
+  compositionVersion: string;
+  /** `remotion` | `mock` — renderizadores distintos nunca partilham cache. */
+  renderer: string;
+  /** Fontes da conta usadas pela peça (família + URL do arquivo), ordenadas aqui. */
+  fonts: Array<{ family: string; url: string }>;
+}
+
+/**
+ * Hash do `render_still` (6.1): descritor canônico + aspecto + versão da
+ * composição + renderizador + fontes. Mesmas entradas ⇒ mesmo quadro ⇒ asset
+ * `piece_still` reaproveitado; mudar só a fala não passa por aqui.
+ */
+export function computeRenderStillHash(input: RenderStillHashInput): string {
+  return computeInputHash(McStepType.RENDER_STILL, MC_BUILDER_VERSIONS_V2.render_still, {
+    pieceHash: input.pieceHash,
+    aspectRatio: input.aspectRatio,
+    compositionVersion: input.compositionVersion,
+    renderer: input.renderer,
+    fonts: [...input.fonts]
+      .map((f) => ({ family: f.family, url: f.url }))
+      .sort((a, b) => a.family.localeCompare(b.family) || a.url.localeCompare(b.url)),
   });
 }
 

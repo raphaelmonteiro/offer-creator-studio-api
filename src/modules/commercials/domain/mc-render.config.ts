@@ -21,6 +21,12 @@ export const MC_DEFAULT_RENDER_ASSET_BASE_URL = 'http://127.0.0.1:3001';
 
 /** Id da composição registrada no Root do pacote (`OFFER_CAROUSEL_COMPOSITION_ID`). */
 export const MC_OFFER_CAROUSEL_COMPOSITION_ID = 'OfferCarousel';
+/**
+ * Id da composição do QUADRO PARADO da peça de ofertas (change
+ * video-peca-configuravel, 6.2): um quadro, `renderStill`, props = descritor
+ * da peça + dimensões + base das URLs.
+ */
+export const MC_OFFER_PIECE_STILL_COMPOSITION_ID = 'OfferPieceStill';
 
 export type McCarouselRendererKind = 'remotion' | 'mock';
 

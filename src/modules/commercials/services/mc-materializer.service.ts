@@ -25,6 +25,14 @@ import {
   computeRenderRemotionInputsHash,
 } from '../domain/mc-offer-carousel-props';
 import { mcCarouselRendererKind, mcCompositionVersion } from '../domain/mc-render.config';
+import {
+  McPieceDocument,
+  pieceBlock,
+  pieceCanonicalHash,
+  pieceFontFamilies,
+  resolvePieceFonts,
+} from '../domain/mc-piece';
+import { Font } from '../../fonts/entities/font.entity';
 import { carouselOffers, effectiveScenePrompts } from '../domain/mc-script-v2';
 import { buildTalkPrompt } from '../domain/mc-talk-prompts';
 import { kitVoiceDelivery } from '../domain/mc-voice-delivery';
@@ -36,6 +44,7 @@ import {
   computeFinalizeHash,
   computeKeyframeHashV2,
   computeLipsyncHashV2,
+  computeRenderStillHash,
   computeSceneComposeHash,
   computeSceneStepHashes,
   computeTalkHashV2,
@@ -858,7 +867,101 @@ export class McMaterializerService {
     if (project.format === 'offer_carousel') {
       return this.ensureOfferCarouselProjectStepsV2(manager, project, script, scenes);
     }
+    if (project.format === 'offer_piece') {
+      return this.ensureOfferPieceProjectStepsV2(manager, project, script, scenes);
+    }
     return this.ensureSceneAssemblyStepV2(manager, project, script, scenes);
+  }
+
+  /**
+   * Peça de ofertas (change video-peca-configuravel, 6.1/6.3/6.5): a cadeia
+   * `render_still → compose_ffmpeg → finalize`.
+   * - `render_still`: hash = descritor canônico + aspecto + versão da composição
+   *   + renderizador + fontes da conta citadas (o processor grava o hash EXATO
+   *   com a versão do pacote). Não depende das cenas.
+   * - `compose_ffmpeg`: o hash do F1 SEM arte do projeto (a arte é o quadro) e
+   *   COM o `pieceHash`: mudar só a fala não refaz o quadro; mudar só a peça não
+   *   regrava fala — refaz quadro e compose. Janela = rect do personagem (já no
+   *   roteiro), cor = painel do bloco (`talkBackgroundColor`); rosto do logo
+   *   usa a caixa confirmada do projeto, como no F1 (o quadro tem o tamanho do
+   *   quadro de saída, então as frações da arte são as do quadro).
+   * - `finalize`: como no F1.
+   */
+  async ensureOfferPieceProjectStepsV2(
+    manager: EntityManager,
+    project: McProject,
+    script: McScript,
+    scenes: McScene[],
+  ): Promise<McStep> {
+    const document = (project.pieceSnapshot ?? null) as McPieceDocument | null;
+    if (!document || !Array.isArray(document.blocks)) {
+      throw new Error(`Projeto ${project.id} (offer_piece) sem pieceSnapshot`);
+    }
+    const options = resolveProjectOptions(project.options);
+    const kit = await manager.findOne(McCharacterKit, { where: { id: project.kitId } });
+    const families = pieceFontFamilies(document);
+    const fontRows = families.length
+      ? await manager.find(Font, { where: { family: In(families) } })
+      : [];
+    const fonts = resolvePieceFonts(document, fontRows);
+    const pieceHash = pieceCanonicalHash(document);
+    const stillHash = computeRenderStillHash({
+      pieceHash,
+      aspectRatio: project.aspectRatio,
+      compositionVersion: mcCompositionVersion(),
+      renderer: mcCarouselRendererKind(),
+      fonts,
+    });
+
+    const character = pieceBlock(document, 'character');
+    const logoFace = script.logoFace === true;
+    const logoBox = logoFace ? readProjectLogoBox(project.logoBox) : null;
+    const backgroundColor = resolveTalkWindowColor({
+      scriptColor: script.talkBackgroundColor ?? character?.panel?.color ?? null,
+      logoFace,
+      logoBox: project.logoBox,
+      kitColor: kit?.tileBackgroundColor,
+      fallback: '#FFFFFF',
+    });
+    const frame = compositionDimensions(project.aspectRatio);
+    const window = script.window ?? character?.rect ?? null;
+    const composeHash = computeComposeFfmpegHash({
+      clips: scenes.map((s) => ({
+        sceneId: s.scriptSceneId as string,
+        finalAssetId: s.finalAssetId ?? `pending:${s.generation}`,
+      })),
+      backgroundArtAssetId: null,
+      pieceHash,
+      aspectRatio: project.aspectRatio,
+      window: composeHashWindow({
+        window,
+        logoFace,
+        logoBox,
+        artWidth: frame.width,
+        artHeight: frame.height,
+        width: frame.width,
+        height: frame.height,
+      }),
+      logoFace,
+      backgroundColor,
+      gapMs: MC_TALK_GAP_MS,
+      captionsEnabled: options.captionsEnabled,
+      endcard: script.endcard?.storeName ?? null,
+      graphVersion: MC_COMPOSE_GRAPH_VERSION,
+    });
+    const finalizeHash = computeFinalizeHash({
+      composeHash,
+      channel: project.channel ?? null,
+      musicEnabled: options.musicEnabled,
+      captionsEnabled: options.captionsEnabled,
+      loudness: { ...MC_FINALIZE_LOUDNESS },
+      graphVersion: MC_FINALIZE_GRAPH_VERSION,
+    });
+    return this.upsertProjectChain(manager, project, {
+      [McStepType.RENDER_STILL]: stillHash,
+      [McStepType.COMPOSE_FFMPEG]: composeHash,
+      [McStepType.FINALIZE]: finalizeHash,
+    });
   }
 
   /**

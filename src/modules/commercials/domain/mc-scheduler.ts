@@ -1,4 +1,9 @@
-import { planSteps, projectAssemblySteps, scenePlan } from './mc-execution-plan';
+import {
+  isSceneIndependentProjectStep,
+  planSteps,
+  projectAssemblySteps,
+  scenePlan,
+} from './mc-execution-plan';
 import { isPipelineV2 } from './mc-quality';
 import {
   DONE_STEP_STATUSES,
@@ -260,28 +265,39 @@ function readyStepsV2(
           (attempt == null || (s.attempt ?? 1) === attempt) &&
           (s.projectRevision == null || revision == null || s.projectRevision === revision),
       );
+    // Cena `ready` já tem o clipe final (finalAssetId) — inclusive de uma
+    // revisão ANTERIOR: a remontagem `assembly_only` reutiliza os clipes
+    // aprovados sem novos steps de produção (ADR §4.1), então a prontidão
+    // não pode depender de steps da revisão corrente.
+    const liveScenes = scenes.filter((s) => s.status !== McSceneStatus.CANCELED);
+    const allFinalsDone =
+      liveScenes.length > 0 &&
+      liveScenes.every((scene) => {
+        if (scene.status === McSceneStatus.READY) return true;
+        const plan = scenePlan(sceneTypeOf(scene));
+        return isDone(currentGenerationSteps(scene, steps, revision)[plan.final]);
+      });
     for (const [position, type] of chain.entries()) {
       const pending = projectStep(type, McStepStatus.PENDING);
       if (!pending) continue;
-      if (position === 0) {
-        const liveScenes = scenes.filter((s) => s.status !== McSceneStatus.CANCELED);
-        // Cena `ready` já tem o clipe final (finalAssetId) — inclusive de uma
-        // revisão ANTERIOR: a remontagem `assembly_only` reutiliza os clipes
-        // aprovados sem novos steps de produção (ADR §4.1), então a prontidão
-        // não pode depender de steps da revisão corrente.
-        const allFinalsDone =
-          liveScenes.length > 0 &&
-          liveScenes.every((scene) => {
-            if (scene.status === McSceneStatus.READY) return true;
-            const plan = scenePlan(sceneTypeOf(scene));
-            return isDone(currentGenerationSteps(scene, steps, revision)[plan.final]);
-          });
-        if (allFinalsDone) ready.push(toRef(pending));
+      // Quadro parado da peça (6.3): só precisa do descritor congelado — libera
+      // assim que está pendente, enquanto as falas ainda gravam.
+      if (isSceneIndependentProjectStep(type)) {
+        ready.push(toRef(pending));
         continue;
       }
-      // A cadeia de UMA entrega compartilha o `attempt` (materializer): um
-      // compose concluído de uma entrega anterior da mesma revisão nunca
-      // destrava o finalize da entrega nova.
+      // O primeiro step que precisa das cenas (tudo antes dele é independente
+      // delas) espera TODAS as cenas vivas com final pronto…
+      const needsScenes = chain.slice(0, position).every(isSceneIndependentProjectStep);
+      if (needsScenes && !allFinalsDone) continue;
+      if (position === 0) {
+        ready.push(toRef(pending));
+        continue;
+      }
+      // …e, como todo seguinte, o anterior concluído na MESMA cadeia: a cadeia
+      // de UMA entrega compartilha o `attempt` (materializer) — um compose
+      // concluído de uma entrega anterior da mesma revisão nunca destrava o
+      // finalize da entrega nova.
       const previousType = chain[position - 1];
       const attempt = pending.attempt ?? 1;
       const previousDone =

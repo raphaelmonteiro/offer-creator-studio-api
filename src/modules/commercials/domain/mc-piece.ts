@@ -761,6 +761,36 @@ export function pieceValidityHint(
   return `até ${match[3]}/${match[2]}`;
 }
 
+/** Famílias de fonte citadas pelos textos da peça (sem repetição, em ordem de uso). */
+export function pieceFontFamilies(document: McPieceDocument): string[] {
+  const families: string[] = [];
+  for (const block of document.blocks ?? []) {
+    if (block.type !== 'text') continue;
+    const family = (block.fontFamily ?? '').trim();
+    if (family && !families.includes(family)) families.push(family);
+  }
+  return families;
+}
+
+/**
+ * Fontes que o quadro parado carrega (6.1/6.2): para cada família citada por
+ * um texto, o arquivo da conta (`fonts.fileUrl`) — a primeira variante
+ * cadastrada da família. Família sem arquivo fica de fora (a composição usa a
+ * fonte padrão; a validação já aponta `TEXT_FONT_UNKNOWN`). Ordenado por
+ * família: entra assim no hash do render.
+ */
+export function resolvePieceFonts(
+  document: McPieceDocument,
+  rows: Array<{ family: string; fileUrl: string }>,
+): McPieceFont[] {
+  const fonts: McPieceFont[] = [];
+  for (const family of pieceFontFamilies(document)) {
+    const row = rows.find((r) => r.family === family && (r.fileUrl ?? '').trim());
+    if (row) fonts.push({ family, url: row.fileUrl.trim() });
+  }
+  return fonts.sort((a, b) => a.family.localeCompare(b.family));
+}
+
 export type McPieceChangeScope = 'none' | 'visual' | 'spoken';
 
 /** O que a fala enxerga de cada oferta falada (ordem conta). */

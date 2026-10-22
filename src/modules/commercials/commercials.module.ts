@@ -26,7 +26,9 @@ import { McAssemblyProcessor } from './processors/mc-assembly.processor';
 import { McComposeFfmpegProcessor } from './processors/mc-compose-ffmpeg.processor';
 import { McFinalizeProcessor } from './processors/mc-finalize.processor';
 import { McRenderRemotionProcessor } from './processors/mc-render-remotion.processor';
+import { McRenderStillProcessor } from './processors/mc-render-still.processor';
 import { McCarouselRendererService } from './services/mc-carousel-renderer';
+import { McStillRendererService } from './services/mc-still-renderer';
 import { McOfferCarouselService } from './services/mc-offer-carousel.service';
 import { McIngestProcessor } from './processors/mc-ingest.processor';
 import { McClipInspectorService } from './services/mc-clip-inspector.service';
@@ -144,6 +146,9 @@ import { McWindowPriceService } from './services/mc-window-price.service';
     // F2 (tarefas 6.5–6.8): render Remotion (fila mc.render) e correções por oferta.
     McRenderRemotionProcessor,
     McCarouselRendererService,
+    // Peça de ofertas (change video-peca-configuravel, grupo 6): quadro parado na fila mc.render.
+    McRenderStillProcessor,
+    McStillRendererService,
     McOfferCarouselService,
     McReconcilerService,
     McClipInspectorService,
@@ -171,6 +176,7 @@ export class CommercialsModule implements OnModuleInit {
     private readonly composeFfmpegProcessor: McComposeFfmpegProcessor,
     private readonly finalizeProcessor: McFinalizeProcessor,
     private readonly renderRemotionProcessor: McRenderRemotionProcessor,
+    private readonly renderStillProcessor: McRenderStillProcessor,
     private readonly reconciler: McReconcilerService,
     private readonly voices: McVoicesService,
   ) {}
@@ -261,10 +267,12 @@ export class CommercialsModule implements OnModuleInit {
       );
       // mc.render (F2, tarefa 6.5): render Remotion — um navegador por vez, gate
       // do ResourceGuard (CPU/memória), expiração própria (MC_QUEUE_EXPIRE_S).
+      // Transporta também o quadro parado da peça de ofertas (`render_still`):
+      // o dispatcher separa pelo `type` do payload (ou do step, nos jobs antigos).
       await this.queue.subscribe(
         QUEUES.MC_RENDER,
         MC_QUEUE_CONCURRENCY[QUEUES.MC_RENDER] ?? 1,
-        (d: { stepId: string }) => this.renderRemotionProcessor.process(d),
+        (d: { stepId: string; type?: string }) => this.dispatchRender(d),
         () => this.resourceGuard.admitHeavyJob(),
       );
       // Watchdog de steps órfãos (domain/mc-watchdog.ts): repõe jobs de steps
@@ -287,6 +295,12 @@ export class CommercialsModule implements OnModuleInit {
     if (type === McStepType.COMPOSE_FFMPEG) return this.composeFfmpegProcessor.process(d);
     if (type === McStepType.FINALIZE) return this.finalizeProcessor.process(d);
     return this.assemblyProcessor.process(d);
+  }
+
+  private async dispatchRender(d: { stepId: string; type?: string }): Promise<void> {
+    const type = d.type ?? (await this.stepType(d.stepId)) ?? McStepType.RENDER_REMOTION;
+    if (type === McStepType.RENDER_STILL) return this.renderStillProcessor.process(d);
+    return this.renderRemotionProcessor.process(d);
   }
 
   private async stepType(stepId: string): Promise<string | null> {

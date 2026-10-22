@@ -15,7 +15,11 @@ import {
   mcRetryDelayS,
   mcShouldRetry,
 } from '../domain/mc-error-classes';
-import { isProjectAssemblyStep, projectAssemblySteps } from '../domain/mc-execution-plan';
+import {
+  firstSceneDependentAssemblyStep,
+  isProjectAssemblyStep,
+  isSceneIndependentProjectStep,
+} from '../domain/mc-execution-plan';
 import { mcExpireForQueue, mcQueueForStep } from '../domain/mc-pipeline.config';
 import {
   approvalAuthorizes,
@@ -137,10 +141,11 @@ export class McPipelineService {
       enqueued.push(ref.id);
     }
 
-    // O PRIMEIRO step de projeto da fase assembly destravou (assembly no F3;
-    // compose_ffmpeg no F1 — D6) ⇒ o projeto entra em montagem
+    // O PRIMEIRO step de projeto que precisa das cenas destravou (assembly no
+    // F3; compose_ffmpeg no F1 — D6; na peça de ofertas o `render_still` sai
+    // antes e não muda a fase) ⇒ o projeto entra em montagem
     // (generating → assembling). O finalize nunca é o primeiro.
-    const firstAssemblyStep = projectAssemblySteps(project.format)[0];
+    const firstAssemblyStep = firstSceneDependentAssemblyStep(project.format);
     if (ready.some((r) => r.type === firstAssemblyStep)) {
       const won = await this.transitions.casTransition(
         manager,
@@ -645,11 +650,18 @@ export class McPipelineService {
         // v2 (ADR §4.1): falha recuperável da montagem (assembly, ou
         // compose_ffmpeg/finalize do F1 — D6) pausa em needs_attention com
         // fase de retomada persistida — clipes aprovados e reservas ficam.
+        // O quadro parado da peça (`render_still`, 6.3) roda ANTES das cenas:
+        // falhando ainda em `generating`, a pausa parte de lá — a retomada
+        // (`approve-assembly`) rearma a cadeia e devolve à produção se faltam cenas.
+        const fromStatus =
+          isSceneIndependentProjectStep(step.type) && project.status === McProjectStatus.GENERATING
+            ? McProjectStatus.GENERATING
+            : McProjectStatus.ASSEMBLING;
         const wonProject = await this.transitions.casTransition(
           manager,
           McProject,
           project.id,
-          McProjectStatus.ASSEMBLING,
+          fromStatus,
           McProjectStatus.NEEDS_ATTENTION,
           {
             errorCode: code,
@@ -663,7 +675,7 @@ export class McPipelineService {
             manager,
             project.userId,
             project.id,
-            McProjectStatus.ASSEMBLING,
+            fromStatus,
             McProjectStatus.NEEDS_ATTENTION,
             { errorCode: code, stepId: step.id, resumePhase: 'assembly' },
           );

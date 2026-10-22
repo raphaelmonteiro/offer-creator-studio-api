@@ -36,6 +36,13 @@ export enum McStepType {
    * (concorrência 1, expiração 900 s) — e entrega o vídeo COMPOSTO ao `finalize`.
    */
   RENDER_REMOTION = 'render_remotion',
+  /**
+   * Step de PROJETO da peça de ofertas (change video-peca-configuravel, grupo 6):
+   * renderiza o QUADRO PARADO da peça (`OfferPieceStill`, PNG no tamanho do
+   * formato) a partir do descritor congelado (`pieceSnapshot`) — fila `mc.render`.
+   * Não depende das cenas: o `compose_ffmpeg` usa o quadro como arte de fundo.
+   */
+  RENDER_STILL = 'render_still',
 }
 
 /**

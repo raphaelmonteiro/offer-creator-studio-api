@@ -2,8 +2,11 @@ import {
   CommercialsGcAsset,
   CommercialsGcContext,
   CommercialsGcDelivery,
+  COMMERCIALS_GC_DELIVERY_KINDS,
+  COMMERCIALS_GC_KINDS,
   DELIVERIES_KEPT_PER_PROJECT,
   keptDeliveryIds,
+  PIECE_BACKGROUND_RETENTION_MS,
   selectCommercialsGarbage,
   selectGarbage,
 } from './uploads-gc.rules';
@@ -304,5 +307,87 @@ describe('selectCommercialsGarbage — escopo e idempotência', () => {
         NOW,
       ),
     ).toEqual([]);
+  });
+});
+
+describe('selectCommercialsGarbage — peça de ofertas (change video-peca-configuravel, 6.6)', () => {
+  const stills: CommercialsGcDelivery[] = [1, 2, 3, 4, 5].map((v) => ({
+    id: `s${v}`,
+    kind: 'piece_still',
+    projectId: 'p1',
+    createdAt: daysAgo(200 - v * 20), // s5 é o mais recente
+    version: v,
+    composedAssetId: null,
+  }));
+  const stillAsset = (d: CommercialsGcDelivery) =>
+    asset({
+      id: d.id,
+      kind: 'piece_still',
+      createdAt: d.createdAt,
+      fileUrl: `/uploads/commercials/u1/p1/final/v${d.version}/still.png`,
+      metadata: { projectId: 'p1', version: d.version, pieceHash: 'h' },
+    });
+
+  it('piece_still segue a regra das entregas: fora das 3 mais recentes do projeto e com mais de 90 dias → delivery_superseded', () => {
+    expect(COMMERCIALS_GC_KINDS).toEqual(
+      expect.arrayContaining(['piece_still', 'piece_background']),
+    );
+    expect(COMMERCIALS_GC_DELIVERY_KINDS).toContain('piece_still');
+    const result = selectCommercialsGarbage(
+      stills.map(stillAsset),
+      ctx({
+        deliveries: stills,
+        projects: [
+          { id: 'p1', finalAssetId: null, lastDeliveryAssetId: null, backgroundArtAssetId: null },
+        ],
+      }),
+      NOW,
+    );
+    expect(result.map((r) => [r.assetId, r.reason])).toEqual([
+      ['s1', 'delivery_superseded'],
+      ['s2', 'delivery_superseded'],
+    ]);
+    expect(result[0].files).toEqual(['/uploads/commercials/u1/p1/final/v1/still.png']);
+    // quadro fora do ranking lido (projeto não consultado) → preservado
+    expect(selectCommercialsGarbage([stillAsset(stills[0])], ctx(), NOW)).toEqual([]);
+    // o ranking dos quadros não interfere no das composições do mesmo projeto
+    expect(keptDeliveryIds(stills, []).size).toBe(DELIVERIES_KEPT_PER_PROJECT);
+  });
+
+  const background = (overrides: Partial<CommercialsGcAsset> = {}) =>
+    asset({
+      id: 'bg1',
+      kind: 'piece_background',
+      createdAt: daysAgo(31),
+      fileUrl: '/uploads/commercials/pieces/u1/bg-1.jpg',
+      metadata: {},
+      ...overrides,
+    });
+
+  it('piece_background sem peça nem projeto que o use, com mais de 30 dias → piece_background_unreferenced', () => {
+    expect(
+      selectCommercialsGarbage([background()], ctx({ referencedPieceBackgroundIds: [] }), NOW),
+    ).toEqual([
+      {
+        assetId: 'bg1',
+        reason: 'piece_background_unreferenced',
+        files: ['/uploads/commercials/pieces/u1/bg-1.jpg'],
+      },
+    ]);
+  });
+
+  it('referenciado por uma peça/snapshot, recente, ou sem a consulta de referências (contexto antigo) → preservado', () => {
+    expect(
+      selectCommercialsGarbage([background()], ctx({ referencedPieceBackgroundIds: ['bg1'] }), NOW),
+    ).toEqual([]);
+    expect(
+      selectCommercialsGarbage(
+        [background({ createdAt: daysAgo(10) })],
+        ctx({ referencedPieceBackgroundIds: [] }),
+        NOW,
+      ),
+    ).toEqual([]);
+    expect(selectCommercialsGarbage([background()], ctx(), NOW)).toEqual([]);
+    expect(PIECE_BACKGROUND_RETENTION_MS).toBe(30 * DAY_MS);
   });
 });

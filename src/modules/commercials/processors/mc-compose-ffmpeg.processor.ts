@@ -12,6 +12,7 @@ import { compositionDimensions } from '../domain/mc-composition.config';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import { MC_TALK_GAP_MS } from '../domain/mc-talk-conform-graph';
 import { readProjectLogoBox, resolveTalkWindowColor } from '../domain/mc-logo-face';
+import { McPieceDocument, pieceCanonicalHash } from '../domain/mc-piece';
 import {
   buildComposeGraph,
   ComposeGraphInput,
@@ -139,18 +140,33 @@ export class McComposeFfmpegProcessor {
       }
       const timeline = composeTimeline(measured, MC_TALK_GAP_MS);
 
-      // 2) arte de fundo, janela e cor (D1/D6/D9)
-      const art = project.backgroundArtAssetId
-        ? await this.dataSource
-            .getRepository(AnimationAsset)
-            .findOneBy({ id: project.backgroundArtAssetId })
-        : null;
-      if (project.backgroundArtAssetId && !art?.fileUrl) {
+      // 2) arte de fundo, janela e cor (D1/D6/D9). Na peça de ofertas (6.4) a
+      // arte É o quadro parado desta cadeia (`render_still`, mesmo attempt):
+      // já no tamanho de saída — contain-fit e pad são identidade.
+      const piece = project.format === 'offer_piece';
+      const stillAssetId = piece ? await this.stillAssetIdFor(step) : null;
+      const backgroundArtAssetId = piece ? stillAssetId : (project.backgroundArtAssetId ?? null);
+      if (piece && !stillAssetId) {
         throw new TerminalProviderError(
-          'Arte de fundo do projeto ausente',
-          'background_art_missing',
+          'Quadro parado da peça (render_still) não encontrado para esta entrega',
+          'piece_still_missing',
         );
       }
+      const art = backgroundArtAssetId
+        ? await this.dataSource
+            .getRepository(AnimationAsset)
+            .findOneBy({ id: backgroundArtAssetId })
+        : null;
+      if (backgroundArtAssetId && !art?.fileUrl) {
+        throw new TerminalProviderError(
+          piece ? 'Quadro parado da peça ausente' : 'Arte de fundo do projeto ausente',
+          piece ? 'piece_still_missing' : 'background_art_missing',
+        );
+      }
+      const pieceHash =
+        piece && project.pieceSnapshot
+          ? pieceCanonicalHash(project.pieceSnapshot as McPieceDocument)
+          : null;
       const backgroundArtPath = art?.fileUrl ? this.storage.absoluteFromUrl(art.fileUrl) : null;
       const artDims = backgroundArtPath
         ? await this.artDimensions(backgroundArtPath, art?.width ?? null, art?.height ?? null)
@@ -267,8 +283,9 @@ export class McComposeFfmpegProcessor {
       // snapshot persistido: assets/URLs em vez de caminhos temporários
       const snapshot: Record<string, unknown> = {
         ...input,
-        backgroundArtAssetId: project.backgroundArtAssetId ?? null,
+        backgroundArtAssetId,
         backgroundArtPath: art?.fileUrl ?? null,
+        ...(piece ? { stillAssetId, pieceHash } : {}),
         clips: input.clips.map((clip, i) => ({
           sceneId: clip.sceneId,
           finalAssetId: measured[i].finalAssetId,
@@ -306,7 +323,8 @@ export class McComposeFfmpegProcessor {
             logoFace: input.logoFace,
             logoBox,
             backgroundColor,
-            backgroundArtAssetId: project.backgroundArtAssetId ?? null,
+            backgroundArtAssetId,
+            ...(piece ? { stillAssetId, pieceHash } : {}),
             gapMs: MC_TALK_GAP_MS,
             endcard: !!input.endcard,
             timeline: {
@@ -350,6 +368,29 @@ export class McComposeFfmpegProcessor {
       .metadata()
       .catch(() => null);
     return meta?.width && meta?.height ? { width: meta.width, height: meta.height } : null;
+  }
+
+  /**
+   * Quadro parado da MESMA cadeia (revisão + attempt do compose): o
+   * `render_still` concluído mais recente com asset; sem um da cadeia, o mais
+   * recente do projeto (quadro reaproveitado por hash numa entrega anterior).
+   */
+  private async stillAssetIdFor(step: McStep): Promise<string | null> {
+    const stills = await this.dataSource.getRepository(McStep).find({
+      where: {
+        projectId: step.projectId,
+        type: McStepType.RENDER_STILL,
+        status: McStepStatus.SUCCEEDED,
+      },
+      order: { finishedAt: 'DESC' },
+    });
+    const sameChain = stills.find(
+      (s) =>
+        s.outputAssetId &&
+        (s.projectRevision ?? null) === (step.projectRevision ?? null) &&
+        (s.attempt ?? 1) === (step.attempt ?? 1),
+    );
+    return (sameChain ?? stills.find((s) => !!s.outputAssetId))?.outputAssetId ?? null;
   }
 
   /** Versão da entrega = finalizações entregues + 1 (compose e finalize da mesma entrega partilham a pasta). */

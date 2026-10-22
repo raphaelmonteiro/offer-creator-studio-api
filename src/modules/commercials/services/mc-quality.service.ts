@@ -22,7 +22,12 @@ import {
 import { SystemSettingsService } from '../../../shared/settings/system-settings.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { CommercialsService, MC_PAUSED_KEY } from '../commercials.service';
-import { scenePlan, sceneUsesKeyframe } from '../domain/mc-execution-plan';
+import {
+  isSceneIndependentProjectStep,
+  projectAssemblySteps,
+  scenePlan,
+  sceneUsesKeyframe,
+} from '../domain/mc-execution-plan';
 import {
   klingActionDuration,
   mcTalkEngines,
@@ -1663,11 +1668,46 @@ export class McQualityService {
         .find({ where: { projectId: project.id }, order: { idx: 'ASC' } })
     ).filter((s) => s.status !== McSceneStatus.CANCELED);
     const notReady = scenes.filter((s) => s.status !== McSceneStatus.READY || !s.finalAssetId);
-    if (notReady.length > 0) {
+    // Peça de ofertas (6.3): o quadro parado roda antes das cenas e pode ter
+    // falhado em plena produção. Retomar com cenas por gravar rearma a cadeia e
+    // devolve o projeto à PRODUÇÃO (as cenas seguem; a montagem vem depois).
+    const backToProduction =
+      notReady.length > 0 &&
+      resuming &&
+      projectAssemblySteps(project.format).some(isSceneIndependentProjectStep);
+    if (notReady.length > 0 && !backToProduction) {
       throw new UnprocessableEntityException({
         code: 'SCENES_NOT_READY',
         message: 'Há cenas sem clipe final — a remontagem só usa clipes já aprovados.',
       });
+    }
+    if (backToProduction) {
+      await this.dataSource.transaction(async (manager) => {
+        const from = project.status;
+        await this.materializer.ensureAssemblyStepV2(manager, project, script, scenes);
+        assertProjectTransition(from, McProjectStatus.GENERATING);
+        const won = await this.casTransitionWithRevision(
+          manager,
+          project,
+          McProjectStatus.GENERATING,
+          {
+            quality: { ...quality, resumePhase: null },
+            errorCode: null,
+            errorMessage: null,
+          },
+        );
+        if (!won) throw this.conflict();
+        await this.pipeline.appendProjectTransition(
+          manager,
+          userId,
+          project.id,
+          from,
+          McProjectStatus.GENERATING,
+          { revision: project.revision, resumed: 'assembly', scenesPending: notReady.length },
+        );
+        await this.pipeline.enqueueReadySteps(manager, project.id);
+      });
+      return this.reload(project.id);
     }
     await this.dataSource.transaction(async (manager) => {
       const from = project.status;

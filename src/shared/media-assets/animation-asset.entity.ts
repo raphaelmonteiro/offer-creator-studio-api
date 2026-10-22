@@ -40,7 +40,15 @@ export type AnimationAssetKind =
    * Vídeo COMPOSTO dos formatos novos (saída do `compose_ffmpeg`, design D6):
    * entrada do `finalize`; a entrega continua sendo `commercial_final`.
    */
-  | 'commercial_composed';
+  | 'commercial_composed'
+  /**
+   * Quadro PARADO da peça de ofertas (saída do `render_still`, change
+   * video-peca-configuravel 6.1): PNG no tamanho do formato, arte de fundo do
+   * `compose_ffmpeg` do `offer_piece`. Segue a retenção das entregas no GC.
+   */
+  | 'piece_still'
+  /** Imagem de fundo enviada para uma peça de ofertas (referenciada por `mc_pieces.document`). */
+  | 'piece_background';
 
 export type AnimationAssetStatus =
   | 'draft'

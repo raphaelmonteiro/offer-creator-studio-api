@@ -5,7 +5,9 @@ import { DataSource, EntityManager } from 'typeorm';
 import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
+import { fixturePieceDocument } from '../domain/__fixtures__/mc-piece.fixtures';
 import { fixtureTalkTileScript } from '../domain/__fixtures__/mc-script-v2.fixtures';
+import { pieceCanonicalHash } from '../domain/mc-piece';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -407,5 +409,134 @@ describe('McComposeFfmpegProcessor — step de projeto compose_ffmpeg (tarefas 4
       expect.objectContaining({ code: 'composed_duration_mismatch' }),
       expect.anything(),
     );
+  });
+
+  describe('peça de ofertas (change video-peca-configuravel, 6.4/6.5): a arte é o quadro parado da cadeia', () => {
+    const snapshot = fixturePieceDocument();
+    let stillSteps: Array<Record<string, unknown>>;
+
+    beforeEach(() => {
+      project.format = 'offer_piece';
+      project.backgroundArtAssetId = null;
+      project.pieceId = 'piece-1';
+      project.pieceSnapshot = snapshot;
+      (project.script as Record<string, unknown>).format = 'offer_piece';
+      (project.script as Record<string, unknown>).window = { x: 0.58, y: 0.6, w: 0.37, h: 0.28 };
+      assets.push({
+        id: 'still-1',
+        kind: 'piece_still',
+        fileUrl: '/uploads/still.png',
+        width: 1080,
+        height: 1920,
+      });
+      stillSteps = [
+        {
+          id: 'rs-old',
+          type: McStepType.RENDER_STILL,
+          status: McStepStatus.SUCCEEDED,
+          outputAssetId: 'still-old',
+          projectRevision: 1,
+          attempt: 1,
+          finishedAt: new Date('2026-10-20T10:00:00Z'),
+        },
+        {
+          id: 'rs-1',
+          type: McStepType.RENDER_STILL,
+          status: McStepStatus.SUCCEEDED,
+          outputAssetId: 'still-1',
+          projectRevision: 1,
+          attempt: 1,
+          finishedAt: new Date('2026-10-21T10:00:00Z'),
+        },
+      ];
+      const base = dataSource.getRepository.getMockImplementation() as (
+        entity: unknown,
+      ) => Record<string, jest.Mock>;
+      dataSource.getRepository.mockImplementation((entity: unknown) => {
+        const repo = base(entity);
+        // a consulta real ordena por finishedAt DESC (o quadro mais recente da cadeia vence)
+        if (entity === McStep)
+          repo.find = jest.fn(() =>
+            Promise.resolve(
+              [...stillSteps].sort(
+                (a, b) => (b.finishedAt as Date).getTime() - (a.finishedAt as Date).getTime(),
+              ),
+            ),
+          );
+        return repo;
+      });
+    });
+
+    it('usa o quadro (piece_still) do mesmo attempt como arte, com a janela do personagem e a cor do painel; grava stillAssetId e pieceHash', async () => {
+      // o quadro de OUTRA entrega (attempt 2) nunca é escolhido para esta cadeia
+      stillSteps.push({
+        id: 'rs-2',
+        type: McStepType.RENDER_STILL,
+        status: McStepStatus.SUCCEEDED,
+        outputAssetId: 'still-other',
+        projectRevision: 1,
+        attempt: 2,
+        finishedAt: new Date('2026-10-22T10:00:00Z'),
+      });
+      await processor.process({ stepId: 'cmp-1' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      const compose = runWith(ffmpeg, 'composed.mp4') as string[];
+      const inputs = compose.filter((_, i) => compose[i - 1] === '-i');
+      expect(inputs[0]).toBe(path.join(uploadsDir, 'still.png'));
+      const graph = compose[compose.indexOf('-filter_complex') + 1];
+      // o quadro já tem 1080×1920: contain-fit e pad são identidade; a cor é a do painel (roteiro)
+      expect(graph).toContain('pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=0xABCDEF');
+      // janela = rect do personagem: 400×538 em (626, 1152)
+      expect(graph).toContain('overlay=x=626:y=1152');
+      const pieceHash = pieceCanonicalHash(snapshot);
+      expect(saved[0]).toMatchObject({
+        kind: 'commercial_composed',
+        metadata: expect.objectContaining({
+          format: 'offer_piece',
+          backgroundArtAssetId: 'still-1',
+          stillAssetId: 'still-1',
+          pieceHash,
+          artRect: { x: 0, y: 0, width: 1080, height: 1920 },
+          window: { x: 0.58, y: 0.6, w: 0.37, h: 0.28 },
+        }),
+      });
+      expect(stepUpdates[0]).toMatchObject({
+        inputSnapshot: expect.objectContaining({
+          backgroundArtAssetId: 'still-1',
+          backgroundArtPath: '/uploads/still.png',
+          stillAssetId: 'still-1',
+          pieceHash,
+        }),
+      });
+    });
+
+    it('sem quadro concluído para o projeto ⇒ falha honesta piece_still_missing, sem ffmpeg', async () => {
+      stillSteps.splice(0, stillSteps.length);
+      await processor.process({ stepId: 'cmp-1' });
+      expect(ffmpeg.run).not.toHaveBeenCalled();
+      expect(pipeline.failStep).toHaveBeenCalledWith(
+        step,
+        McStepStatus.RUNNING,
+        expect.objectContaining({ code: 'piece_still_missing' }),
+        expect.objectContaining({ fallbackCode: 'compose_failed' }),
+      );
+      // quadro apontado mas sem arquivo → mesmo código
+      stillSteps.push({
+        id: 'rs-x',
+        type: McStepType.RENDER_STILL,
+        status: McStepStatus.SUCCEEDED,
+        outputAssetId: 'still-missing',
+        projectRevision: 1,
+        attempt: 1,
+        finishedAt: new Date(),
+      });
+      await processor.process({ stepId: 'cmp-1' });
+      expect(pipeline.failStep).toHaveBeenLastCalledWith(
+        step,
+        McStepStatus.RUNNING,
+        expect.objectContaining({ code: 'piece_still_missing' }),
+        expect.anything(),
+      );
+    });
   });
 });

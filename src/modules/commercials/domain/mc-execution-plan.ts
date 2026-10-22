@@ -124,17 +124,18 @@ export function planSteps(plan: McScenePlan): McStepType[] {
  * - scenes (F3): `assembly` (montagem 720p, selos/legendas/trilha);
  * - talking_art (F1): `compose_ffmpeg` (arte + janela) → `finalize`;
  * - offer_carousel (F2): `render_remotion` (composição Remotion, fila mc.render) → `finalize`
- *   (sem legendas queimadas: a composição já as desenha por palavra).
- * Cada um depende do anterior; o primeiro depende de todas as cenas prontas.
+ *   (sem legendas queimadas: a composição já as desenha por palavra);
+ * - offer_piece (peça de ofertas, change video-peca-configuravel 6.3): `render_still`
+ *   (quadro parado da peça, fila mc.render — NÃO depende das cenas) → `compose_ffmpeg`
+ *   (quadro como arte + personagem na janela; espera o quadro E todas as cenas) → `finalize`.
+ * Cada um depende do anterior; o primeiro que precisa das cenas depende de todas prontas.
  * Fonte única para scheduler, materializer, cotação e transição assembling.
  */
 export const MC_PROJECT_ASSEMBLY_STEPS: Record<McProjectFormat, readonly McStepType[]> = {
   scenes: [McStepType.ASSEMBLY],
   talking_art: [McStepType.COMPOSE_FFMPEG, McStepType.FINALIZE],
   offer_carousel: [McStepType.RENDER_REMOTION, McStepType.FINALIZE],
-  // peça de ofertas: o grupo 6 da change video-peca-configuravel antepõe `render_still`
-  // (quadro parado) ao compose; até lá o plano espelha o F1.
-  offer_piece: [McStepType.COMPOSE_FFMPEG, McStepType.FINALIZE],
+  offer_piece: [McStepType.RENDER_STILL, McStepType.COMPOSE_FFMPEG, McStepType.FINALIZE],
 };
 
 export function projectAssemblySteps(
@@ -143,12 +144,34 @@ export function projectAssemblySteps(
   return MC_PROJECT_ASSEMBLY_STEPS[format ?? 'scenes'] ?? MC_PROJECT_ASSEMBLY_STEPS.scenes;
 }
 
-/** Step de projeto da fase assembly (sceneId null): assembly, compose_ffmpeg, render_remotion ou finalize. */
+/**
+ * Steps de projeto que NÃO dependem das cenas (6.3): o quadro parado da peça
+ * só precisa do descritor congelado, então o scheduler o libera assim que ele
+ * existe pendente — enquanto as falas ainda gravam.
+ */
+export function isSceneIndependentProjectStep(type: McStepType): boolean {
+  return type === McStepType.RENDER_STILL;
+}
+
+/**
+ * Primeiro step da cadeia que precisa de TODAS as cenas prontas — é ele que
+ * marca a entrada do projeto em montagem (`generating → assembling`); um
+ * `render_still` liberado cedo não muda a fase.
+ */
+export function firstSceneDependentAssemblyStep(
+  format: McProjectFormat | null | undefined,
+): McStepType {
+  const chain = projectAssemblySteps(format);
+  return chain.find((type) => !isSceneIndependentProjectStep(type)) ?? chain[0];
+}
+
+/** Step de projeto da fase assembly (sceneId null): assembly, compose_ffmpeg, render_remotion, render_still ou finalize. */
 export function isProjectAssemblyStep(type: McStepType): boolean {
   return (
     type === McStepType.ASSEMBLY ||
     type === McStepType.COMPOSE_FFMPEG ||
     type === McStepType.RENDER_REMOTION ||
+    type === McStepType.RENDER_STILL ||
     type === McStepType.FINALIZE
   );
 }

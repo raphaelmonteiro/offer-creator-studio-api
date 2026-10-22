@@ -80,13 +80,20 @@ interface RemotionRendererModule {
   ): Promise<{ close: (opts?: unknown) => Promise<void> }>;
   selectComposition(options: Record<string, unknown>): Promise<Record<string, unknown>>;
   renderMedia(options: Record<string, unknown>): Promise<unknown>;
+  /** Um quadro (PNG/JPEG) — o quadro parado da peça de ofertas (6.2). */
+  renderStill(options: Record<string, unknown>): Promise<unknown>;
   makeCancelSignal(): { cancelSignal: unknown; cancel: () => void };
 }
 
 /** Superfície usada do núcleo de `@chroma/video-templates/core`. */
-interface VideoTemplatesCoreModule {
+export interface VideoTemplatesCoreModule {
   COMPOSITION_VERSION?: string;
   OFFER_CAROUSEL_COMPOSITION_ID?: string;
+  /** Composição do quadro parado da peça de ofertas (change video-peca-configuravel). */
+  OFFER_PIECE_STILL_COMPOSITION_ID?: string;
+  parseOfferPieceStillProps?: (
+    input: unknown,
+  ) => { success: true; data: unknown } | { success: false; issues: unknown[] };
   parseOfferCarouselProps?: (
     input: unknown,
   ) => { success: true; data: unknown } | { success: false; issues: unknown[] };
@@ -175,6 +182,29 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
   async compositionVersion(): Promise<string> {
     const modules = await this.load();
     return modules.core.COMPOSITION_VERSION ?? mcCompositionVersion(this.env);
+  }
+
+  /**
+   * Módulos, bundle e navegador JÁ abertos deste processo — partilhados com o
+   * quadro parado da peça de ofertas (`RemotionStillRenderer`, 6.2): um bundle
+   * e um navegador por worker, qualquer que seja a composição.
+   */
+  async runtime(): Promise<{
+    modules: RemotionModules;
+    serveUrl: string;
+    browser: { close: (opts?: unknown) => Promise<void> };
+  }> {
+    const modules = await this.load();
+    const serveUrl = await this.bundle(modules);
+    const browser = await this.openBrowser(modules);
+    return { modules, serveUrl, browser };
+  }
+
+  /** Navegador possivelmente morto depois de um erro: o próximo job abre outro. */
+  async discardBrowser(): Promise<void> {
+    const dead = this.browser;
+    this.browser = null;
+    await dead?.then((b) => b.close({ silent: true })).catch(() => undefined);
   }
 
   /** Bundle UMA vez por processo (D3b: "uma vez por deploy"), sem cache do webpack. */
@@ -297,10 +327,7 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
         },
       });
     } catch (err) {
-      // navegador possivelmente morto: o próximo job abre outro
-      const dead = this.browser;
-      this.browser = null;
-      await dead?.then((b) => b.close({ silent: true })).catch(() => undefined);
+      await this.discardBrowser();
       throw err;
     } finally {
       clearTimeout(timer);
@@ -396,6 +423,12 @@ export class McCarouselRendererService implements OnModuleDestroy {
       this.mock = this.mock ?? new MockCarouselRenderer(this.ffmpeg, env);
       return this.mock;
     }
+    this.remotion = this.remotion ?? new RemotionCarouselRenderer(env);
+    return this.remotion;
+  }
+
+  /** A instância Remotion deste processo (bundle + navegador), para o quadro parado da peça (6.2). */
+  remotionRenderer(env: NodeJS.ProcessEnv = process.env): RemotionCarouselRenderer {
     this.remotion = this.remotion ?? new RemotionCarouselRenderer(env);
     return this.remotion;
   }

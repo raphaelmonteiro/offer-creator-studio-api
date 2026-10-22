@@ -8,7 +8,9 @@ import { AnimationAsset } from '../media-assets/animation-asset.entity';
 import {
   CommercialsGcAsset,
   CommercialsGcContext,
+  COMMERCIALS_GC_DELIVERY_KINDS,
   DELIVERY_RETENTION_MS,
+  PIECE_BACKGROUND_RETENTION_MS,
   EXPORT_RETENTION_MS,
   GcReason,
   GcSelection,
@@ -43,6 +45,7 @@ const EMPTY_COMMERCIALS_CONTEXT: CommercialsGcContext = {
   projects: [],
   deliveries: [],
   stepReferencedAssetIds: [],
+  referencedPieceBackgroundIds: [],
 };
 
 const unique = (values: Array<string | null | undefined>): string[] => [
@@ -216,10 +219,11 @@ export class UploadsGcService implements OnModuleInit, OnModuleDestroy {
         { kind: 'kit_candidate', createdAt: before(KIT_CANDIDATE_RETENTION_MS) },
         { kind: 'kit_tile', createdAt: before(SUPERSEDED_TILE_GRACE_MS) },
         {
-          kind: In(['commercial_final', 'commercial_composed']),
+          kind: In([...COMMERCIALS_GC_DELIVERY_KINDS]),
           createdAt: before(DELIVERY_RETENTION_MS),
         },
         { kind: 'video_art', createdAt: before(VIDEO_ART_RETENTION_MS) },
+        { kind: 'piece_background', createdAt: before(PIECE_BACKGROUND_RETENTION_MS) },
       ],
     });
     return rows.map((a) => ({ ...a, metadata: a.metadata ?? null }));
@@ -240,7 +244,8 @@ export class UploadsGcService implements OnModuleInit, OnModuleDestroy {
       return typeof value === 'string' ? value : null;
     };
     const kitIds = unique(assets.map((a) => meta(a, 'kitId')));
-    const deliveryKinds = ['commercial_final', 'commercial_composed'];
+    const deliveryKinds: string[] = [...COMMERCIALS_GC_DELIVERY_KINDS];
+    const backgroundIds = assets.filter((a) => a.kind === 'piece_background').map((a) => a.id);
     const projectIds = unique(
       assets.filter((a) => deliveryKinds.includes(a.kind)).map((a) => meta(a, 'projectId')),
     );
@@ -307,7 +312,24 @@ export class UploadsGcService implements OnModuleInit, OnModuleDestroy {
           [tileIds],
         )) as Array<{ id: string }>)
       : [];
+    // Fundos de peça (6.6): referenciados pela URL em `mc_pieces.document` ou no
+    // `pieceSnapshot` congelado de um projeto.
+    const backgroundRows = backgroundIds.length
+      ? ((await this.dataSource.query(
+          `SELECT a.id::text AS id
+             FROM animation_assets a
+            WHERE a.id::text = ANY($1::text[])
+              AND (
+                EXISTS (SELECT 1 FROM mc_pieces p
+                         WHERE p.document->'background'->>'imageUrl' = a."fileUrl")
+                OR EXISTS (SELECT 1 FROM mc_projects pr
+                         WHERE pr."pieceSnapshot"->'background'->>'imageUrl' = a."fileUrl")
+              )`,
+          [backgroundIds],
+        )) as Array<{ id: string }>)
+      : [];
     return {
+      referencedPieceBackgroundIds: backgroundRows.map((r) => r.id),
       kits,
       candidates,
       projects,

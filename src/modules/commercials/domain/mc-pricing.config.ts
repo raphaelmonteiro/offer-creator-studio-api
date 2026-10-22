@@ -39,6 +39,8 @@ export const MC_STEP_CREDITS: Record<McStepType, number> = {
   [McStepType.FINALIZE]: 0,
   /** Render da composição Remotion do F2 — incluso (0) até a calibração (custo é CPU do worker). */
   [McStepType.RENDER_REMOTION]: 0,
+  /** Quadro parado da peça de ofertas — incluso (0), como o render (tarefa 6.7). */
+  [McStepType.RENDER_STILL]: 0,
 };
 
 /**
