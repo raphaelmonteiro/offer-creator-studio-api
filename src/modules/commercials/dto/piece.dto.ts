@@ -1,5 +1,21 @@
-import { IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Length, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Min,
+} from 'class-validator';
 import { MC_PIECE_ASPECT_RATIOS, McPieceAspectRatio, McPieceDocument } from '../domain/mc-piece';
+import {
+  MC_PROJECT_CHANNELS,
+  MC_PROJECT_TIERS,
+  McProjectChannel,
+  McProjectTier,
+} from '../domain/mc-types';
 import { MC_PIECE_KINDS, McPieceKind } from '../entities/mc-piece.entity';
 
 /**
@@ -49,6 +65,35 @@ export class SaveAsTemplateDto {
   @IsString()
   @Length(1, 120)
   name: string;
+}
+
+/** POST /commercials/projects/from-piece — a peça pronta vira projeto `offer_piece`. */
+export class CreateProjectFromPieceDto {
+  @IsUUID()
+  pieceId: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  title?: string;
+
+  @IsOptional()
+  @IsIn(MC_PROJECT_TIERS as readonly string[])
+  tier?: McProjectTier;
+
+  @IsOptional()
+  @IsIn(MC_PROJECT_CHANNELS as readonly string[])
+  channel?: McProjectChannel;
+
+  /** Legendas: desligadas por padrão nesta peça (spec "Legendas e trilha opcionais"). */
+  @IsOptional()
+  @IsBoolean()
+  captionsEnabled?: boolean;
+
+  /** Trilha paga: só por escolha explícita. */
+  @IsOptional()
+  @IsBoolean()
+  musicEnabled?: boolean;
 }
 
 export class ListPiecesQueryDto {

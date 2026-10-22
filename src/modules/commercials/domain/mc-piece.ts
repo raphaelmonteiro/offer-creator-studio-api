@@ -31,6 +31,10 @@ export type McPieceAspectRatio = (typeof MC_PIECE_ASPECT_RATIOS)[number];
 export const MC_PIECE_MIN_PRODUCTS = 2;
 export const MC_PIECE_MAX_PRODUCTS = 12;
 export const MC_PIECE_MAX_SPOKEN = 6;
+/** Roteiro da peça: ao menos uma oferta falada (o F2 exige 3). */
+export const MC_OFFER_PIECE_MIN_OFFERS = 1;
+/** Duração alvo do projeto gerado da peça (a fala manda; teto de 30 s medidos). */
+export const MC_PIECE_DEFAULT_DURATION_S = 25;
 /** Imagem única: até 3 produtos marcados só para a fala citar. */
 export const MC_PIECE_SINGLE_MAX_PRODUCTS = 3;
 export const MC_PIECE_MAX_TEXTS = 5;
@@ -742,6 +746,19 @@ export function templateFromPiece(document: McPieceDocument): McPieceDocument {
     }
   });
   return { ...document, blocks };
+}
+
+/**
+ * Validade do rodapé como dica para o fechamento da fala ("até 16/04"):
+ * `to` em ISO (YYYY-MM-DD) vira DD/MM; ausente ou ilegível → null.
+ */
+export function pieceValidityHint(
+  validity: { from?: string | null; to?: string | null } | null | undefined,
+): string | null {
+  const to = (validity?.to ?? '').trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(to);
+  if (!match) return null;
+  return `até ${match[3]}/${match[2]}`;
 }
 
 export type McPieceChangeScope = 'none' | 'visual' | 'spoken';

@@ -15,6 +15,7 @@ import { McEnabledGuard } from './mc-enabled.guard';
 import { McArtService } from './services/mc-art.service';
 import { McFromArtService } from './services/mc-from-art.service';
 import { McPiecesService } from './services/mc-pieces.service';
+import { McFromPieceService } from './services/mc-from-piece.service';
 import { McKitCandidatesService } from './services/mc-kit-candidates.service';
 import { McKitsService } from './services/mc-kits.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
@@ -142,6 +143,7 @@ describe('CommercialsController — GET /commercials/config', () => {
       {} as McArtService,
       {} as McFromArtService,
       {} as McPiecesService,
+      {} as McFromPieceService,
     );
     await expect(controller.getConfig()).resolves.toBe(config);
     expect(commercials.getConfig).toHaveBeenCalledTimes(1);

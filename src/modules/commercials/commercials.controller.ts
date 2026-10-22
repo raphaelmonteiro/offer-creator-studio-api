@@ -37,10 +37,12 @@ import { McArtService } from './services/mc-art.service';
 import { McFromArtService } from './services/mc-from-art.service';
 import {
   CreatePieceDto,
+  CreateProjectFromPieceDto,
   ListPiecesQueryDto,
   SaveAsTemplateDto,
   UpdatePieceDto,
 } from './dto/piece.dto';
+import { McFromPieceService } from './services/mc-from-piece.service';
 import { McPiecesService } from './services/mc-pieces.service';
 import { SystemSettingsService } from '../../shared/settings/system-settings.service';
 import { AdminPauseDto } from './dto/admin-pause.dto';
@@ -94,6 +96,7 @@ export class CommercialsController {
     private readonly art: McArtService,
     private readonly fromArt: McFromArtService,
     private readonly pieces: McPiecesService,
+    private readonly fromPiece: McFromPieceService,
   ) {}
 
   /** Rotas compartilhadas entre executores despacham pelo `pipelineVersion` do projeto. */
@@ -374,6 +377,15 @@ export class CommercialsController {
     @Body() dto: SaveAsTemplateDto,
   ) {
     return this.pieces.saveAsTemplate(user.id, id, dto);
+  }
+
+  /** Peça pronta → projeto `offer_piece` em `scripting` (422 PIECE_INVALID com `issues[]` por bloco). */
+  @Post('projects/from-piece')
+  createProjectFromPiece(
+    @CurrentUser() user: { id: string },
+    @Body() dto: CreateProjectFromPieceDto,
+  ) {
+    return this.fromPiece.createFromPiece(user.id, dto);
   }
 
   // ─────────────────────────────── projetos ───────────────────────────────

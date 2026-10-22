@@ -46,12 +46,12 @@ no worker.
 
 ## 5. Backend: projeto a partir da peça
 
-- [ ] 5.1 `POST projects/from-piece` (`services/mc-from-piece.service.ts`): gates na ordem do F1/F2 (pausa, formato, v2, preflight, kit aprovado e **com tile**, peça válida e do usuário) → projeto `offer_piece` com `pieceId`, `pieceSnapshot` (cópia), `aspectRatio` da peça, `options.products` = `pieceSpokenOffers`, `logoBox` = rect do bloco `character` quando `logo_face`
-- [ ] 5.2 Step `SCRIPT` do `offer_piece`: diretor do F2 (`buildDirectorSystemPromptF2`) com as ofertas faladas na ordem da peça, `storeName` do cliente e validade do rodapé no contexto; `buildOfferCarouselScript` com `format: 'offer_piece'`; mock determinístico igual ao F2
-- [ ] 5.3 `McScript` do `offer_piece`: `window` = rect do bloco `character` (em frações do quadro de saída, já que a peça tem o tamanho de saída), `logoFace`, `talkBackgroundColor` = cor do painel; `validateScriptV2` aceita o formato
+- [x] 5.1 `POST projects/from-piece` (`services/mc-from-piece.service.ts`): gates na ordem do F1/F2 (pausa, formato, v2, preflight, kit aprovado e **com tile**, peça válida e do usuário) → projeto `offer_piece` com `pieceId`, `pieceSnapshot` (cópia), `aspectRatio` da peça, `options.products` = `pieceSpokenOffers`, `logoBox` = rect do bloco `character` quando `logo_face`
+- [x] 5.2 Step `SCRIPT` do `offer_piece`: diretor do F2 (`buildDirectorSystemPromptF2`) com as ofertas faladas na ordem da peça, `storeName` do cliente e validade do rodapé no contexto; `buildOfferCarouselScript` com `format: 'offer_piece'`; mock determinístico igual ao F2
+- [x] 5.3 `McScript` do `offer_piece`: `window` = rect do bloco `character` (em frações do quadro de saída, já que a peça tem o tamanho de saída), `logoFace`, `talkBackgroundColor` = cor do painel; `validateScriptV2` aceita o formato
 - [ ] 5.4 `PATCH projects/:id/piece` `{ document, expectedRevision }`: `pieceChangeScope` → `spoken`: reescreve a frase do item pelo line builder do F2 e segue `updateScript` (volta a `storyboard_review`); `visual`: revisão `assembly_only` (render_still + compose + finalize); atualiza `pieceSnapshot`
 - [ ] 5.5 `duplicate` com `aspectRatio` diferente: clona a peça, roda `layoutProducts` do pacote no servidor, cria projeto novo em `storyboard_review` com os TTS clonados como `skipped_cached` (mesmo caminho de `duplicateProject`)
-- [ ] 5.6 Specs: criação (gates, snapshot, ofertas faladas), roteiro mock (abertura + N + fechamento ≤ 30 s), `PATCH piece` nos dois escopos, duplicação
+- [ ] 5.6 Specs: criação (gates, snapshot, ofertas faladas) ✔, roteiro mock e openai ✔; faltam `PATCH piece` nos dois escopos e duplicação (com 5.4/5.5)
 
 ## 6. Backend: render do quadro e composição
 

@@ -20,13 +20,16 @@ import {
   buildMockScript,
   buildMockScriptF1,
   buildMockScriptF2,
+  buildMockScriptPiece,
   buildMockScriptV2,
   buildOfferCarouselScript,
+  buildOfferPieceScript,
   buildProductsSnapshot,
   buildScriptSeal,
   buildTalkingArtScript,
   DirectorF1Context,
   DirectorF2Context,
+  DirectorPieceContext,
   normalizeDirectorScenes,
   normalizeDirectorScenesV2,
   RawDirectorF1,
@@ -35,6 +38,12 @@ import {
   RawDirectorSceneV2,
 } from '../domain/mc-director';
 import { compositionDimensions } from '../domain/mc-composition.config';
+import {
+  MC_PIECE_MAX_SPOKEN,
+  pieceBlock,
+  pieceSpokenOffers,
+  pieceValidityHint,
+} from '../domain/mc-piece';
 import { talkEngineFor } from '../domain/mc-pipeline.config';
 import { isPipelineV2, MC_SCRIPT_SCHEMA_V2 } from '../domain/mc-quality';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -246,6 +255,14 @@ export class McScriptProcessor {
       if (provider === 'openai') return this.generateScriptOpenAiF2(project, ctx);
       throw new Error(`not_implemented: MC_SCRIPT_PROVIDER desconhecido '${provider}'`);
     }
+    // Peça de ofertas (change video-peca-configuravel): as falas do F2 sobre
+    // os itens FALADOS da peça congelada, com a janela e o painel do personagem.
+    if (project.format === 'offer_piece') {
+      const ctx = await this.offerPieceContext(project, storeName);
+      if (provider === 'mock') return buildMockScriptPiece(ctx, () => randomUUID());
+      if (provider === 'openai') return this.generateScriptOpenAiF2(project, ctx);
+      throw new Error(`not_implemented: MC_SCRIPT_PROVIDER desconhecido '${provider}'`);
+    }
     if (provider === 'mock') {
       // Roteiro MOCK multi-cena — atravessa o pipeline inteiro sem chamar LLM
       // nem gastar um centavo. Legado: 2 faladas + 1 muda; v2: presenter +
@@ -341,10 +358,54 @@ export class McScriptProcessor {
   }
 
   /**
+   * Contexto do diretor da peça: ofertas FALADAS do `pieceSnapshot` (ids =
+   * chaves dos itens, que viram `productRef` das cenas), loja, limite do
+   * motor, e o que a peça fixa para o vídeo (janela = rect do personagem,
+   * rosto do logo, cor do painel, validade do rodapé para o fechamento).
+   * `options.products` NÃO é a fonte aqui: a criação reatribui ids aos
+   * produtos do projeto e a peça precisa dos ids originais dos itens.
+   */
+  private async offerPieceContext(
+    project: McProject,
+    storeName: string | null,
+  ): Promise<DirectorPieceContext> {
+    const piece = project.pieceSnapshot;
+    if (!piece) throw new Error('script_failed: projeto "peça de ofertas" sem pieceSnapshot');
+    const character = pieceBlock(piece, 'character');
+    if (!character) throw new Error('script_failed: a peça não tem personagem');
+    const kit = await this.dataSource
+      .getRepository(McCharacterKit)
+      .findOneBy({ id: project.kitId });
+    const engine = talkEngineFor({
+      tier: project.tier ?? 'economico',
+      identityMode: kit?.identityMode ?? 'generated',
+    });
+    const options = resolveProjectOptions(project.options);
+    const footer = pieceBlock(piece, 'footer');
+    return {
+      offers: pieceSpokenOffers(piece).slice(0, MC_PIECE_MAX_SPOKEN),
+      storeName,
+      maxChunkS: engine.maxChunkS,
+      layoutPreset: MC_DEFAULT_CAROUSEL_LAYOUT_PRESET,
+      captions: options.captionsEnabled,
+      window: {
+        x: character.rect.x,
+        y: character.rect.y,
+        w: character.rect.w,
+        h: character.rect.h,
+      },
+      logoFace: character.mode === 'logo_face',
+      talkBackgroundColor: character.panel?.color ?? null,
+      closingHint: pieceValidityHint(footer?.validity),
+    };
+  }
+
+  /**
    * Diretor F2 real: UMA chamada com json_schema estrito (abertura, exatamente
    * uma fala por oferta, fechamento). Nome e preço por extenso são conferidos
    * por oferta (fala que não cita vira a fala determinística) e o orçamento de
-   * 30 s estimados é aplicado em `buildOfferCarouselScript`.
+   * 30 s estimados é aplicado em `buildOfferCarouselScript`. A peça de ofertas
+   * usa o mesmo diretor (validade no fechamento) e monta o roteiro próprio.
    */
   private async generateScriptOpenAiF2(
     project: McProject,
@@ -370,6 +431,7 @@ export class McScriptProcessor {
               offers: ctx.offers,
               storeName: ctx.storeName,
               maxChunkS: ctx.maxChunkS,
+              closingHint: (ctx as Partial<DirectorPieceContext>).closingHint ?? null,
             }),
           },
           { role: 'user', content: `Briefing: ${project.briefing}` },
@@ -386,7 +448,9 @@ export class McScriptProcessor {
     const content = body.choices?.[0]?.message?.content;
     if (!content) throw new Error('script_failed: resposta do OpenAI sem conteúdo');
     const parsed = JSON.parse(content) as RawDirectorF2;
-    return buildOfferCarouselScript(parsed, ctx, () => randomUUID());
+    return project.format === 'offer_piece'
+      ? buildOfferPieceScript(parsed, ctx as DirectorPieceContext, () => randomUUID())
+      : buildOfferCarouselScript(parsed, ctx, () => randomUUID());
   }
 
   /**

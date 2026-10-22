@@ -63,7 +63,20 @@ import {
   stepClipView,
 } from './domain/mc-clip-view';
 import { randomUUID } from 'crypto';
+import { McProjectLogoBox } from './domain/mc-logo-face';
+import { McPieceDocument, pieceCanonicalHash } from './domain/mc-piece';
 import { CreateProjectDto } from './dto/create-project.dto';
+
+/**
+ * Peça congelada que a ponte `POST projects/from-piece` entrega à criação
+ * (change video-peca-configuravel): a referência, a cópia imutável do
+ * descritor e, no modo rosto do logo, a caixa do logo já confirmada.
+ */
+export interface McProjectPieceInput {
+  pieceId: string;
+  pieceSnapshot: McPieceDocument;
+  logoBox?: McProjectLogoBox | null;
+}
 import { McCharacterKit, McKitStatus } from './entities/mc-character-kit.entity';
 import { McEvent } from './entities/mc-event.entity';
 import { McProject } from './entities/mc-project.entity';
@@ -274,7 +287,11 @@ export class CommercialsService {
    * (com inputHash canônico), enfileira em mc.llm e emite evento + pg_notify —
    * TUDO NA MESMA TRANSAÇÃO (padrão do animations; pg-boss é Postgres).
    */
-  async createProject(userId: string, dto: CreateProjectDto): Promise<McProject> {
+  async createProject(
+    userId: string,
+    dto: CreateProjectDto,
+    piece?: McProjectPieceInput,
+  ): Promise<McProject> {
     // Kill-switch em banco (plano §6.7): pausa operacional sem redeploy.
     // `get` com cache de 10s — a pausa/retomada propaga em até 10s por processo.
     if ((await this.settings.get<boolean>(MC_PAUSED_KEY)) === true) {
@@ -317,6 +334,19 @@ export class CommercialsService {
     }
     if (dto.backgroundArtAssetId) await this.assertBackgroundArt(userId, dto.backgroundArtAssetId);
     if (format === 'offer_carousel') McCommercialsF2Gate.assertOffers(dto.products ?? []);
+    // Peça de ofertas: só nasce pela ponte `POST projects/from-piece`, que
+    // valida a peça e a congela (`pieceSnapshot`); sem ela não há quadro.
+    if (format === 'offer_piece' && !piece) {
+      throw new HttpException(
+        {
+          code: 'PIECE_REQUIRED',
+          message:
+            'O formato "peça de ofertas" nasce de uma peça montada no editor ' +
+            '(POST /commercials/projects/from-piece).',
+        },
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
 
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: dto.kitId });
     if (!kit) throw new NotFoundException('Kit não encontrado');
@@ -326,6 +356,20 @@ export class CommercialsService {
         code: 'KIT_NOT_APPROVED',
         message: 'O kit do mascote precisa estar aprovado para criar um comercial',
       });
+    }
+    // Peça de ofertas: o tile de fala É o personagem dentro da peça — a
+    // produção recusaria depois (KIT_TILE_MISSING); aqui recusa antes de gastar.
+    if (format === 'offer_piece' && !kit.tileAssetId) {
+      throw new HttpException(
+        {
+          code: 'KIT_TILE_MISSING',
+          message:
+            'Este kit foi aprovado antes do recorte de fala do personagem. ' +
+            'Para a peça de ofertas, crie um kit novo.',
+          details: { kitId: kit.id },
+        },
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
     }
 
     return this.dataSource.transaction(async (manager) => {
@@ -373,8 +417,11 @@ export class CommercialsService {
         channel: dto.channel ?? MC_DEFAULT_PROJECT_CHANNEL,
         backgroundArtAssetId: dto.backgroundArtAssetId ?? null,
         layoutPreset: dto.layoutPreset ?? null,
-        logoBox: dto.logoBox ? { ...dto.logoBox } : null,
+        // Peça de ofertas: a caixa do logo vem do bloco da logo na peça (já confirmada).
+        logoBox: piece?.logoBox ?? (dto.logoBox ? { ...dto.logoBox } : null),
         sourceArt: dto.sourceArt ? { ...dto.sourceArt } : null,
+        pieceId: piece?.pieceId ?? null,
+        pieceSnapshot: piece?.pieceSnapshot ?? null,
         revision: 0,
         // F1/F2 gravam `quality` vazio EXPLICITAMENTE (D6), como o v2 do F3.
         quality: pipelineVersion === MC_PIPELINE_V2 ? { ...MC_EMPTY_QUALITY } : null,
@@ -426,6 +473,8 @@ export class CommercialsService {
         ...(format !== MC_DEFAULT_PROJECT_FORMAT
           ? { format, backgroundArtAssetId: dto.backgroundArtAssetId ?? null }
           : {}),
+        // Peça de ofertas: mudar a peça (itens falados, janela, painel) muda o roteiro.
+        ...(piece ? { pieceHash: pieceCanonicalHash(piece.pieceSnapshot) } : {}),
       });
       const step = manager.create(McStep, {
         projectId: project.id,

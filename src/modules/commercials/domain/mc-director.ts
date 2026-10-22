@@ -1,3 +1,4 @@
+import { MC_OFFER_PIECE_MIN_OFFERS } from './mc-piece';
 import { numeroPorExtenso, parsePreco, precoPorExtenso } from './mc-preco-extenso';
 import { MC_SCRIPT_SCHEMA_V2 } from './mc-quality';
 import { defaultSealCue, sceneSourceHash } from './mc-script-v2';
@@ -947,6 +948,8 @@ export function buildDirectorSystemPromptF2(opts: {
   offers: McSealProduct[];
   storeName: string | null;
   maxChunkS: number;
+  /** Peça de ofertas: validade do rodapé para o fechamento citar ("até 16/04"). */
+  closingHint?: string | null;
 }): string {
   const list = opts.offers
     .map(
@@ -979,6 +982,9 @@ export function buildDirectorSystemPromptF2(opts: {
     `- Ofertas (na ordem do vídeo): ${list}.`,
   ];
   if (opts.storeName) lines.push(`- A loja se chama "${opts.storeName}" — pode citá-la uma vez.`);
+  if (opts.closingHint?.trim()) {
+    lines.push(`- No FECHAMENTO, diga que as ofertas valem ${opts.closingHint.trim()}.`);
+  }
   return lines.join('\n');
 }
 
@@ -1191,13 +1197,28 @@ export function buildOfferCarouselScript(
   ctx: DirectorF2Context,
   idFactory: () => string,
 ): McScript {
+  return buildCarouselLikeScript(raw, ctx, idFactory, {
+    format: 'offer_carousel',
+    minOffers: MC_OFFER_CAROUSEL_MIN_OFFERS,
+    label: '"ofertas em sequência"',
+  });
+}
+
+/**
+ * Núcleo compartilhado pelo F2 e pela peça de ofertas: mesma validação das
+ * falas, mesmo encurtamento e mesmas cenas `talk_tile`; só o formato e o
+ * mínimo de ofertas mudam (a peça fala a partir de uma oferta).
+ */
+function buildCarouselLikeScript(
+  raw: RawDirectorF2,
+  ctx: DirectorF2Context,
+  idFactory: () => string,
+  opts: { format: 'offer_carousel' | 'offer_piece'; minOffers: number; label: string },
+): McScript {
   const offers = ctx.offers.map((o) => ({ ...o, id: o.id ?? idFactory() }));
-  if (
-    offers.length < MC_OFFER_CAROUSEL_MIN_OFFERS ||
-    offers.length > MC_OFFER_CAROUSEL_MAX_OFFERS
-  ) {
+  if (offers.length < opts.minOffers || offers.length > MC_OFFER_CAROUSEL_MAX_OFFERS) {
     throw new Error(
-      `script_failed: "ofertas em sequência" pede de ${MC_OFFER_CAROUSEL_MIN_OFFERS} a ` +
+      `script_failed: ${opts.label} pede de ${opts.minOffers} a ` +
         `${MC_OFFER_CAROUSEL_MAX_OFFERS} ofertas (recebidas: ${offers.length})`,
     );
   }
@@ -1230,7 +1251,7 @@ export function buildOfferCarouselScript(
   return {
     version: 1,
     schemaVersion: MC_SCRIPT_SCHEMA_V2,
-    format: 'offer_carousel',
+    format: opts.format,
     offers: offers.map((o) => ({ ...o })),
     products: offers.map((o) => ({ ...o })),
     environments: [],
@@ -1241,6 +1262,50 @@ export function buildOfferCarouselScript(
     layoutPreset: ctx.layoutPreset,
     captions: ctx.captions,
   };
+}
+
+// ───────────── peça de ofertas configurável (change video-peca-configuravel) ─────────────
+
+/**
+ * Contexto do diretor da peça: o do F2 (ofertas FALADAS na ordem da peça,
+ * loja, limite do motor) mais o que a peça fixa para o vídeo — a janela do
+ * personagem (rect do bloco, frações do quadro), o modo rosto do logo, a cor
+ * do painel (fundo do tile de fala) e a validade do rodapé para o fechamento.
+ */
+export interface DirectorPieceContext extends DirectorF2Context {
+  window: { x: number; y: number; w: number; h: number };
+  logoFace: boolean;
+  talkBackgroundColor: string | null;
+  closingHint: string | null;
+}
+
+/** Roteiro da peça: as falas do F2 (≥ 1 oferta) + janela, rosto do logo e cor do painel. */
+export function buildOfferPieceScript(
+  raw: RawDirectorF2,
+  ctx: DirectorPieceContext,
+  idFactory: () => string,
+): McScript {
+  const base = buildCarouselLikeScript(raw, ctx, idFactory, {
+    format: 'offer_piece',
+    minOffers: MC_OFFER_PIECE_MIN_OFFERS,
+    label: '"peça de ofertas"',
+  });
+  return {
+    ...base,
+    window: { ...ctx.window },
+    logoFace: ctx.logoFace,
+    talkBackgroundColor: ctx.talkBackgroundColor,
+  };
+}
+
+/** Falas MOCK da peça: as do F2, com a validade no fechamento quando o rodapé a traz. */
+export function buildMockDirectorPiece(ctx: DirectorPieceContext): RawDirectorF2 {
+  const base = buildMockDirectorF2(ctx);
+  return ctx.closingHint ? { ...base, closing: `Válido ${ctx.closingHint}. Aproveite!` } : base;
+}
+
+export function buildMockScriptPiece(ctx: DirectorPieceContext, idFactory: () => string): McScript {
+  return buildOfferPieceScript(buildMockDirectorPiece(ctx), ctx, idFactory);
 }
 
 /** Falas MOCK do F2 (MC_SCRIPT_PROVIDER=mock): determinísticas, preço por extenso, ≤ 30 s estimado. */

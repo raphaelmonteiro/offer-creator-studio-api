@@ -1070,8 +1070,14 @@ export class McQualityService {
     // SPEECH_ALIGNMENT_MISSING (única ação: refazer o TTS da fala, SEM aceite);
     // a soma das falas MEDIDAS acima de 30 s bloqueia com SPEECH_OVER_LENGTH
     // (encurtar falas ou remover oferta, SEM aceite).
-    if (project.format === 'offer_carousel') {
-      problems.push(...this.offerCarouselSpeechProblems(scenes, assets));
+    // Peça de ofertas: mesmo teto de 30 s medidos; alinhamento por palavra só
+    // importa com legendas ligadas (regra genérica acima, com aceite).
+    if (project.format === 'offer_carousel' || project.format === 'offer_piece') {
+      problems.push(
+        ...this.offerCarouselSpeechProblems(scenes, assets, {
+          requireAlignment: project.format === 'offer_carousel',
+        }),
+      );
     }
     if (problems.length > 0) {
       throw new UnprocessableEntityException({
@@ -1779,6 +1785,7 @@ export class McQualityService {
   private offerCarouselSpeechProblems(
     scenes: McScene[],
     assets: AnimationAsset[],
+    opts: { requireAlignment: boolean } = { requireAlignment: true },
   ): Array<{ code: string; sceneId: string; message: string; detail?: Record<string, unknown> }> {
     const problems: Array<{
       code: string;
@@ -1787,7 +1794,7 @@ export class McQualityService {
       detail?: Record<string, unknown>;
     }> = [];
     const audioOf = (scene: McScene) => assets.find((a) => a.id === scene.audioAssetId) ?? null;
-    const missing = scenes.filter((scene) => {
+    const missing = (opts.requireAlignment ? scenes : []).filter((scene) => {
       const audio = audioOf(scene);
       if (!audio?.fileUrl) return false; // AUDIO_MISSING já cobre
       const alignment = (audio.metadata as { alignment?: ElevenLabsAlignment } | null)?.alignment;

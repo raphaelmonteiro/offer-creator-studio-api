@@ -50,6 +50,7 @@ import { McArtService } from './services/mc-art.service';
 import { McFromArtService } from './services/mc-from-art.service';
 import { McPiece } from './entities/mc-piece.entity';
 import { McPiecesService } from './services/mc-pieces.service';
+import { McFromPieceService } from './services/mc-from-piece.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
 import { McQualityService } from './services/mc-quality.service';
 import { McReconcilerService } from './services/mc-reconciler.service';
@@ -124,6 +125,7 @@ import { McWindowPriceService } from './services/mc-window-price.service';
     McFromArtService,
     // Peça de ofertas configurável (change video-peca-configuravel): CRUD e modelos.
     McPiecesService,
+    McFromPieceService,
     McLogoLocatorService,
     McTranslationService,
     McQualityService,

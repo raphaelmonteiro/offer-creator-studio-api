@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { computeContentHash } from './input-hash';
 import { legacySceneType, isSceneType, sceneTypeDialogueIssue } from './mc-execution-plan';
-import { MC_PIECE_MAX_SPOKEN } from './mc-piece';
+import { MC_OFFER_PIECE_MIN_OFFERS, MC_PIECE_MAX_SPOKEN } from './mc-piece';
 import { parsePreco } from './mc-preco-extenso';
 import { MC_SCRIPT_SCHEMA_V2 } from './mc-quality';
 import { MC_COMPOSITION_DIMENSIONS } from './mc-composition.config';
@@ -289,6 +289,7 @@ export function validateScriptV2(
   });
   issues.push(...validateTalkingArtFields(script, productIds, opts));
   issues.push(...validateOfferCarouselFields(script));
+  issues.push(...validateOfferPieceFields(script));
   return issues;
 }
 
@@ -413,7 +414,7 @@ export function deriveCarouselLines(scenes: McScriptScene[]): McCarouselLine[] {
  * Roteiros de outros formatos voltam intactos.
  */
 export function normalizeOfferCarouselScript(script: McScript): McScript {
-  if (script.format !== 'offer_carousel') return script;
+  if (script.format !== 'offer_carousel' && script.format !== 'offer_piece') return script;
   const lines = deriveCarouselLines(script.scenes);
   const offers = carouselOffers(script);
   const order = lines.filter((l) => l.kind === 'offer' && l.offerRef).map((l) => l.offerRef);
@@ -440,13 +441,18 @@ export function normalizeOfferCarouselScript(script: McScript): McScript {
  */
 export function validateOfferCarouselFields(script: McScript): McScriptIssue[] {
   const issues: McScriptIssue[] = [];
-  if (script.format !== 'offer_carousel') return issues;
+  // A peça de ofertas (change video-peca-configuravel) tem o mesmo roteiro do
+  // F2 — abertura, uma fala por oferta falada, fechamento — a partir de UMA oferta.
+  const piece = script.format === 'offer_piece';
+  if (script.format !== 'offer_carousel' && !piece) return issues;
+  const label = piece ? '"Peça de ofertas"' : '"Ofertas em sequência"';
+  const minOffers = piece ? MC_OFFER_PIECE_MIN_OFFERS : MC_OFFER_CAROUSEL_MIN_OFFERS;
   const offers = carouselOffers(script);
-  if (offers.length < MC_OFFER_CAROUSEL_MIN_OFFERS) {
+  if (offers.length < minOffers) {
     issues.push({
       code: 'OFFERS_TOO_FEW',
       element: 'offers',
-      message: `"Ofertas em sequência" precisa de no mínimo ${MC_OFFER_CAROUSEL_MIN_OFFERS} ofertas.`,
+      message: `${label} precisa de no mínimo ${minOffers} oferta${minOffers > 1 ? 's' : ''}.`,
     });
   }
   if (offers.length > MC_OFFER_CAROUSEL_MAX_OFFERS) {
@@ -454,7 +460,7 @@ export function validateOfferCarouselFields(script: McScript): McScriptIssue[] {
       code: 'OFFERS_TOO_MANY',
       element: 'offers',
       message:
-        `"Ofertas em sequência" aceita no máximo ${MC_OFFER_CAROUSEL_MAX_OFFERS} ofertas ` +
+        `${label} aceita no máximo ${MC_OFFER_CAROUSEL_MAX_OFFERS} ofertas ` +
         `(o vídeo tem até ${MC_OFFER_CAROUSEL_MAX_SPEECH_S} s de fala).`,
     });
   }
@@ -577,6 +583,35 @@ export function validateOfferCarouselFields(script: McScript): McScriptIssue[] {
       code: 'CAPTIONS_INVALID',
       element: 'captions',
       message: 'captions precisa ser verdadeiro ou falso.',
+    });
+  }
+  return issues;
+}
+
+/**
+ * Campos próprios da peça de ofertas (change video-peca-configuravel): além
+ * do roteiro do F2, a janela do personagem (rect do bloco, frações 0..1,
+ * inteira no quadro) e a cor do painel (#RRGGBB) que vira o fundo do tile.
+ * A área segura e o aspecto do tile não se aplicam: a peça já validou o rect.
+ */
+export function validateOfferPieceFields(script: McScript): McScriptIssue[] {
+  const issues: McScriptIssue[] = [];
+  if (script.format !== 'offer_piece') return issues;
+  if (!isWindowWellFormed(script.window)) {
+    issues.push({
+      code: 'PIECE_WINDOW_INVALID',
+      element: 'character_window',
+      message: 'O roteiro da peça precisa da janela do personagem (rect do bloco, frações 0..1).',
+    });
+  }
+  if (
+    script.talkBackgroundColor != null &&
+    !/^#[0-9a-f]{6}$/i.test(script.talkBackgroundColor.trim())
+  ) {
+    issues.push({
+      code: 'PIECE_TALK_COLOR_INVALID',
+      element: 'character_panel',
+      message: 'A cor do painel do personagem precisa ser #RRGGBB.',
     });
   }
   return issues;
