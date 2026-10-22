@@ -132,6 +132,9 @@ export const MC_PROJECT_ASSEMBLY_STEPS: Record<McProjectFormat, readonly McStepT
   scenes: [McStepType.ASSEMBLY],
   talking_art: [McStepType.COMPOSE_FFMPEG, McStepType.FINALIZE],
   offer_carousel: [McStepType.RENDER_REMOTION, McStepType.FINALIZE],
+  // peça de ofertas: o grupo 6 da change video-peca-configuravel antepõe `render_still`
+  // (quadro parado) ao compose; até lá o plano espelha o F1.
+  offer_piece: [McStepType.COMPOSE_FFMPEG, McStepType.FINALIZE],
 };
 
 export function projectAssemblySteps(

@@ -12,7 +12,7 @@
  */
 
 /** Espelho de McProjectFormat (commercials/domain/mc-types) sem importar o módulo de feature. */
-export const RENDER_FORMATS = ['scenes', 'talking_art', 'offer_carousel'] as const;
+export const RENDER_FORMATS = ['scenes', 'talking_art', 'offer_carousel', 'offer_piece'] as const;
 export type RenderFormat = (typeof RENDER_FORMATS)[number];
 
 export const RENDER_REQUIREMENT_IDS = ['ffmpeg', 'ffprobe', 'fonts', 'browser'] as const;
@@ -28,6 +28,8 @@ export const RENDER_REQUIREMENTS: Record<RenderFormat, readonly RenderRequiremen
   scenes: ['ffmpeg', 'ffprobe', 'fonts'],
   talking_art: ['ffmpeg', 'ffprobe', 'fonts'],
   offer_carousel: ['ffmpeg', 'ffprobe', 'fonts', 'browser'],
+  // peça de ofertas: o quadro parado é renderizado no navegador (render_still) e o vídeo no ffmpeg
+  offer_piece: ['ffmpeg', 'ffprobe', 'fonts', 'browser'],
 };
 
 export interface RenderRequirementCheck {

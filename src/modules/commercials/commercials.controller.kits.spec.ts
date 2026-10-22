@@ -4,6 +4,7 @@ import { CommercialsController } from './commercials.controller';
 import { CommercialsService } from './commercials.service';
 import { McArtService } from './services/mc-art.service';
 import { McFromArtService } from './services/mc-from-art.service';
+import { McPiecesService } from './services/mc-pieces.service';
 import { McKitCandidatesService } from './services/mc-kit-candidates.service';
 import { McKitsService } from './services/mc-kits.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
@@ -40,6 +41,7 @@ describe('CommercialsController — rotas de candidatos do kit (D4)', () => {
       {} as ConfigService,
       {} as McArtService,
       {} as McFromArtService,
+      {} as McPiecesService,
     );
   });
 

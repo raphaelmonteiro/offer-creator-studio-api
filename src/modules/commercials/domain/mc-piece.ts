@@ -41,6 +41,21 @@ export const MC_PIECE_MAX_BYTES = 2 * 1024 * 1024;
 /** Folga numérica nas bordas do quadro (arredondamento do editor). */
 const RECT_EPSILON = 1e-6;
 
+/**
+ * Issues ESTRUTURAIS: o descritor não é um documento de peça (schema,
+ * formato, bloco sem id/duplicado/tipo desconhecido). O autosave recusa com
+ * 422 PIECE_INVALID; todas as outras são regras de negócio ainda abertas
+ * (sem personagem, poucos produtos) e voltam em `issues[]` sem bloquear.
+ */
+export const MC_PIECE_STRUCTURAL_CODES: readonly string[] = [
+  'PIECE_EMPTY',
+  'PIECE_SCHEMA',
+  'PIECE_ASPECT',
+  'BLOCK_WITHOUT_ID',
+  'BLOCK_DUPLICATE_ID',
+  'BLOCK_TYPE_INVALID',
+];
+
 export interface McPieceRect {
   x: number;
   y: number;
@@ -157,6 +172,43 @@ export interface McPieceDocument {
   blocks: McPieceBlock[];
   /** Fontes da conta usadas pelos textos (família + arquivo), para o render. */
   fonts?: McPieceFont[];
+}
+
+/**
+ * Peça em branco (spec "Peça com formato e cliente"): fundo claro, área de
+ * produtos vazia em auto-layout e rodapé em faixa. Logo entra por
+ * `applyClientToPiece`; personagem e textos o cliente escolhe. Não passa na
+ * validação até ter personagem e produtos — por desenho (`issues[]`).
+ */
+export function defaultPieceDocument(aspectRatio: McPieceAspectRatio): McPieceDocument {
+  return {
+    schemaVersion: MC_PIECE_SCHEMA_VERSION,
+    aspectRatio,
+    background: { mode: 'solid', color: '#F3F4F6' },
+    blocks: [
+      {
+        id: 'products',
+        type: 'products',
+        rect: { x: 0.05, y: 0.2, w: 0.9, h: 0.52 },
+        zIndex: 1,
+        mode: 'grid',
+        layout: 'auto',
+        areaStyle: { background: '#FFFFFF', radius: 0.03, shadow: true },
+        tagStyle: { kind: 'badge', color: '#D32F2F', textColor: '#FFFFFF' },
+        items: [],
+      },
+      {
+        id: 'footer',
+        type: 'footer',
+        rect: { x: 0, y: 0.92, w: 1, h: 0.08 },
+        zIndex: 2,
+        style: 'bar',
+        legal: 'ou enquanto durarem os estoques',
+        backgroundColor: '#111827',
+        textColor: '#FFFFFF',
+      },
+    ],
+  };
 }
 
 // ───────────────────────────── validação ─────────────────────────────

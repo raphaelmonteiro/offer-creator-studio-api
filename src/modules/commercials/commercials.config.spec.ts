@@ -14,6 +14,7 @@ import { CommercialsService } from './commercials.service';
 import { McEnabledGuard } from './mc-enabled.guard';
 import { McArtService } from './services/mc-art.service';
 import { McFromArtService } from './services/mc-from-art.service';
+import { McPiecesService } from './services/mc-pieces.service';
 import { McKitCandidatesService } from './services/mc-kit-candidates.service';
 import { McKitsService } from './services/mc-kits.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
@@ -55,7 +56,7 @@ describe('CommercialsService.getConfig — formatos habilitados + render do hear
   it('MC_FORMATS=talking_art com v2=all → só scenes e talking_art; render null sem heartbeat', async () => {
     const config = await service.getConfig({ MC_FORMATS: 'talking_art', MC_PIPELINE_V2: 'all' });
     expect(config).toEqual({
-      formats: { scenes: true, talking_art: true, offer_carousel: false },
+      formats: { scenes: true, talking_art: true, offer_carousel: false, offer_piece: false },
       render: null,
     });
     expect(settings.getFresh).toHaveBeenCalledWith(WORKER_HEARTBEAT_KEY);
@@ -63,7 +64,12 @@ describe('CommercialsService.getConfig — formatos habilitados + render do hear
 
   it('MC_FORMATS vazio → só scenes (o F3 nunca é gated por MC_FORMATS)', async () => {
     const config = await service.getConfig({ MC_PIPELINE_V2: 'all' });
-    expect(config.formats).toEqual({ scenes: true, talking_art: false, offer_carousel: false });
+    expect(config.formats).toEqual({
+      scenes: true,
+      talking_art: false,
+      offer_carousel: false,
+      offer_piece: false,
+    });
   });
 
   it('formato listado sem MC_PIPELINE_V2=all não conta como habilitado (a criação daria PIPELINE_V2_REQUIRED)', async () => {
@@ -71,7 +77,12 @@ describe('CommercialsService.getConfig — formatos habilitados + render do hear
       MC_FORMATS: 'talking_art,offer_carousel',
       MC_PIPELINE_V2: 'cohort',
     });
-    expect(config.formats).toEqual({ scenes: true, talking_art: false, offer_carousel: false });
+    expect(config.formats).toEqual({
+      scenes: true,
+      talking_art: false,
+      offer_carousel: false,
+      offer_piece: false,
+    });
   });
 
   it('render = worker.render.formats do heartbeat (sem navegador → offer_carousel indisponível)', async () => {
@@ -84,11 +95,17 @@ describe('CommercialsService.getConfig — formatos habilitados + render do hear
       MC_FORMATS: 'talking_art,offer_carousel',
       MC_PIPELINE_V2: 'all',
     });
-    expect(config.formats).toEqual({ scenes: true, talking_art: true, offer_carousel: true });
+    expect(config.formats).toEqual({
+      scenes: true,
+      talking_art: true,
+      offer_carousel: true,
+      offer_piece: false,
+    });
     expect(config.render).toEqual({
       scenes: { available: true, missing: [] },
       talking_art: { available: true, missing: [] },
       offer_carousel: { available: false, missing: ['browser'] },
+      offer_piece: { available: false, missing: ['browser'] },
     });
   });
 
@@ -109,7 +126,7 @@ describe('CommercialsService.getConfig — formatos habilitados + render do hear
 describe('CommercialsController — GET /commercials/config', () => {
   it('delega ao service, atrás do JWT e do McEnabledGuard (404 MC_DISABLED com o módulo desligado)', async () => {
     const config = {
-      formats: { scenes: true, talking_art: true, offer_carousel: false },
+      formats: { scenes: true, talking_art: true, offer_carousel: false, offer_piece: false },
       render: null,
     };
     const commercials = { getConfig: jest.fn().mockResolvedValue(config) };
@@ -124,6 +141,7 @@ describe('CommercialsController — GET /commercials/config', () => {
       {} as ConfigService,
       {} as McArtService,
       {} as McFromArtService,
+      {} as McPiecesService,
     );
     await expect(controller.getConfig()).resolves.toBe(config);
     expect(commercials.getConfig).toHaveBeenCalledTimes(1);

@@ -48,6 +48,8 @@ import { McMaterializerService } from './services/mc-materializer.service';
 import { McPipelineService } from './services/mc-pipeline.service';
 import { McArtService } from './services/mc-art.service';
 import { McFromArtService } from './services/mc-from-art.service';
+import { McPiece } from './entities/mc-piece.entity';
+import { McPiecesService } from './services/mc-pieces.service';
 import { McProjectActionsService } from './services/mc-project-actions.service';
 import { McQualityService } from './services/mc-quality.service';
 import { McReconcilerService } from './services/mc-reconciler.service';
@@ -86,7 +88,15 @@ import { McWindowPriceService } from './services/mc-window-price.service';
     // EmailModule: e-mail de conclusão do comercial (plano §10 v1) — envio
     // NÃO bloqueante, tratado no McPipelineService.
     EmailModule,
-    TypeOrmModule.forFeature([McCharacterKit, McKitCandidate, McProject, McScene, McStep, McEvent]),
+    TypeOrmModule.forFeature([
+      McCharacterKit,
+      McKitCandidate,
+      McProject,
+      McScene,
+      McStep,
+      McEvent,
+      McPiece,
+    ]),
   ],
   // CommercialsInsightsController: custos por mês (admin, 8.3) e avisos da janela (4.7).
   controllers: [
@@ -112,6 +122,8 @@ import { McWindowPriceService } from './services/mc-window-price.service';
     // Ponte arte → projeto (D9): upload da arte e criação a partir dela.
     McArtService,
     McFromArtService,
+    // Peça de ofertas configurável (change video-peca-configuravel): CRUD e modelos.
+    McPiecesService,
     McLogoLocatorService,
     McTranslationService,
     McQualityService,

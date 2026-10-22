@@ -70,10 +70,17 @@ export function isScenesAspectRatio(
  * Formatos de projeto (change video-formatos-personagem, design D6):
  * - scenes: comercial de cenas geradas (F3, o formato original; v1 e v2);
  * - talking_art: arte estática do Chroma + personagem falando numa janela (F1);
- * - offer_carousel: personagem apresentador + cards de oferta sincronizados (F2).
+ * - offer_carousel: personagem apresentador + cards de oferta sincronizados (F2);
+ * - offer_piece: peça de ofertas montada pelo cliente no editor + personagem falando
+ *   dentro dela (change video-peca-configuravel).
  * A admissão dos formatos novos é por configuração (`MC_FORMATS`, mc-pipeline.config).
  */
-export const MC_PROJECT_FORMATS = ['scenes', 'talking_art', 'offer_carousel'] as const;
+export const MC_PROJECT_FORMATS = [
+  'scenes',
+  'talking_art',
+  'offer_carousel',
+  'offer_piece',
+] as const;
 export type McProjectFormat = (typeof MC_PROJECT_FORMATS)[number];
 export const MC_DEFAULT_PROJECT_FORMAT: McProjectFormat = 'scenes';
 

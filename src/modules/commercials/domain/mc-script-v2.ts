@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { computeContentHash } from './input-hash';
 import { legacySceneType, isSceneType, sceneTypeDialogueIssue } from './mc-execution-plan';
+import { MC_PIECE_MAX_SPOKEN } from './mc-piece';
 import { parsePreco } from './mc-preco-extenso';
 import { MC_SCRIPT_SCHEMA_V2 } from './mc-quality';
 import { MC_COMPOSITION_DIMENSIONS } from './mc-composition.config';
@@ -138,6 +139,7 @@ export const MC_SCENE_TYPES_BY_FORMAT: Record<McProjectFormat, readonly McSceneT
   scenes: ['presenter', 'action', 'action_voiceover'],
   talking_art: ['talk_tile'],
   offer_carousel: ['talk_tile'],
+  offer_piece: ['talk_tile'],
 };
 
 /**
@@ -295,6 +297,8 @@ export const MC_MAX_PRODUCTS_BY_FORMAT: Record<McProjectFormat, number> = {
   scenes: MC_MAX_SEAL_PRODUCTS,
   talking_art: MC_TALKING_ART_MAX_OFFERS,
   offer_carousel: MC_OFFER_CAROUSEL_MAX_OFFERS,
+  // peça de ofertas: `products[]` do roteiro são só os itens FALADOS (até 6)
+  offer_piece: MC_PIECE_MAX_SPOKEN,
 };
 
 /**

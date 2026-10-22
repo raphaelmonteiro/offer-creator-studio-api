@@ -20,6 +20,7 @@ import {
   McScript,
   McSourceArt,
 } from '../domain/mc-types';
+import type { McPieceDocument } from '../domain/mc-piece';
 import type { McQualityState } from '../domain/mc-quality';
 import { McCharacterKit } from './mc-character-kit.entity';
 
@@ -87,6 +88,18 @@ export class McProject {
   /** Origem da arte (D9): `{kind, id, pageIndex, snapshotHash}`. NULL nos projetos sem ponte. */
   @Column({ type: 'jsonb', nullable: true })
   sourceArt: McSourceArt | null;
+
+  /**
+   * Peça de ofertas configurável (`offer_piece`): referência LÓGICA a
+   * `mc_pieces.id` e a cópia IMUTÁVEL do descritor no momento de gerar — o
+   * quadro do vídeo é reproduzível mesmo que a peça seja editada depois.
+   * NULL nos demais formatos.
+   */
+  @Column({ type: 'uuid', nullable: true })
+  pieceId: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  pieceSnapshot: McPieceDocument | null;
 
   /** Revisão editorial (v2): controle otimista + vínculo da aprovação. Incrementa a cada edição. */
   @Column({ type: 'int', default: 0 })

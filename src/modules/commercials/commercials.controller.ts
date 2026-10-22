@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Headers,
@@ -34,6 +35,13 @@ import {
 } from './dto/from-art.dto';
 import { McArtService } from './services/mc-art.service';
 import { McFromArtService } from './services/mc-from-art.service';
+import {
+  CreatePieceDto,
+  ListPiecesQueryDto,
+  SaveAsTemplateDto,
+  UpdatePieceDto,
+} from './dto/piece.dto';
+import { McPiecesService } from './services/mc-pieces.service';
 import { SystemSettingsService } from '../../shared/settings/system-settings.service';
 import { AdminPauseDto } from './dto/admin-pause.dto';
 import { CreateKitDto } from './dto/create-kit.dto';
@@ -85,6 +93,7 @@ export class CommercialsController {
     private readonly configService: ConfigService,
     private readonly art: McArtService,
     private readonly fromArt: McFromArtService,
+    private readonly pieces: McPiecesService,
   ) {}
 
   /** Rotas compartilhadas entre executores despacham pelo `pipelineVersion` do projeto. */
@@ -320,6 +329,51 @@ export class CommercialsController {
     @Body() dto: SetLogoBoxDto,
   ) {
     return this.fromArt.setLogoBox(user.id, id, { x: dto.x, y: dto.y, w: dto.w, h: dto.h });
+  }
+
+  // ───────────── peça de ofertas configurável (change video-peca-configuravel) ─────────────
+
+  /** Peça nova para um cliente (logo e rodapé do cadastro entram), em branco ou de um modelo. */
+  @Post('pieces')
+  createPiece(@CurrentUser() user: { id: string }, @Body() dto: CreatePieceDto) {
+    return this.pieces.create(user.id, dto);
+  }
+
+  /** `?kind=piece|template&clientId=` — peças e modelos da conta, mais recentes primeiro. */
+  @Get('pieces')
+  findAllPieces(@CurrentUser() user: { id: string }, @Query() query: ListPiecesQueryDto) {
+    return this.pieces.findAll(user.id, query);
+  }
+
+  /** Peça + `issues[]` (o que falta para gerar, por bloco/item). */
+  @Get('pieces/:id')
+  findOnePiece(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
+    return this.pieces.findOne(user.id, id);
+  }
+
+  /** Autosave: documento inteiro + `expectedRevision` (409 REVISION_CONFLICT; 422 PIECE_INVALID / PIECE_TOO_LARGE). */
+  @Patch('pieces/:id')
+  updatePiece(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdatePieceDto,
+  ) {
+    return this.pieces.update(user.id, id, dto);
+  }
+
+  @Delete('pieces/:id')
+  removePiece(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
+    return this.pieces.remove(user.id, id);
+  }
+
+  /** Modelo da conta a partir da peça (sem produtos, logo e dados do cliente). */
+  @Post('pieces/:id/save-as-template')
+  savePieceAsTemplate(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SaveAsTemplateDto,
+  ) {
+    return this.pieces.saveAsTemplate(user.id, id, dto);
   }
 
   // ─────────────────────────────── projetos ───────────────────────────────

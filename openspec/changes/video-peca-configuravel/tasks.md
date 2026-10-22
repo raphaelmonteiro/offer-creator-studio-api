@@ -19,12 +19,12 @@ no worker.
 
 ## 2. Domínio da peça (backend, puro, sem IO)
 
-- [ ] 2.1 `domain/mc-piece.ts`: tipos do descritor (`McPieceDocument`, blocos `logo | text | footer | products | character`, `rect` em frações, `schemaVersion: 1`), constantes de limite (`MC_PIECE_MAX_PRODUCTS = 12`, `MC_PIECE_MAX_SPOKEN = 6`, `MC_PIECE_MAX_TEXTS = 5`, `MC_PIECE_MIN_CHARACTER_WIDTH = 0.25`, `MC_PIECE_MAX_BYTES = 2 MiB`)
-- [ ] 2.2 `validatePieceDocument(document, ctx)` → `issues[]` por bloco (`blockId`, `code`, `message`): blocos dentro do quadro, um personagem, produtos 2..12 com nome legível (não arquivo/EAN) e foto `/uploads/`, `spoken` ≤ 6, textos ≤ 5, fonte existente, personagem ≥ 25% da largura, `logo_face` só com kit `logo_as_is`
-- [ ] 2.3 `pieceCanonicalHash(document)` (JSON canônico, mesma função de `input-hash.ts`) e `pieceSpokenOffers(document)` → `McSealProduct[]` na ordem da peça (ponte para o diretor do F2)
-- [ ] 2.4 `applyClientToPiece(document, client)` (logo e rodapé do cliente) e `templateFromPiece(document)` (remove `items`, `clientId`)
-- [ ] 2.5 `pieceChangeScope(before, after)` → `'spoken' | 'visual' | 'none'` (nome/preço de item `spoken` muda a fala; o resto é só composição), espelhando a regra do `PATCH /composition` do F2
-- [ ] 2.6 Specs: `mc-piece.spec.ts` cobrindo limites, hash estável por ordem de chaves e `pieceChangeScope`
+- [x] 2.1 `domain/mc-piece.ts`: tipos do descritor (`McPieceDocument`, blocos `logo | text | footer | products | character`, `rect` em frações, `schemaVersion: 1`), constantes de limite (`MC_PIECE_MAX_PRODUCTS = 12`, `MC_PIECE_MAX_SPOKEN = 6`, `MC_PIECE_MAX_TEXTS = 5`, `MC_PIECE_MIN_CHARACTER_WIDTH = 0.25`, `MC_PIECE_MAX_BYTES = 2 MiB`)
+- [x] 2.2 `validatePieceDocument(document, ctx)` → `issues[]` por bloco (`blockId`, `code`, `message`): blocos dentro do quadro, um personagem, produtos 2..12 com nome legível (não arquivo/EAN) e foto `/uploads/`, `spoken` ≤ 6, textos ≤ 5, fonte existente, personagem ≥ 25% da largura, `logo_face` só com kit `logo_as_is`
+- [x] 2.3 `pieceCanonicalHash(document)` (JSON canônico, mesma função de `input-hash.ts`) e `pieceSpokenOffers(document)` → `McSealProduct[]` na ordem da peça (ponte para o diretor do F2)
+- [x] 2.4 `applyClientToPiece(document, client)` (logo e rodapé do cliente) e `templateFromPiece(document)` (remove `items`, `clientId`)
+- [x] 2.5 `pieceChangeScope(before, after)` → `'spoken' | 'visual' | 'none'` (nome/preço de item `spoken` muda a fala; o resto é só composição), espelhando a regra do `PATCH /composition` do F2
+- [x] 2.6 Specs: `mc-piece.spec.ts` cobrindo limites, hash estável por ordem de chaves e `pieceChangeScope`
 
 ## 3. Pacote compartilhado `@chroma/video-templates`
 
@@ -37,12 +37,12 @@ no worker.
 
 ## 4. Backend: entidade e rotas da peça
 
-- [ ] 4.1 Migration `CreateMcPieces`: tabela `mc_pieces` (id, userId, clientId nullable, kind `piece|template`, name, aspectRatio, document jsonb, revision, createdAt, updatedAt) + índice `(userId, kind, updatedAt)`; `mc_projects.pieceId` uuid nullable e `pieceSnapshot` jsonb; `up`/`down` testados com run/revert
-- [ ] 4.2 Entidade `McPiece` + `McPiecesService` (`services/mc-pieces.service.ts`): criar (com `applyClientToPiece`), listar, obter, `PATCH` com `expectedRevision` (409 `REVISION_CONFLICT`), `save-as-template`, apagar (422 se há projeto não terminal apontando para ela)
-- [ ] 4.3 DTOs com `@ValidateNested`/`@Type` por tipo de bloco (o pipe global tem `forbidNonWhitelisted`); teto de 2 MiB → 422 `PIECE_TOO_LARGE`; `imageUrl` só `/uploads/` (como `ProjectProductDto`)
-- [ ] 4.4 Rotas no `commercials.controller.ts`: `POST/GET pieces`, `GET/PATCH/DELETE pieces/:id`, `POST pieces/:id/save-as-template`; guard `McEnabledGuard` + JWT; dono por `userId`
-- [ ] 4.5 Formato `offer_piece`: `MC_PROJECT_FORMATS`, `RENDER_FORMATS` (ffmpeg, ffprobe, fontes, navegador), `getConfig`, token em `MC_FORMATS`, `FORMAT_NOT_ENABLED`
-- [ ] 4.6 Specs: `mc-pieces.service.spec.ts` (CRUD, revisão, modelo, dono) e `commercials.controller.pieces.spec.ts` (forma dos DTOs, 400 em chave desconhecida)
+- [x] 4.1 Migration `CreateMcPieces`: tabela `mc_pieces` (id, userId, clientId nullable, kind `piece|template`, name, aspectRatio, document jsonb, revision, createdAt, updatedAt) + índice `(userId, kind, updatedAt)`; `mc_projects.pieceId` uuid nullable e `pieceSnapshot` jsonb; `up`/`down` testados com run/revert
+- [x] 4.2 Entidade `McPiece` + `McPiecesService` (`services/mc-pieces.service.ts`): criar (com `applyClientToPiece`), listar, obter, `PATCH` com `expectedRevision` (409 `REVISION_CONFLICT`), `save-as-template`, apagar (422 se há projeto não terminal apontando para ela)
+- [x] 4.3 DTOs com `@ValidateNested`/`@Type` por tipo de bloco (o pipe global tem `forbidNonWhitelisted`); teto de 2 MiB → 422 `PIECE_TOO_LARGE`; `imageUrl` só `/uploads/` (como `ProjectProductDto`)
+- [x] 4.4 Rotas no `commercials.controller.ts`: `POST/GET pieces`, `GET/PATCH/DELETE pieces/:id`, `POST pieces/:id/save-as-template`; guard `McEnabledGuard` + JWT; dono por `userId`
+- [x] 4.5 Formato `offer_piece`: `MC_PROJECT_FORMATS`, `RENDER_FORMATS` (ffmpeg, ffprobe, fontes, navegador), `getConfig`, token em `MC_FORMATS`, `FORMAT_NOT_ENABLED`
+- [x] 4.6 Specs: `mc-pieces.service.spec.ts` (CRUD, revisão, modelo, dono) e `commercials.controller.pieces.spec.ts` (forma dos DTOs, 400 em chave desconhecida)
 
 ## 5. Backend: projeto a partir da peça
 

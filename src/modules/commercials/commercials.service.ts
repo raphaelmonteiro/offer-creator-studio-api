@@ -262,6 +262,7 @@ export class CommercialsService {
         scenes: true,
         talking_art: admitted('talking_art'),
         offer_carousel: admitted('offer_carousel'),
+        offer_piece: admitted('offer_piece'),
       },
       render: heartbeat?.render?.formats ?? null,
     };
