@@ -565,8 +565,10 @@ Executor v2 (`pipelineVersion = 2`) para projetos novos com `MC_PIPELINE_V2=all`
   sharp; asset `piece_still`; não depende das cenas) `→ compose_ffmpeg` (quadro como arte, janela = rect do
   personagem, hash leva `pieceHash`) `→ finalize`. `PATCH projects/:id/piece` edita a peça depois do vídeo:
   mudança falada (ou cor do painel/modo) reescreve só as frases afetadas e volta ao roteiro; só visual → revisão
-  `assembly_only` (ou grava no lugar antes da entrega). Pendentes: `layoutProducts`/`PieceCanvas` no pacote de
-  templates (grupo 3), duplicação com re-layout (5.5), editor e revisão no front (grupos 7–8).
+  `assembly_only` (ou grava no lugar antes da entrega). `POST projects/:id/duplicate` com `aspectRatio` clona a
+  peça re-layoutada (`domain/mc-piece-relayout.ts`: grade volta a `auto` pelo `layoutProducts` do pacote, demais
+  blocos mantêm as frações) numa `mc_pieces` nova e o projeto nasce em `storyboard_review` com os TTS reaproveitados.
+  `PieceCanvas`/`layoutProducts`/`OfferPieceStill` vivem no pacote `@chroma/video-templates` (0.2.0).
 
 **Kit do personagem**: origem `mascot` ou `logo` (logo vira `mascots.kind = 'logo'`), estilo `cartoon_2d |
 3d_render | realistic`, rodadas de candidatos de mascotização (`mc_kit_candidates`), "usar o logo como está"

@@ -28,6 +28,8 @@ import {
   McStepStatus,
 } from '../domain/mc-state-machines';
 import { assertAspectSupportedForFormat } from '../domain/mc-composition.config';
+import { McPieceAspectRatio, McPieceDocument } from '../domain/mc-piece';
+import { pieceCopyName, PieceRelayoutResult, relayoutPieceForAspect } from '../domain/mc-piece-relayout';
 import { assertFormatEnabled, assertPipelineV2ForFormat } from '../domain/mc-pipeline.config';
 import { isPipelineV2, MC_EMPTY_QUALITY, MC_PIPELINE_V2 } from '../domain/mc-quality';
 import {
@@ -38,11 +40,13 @@ import {
   resolveProjectOptions,
 } from '../domain/mc-types';
 import { McCharacterKit, McKitStatus } from '../entities/mc-character-kit.entity';
+import { McPiece } from '../entities/mc-piece.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { DuplicateProjectDto } from '../dto/duplicate-project.dto';
 import { UpdateScriptDto } from '../dto/update-script.dto';
+import { McFromPieceService } from './mc-from-piece.service';
 import { McMaterializerService } from './mc-materializer.service';
 import { McPipelineService } from './mc-pipeline.service';
 
@@ -262,6 +266,13 @@ export class McProjectActionsService {
    *   são clonadas como `skipped_cached` (mesmo `baseHash`/`outputAssetId`)
    *   nas cenas da cópia, para `selectedAssetMatches` reaproveitá-las: só os
    *   clipes de fala (`talk`) são gerados de novo.
+   * - Peça de ofertas (change video-peca-configuravel, 5.5): a cópia ganha uma
+   *   PEÇA NOVA (`mc_pieces`, `pieceId` novo) com o descritor reorganizado
+   *   para o formato pedido (`relayoutPieceForAspect`: grade volta ao
+   *   auto-layout do pacote, demais blocos mantêm as frações — nada esticado)
+   *   e o `pieceSnapshot` congelado dessa peça; `render_still` e `compose`
+   *   são novos, as falas vêm do cache como nos outros formatos. O projeto abre
+   *   em `storyboard_review` para o usuário ajustar a peça antes de gerar.
    */
   async duplicateProject(
     userId: string,
@@ -306,6 +317,20 @@ export class McProjectActionsService {
     assertPipelineV2ForFormat(format);
     assertAspectSupportedForFormat(format, aspectRatio);
 
+    // Peça de ofertas: o descritor congelado reorganizado para o formato da
+    // cópia (puro, antes de qualquer escrita); sem snapshot não há o que copiar.
+    const isPiece = format === 'offer_piece';
+    let relayout: PieceRelayoutResult | null = null;
+    if (isPiece) {
+      if (!source.pieceSnapshot) {
+        throw new UnprocessableEntityException({
+          code: 'PIECE_SNAPSHOT_MISSING',
+          message: 'O vídeo de origem não tem a peça congelada para copiar.',
+        });
+      }
+      relayout = relayoutPieceForAspect(source.pieceSnapshot, aspectRatio as McPieceAspectRatio);
+    }
+
     const kit = await this.getKit(source.kitId);
     const title = await this.nextCopyTitle(userId, source.title);
     const newFormat = format !== MC_DEFAULT_PROJECT_FORMAT;
@@ -313,6 +338,27 @@ export class McProjectActionsService {
     const v2 = newFormat || isPipelineV2(source);
 
     const created = await this.dataSource.transaction(async (manager) => {
+      let pieceId = source.pieceId ?? null;
+      let pieceSnapshot: McPieceDocument | null = source.pieceSnapshot ?? null;
+      let logoBox = source.logoBox ? { ...source.logoBox } : null;
+      if (relayout) {
+        const sourcePiece = source.pieceId
+          ? await manager.findOne(McPiece, { where: { id: source.pieceId } })
+          : null;
+        const piece = manager.create(McPiece, {
+          userId,
+          clientId: sourcePiece?.clientId ?? null,
+          kind: 'piece' as const,
+          name: pieceCopyName(sourcePiece?.name ?? source.title, aspectRatio as McPieceAspectRatio),
+          aspectRatio: aspectRatio as McPieceAspectRatio,
+          document: relayout.document,
+          revision: 0,
+        });
+        await manager.save(piece);
+        pieceId = piece.id;
+        pieceSnapshot = relayout.document;
+        logoBox = McFromPieceService.logoBoxFor(relayout.document);
+      }
       const copy = manager.create(McProject, {
         userId,
         kitId: kit.id,
@@ -325,7 +371,9 @@ export class McProjectActionsService {
         backgroundArtAssetId: source.backgroundArtAssetId ?? null,
         sourceArt: source.sourceArt ? JSON.parse(JSON.stringify(source.sourceArt)) : null,
         layoutPreset: source.layoutPreset ?? null,
-        logoBox: source.logoBox ? { ...source.logoBox } : null,
+        logoBox,
+        pieceId,
+        pieceSnapshot,
         revision: 0,
         quality: v2 ? { ...MC_EMPTY_QUALITY } : null,
         // Deep copy: editar o roteiro da cópia NUNCA pode tocar no original
@@ -353,6 +401,13 @@ export class McProjectActionsService {
           tier,
           sceneCount: copy.script?.scenes.length ?? 0,
           reusedTts,
+          ...(relayout
+            ? {
+                pieceId: copy.pieceId,
+                sourcePieceId: source.pieceId ?? null,
+                pieceRelayout: relayout.changed ? (relayout.layout ?? { cols: 0, rows: 0 }) : null,
+              }
+            : {}),
         },
       });
       await this.transitions.notify(
