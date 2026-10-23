@@ -1,3 +1,4 @@
+import { layoutProducts, LayoutProductsResult } from '@chroma/video-templates/core';
 import { absoluteAssetUrl } from './mc-offer-carousel-props';
 import {
   McPieceBlock,
@@ -6,7 +7,6 @@ import {
   McPieceProductItem,
   McPieceRect,
 } from './mc-piece';
-import { layoutPieceProducts, PieceLayoutResult } from './mc-piece-layout';
 
 /**
  * Props da composição `OfferPieceStill` (change video-peca-configuravel, 6.2)
@@ -17,7 +17,8 @@ import { layoutPieceProducts, PieceLayoutResult } from './mc-piece-layout';
  * mídias em URL absoluta (o navegador do render busca em
  * `MC_RENDER_ASSET_BASE_URL`), as dimensões do formato e as fontes da conta.
  * O mesmo arquivo descreve o plano do renderizador MOCK (sharp): fundo +
- * retângulos, para o e2e sem navegador.
+ * retângulos, para o e2e sem navegador — com as células do MESMO
+ * `layoutProducts` do pacote `@chroma/video-templates` que o editor usa.
  */
 
 export interface OfferPieceStillProps {
@@ -109,33 +110,6 @@ export function pieceRectToPx(rect: McPieceRect, width: number, height: number):
     width: Math.max(1, Math.round((rect.x + rect.w) * width) - x),
     height: Math.max(1, Math.round((rect.y + rect.h) * height) - y),
   };
-}
-
-/**
- * Grade do mock para a área de produtos em `layout: 'auto'` (o auto-layout
- * REAL vive em `@chroma/video-templates`/`layoutProducts`; este só precisa de
- * células plausíveis): colunas por quantidade, células com folga de 2% da área.
- */
-export function mockGridCells(area: MockStillRectPx, count: number): MockStillRectPx[] {
-  if (count <= 0) return [];
-  const cols = count <= 2 ? count : count <= 4 ? 2 : count <= 9 ? 3 : 4;
-  const rows = Math.ceil(count / cols);
-  const gapX = Math.round(area.width * 0.02);
-  const gapY = Math.round(area.height * 0.02);
-  const cellW = Math.floor((area.width - gapX * (cols + 1)) / cols);
-  const cellH = Math.floor((area.height - gapY * (rows + 1)) / rows);
-  const cells: MockStillRectPx[] = [];
-  for (let i = 0; i < count; i += 1) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    cells.push({
-      x: area.x + gapX + col * (cellW + gapX),
-      y: area.y + gapY + row * (cellH + gapY),
-      width: Math.max(1, cellW),
-      height: Math.max(1, cellH),
-    });
-  }
-  return cells;
 }
 
 function escapeXml(text: string): string {
@@ -301,11 +275,11 @@ export function buildMockStillPlan(props: OfferPieceStillProps): MockStillPlan {
           });
           break;
         }
-        // grade: rects manuais ou o MESMO auto-layout do editor (`layoutPieceProducts`)
+        // grade: rects manuais ou o MESMO auto-layout do editor (`layoutProducts` do pacote)
         const manual = block.layout === 'manual' && items.every((i) => i.rect);
         const auto = manual
           ? null
-          : layoutPieceProducts({
+          : layoutProducts({
               areaRect: block.rect,
               width: W,
               height: H,
@@ -314,7 +288,7 @@ export function buildMockStillPlan(props: OfferPieceStillProps): MockStillPlan {
             });
         const cells = items.map((item) =>
           pieceRectToPx(
-            manual ? (item.rect as McPieceRect) : (auto as PieceLayoutResult).rects[item.id],
+            manual ? (item.rect as McPieceRect) : (auto as LayoutProductsResult).rects[item.id],
             W,
             H,
           ),

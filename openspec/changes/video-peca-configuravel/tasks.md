@@ -28,12 +28,17 @@ no worker.
 
 ## 3. Pacote compartilhado `@chroma/video-templates`
 
-- [~] 3.1 `layoutProducts({ areaRect, width, height, itemIds, featuredId })` → rect por item (frações do quadro), colunas por quantidade (1/2/2+1 ou 3/2×2/3/4), destaque em duas colunas, folga de 2%, mínimos de texto (preço ≥ 36 px, nome ≥ 24 px a 1080); testes com números fixados — FEITO no lugar provisório (`offer-creator-studio/src/lib/video-templates/piece/layoutProducts.ts`) e COPIADO no backend (`domain/mc-piece-layout.ts`, spec com os mesmos números) para o quadro mock desenhar as mesmas células; falta mover para o pacote e apagar a cópia
-- [~] 3.2 `PieceCanvas({ document, width, height, assetBase, characterPosterUrl })`: fundo (sólido, degradê, imagem com fit/blur/darken), blocos por `zIndex`, selo de/por com unidade, rodapé faixa/pill, painel do personagem com o poster do tile, `@font-face` das fontes da conta; sem estado — FEITO no lugar provisório (`src/lib/video-templates/piece/PieceCanvas.tsx`, teste com `renderToStaticMarkup`); falta mover para o pacote
-- [ ] 3.3 Fontes: `@font-face` a partir de `document.fonts[]` (família + URL absoluta) com `delayRender`/`continueRender` no Remotion e carregamento normal no navegador
-- [ ] 3.4 Composição Remotion `OfferPieceStill` (um quadro) e `parsePieceDocument` (zod) exportados do `dist/cjs/core`; `COMPOSITION_VERSION` incrementada
-- [ ] 3.5 Publicar o pacote (ou fixar o checkout em `MC_VIDEO_TEMPLATES_DIR` também para o frontend via workspace) — a decisão de distribuição fica registrada no README do pacote
-- [ ] 3.6 Fixture: um descritor completo de exemplo (`fixtures/piece-9x16.json`) usado pelos testes do pacote, do backend e do frontend
+> Repo do pacote: `raphaelmonteiro/video-templates` (branch `claude/affectionate-bohr-2u3siq`, versão 0.2.0). O
+> frontend importa `@chroma/video-templates/piece` (React puro) e o backend `@chroma/video-templates/core`;
+> as cópias provisórias (`offer-creator-studio/src/lib/video-templates/piece/`, `domain/mc-piece-layout.ts`)
+> foram apagadas. Quadro real verificado: `npm run still:piece` com a fixture renderizou 1080×1920 pelo Remotion.
+
+- [x] 3.1 `layoutProducts({ areaRect, width, height, itemIds, featuredId })` → rect por item (frações do quadro), colunas por quantidade (1/2/2+1 ou 3/2×2/3/4), destaque em duas colunas, última linha incompleta centralizada, folga de 2%, mínimos de texto (preço ≥ 36 px, nome ≥ 24 px a 1080); testes com números fixados (`test/piece-layout.test.ts`) — em `src/core/piece/layout.ts` do pacote
+- [x] 3.2 `PieceCanvas({ document, width, height, assetBase | resolveAssetUrl, imgComponent, characterPosterUrl })`: fundo (sólido, degradê, imagem como `<img>` com fit/blur/darken), blocos por `zIndex`, selo de/por com unidade, rodapé faixa/pill, painel do personagem com o poster do tile, `@font-face` das fontes da conta, célula em destaque (larga) com a foto à esquerda; sem estado e sem Remotion (`src/components/piece/PieceCanvas.tsx`, entrada `./piece`; teste com `renderToStaticMarkup`)
+- [x] 3.3 Fontes: `@font-face` injetado pelo canvas (navegador) e, na composição, `loadFont` de cada `fonts[i]` sob `delayRender`/`continueRender` (`usePieceFontsReady`); fonte indisponível segue com o fallback
+- [x] 3.4 Composição Remotion `OfferPieceStill` (Still de um quadro, `Img` do Remotion, `staticFile` para fixtures, `calculateMetadata` valida as props) e `parsePieceDocument`/`parseOfferPieceStillProps` (zod) exportados de `dist/cjs/core`; `COMPOSITION_VERSION` 0.2.0; a raiz registra só a composição que as input props pedem (uma por bundle)
+- [x] 3.5 Distribuição decidida e registrada no README do pacote: privado, sem registro; dependência git fixada (`github:raphaelmonteiro/video-templates#<tag|sha>`) com `dist/` versionado; tag `vX.Y.Z` = `package.json#version` quando o branch chegar em `main` (backend e frontend fixam o commit `8be1eca` até lá); `MC_VIDEO_TEMPLATES_DIR` segue opcional no worker
+- [x] 3.6 Fixture `fixtures/piece-9x16.json` (props completas: 6 produtos com destaque, logo, texto, rodapé, personagem) usada pelos testes do pacote, pelo Studio, pelo backend (`mc-piece-package.spec.ts`: válida pelas regras do backend com fotos em `/uploads/`) e pelo frontend (`pieceEditor.test.ts`)
 
 ## 4. Backend: entidade e rotas da peça
 
@@ -66,14 +71,11 @@ no worker.
 
 ## 7. Frontend: editor da peça
 
-> Grupos 3 e 7 — onde o código vive: o repo `chroma-video-templates` não estava acessível nesta frente, então
-> `layoutProducts`, `PieceCanvas` e os tipos do descritor foram escritos no FRONT em
-> `src/lib/video-templates/piece/` SEM dependências da aplicação (React + TS puros), para serem movidos para o
-> pacote como estão (3.1/3.2/3.6 ficam "feitos no lugar provisório"; 3.3/3.4/3.5 — `OfferPieceStill`,
-> `parsePieceDocument`, `COMPOSITION_VERSION`, publicação — continuam pendentes NO PACOTE). Até lá o worker só
-> renderiza o quadro com o mock (sharp); o renderizador Remotion falha com `RENDER_UNAVAILABLE` até a composição existir.
+> Grupos 3 e 7 — onde o código vive: `layoutProducts`, `PieceCanvas` e os tipos do descritor vivem no pacote
+> `@chroma/video-templates` (entrada `./piece`, React puro); o frontend os importa de lá e a casa provisória
+> `src/lib/video-templates/piece/` foi apagada (grupo 3 concluído).
 
-- [x] 7.1 Rotas `/commercials/pieces/new` e `/commercials/pieces/:id` (`?projectId=` abre a peça congelada de um vídeo); serviço `commercialsPiecesService` (criar, obter, `PATCH` com `expectedRevision`, listar modelos, salvar como modelo, upload de fundo, `from-piece`, `PATCH projects/:id/piece`); tipos espelhando o descritor do backend em `src/lib/video-templates/piece/types.ts`
+- [x] 7.1 Rotas `/commercials/pieces/new` e `/commercials/pieces/:id` (`?projectId=` abre a peça congelada de um vídeo); serviço `commercialsPiecesService` (criar, obter, `PATCH` com `expectedRevision`, listar modelos, salvar como modelo, upload de fundo, `from-piece`, `PATCH projects/:id/piece`); tipos do descritor importados de `@chroma/video-templates/piece`
 - [x] 7.2 Tela `CommercialPieceEditor`: etapas à esquerda (Fundo, Produtos, Logo e textos, Rodapé, Personagem), prévia à direita (`PieceStage`: `PieceCanvas` em tamanho natural + `transform: scale`, zoom/ajustar); nome, formato e estado do autosave no topo
 - [x] 7.3 Fundo (`BackgroundPanel`): cor (paleta curta de vídeo + seletor), degradê (duas cores + ângulo), imagem (galeria ou upload → `POST pieces/backgrounds` = `piece_background`) com fit, desfoque e escurecimento
 - [x] 7.4 Produtos (`ProductsPanel`): catálogo (busca em `productsService.getAll`; produto sem foto pede a foto na galeria) ou galeria (`GalleryProductPickerDialog`), edição de nome/gramatura/preço de/por/unidade, fala (até 6, pelo menos 1), destaque, ordem, grade/imagem única, estilo da área e do selo, "arrumar de novo"

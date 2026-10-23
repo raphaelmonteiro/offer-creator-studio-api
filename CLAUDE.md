@@ -83,7 +83,7 @@ MC_RENDER_BROWSER             # navegador do render Remotion (offer_carousel e o
 MC_RENDER_FONT_FILE           # dica só para o preflight (DejaVuSans.ttf fora dos caminhos usuais); o drawtext usa o fontconfig
 MC_CAROUSEL_RENDERER          # mock (default com pipeline mock) | remotion — renderizador do F2
 MC_RENDER_ASSET_BASE_URL      # base absoluta das mídias passadas ao Remotion (default http://127.0.0.1:3001)
-MC_COMPOSITION_VERSION        # versão da composição @chroma/video-templates no hash do render (default 0.1.0)
+MC_COMPOSITION_VERSION        # versão das composições @chroma/video-templates no hash do render (default 0.2.0; vale a do pacote quando carregado)
 MC_VIDEO_TEMPLATES_DIR        # checkout local do pacote de composição (dev, enquanto ele não é dependência)
 MC_KIT_CANDIDATE_COUNT / MC_KIT_STYLE_REFS_DIR
                               # candidatos por rodada (4–6) e referências de estilo opcionais da mascotização
@@ -551,7 +551,10 @@ Executor v2 (`pipelineVersion = 2`) para projetos novos com `MC_PIPELINE_V2=all`
   rosto do logo. Steps: `tts → talk` por fala, depois `compose_ffmpeg → finalize` (1080p).
 - `offer_carousel` (F2, "ofertas em sequência"): 3–6 ofertas em cards animados sincronizados com a fala.
   Steps: `tts → talk` por fala, depois `render_remotion → finalize`. A composição vive no pacote
-  `@chroma/video-templates` (repo próprio; ainda local em `~/Sites/chroma-video-templates`, não publicado).
+  `@chroma/video-templates` (repo `raphaelmonteiro/video-templates`, privado e sem registro: dependência git
+  fixada por tag/commit em `package.json`, `dist/` versionado; o README do pacote tem as regras de versão).
+  O backend importa `@chroma/video-templates/core` (puro: `layoutProducts`, schemas, `COMPOSITION_VERSION`);
+  o worker faz o bundle de `src/index.ts` do pacote instalado ou do checkout em `MC_VIDEO_TEMPLATES_DIR`.
 - `offer_piece` ("peça de ofertas", change `video-peca-configuravel`): o cliente monta a PEÇA no editor
   (fundo, produtos da galeria com preço de/por, logo, textos, rodapé, personagem em painel liso) — entidade
   `mc_pieces` (`kind` peça|modelo, `document` jsonb em frações do quadro, `revision` com 409), domínio puro em

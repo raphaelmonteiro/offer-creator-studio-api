@@ -3,7 +3,6 @@ import { McPieceProductsBlock } from './mc-piece';
 import {
   buildMockStillPlan,
   buildOfferPieceStillProps,
-  mockGridCells,
   pieceMediaUrls,
   pieceRectToPx,
 } from './mc-piece-still-props';
@@ -84,25 +83,13 @@ describe('mc-piece-still-props — props do quadro parado', () => {
     ).toBe('https://cdn.x/p.png');
   });
 
-  it('frações → pixels sem buracos entre células vizinhas; grade do mock cabe na área', () => {
+  it('frações → pixels sem buracos entre células vizinhas', () => {
     expect(pieceRectToPx({ x: 0.05, y: 0.2, w: 0.9, h: 0.52 }, 1080, 1920)).toEqual({
       x: 54,
       y: 384,
       width: 972,
       height: 998,
     });
-    const area = { x: 54, y: 384, width: 972, height: 998 };
-    for (const n of [1, 2, 3, 4, 6, 9, 12]) {
-      const cells = mockGridCells(area, n);
-      expect(cells).toHaveLength(n);
-      for (const c of cells) {
-        expect(c.x).toBeGreaterThanOrEqual(area.x);
-        expect(c.y).toBeGreaterThanOrEqual(area.y);
-        expect(c.x + c.width).toBeLessThanOrEqual(area.x + area.width);
-        expect(c.y + c.height).toBeLessThanOrEqual(area.y + area.height);
-      }
-    }
-    expect(mockGridCells(area, 0)).toEqual([]);
   });
 
   it('plano do mock: fundo sólido/degradê em SVG, imagem como referência; um desenho por bloco na ordem do zIndex', () => {

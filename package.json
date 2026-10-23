@@ -30,6 +30,7 @@
     "migration:show:prod": "typeorm migration:show -d dist/data-source.js"
   },
   "dependencies": {
+    "@chroma/video-templates": "github:raphaelmonteiro/video-templates#8be1eca9f88526ed0333b93a362e5893879d02b6",
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.1.1",
     "@nestjs/core": "^10.3.0",

@@ -7,16 +7,18 @@ import { mcExpireForQueue } from './mc-pipeline.config';
  * do env a cada chamada (baratas e testáveis), no mesmo papel do
  * mc-pipeline.config para as filas.
  *
- * - `MC_COMPOSITION_VERSION` (default `0.1.0`): versão da composição
- *   `OfferCarousel` do pacote `@chroma/video-templates`. Entra no hash do
- *   render (spec "Render determinístico"): trocar o pacote invalida o render.
+ * - `MC_COMPOSITION_VERSION` (default `0.2.0`): versão das composições do
+ *   pacote `@chroma/video-templates` (`OfferCarousel` e `OfferPieceStill`;
+ *   `COMPOSITION_VERSION` do pacote). Entra no hash do render (spec "Render
+ *   determinístico"): trocar o pacote invalida o render. Com o pacote
+ *   carregado, vale a versão DELE; este default é o do renderizador mock.
  * - `MC_RENDER_ASSET_BASE_URL` (default `http://127.0.0.1:3001`): base das
  *   URLs absolutas de mídia que o navegador do render busca (`/uploads/*` do
  *   backend; no worker da VM a API responde em 127.0.0.1:3001).
  * - `MC_CAROUSEL_RENDERER` (`remotion` | `mock`): força o renderizador; sem
  *   ele, `MC_PIPELINE_PROVIDER=mock` usa o mock em ffmpeg e o resto, o Remotion.
  */
-export const MC_DEFAULT_COMPOSITION_VERSION = '0.1.0';
+export const MC_DEFAULT_COMPOSITION_VERSION = '0.2.0';
 export const MC_DEFAULT_RENDER_ASSET_BASE_URL = 'http://127.0.0.1:3001';
 
 /** Id da composição registrada no Root do pacote (`OFFER_CAROUSEL_COMPOSITION_ID`). */
