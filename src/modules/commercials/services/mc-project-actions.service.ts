@@ -29,7 +29,11 @@ import {
 } from '../domain/mc-state-machines';
 import { assertAspectSupportedForFormat } from '../domain/mc-composition.config';
 import { McPieceAspectRatio, McPieceDocument } from '../domain/mc-piece';
-import { pieceCopyName, PieceRelayoutResult, relayoutPieceForAspect } from '../domain/mc-piece-relayout';
+import {
+  pieceCopyName,
+  PieceRelayoutResult,
+  relayoutPieceForAspect,
+} from '../domain/mc-piece-relayout';
 import { assertFormatEnabled, assertPipelineV2ForFormat } from '../domain/mc-pipeline.config';
 import { isPipelineV2, MC_EMPTY_QUALITY, MC_PIPELINE_V2 } from '../domain/mc-quality';
 import {

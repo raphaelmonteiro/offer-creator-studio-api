@@ -88,18 +88,27 @@ describe('McProjectActionsService — duplicar a peça de ofertas em outro forma
       reservedCredits: 0,
       consumedCredits: 0,
     };
-    sourcePiece = { id: 'piece-1', userId, clientId: 'c1', name: 'Ofertas da semana', kind: 'piece' };
+    sourcePiece = {
+      id: 'piece-1',
+      userId,
+      clientId: 'c1',
+      name: 'Ofertas da semana',
+      kind: 'piece',
+    };
     saved = [];
     manager = {
       create: jest.fn((_e: unknown, obj: Record<string, unknown>) => ({ ...obj })),
       save: jest.fn((obj: Record<string, unknown>) => {
-        if (!obj.id) obj.id = 'document' in obj ? 'piece-2' : 'script' in obj ? 'p2' : `row-${saved.length}`;
+        if (!obj.id)
+          obj.id = 'document' in obj ? 'piece-2' : 'script' in obj ? 'p2' : `row-${saved.length}`;
         saved.push(obj);
         return Promise.resolve(obj);
       }),
       find: jest.fn(() => Promise.resolve([])),
       findOne: jest.fn((entity: unknown, opts: { where: { id: string } }) =>
-        Promise.resolve(entity === McPiece && sourcePiece?.id === opts.where.id ? sourcePiece : null),
+        Promise.resolve(
+          entity === McPiece && sourcePiece?.id === opts.where.id ? sourcePiece : null,
+        ),
       ),
     };
     const dataSource = {
@@ -107,7 +116,12 @@ describe('McProjectActionsService — duplicar a peça de ofertas em outro forma
         findOneBy: jest.fn(() => {
           if (entity === McProject) return Promise.resolve(source);
           if (entity === McCharacterKit) {
-            return Promise.resolve({ id: 'kit-1', userId, status: McKitStatus.APPROVED, version: 1 });
+            return Promise.resolve({
+              id: 'kit-1',
+              userId,
+              status: McKitStatus.APPROVED,
+              version: 1,
+            });
           }
           return Promise.resolve(null);
         }),
@@ -235,7 +249,9 @@ describe('McProjectActionsService — duplicar a peça de ofertas em outro forma
 
   it('sem pieceSnapshot na origem → 422 PIECE_SNAPSHOT_MISSING, nada salvo', async () => {
     source.pieceSnapshot = null;
-    await expect(service.duplicateProject(userId, 'p1', { aspectRatio: '4:5' })).rejects.toMatchObject({
+    await expect(
+      service.duplicateProject(userId, 'p1', { aspectRatio: '4:5' }),
+    ).rejects.toMatchObject({
       response: { code: 'PIECE_SNAPSHOT_MISSING' },
     });
     await expect(service.duplicateProject(userId, 'p1', {})).rejects.toBeInstanceOf(
