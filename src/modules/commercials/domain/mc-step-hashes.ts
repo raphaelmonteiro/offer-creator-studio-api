@@ -383,6 +383,11 @@ export interface ComposeFfmpegHashInput {
   endcard: string | null;
   /** Versão do grafo de composição (`MC_COMPOSE_GRAPH_VERSION`): bump = render refeito. */
   graphVersion: number;
+  /**
+   * Modo sem fundo (video-mascote-transparente, D10): chave, enquadramento, tolerâncias e versões
+   * do recorte (`composeCutoutHashInput`). Ausente ⇒ hash idêntico ao de hoje.
+   */
+  cutout?: Record<string, string | number> | null;
 }
 
 /**
@@ -405,6 +410,7 @@ export function computeComposeFfmpegHash(input: ComposeFfmpegHashInput): string 
     captionsEnabled: input.captionsEnabled,
     endcard: input.endcard,
     graphVersion: input.graphVersion,
+    ...(input.cutout ? { cutout: input.cutout } : {}),
   });
 }
 

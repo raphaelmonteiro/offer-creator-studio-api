@@ -34,6 +34,7 @@ import {
 } from '../domain/mc-piece';
 import { Font } from '../../fonts/entities/font.entity';
 import { carouselOffers, effectiveScenePrompts } from '../domain/mc-script-v2';
+import { composeCutoutHashInput } from '../domain/mc-cutout-graph';
 import { MC_CUTOUT_KEY_RULE_VERSION } from '../domain/mc-cutout-key';
 import { buildTalkPrompt, TalkPromptCutout } from '../domain/mc-talk-prompts';
 import { kitVoiceDelivery } from '../domain/mc-voice-delivery';
@@ -869,6 +870,15 @@ export class McMaterializerService {
     };
   }
 
+  /** Entrada do recorte no hash do compose; null fora do modo sem fundo. */
+  private composeCutoutOf(script: McScript): ReturnType<typeof composeCutoutHashInput> | null {
+    if (script.cutout !== true || !script.cutoutKeyColor) return null;
+    return composeCutoutHashInput({
+      keyColor: script.cutoutKeyColor,
+      framing: script.framing ?? 'corpo',
+    });
+  }
+
   /** Modo sem fundo do roteiro: cor-chave congelada + enquadramento; falta de chave é pré-condição. */
   private talkCutoutOf(script: McScript, kitId: string): TalkPromptCutout | null {
     if (script.cutout !== true) return null;
@@ -977,6 +987,7 @@ export class McMaterializerService {
       captionsEnabled: options.captionsEnabled,
       endcard: script.endcard?.storeName ?? null,
       graphVersion: MC_COMPOSE_GRAPH_VERSION,
+      cutout: this.composeCutoutOf(script),
     });
     const finalizeHash = computeFinalizeHash({
       composeHash,
@@ -1103,6 +1114,7 @@ export class McMaterializerService {
       captionsEnabled: options.captionsEnabled,
       endcard: script.endcard?.storeName ?? null,
       graphVersion: MC_COMPOSE_GRAPH_VERSION,
+      cutout: this.composeCutoutOf(script),
     });
     const finalizeHash = computeFinalizeHash({
       composeHash,

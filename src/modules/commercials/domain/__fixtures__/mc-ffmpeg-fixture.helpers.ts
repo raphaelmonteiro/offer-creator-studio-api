@@ -406,3 +406,79 @@ export async function keyframeIndexes(file: string): Promise<number[]> {
     .map((flags, i) => (flags.includes('K') ? i : -1))
     .filter((i) => i >= 0);
 }
+
+/** Quadro RGB24 inteiro do vídeo no instante `t` (w×h×3 bytes). */
+export async function rgbFrameAt(
+  file: string,
+  t: number,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const { stdout } = await ffmpeg([
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-ss',
+    t.toFixed(3),
+    '-i',
+    file,
+    '-frames:v',
+    '1',
+    '-f',
+    'rawvideo',
+    '-pix_fmt',
+    'rgb24',
+    '-',
+  ]);
+  return stdout.subarray(0, width * height * 3);
+}
+
+/** Clipe "conformado" a partir de uma imagem (PNG) em loop + tom: H.264 yuv420p como o dos motores. */
+export async function imageClip(
+  file: string,
+  imagePath: string,
+  durationS: number,
+  opts: { frequency?: number } = {},
+): Promise<void> {
+  await ffmpeg([
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-loop',
+    '1',
+    '-framerate',
+    '30',
+    '-t',
+    String(durationS),
+    '-i',
+    imagePath,
+    '-f',
+    'lavfi',
+    '-t',
+    String(durationS),
+    '-i',
+    `sine=frequency=${opts.frequency ?? 440}:sample_rate=48000`,
+    '-map',
+    '0:v:0',
+    '-map',
+    '1:a:0',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-crf',
+    '18',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    '-t',
+    String(durationS),
+    file,
+  ]);
+}

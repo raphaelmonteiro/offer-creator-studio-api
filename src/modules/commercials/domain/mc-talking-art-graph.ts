@@ -4,6 +4,7 @@ import {
   buildEndcardArgs,
   ENDCARD_DURATION_S,
 } from './mc-assembly-graph';
+import { buildCutoutKeyChain, ComposeCutoutInput, cutoutFitFilters } from './mc-cutout-graph';
 import { buildSpeechTimeline, MC_TALK_GAP_MS } from './mc-talk-conform-graph';
 import {
   artBoxToOutputWindow,
@@ -96,6 +97,11 @@ export interface ComposeGraphInput {
   gapMs: number;
   captionsEnabled: boolean;
   endcard: { storeName: string } | null;
+  /**
+   * Modo sem fundo (video-mascote-transparente, D5): cada clipe tem a cor-chave removida e entra
+   * com alfa (encaixe inteiro, colado embaixo, sem crossfade). Ausente = Card/Círculo/logo, como hoje.
+   */
+  cutout?: ComposeCutoutInput | null;
 }
 
 export interface ComposePass {
@@ -247,7 +253,8 @@ interface ClipSlot {
 
 function planSlots(input: ComposeGraphInput): ClipSlot[] {
   const gapS = Math.max(0, input.gapMs / 1000);
-  const crossfadeS = Math.min(MC_COMPOSE_CROSSFADE_MAX_S, gapS);
+  // sem fundo não há crossfade: duas versões semitransparentes da personagem apareceriam juntas
+  const crossfadeS = input.cutout ? 0 : Math.min(MC_COMPOSE_CROSSFADE_MAX_S, gapS);
   return input.clips.map((clip, index) => {
     const isFirst = index === 0;
     const isLast = index === input.clips.length - 1;
@@ -286,16 +293,17 @@ export function buildClipWindowChain(
       `pad=${ww}:${wh}:(ow-iw)/2:(oh-ih)/2:color=${color}`;
   // 30 fps CFR desde t=0; 100 ms de último quadro clonado ANTES do trim cobrem
   // um vídeo conformado um quadro mais curto que o áudio (a janela nunca pisca a arte).
-  const filters: string[] = [
+  const timing: string[] = [
     'setpts=PTS-STARTPTS',
     `fps=${ASSEMBLY_FPS}`,
     'tpad=stop_mode=clone:stop_duration=0.1',
     `trim=duration=${fmt(slot.durationS)}`,
     'setpts=PTS-STARTPTS',
-    fit,
-    'setsar=1',
-    'format=yuva420p',
   ];
+  const cutout = input.cutout ?? null;
+  const filters: string[] = cutout
+    ? [...timing, ...cutoutFitFilters(ww, wh), 'setsar=1', 'format=yuva420p']
+    : [...timing, fit, 'setsar=1', 'format=yuva420p'];
   if (slot.headHoldS > 0 || slot.tailHoldS > 0) {
     const parts: string[] = [];
     if (slot.headHoldS > 0) parts.push(`start_mode=clone:start_duration=${fmt(slot.headHoldS)}`);
@@ -307,7 +315,13 @@ export function buildClipWindowChain(
   if (slot.fadeInS > 0) {
     filters.push(`fade=t=in:st=${fmt(appearS)}:d=${fmt(slot.fadeInS)}:alpha=1`);
   }
-  return `[${slot.index + 1}:v]${filters.join(',')}[c${slot.index}]`;
+  if (!cutout) return `[${slot.index + 1}:v]${filters.join(',')}[c${slot.index}]`;
+  // chave removida ANTES de qualquer filtro de tempo ou escala (alfa limpo na resolução do clipe)
+  const keyed = `ck${slot.index}`;
+  return (
+    `${buildCutoutKeyChain(`${slot.index + 1}:v`, cutout.keyColor, String(slot.index), keyed)};` +
+    `[${keyed}]${filters.join(',')}[c${slot.index}]`
+  );
 }
 
 /** Overlay de um clipe na janela, ligado só no intervalo dele (`enable=between`). */

@@ -238,6 +238,36 @@ describe('McMaterializerService — cadeia da peça de ofertas (render_still →
     expect(again).toEqual(base);
   });
 
+  it('modo sem fundo: o recorte entra no hash do compose (chave e enquadramento); Card segue com o hash de antes e o quadro não muda', async () => {
+    const hashes = async (script: McScript) => {
+      const manager = fakeManager();
+      manager.seed(McCharacterKit, [{ ...kit }]);
+      await service.ensureAssemblyStepV2(manager, pieceProject(), script, readyScenes(script));
+      const chain = chainOf(manager);
+      return { still: chain[0].hash, compose: chain[1].hash, finalize: chain[2].hash };
+    };
+    const card = pieceScript();
+    const base = await hashes(card);
+    const cutout = await hashes({
+      ...card,
+      cutout: true,
+      framing: 'corpo',
+      cutoutKeyColor: '#00B140',
+    });
+    expect(cutout.compose).not.toBe(base.compose);
+    expect(cutout.finalize).not.toBe(base.finalize);
+    expect(cutout.still).toBe(base.still); // o quadro depende só do descritor
+    const blue = await hashes({
+      ...card,
+      cutout: true,
+      framing: 'corpo',
+      cutoutKeyColor: '#0047BB',
+    });
+    expect(blue.compose).not.toBe(cutout.compose);
+    // sem os campos do modo: igual ao de sempre (nenhum hash existente muda)
+    expect(await hashes({ ...card })).toEqual(base);
+  });
+
   it('repetir só atualiza os hashes dos pendentes; cadeia entregue ⇒ a próxima nasce com attempt 2', async () => {
     const manager = fakeManager();
     manager.seed(McCharacterKit, [{ ...kit }]);

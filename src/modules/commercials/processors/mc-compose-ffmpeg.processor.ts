@@ -205,6 +205,8 @@ export class McComposeFfmpegProcessor {
             tileHeight: null,
           });
 
+      // video-mascote-transparente: o recorte é do roteiro (cor-chave congelada na criação)
+      const cutout = this.cutoutOf(script);
       const input: ComposeGraphInput = {
         format: project.format ?? 'talking_art',
         aspectRatio: project.aspectRatio,
@@ -229,6 +231,7 @@ export class McComposeFfmpegProcessor {
         endcard: script?.endcard?.storeName?.trim()
           ? { storeName: script.endcard.storeName.trim() }
           : null,
+        ...(cutout ? { cutout } : {}),
       };
 
       const resolvedWindow = composeHashWindow({
@@ -326,6 +329,7 @@ export class McComposeFfmpegProcessor {
             backgroundArtAssetId,
             ...(piece ? { stillAssetId, pieceHash } : {}),
             gapMs: MC_TALK_GAP_MS,
+            ...(cutout ? { cutout } : {}),
             endcard: !!input.endcard,
             timeline: {
               totalS: timeline.totalS,
@@ -355,6 +359,18 @@ export class McComposeFfmpegProcessor {
     } finally {
       await this.ffmpeg.removeTempDir(tempDir);
     }
+  }
+
+  /** Modo sem fundo do roteiro; cor-chave ausente é erro terminal (nunca recorta com outra cor). */
+  private cutoutOf(script: McScript | null): ComposeGraphInput['cutout'] {
+    if (script?.cutout !== true) return null;
+    if (!script.cutoutKeyColor) {
+      throw new TerminalProviderError(
+        'Roteiro em modo sem fundo sem cor-chave congelada',
+        'cutout_key_missing',
+      );
+    }
+    return { keyColor: script.cutoutKeyColor, framing: script.framing ?? 'corpo' };
   }
 
   /** Dimensões da arte: as do asset; sem elas, lidas do arquivo (sharp). */

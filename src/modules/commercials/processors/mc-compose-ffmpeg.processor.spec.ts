@@ -369,6 +369,41 @@ describe('McComposeFfmpegProcessor — step de projeto compose_ffmpeg (tarefas 4
     expect(ffmpeg.run).not.toHaveBeenCalled();
   });
 
+  it('modo sem fundo: o grafo remove a cor-chave de cada clipe, encaixa colado embaixo e o snapshot registra o recorte', async () => {
+    Object.assign(project.script as Record<string, unknown>, {
+      cutout: true,
+      framing: 'corpo',
+      cutoutKeyColor: '#00B140',
+    });
+    await processor.process({ stepId: 'cmp-1' });
+    expect(pipeline.failStep).not.toHaveBeenCalled();
+    const compose = runWith(ffmpeg, 'composed.mp4') as string[];
+    const graph = compose[compose.indexOf('-filter_complex') + 1];
+    expect(graph.match(/chromakey=color=0x00B140/g)).toHaveLength(3); // um por clipe
+    expect(graph).toContain('pad=432:412:(ow-iw)/2:oh-ih:color=black@0');
+    expect(graph).not.toContain('fade=t=in');
+    expect(stepUpdates[0]).toMatchObject({
+      inputSnapshot: expect.objectContaining({
+        cutout: { keyColor: '#00B140', framing: 'corpo' },
+      }),
+    });
+    expect(saved[0]).toMatchObject({
+      metadata: expect.objectContaining({ cutout: { keyColor: '#00B140', framing: 'corpo' } }),
+    });
+  });
+
+  it('sem fundo sem cor-chave congelada no roteiro ⇒ falha honesta (cutout_key_missing), sem ffmpeg', async () => {
+    Object.assign(project.script as Record<string, unknown>, { cutout: true });
+    await processor.process({ stepId: 'cmp-1' });
+    expect(pipeline.failStep).toHaveBeenCalledWith(
+      step,
+      McStepStatus.RUNNING,
+      expect.objectContaining({ code: 'cutout_key_missing' }),
+      expect.objectContaining({ fallbackCode: 'compose_failed' }),
+    );
+    expect(ffmpeg.run).not.toHaveBeenCalled();
+  });
+
   it('cena sem clipe final (re-roll no meio) ⇒ step cancelado por composition_changed, sem ffmpeg', async () => {
     scenes[1].status = McSceneStatus.PENDING;
     scenes[1].finalAssetId = null;
