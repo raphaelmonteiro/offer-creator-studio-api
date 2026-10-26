@@ -7,7 +7,9 @@ import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
+import { CommercialsService } from '../commercials.service';
 import { buildConcatListContent } from '../domain/mc-assembly-graph';
+import { CHARACTER_CUTOUT_FAILED, cutoutFailureMessage } from '../domain/mc-cutout-quality';
 import { compositionDimensions } from '../domain/mc-composition.config';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import { MC_TALK_GAP_MS } from '../domain/mc-talk-conform-graph';
@@ -28,6 +30,7 @@ import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McPipelineService } from '../services/mc-pipeline.service';
+import { McCutoutQualityService } from '../services/mc-cutout-quality.service';
 import { McStorageService } from '../services/mc-storage.service';
 
 /** Cor da janela quando nem o roteiro nem o kit definem uma. */
@@ -61,6 +64,8 @@ export class McComposeFfmpegProcessor {
     private readonly transitions: TaskTransitionService,
     private readonly ffmpeg: FfmpegRunner,
     private readonly storage: McStorageService,
+    private readonly commercials: CommercialsService,
+    private readonly cutoutQuality: McCutoutQualityService,
   ) {}
 
   async process({ stepId }: { stepId: string; projectId?: string }): Promise<void> {
@@ -244,6 +249,11 @@ export class McComposeFfmpegProcessor {
         height,
       });
 
+      // 2b) modo sem fundo: verifica o recorte de cada clipe ANTES de compor (local, sem API);
+      // um clipe reprovado leva o projeto a needs_attention sem gastar a composição
+      if (cutout)
+        await this.assertCutoutQuality({ step, project, cutout, measured, scenes, tempDir });
+
       // 3) grafo + execução dos passes com progresso
       const plan = buildComposeGraph(input, tempDir);
       const totalMs = plan.passes.reduce((sum, p) => sum + p.durationMs, 0) || 1;
@@ -359,6 +369,52 @@ export class McComposeFfmpegProcessor {
     } finally {
       await this.ffmpeg.removeTempDir(tempDir);
     }
+  }
+
+  /**
+   * Reprovação do recorte (D7): grava o relatório (evento `cutout_rejected` no step) e falha de
+   * forma terminal e SEM re-execução paga (classe `validation`); nenhum asset é gravado.
+   */
+  private async assertCutoutQuality(args: {
+    step: McStep;
+    project: McProject;
+    cutout: NonNullable<ComposeGraphInput['cutout']>;
+    measured: Array<{ sceneId: string; durationMs: number; path: string }>;
+    scenes: McScene[];
+    tempDir: string;
+  }): Promise<void> {
+    const { step, project, cutout, measured, scenes } = args;
+    const report = await this.cutoutQuality.verifyClips({
+      clips: measured.map((clip, i) => ({
+        sceneId: clip.sceneId,
+        idx: scenes[i].idx,
+        path: clip.path,
+        durationMs: clip.durationMs,
+      })),
+      keyColor: cutout.keyColor,
+      tempDir: args.tempDir,
+    });
+    if (report.passed) return;
+    const failed = report.scenes.filter((s) => !s.passed);
+    await this.dataSource.transaction((manager) =>
+      this.commercials.appendEvent(manager, {
+        userId: project.userId,
+        refKind: 'step',
+        refId: step.id,
+        kind: 'cutout_rejected',
+        detail: {
+          keyColor: cutout.keyColor,
+          framing: cutout.framing,
+          scenes: failed.map((s) => ({
+            sceneId: s.sceneId,
+            idx: s.idx,
+            reasons: s.reasons,
+            metrics: s.metrics,
+          })),
+        },
+      }),
+    );
+    throw new TerminalProviderError(cutoutFailureMessage(failed.length), CHARACTER_CUTOUT_FAILED);
   }
 
   /** Modo sem fundo do roteiro; cor-chave ausente é erro terminal (nunca recorta com outra cor). */

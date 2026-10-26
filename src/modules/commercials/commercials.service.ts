@@ -57,6 +57,11 @@ import {
 import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
 import { availableProjectActions, McProjectAction } from './domain/mc-project-available-actions';
 import {
+  buildCutoutIssue,
+  CHARACTER_CUTOUT_FAILED,
+  McCutoutIssue,
+} from './domain/mc-cutout-quality';
+import {
   clipInspectionView,
   McClipInspectionView,
   McClipView,
@@ -605,6 +610,8 @@ export class CommercialsService {
       >;
       /** Ações oferecidas à UI (ex.: `refazer`, `duplicar_como_economico` após falha do motor premium). */
       availableActions: McProjectAction[];
+      /** Relatório do recorte reprovado (video-mascote-transparente, D7); null fora desse estado. */
+      cutoutIssue: McCutoutIssue | null;
     }
   > {
     const project = await this.dataSource.getRepository(McProject).findOneBy({ id });
@@ -631,12 +638,14 @@ export class CommercialsService {
     ]);
     const url = (assetId: string | null | undefined) =>
       (assetId && urls.get(assetId)?.fileUrl) || null;
+    const availableActions = availableProjectActions(project, steps);
     return {
       ...project,
+      cutoutIssue: await this.cutoutIssueOf(project, steps, availableActions),
       finalUrl: url(project.finalAssetId),
       posterUrl: (project.finalAssetId && urls.get(project.finalAssetId)?.posterUrl) || null,
       lastDeliveryUrl: url(lastDeliveryAssetId),
-      availableActions: availableProjectActions(project, steps),
+      availableActions,
       scenes: scenes.map((s) => ({
         ...s,
         keyframeUrl: url(s.keyframeAssetId),
@@ -660,6 +669,37 @@ export class CommercialsService {
    * ausentes), com tipo/medidas/metadata para a visão do clipe (motor e
    * resolução, 7.2).
    */
+  /**
+   * `cutoutIssue` (D7): último `cutout_rejected` do `compose_ffmpeg` falho da revisão corrente,
+   * só com o projeto em `needs_attention` por `character_cutout_failed`.
+   */
+  private async cutoutIssueOf(
+    project: McProject,
+    steps: McStep[],
+    actions: McProjectAction[],
+  ): Promise<McCutoutIssue | null> {
+    if (
+      project.status !== McProjectStatus.NEEDS_ATTENTION ||
+      project.errorCode !== CHARACTER_CUTOUT_FAILED
+    ) {
+      return null;
+    }
+    const failed = steps
+      .filter(
+        (s) =>
+          s.type === McStepType.COMPOSE_FFMPEG &&
+          s.status === McStepStatus.FAILED &&
+          (s.projectRevision == null || s.projectRevision === project.revision),
+      )
+      .map((s) => s.id);
+    if (failed.length === 0) return null;
+    const event = await this.dataSource.getRepository(McEvent).findOne({
+      where: { refKind: 'step', refId: In(failed), kind: 'cutout_rejected' },
+      order: { id: 'DESC' },
+    });
+    return buildCutoutIssue(event?.detail, actions);
+  }
+
   private async resolveAssetUrls(ids: Array<string | null | undefined>): Promise<
     Map<
       string,

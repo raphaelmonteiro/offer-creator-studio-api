@@ -1,3 +1,4 @@
+import { CHARACTER_CUTOUT_FAILED } from './mc-cutout-quality';
 import { McProjectStatus, McStepStatus } from './mc-state-machines';
 import { McProjectTier, McStepType } from './mc-types';
 
@@ -12,14 +13,23 @@ import { McProjectTier, McStepType } from './mc-types';
  *   `talk` num projeto `premium` — a cópia reaproveita roteiro, falas e tile
  *   e gera só os clipes no motor econômico (`POST /projects/:id/duplicate`
  *   com `tier: 'economico'`).
+ * - `gerar_fala_de_novo` e `usar_painel_liso` (video-mascote-transparente, D7): projeto em
+ *   `needs_attention` por recorte reprovado (`errorCode = character_cutout_failed`); são as
+ *   únicas ações nesse caso (nunca `refazer` nem `duplicar_como_economico`, que são de step de cena).
  */
-export const MC_PROJECT_ACTIONS = ['refazer', 'duplicar_como_economico'] as const;
+export const MC_PROJECT_ACTIONS = [
+  'refazer',
+  'duplicar_como_economico',
+  'gerar_fala_de_novo',
+  'usar_painel_liso',
+] as const;
 export type McProjectAction = (typeof MC_PROJECT_ACTIONS)[number];
 
 export interface AvailableActionsProject {
   status: McProjectStatus;
   tier?: McProjectTier | null;
   revision?: number | null;
+  errorCode?: string | null;
 }
 
 export interface AvailableActionsStep {
@@ -34,6 +44,8 @@ export function availableProjectActions(
   steps: AvailableActionsStep[],
 ): McProjectAction[] {
   if (project.status !== McProjectStatus.NEEDS_ATTENTION) return [];
+  if (project.errorCode === CHARACTER_CUTOUT_FAILED)
+    return ['gerar_fala_de_novo', 'usar_painel_liso'];
   const revision = project.revision ?? null;
   const failed = steps.filter(
     (s) =>

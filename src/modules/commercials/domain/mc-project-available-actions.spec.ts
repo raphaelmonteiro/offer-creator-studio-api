@@ -19,6 +19,40 @@ describe('availableProjectActions — ações da UI em needs_attention (spec "Mo
     ).toEqual(['refazer', 'duplicar_como_economico']);
   });
 
+  it('recorte reprovado (character_cutout_failed): só "gerar a fala de novo" e "usar painel liso", nunca refazer/duplicar', () => {
+    const compose = {
+      sceneId: null,
+      type: McStepType.COMPOSE_FFMPEG,
+      status: McStepStatus.FAILED,
+      projectRevision: 1,
+    };
+    expect(
+      availableProjectActions(
+        {
+          status: McProjectStatus.NEEDS_ATTENTION,
+          tier: 'premium',
+          revision: 1,
+          errorCode: 'character_cutout_failed',
+        },
+        [compose, failedTalk],
+      ),
+    ).toEqual(['gerar_fala_de_novo', 'usar_painel_liso']);
+    // outro erro no compose (sem step de cena falhado) segue sem ações
+    expect(
+      availableProjectActions(
+        { status: McProjectStatus.NEEDS_ATTENTION, revision: 1, errorCode: 'compose_failed' },
+        [compose],
+      ),
+    ).toEqual([]);
+    // fora de needs_attention o código não oferece nada
+    expect(
+      availableProjectActions(
+        { status: McProjectStatus.GENERATING, errorCode: 'character_cutout_failed' },
+        [],
+      ),
+    ).toEqual([]);
+  });
+
   it('projeto econômico com talk falhado → só "refazer"', () => {
     expect(
       availableProjectActions(

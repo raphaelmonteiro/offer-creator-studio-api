@@ -15,7 +15,9 @@ import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McPipelineService } from '../services/mc-pipeline.service';
+import { McCutoutQualityService } from '../services/mc-cutout-quality.service';
 import { McStorageService } from '../services/mc-storage.service';
+import { CommercialsService } from '../commercials.service';
 import { McComposeFfmpegProcessor } from './mc-compose-ffmpeg.processor';
 
 function runWith(ffmpeg: { run: jest.Mock }, needle: string): string[] | undefined {
@@ -57,6 +59,8 @@ describe('McComposeFfmpegProcessor — step de projeto compose_ffmpeg (tarefas 4
   let stepUpdates: Array<Record<string, unknown>>;
   let dataSource: { getRepository: jest.Mock; transaction: jest.Mock };
   let processor: McComposeFfmpegProcessor;
+  let commercials: { appendEvent: jest.Mock };
+  let cutoutQuality: { verifyClips: jest.Mock };
 
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mc-compose-spec-'));
@@ -166,12 +170,16 @@ describe('McComposeFfmpegProcessor — step de projeto compose_ffmpeg (tarefas 4
         } as unknown as EntityManager),
       ),
     };
+    commercials = { appendEvent: jest.fn().mockResolvedValue(undefined) };
+    cutoutQuality = { verifyClips: jest.fn().mockResolvedValue({ passed: true, scenes: [] }) };
     processor = new McComposeFfmpegProcessor(
       dataSource as unknown as DataSource,
       pipeline as unknown as McPipelineService,
       transitions as unknown as TaskTransitionService,
       ffmpeg as unknown as FfmpegRunner,
       storage as unknown as McStorageService,
+      commercials as unknown as CommercialsService,
+      cutoutQuality as unknown as McCutoutQualityService,
     );
   });
 
@@ -390,6 +398,81 @@ describe('McComposeFfmpegProcessor — step de projeto compose_ffmpeg (tarefas 4
     expect(saved[0]).toMatchObject({
       metadata: expect.objectContaining({ cutout: { keyColor: '#00B140', framing: 'corpo' } }),
     });
+  });
+
+  it('sem fundo: a verificação do recorte roda ANTES do ffmpeg, com os clipes na ordem e a chave do roteiro; aprovada, compõe', async () => {
+    Object.assign(project.script as Record<string, unknown>, {
+      cutout: true,
+      framing: 'corpo',
+      cutoutKeyColor: '#0047BB',
+    });
+    await processor.process({ stepId: 'cmp-1' });
+    expect(pipeline.failStep).not.toHaveBeenCalled();
+    const call = cutoutQuality.verifyClips.mock.calls[0][0];
+    expect(call.keyColor).toBe('#0047BB');
+    expect(call.clips.map((c: { idx: number; sceneId: string }) => [c.idx, c.sceneId])).toEqual([
+      [0, 'fx-talk-1'],
+      [1, 'fx-talk-2'],
+      [2, 'fx-talk-3'],
+    ]);
+    expect(cutoutQuality.verifyClips.mock.invocationCallOrder[0]).toBeLessThan(
+      ffmpeg.run.mock.invocationCallOrder[0],
+    );
+    expect(saved).toHaveLength(1);
+  });
+
+  it('clipe reprovado no recorte: evento cutout_rejected, falha character_cutout_failed em pt-BR, nenhum passe do ffmpeg e nenhum asset', async () => {
+    Object.assign(project.script as Record<string, unknown>, {
+      cutout: true,
+      framing: 'corpo',
+      cutoutKeyColor: '#00B140',
+    });
+    cutoutQuality.verifyClips.mockResolvedValue({
+      passed: false,
+      scenes: [
+        { sceneId: 'fx-talk-1', idx: 0, passed: true, reasons: [], metrics: {} },
+        {
+          sceneId: 'fx-talk-2',
+          idx: 1,
+          passed: false,
+          reasons: ['background_unstable'],
+          metrics: { backgroundDrift: 6.4 },
+        },
+      ],
+    });
+    await processor.process({ stepId: 'cmp-1' });
+    expect(ffmpeg.run).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(0);
+    expect(pipeline.completeStepAndAdvance).not.toHaveBeenCalled();
+    expect(commercials.appendEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        refKind: 'step',
+        refId: 'cmp-1',
+        kind: 'cutout_rejected',
+        detail: expect.objectContaining({
+          keyColor: '#00B140',
+          framing: 'corpo',
+          scenes: [
+            {
+              sceneId: 'fx-talk-2',
+              idx: 1,
+              reasons: ['background_unstable'],
+              metrics: { backgroundDrift: 6.4 },
+            },
+          ],
+        }),
+      }),
+    );
+    expect(pipeline.failStep).toHaveBeenCalledWith(
+      step,
+      McStepStatus.RUNNING,
+      expect.objectContaining({
+        code: 'character_cutout_failed',
+        message: expect.stringContaining('1 fala(s)'),
+      }),
+      expect.objectContaining({ fallbackCode: 'compose_failed' }),
+    );
   });
 
   it('sem fundo sem cor-chave congelada no roteiro ⇒ falha honesta (cutout_key_missing), sem ffmpeg', async () => {
