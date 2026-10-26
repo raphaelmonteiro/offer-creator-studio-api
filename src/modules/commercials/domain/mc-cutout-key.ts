@@ -5,6 +5,7 @@
  * mede a fração de pixels OPACOS da identidade perto de cada candidata em
  * CIELAB (ΔE76); sem candidata segura o modo sem fundo é recusado para o kit.
  */
+import { parseHexColor } from './mc-tile';
 
 export const MC_CUTOUT_KEY_RULE_VERSION = 1;
 export const MC_CUTOUT_KEY_GREEN = '#00B140';
@@ -58,8 +59,17 @@ export function rgbToLab(r: number, g: number, b: number): McLab {
 }
 
 export function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace('#', '');
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  const color = parseHexColor(hex);
+  return color ? [color.r, color.g, color.b] : [0, 0, 0];
+}
+
+/** Candidata da chave como a API expõe (`kit.cutout.candidates` e o 422 de chave insegura). */
+export function cutoutCandidateView(c: McCutoutKeyCandidate): {
+  color: string;
+  nearFraction40: number;
+  nearFraction60: number;
+} {
+  return { color: c.color, nearFraction40: c.near40, nearFraction60: c.near60 };
 }
 
 /** ΔE76 entre duas cores Lab. */

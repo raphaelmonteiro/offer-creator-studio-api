@@ -22,6 +22,7 @@ import {
   MC_FIRST_POLL_DELAY_S,
   mcExpireForQueue,
 } from '../domain/mc-pipeline.config';
+import { hexToRgb } from '../domain/mc-cutout-key';
 import { buildActionVideoPrompt, buildAvatarVideoPrompt } from '../domain/mc-scene-prompts';
 import { assertStepTransition, McStepStatus } from '../domain/mc-state-machines';
 import {
@@ -138,7 +139,7 @@ export function buildUnstableCutoutGraph(durationS: number): string {
 
 /** Tom de fundo deslocado da fixture instável: ΔE bem acima da deriva tolerada. */
 export function shiftedKeyColor(hex: string): string {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const [r, g, b] = hexToRgb(hex);
   const shift = (v: number, d: number) => Math.max(0, Math.min(255, v + d));
   return `#${[shift(r, 48), shift(g, 31), shift(b, 56)].map((v) => v.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
 }

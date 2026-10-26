@@ -52,14 +52,8 @@ export class McKitBodyTileService {
       });
     }
     const identityId = String(tile.metadata?.identityAssetId ?? '');
-    if (kit.bodyTileAssetId) {
-      const existing = await assets.findOneBy({ id: kit.bodyTileAssetId });
-      const reusable =
-        existing &&
-        (existing.id === tile.id || existing.metadata?.identityAssetId === identityId) &&
-        existing.metadata?.cutoutKey;
-      if (reusable) return existing;
-    }
+    const reusable = await this.reusableBodyTile(kit, tile, identityId);
+    if (reusable) return reusable;
     if (kit.identityMode === 'logo_as_is') return this.useLogoAsBody(kit, tile);
     const identity = identityId ? await assets.findOneBy({ id: identityId }) : null;
     return this.buildBody(kit, tile, identity);
@@ -75,6 +69,21 @@ export class McKitBodyTileService {
     tile.metadata = { ...tile.metadata, cutoutKey };
     await repo.update({ id: tile.id }, { metadata: tile.metadata });
     return this.claim(kit, tile);
+  }
+
+  /** Tile de corpo já gravado no kit, da mesma identidade e com a chave decidida; senão null. */
+  private async reusableBodyTile(
+    kit: McCharacterKit,
+    tile: AnimationAsset,
+    identityId: string,
+  ): Promise<AnimationAsset | null> {
+    if (!kit.bodyTileAssetId) return null;
+    const existing = await this.dataSource
+      .getRepository(AnimationAsset)
+      .findOneBy({ id: kit.bodyTileAssetId });
+    const sameIdentity =
+      existing && (existing.id === tile.id || existing.metadata?.identityAssetId === identityId);
+    return sameIdentity && existing.metadata?.cutoutKey ? existing : null;
   }
 
   private async buildBody(
@@ -95,6 +104,26 @@ export class McKitBodyTileService {
     const raw = await this.readRaw(source);
     const uniformity = await this.assertBorder(raw);
     this.keyBackground(raw, uniformity);
+    const plan = this.planFromRaw(raw, bbox);
+    const png = await this.renderTile(raw, plan);
+    const cutoutKey = await this.decideKey(raw);
+    const created = await this.saveBodyAsset({
+      kit,
+      identity,
+      plan,
+      png,
+      metadata: { bbox, detectedBackgroundColor: uniformity.hex, cutoutKey },
+    });
+    this.logger.log(
+      `Kit ${kit.id}: tile de corpo ${plan.output.width}x${plan.output.height} (rosto ${Math.round(
+        plan.faceFraction * 100,
+      )}%, chave ${cutoutKey.chosen ?? 'nenhuma segura'})`,
+    );
+    return this.claim(kit, created);
+  }
+
+  /** Plano do tile a partir do alfa já chaveado; 422 com saída "busto" se não achar a figura. */
+  private planFromRaw(raw: RawImage, bbox: McNormalizedBox): McBodyTilePlan {
     const alpha = new Uint8Array(raw.width * raw.height);
     for (let i = 0; i < alpha.length; i++) alpha[i] = raw.data[i * 4 + 3];
     const result = planBodyTile({ width: raw.width, height: raw.height, alpha, bbox });
@@ -105,15 +134,24 @@ export class McKitBodyTileService {
         details: { actions: ['use_bust'] },
       });
     }
-    const png = await this.renderTile(raw, result.plan);
-    const cutoutKey = await this.decideKey(raw);
+    return result.plan;
+  }
+
+  /** Grava o arquivo do tile e o asset `kit_tile` (com a metadata do plano) no banco. */
+  private async saveBodyAsset(input: {
+    kit: McCharacterKit;
+    identity: AnimationAsset;
+    plan: McBodyTilePlan;
+    png: Buffer;
+    metadata: Record<string, unknown>;
+  }): Promise<AnimationAsset> {
+    const { kit, identity, plan, png, metadata } = input;
     const url = await this.storage.saveFile(
       `commercials/kits/${kit.id}`,
       `tile-corpo-${Date.now()}.png`,
       png,
     );
-    const plan = result.plan;
-    const created = await this.dataSource.getRepository(AnimationAsset).save({
+    return this.dataSource.getRepository(AnimationAsset).save({
       userId: kit.userId,
       kind: 'kit_tile' as const,
       status: 'ready' as const,
@@ -130,23 +168,15 @@ export class McKitBodyTileService {
         identityAssetId: identity.id,
         identityMode: kit.identityMode,
         framing: 'body',
-        bbox,
         figure: plan.figure,
         margin: plan.margin,
         cutAtBottom: plan.cutAtBottom,
         faceFraction: plan.faceFraction,
         ratio: Number(plan.ratio.toFixed(4)),
         warnings: plan.warnings,
-        detectedBackgroundColor: uniformity.hex,
-        cutoutKey,
+        ...metadata,
       },
     });
-    this.logger.log(
-      `Kit ${kit.id}: tile de corpo ${plan.output.width}x${plan.output.height} (rosto ${Math.round(
-        plan.faceFraction * 100,
-      )}%, chave ${cutoutKey.chosen ?? 'nenhuma segura'})`,
-    );
-    return this.claim(kit, created);
   }
 
   /** Grava `bodyTileAssetId` só se ainda não há outro válido; quem perde a corrida descarta o seu. */

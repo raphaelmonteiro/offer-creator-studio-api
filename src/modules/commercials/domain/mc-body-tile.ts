@@ -147,6 +147,66 @@ function outputSize(tile: McPixelRect): { scale: number; width: number; height: 
   };
 }
 
+/** Folgas (px) que o `extend` do sharp precisa para cobrir o que o `extract` não alcançou. */
+function planExtend(tile: McPixelRect, extract: McPixelRect): McBodyTilePlan['extend'] {
+  return {
+    top: extract.top - tile.top,
+    left: extract.left - tile.left,
+    bottom: tile.top + tile.height - (extract.top + extract.height),
+    right: tile.left + tile.width - (extract.left + extract.width),
+  };
+}
+
+/** Avisos do plano: só busto, corpo encurtado para o rosto e laterais cortadas na identidade. */
+function bodyTileWarnings(input: {
+  figure: McPixelRect;
+  imageWidth: number;
+  faceHeight: number;
+  cutAtBottom: boolean;
+  trimmed: boolean;
+}): McBodyTileWarningCode[] {
+  const { figure, imageWidth, faceHeight, cutAtBottom, trimmed } = input;
+  const warnings: McBodyTileWarningCode[] = [];
+  if (cutAtBottom && figure.height / faceHeight <= BUST_ONLY_RATIO) {
+    warnings.push('IDENTITY_BUST_ONLY');
+  }
+  if (trimmed) warnings.push('BODY_TRIMMED_FOR_FACE');
+  if (figure.left <= 0 || figure.left + figure.width >= imageWidth) {
+    warnings.push('IDENTITY_CROPPED_SIDES');
+  }
+  return warnings;
+}
+
+/** Bordas iniciais do tile: a figura mais a margem; sem folga embaixo se a identidade já é cortada. */
+function initialEdges(input: {
+  figure: McPixelRect;
+  margin: number;
+  cutAtBottom: boolean;
+  imageHeight: number;
+}): Edges {
+  const { figure, margin, cutAtBottom, imageHeight } = input;
+  return {
+    left: figure.left - margin,
+    top: figure.top - margin,
+    right: figure.left + figure.width + margin,
+    bottom: cutAtBottom ? imageHeight : figure.top + figure.height + margin,
+  };
+}
+
+/** Margem (px) em volta da figura: fração do maior lado, com piso. */
+function figureMargin(figure: McPixelRect): number {
+  return Math.max(MIN_MARGIN, Math.round(MARGIN_FRACTION * Math.max(figure.width, figure.height)));
+}
+
+function edgesToRect(edges: Edges): McPixelRect {
+  return {
+    left: edges.left,
+    top: edges.top,
+    width: edges.right - edges.left,
+    height: edges.bottom - edges.top,
+  };
+}
+
 /** Plano do tile de corpo a partir do alfa da identidade e da caixa do rosto (normalizada). */
 export function planBodyTile(input: {
   width: number;
@@ -158,46 +218,29 @@ export function planBodyTile(input: {
   const figure = findFigureBox(alpha, width, height);
   if (!figure) return { ok: false, code: 'BODY_TILE_FIGURE_NOT_FOUND' };
   const cutAtBottom = identityCutAtBottom(alpha, width, height);
-  const margin = Math.max(
-    MIN_MARGIN,
-    Math.round(MARGIN_FRACTION * Math.max(figure.width, figure.height)),
-  );
+  const margin = figureMargin(figure);
   const faceH = Math.max(1, bbox.h * height);
   const face = { bottom: (bbox.y + bbox.h) * height, height: faceH };
-  const initial: Edges = {
-    left: figure.left - margin,
-    top: figure.top - margin,
-    right: figure.left + figure.width + margin,
-    bottom: cutAtBottom ? height : figure.top + figure.height + margin,
-  };
+  const initial = initialEdges({ figure, margin, cutAtBottom, imageHeight: height });
   const trim = trimForFace(initial, face, margin);
   const edges = fitRatio(trim.edges);
-  const tile: McPixelRect = {
-    left: edges.left,
-    top: edges.top,
-    width: edges.right - edges.left,
-    height: edges.bottom - edges.top,
-  };
+  const tile = edgesToRect(edges);
   const extract = clampRect(tile, width, height);
   const out = outputSize(tile);
   const faceFraction = faceH / tile.height;
-  const warnings: McBodyTileWarningCode[] = [];
-  if (cutAtBottom && figure.height / faceH <= BUST_ONLY_RATIO) warnings.push('IDENTITY_BUST_ONLY');
-  if (trim.trimmed) warnings.push('BODY_TRIMMED_FOR_FACE');
-  if (figure.left <= 0 || figure.left + figure.width >= width) {
-    warnings.push('IDENTITY_CROPPED_SIDES');
-  }
+  const warnings = bodyTileWarnings({
+    figure,
+    imageWidth: width,
+    faceHeight: faceH,
+    cutAtBottom,
+    trimmed: trim.trimmed,
+  });
   return {
     ok: true,
     plan: {
       tile,
       extract,
-      extend: {
-        top: extract.top - tile.top,
-        left: extract.left - tile.left,
-        bottom: tile.top + tile.height - (extract.top + extract.height),
-        right: tile.left + tile.width - (extract.left + extract.width),
-      },
+      extend: planExtend(tile, extract),
       figure,
       margin,
       cutAtBottom,

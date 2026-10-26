@@ -18,7 +18,7 @@ import {
   McBodyTileWarningCode,
 } from '../domain/mc-body-tile';
 import { isCharacterCutoutEnabled } from '../domain/mc-cutout.config';
-import { McCutoutKeyDecision } from '../domain/mc-cutout-key';
+import { cutoutCandidateView, McCutoutKeyDecision } from '../domain/mc-cutout-key';
 import { MC_TILE_MIN_FACE_FRACTION } from '../domain/mc-tile';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McEvent } from '../entities/mc-event.entity';
@@ -283,37 +283,37 @@ export class McKitViewService {
   ): { bodyTile: KitBodyTileView | null; cutout: KitCutoutView | null } {
     const asset = kit.bodyTileAssetId ? byId.get(kit.bodyTileAssetId) : undefined;
     if (!isCharacterCutoutEnabled() || !asset) return { bodyTile: null, cutout: null };
+    const key = asset.metadata?.cutoutKey as McCutoutKeyDecision | undefined;
+    return {
+      bodyTile: this.bodyTileView(asset, asset.id === kit.tileAssetId),
+      cutout: key
+        ? {
+            keyColor: key.chosen,
+            safe: key.safe,
+            candidates: key.candidates.map(cutoutCandidateView),
+          }
+        : null,
+    };
+  }
+
+  /** Tile de corpo do kit; logo como está usa o tile do kit e só avisa LOGO_AS_IS_NO_BODY. */
+  private bodyTileView(asset: AnimationAsset, logoAsIs: boolean): KitBodyTileView {
     const meta = asset.metadata ?? {};
-    const logoAsIs = asset.id === kit.tileAssetId;
     const faceFraction =
       !logoAsIs && typeof meta.faceFraction === 'number' ? (meta.faceFraction as number) : null;
     const codes: McBodyTileWarningCode[] = logoAsIs
       ? ['LOGO_AS_IS_NO_BODY']
       : ((meta.warnings as McBodyTileWarningCode[] | undefined) ?? []);
-    const key = meta.cutoutKey as McCutoutKeyDecision | undefined;
     return {
-      bodyTile: {
-        assetId: asset.id,
-        url: asset.fileUrl,
-        width: asset.width ?? null,
-        height: asset.height ?? null,
-        ratio: typeof meta.ratio === 'number' ? (meta.ratio as number) : null,
-        faceFraction,
-        faceBelowMinimum: faceFraction != null && faceFraction < MC_BODY_TILE_MIN_FACE_FRACTION,
-        cutAtBottom: meta.cutAtBottom === true,
-        warnings: codes.map((code) => ({ code, message: MC_BODY_TILE_WARNING_MESSAGES[code] })),
-      },
-      cutout: key
-        ? {
-            keyColor: key.chosen,
-            safe: key.safe,
-            candidates: key.candidates.map((c) => ({
-              color: c.color,
-              nearFraction40: c.near40,
-              nearFraction60: c.near60,
-            })),
-          }
-        : null,
+      assetId: asset.id,
+      url: asset.fileUrl,
+      width: asset.width ?? null,
+      height: asset.height ?? null,
+      ratio: typeof meta.ratio === 'number' ? (meta.ratio as number) : null,
+      faceFraction,
+      faceBelowMinimum: faceFraction != null && faceFraction < MC_BODY_TILE_MIN_FACE_FRACTION,
+      cutAtBottom: meta.cutAtBottom === true,
+      warnings: codes.map((code) => ({ code, message: MC_BODY_TILE_WARNING_MESSAGES[code] })),
     };
   }
 }

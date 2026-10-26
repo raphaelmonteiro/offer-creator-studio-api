@@ -1,7 +1,11 @@
 import { BadRequestException, Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, Not } from 'typeorm';
-import { McCutoutKeyColor, McCutoutKeyDecision } from '../domain/mc-cutout-key';
+import {
+  cutoutCandidateView,
+  McCutoutKeyColor,
+  McCutoutKeyDecision,
+} from '../domain/mc-cutout-key';
 import { isCharacterCutoutEnabled } from '../domain/mc-cutout.config';
 import { McPieceDocument, pieceBlock } from '../domain/mc-piece';
 import {
@@ -108,11 +112,7 @@ export class McCutoutGuardService {
         'As cores desta personagem são parecidas demais com o verde e o azul de recorte; use um painel liso.',
       details: {
         kitId,
-        candidates: (key?.candidates ?? []).map((c) => ({
-          color: c.color,
-          nearFraction40: c.near40,
-          nearFraction60: c.near60,
-        })),
+        candidates: (key?.candidates ?? []).map(cutoutCandidateView),
         actions: ['use_flat_panel'],
       },
     });
