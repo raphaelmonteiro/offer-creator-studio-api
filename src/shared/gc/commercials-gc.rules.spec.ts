@@ -124,6 +124,16 @@ describe('selectCommercialsGarbage — tiles substituídos', () => {
     ]);
   });
 
+  it('tile de corpo referenciado pelo kit (bodyTileAssetId) não é lixo', () => {
+    expect(
+      selectCommercialsGarbage(
+        [tile({ deletedAt: daysAgo(9) })],
+        ctx({ kits: [kit({ tileAssetId: 't2', bodyTileAssetId: 't1' })] }),
+        NOW,
+      ),
+    ).toEqual([]);
+  });
+
   it('tile do kit, tile citado por snapshot de step ou dentro da carência → preservado', () => {
     expect(
       selectCommercialsGarbage([tile()], ctx({ kits: [kit({ tileAssetId: 't1' })] }), NOW),

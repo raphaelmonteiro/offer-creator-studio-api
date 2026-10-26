@@ -256,12 +256,14 @@ export class UploadsGcService implements OnModuleInit, OnModuleDestroy {
               "candidateRoundId"::text AS "candidateRoundId",
               "identityAssetId"::text AS "identityAssetId",
               "tileAssetId"::text AS "tileAssetId",
+              "bodyTileAssetId"::text AS "bodyTileAssetId",
               "cutoutAssetId"::text AS "cutoutAssetId",
               "referenceAssetIds"::text[] AS "referenceAssetIds"
          FROM mc_character_kits
         WHERE id::text = ANY($1::text[])
            OR "identityAssetId"::text = ANY($2::text[])
            OR "tileAssetId"::text = ANY($2::text[])
+           OR "bodyTileAssetId"::text = ANY($2::text[])
            OR "cutoutAssetId"::text = ANY($2::text[])
            OR "referenceAssetIds"::text[] && $2::text[]`,
       [kitIds, ids],

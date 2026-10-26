@@ -64,6 +64,10 @@ export class McCharacterKit {
   @Column({ type: 'uuid', nullable: true })
   tileAssetId: string | null;
 
+  /** Tile de corpo (personagem inteira, com alfa), calculado sob demanda da identidade (video-mascote-transparente, D4). */
+  @Column({ type: 'uuid', nullable: true })
+  bodyTileAssetId: string | null;
+
   /** Cor de fundo padrão do tile e do slot frontal das referências (#RRGGBB ou #RRGGBBAA). */
   @Column({ type: 'varchar', length: 9, nullable: true })
   tileBackgroundColor: string | null;

@@ -132,6 +132,8 @@ export interface CommercialsGcKit {
   candidateRoundId: string | null;
   identityAssetId: string | null;
   tileAssetId: string | null;
+  /** Tile de corpo (video-mascote-transparente); ausente em contextos antigos. */
+  bodyTileAssetId?: string | null;
   cutoutAssetId: string | null;
   referenceAssetIds: string[] | null;
 }
@@ -245,7 +247,12 @@ export function selectCommercialsGarbage(
   const kitRefs = new Set<string>();
   const openRounds = new Map<string, string>();
   for (const kit of ctx.kits) {
-    for (const id of [kit.identityAssetId, kit.tileAssetId, kit.cutoutAssetId]) {
+    for (const id of [
+      kit.identityAssetId,
+      kit.tileAssetId,
+      kit.bodyTileAssetId,
+      kit.cutoutAssetId,
+    ]) {
       if (id) kitRefs.add(id);
     }
     for (const id of kit.referenceAssetIds ?? []) kitRefs.add(id);
