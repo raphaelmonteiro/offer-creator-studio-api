@@ -569,6 +569,21 @@ describe('McIngestProcessor — step talk: conformação ao áudio, inspeção p
     );
   });
 
+  it('modo sem fundo: a inspeção recebe a cor-chave do snapshot do talk; sem ela, null (prompt de sempre)', async () => {
+    await processor.process({ stepId: 'st-talk' });
+    expect(inspector.inspect.mock.calls[0][3]).toMatchObject({ cutoutKey: null });
+    inspector.inspect.mockClear();
+    (step.inputSnapshot as Record<string, unknown>).cutout = {
+      keyColor: '#00B140',
+      framing: 'corpo',
+    };
+    await processor.process({ stepId: 'st-talk' });
+    expect(inspector.inspect.mock.calls[0][3]).toMatchObject({
+      backgroundKind: 'plain',
+      cutoutKey: '#00B140',
+    });
+  });
+
   it('áudio sem alinhamento → janelas vazias (o inspetor pula só a checagem de boca)', async () => {
     audioAsset.metadata = {};
     await processor.process({ stepId: 'st-talk' });

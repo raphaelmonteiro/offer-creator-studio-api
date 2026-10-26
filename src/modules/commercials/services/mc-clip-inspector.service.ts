@@ -41,6 +41,12 @@ export interface ClipInspectionContext {
   backgroundKind: 'plain' | 'scene';
   /** Janelas de fala (s, relativas ao clipe) — vazio = checagem de boca pulada. */
   speechWindows: SpeechWindow[];
+  /**
+   * Modo sem fundo (video-mascote-transparente, D13): cor-chave do fundo de geração. Presente ⇒ o
+   * fundo chapado é INTENCIONAL (nunca defeito) e texto na roupa/corpo continua `unwanted_text`.
+   * Ausente = o prompt de sempre, byte a byte.
+   */
+  cutoutKey?: string | null;
 }
 
 export interface ClipInspection {
@@ -78,6 +84,16 @@ const STYLE_WORDS: Record<McKitStyle, string> = {
 };
 
 /** Prompt de QA dirigido pelo contexto: nunca presume "mascote num corredor de loja". */
+/**
+ * Modo sem fundo: o fundo liso da geração é o fundo de recorte (chroma key) — nunca um defeito —, e
+ * a proibição de texto vale também no corpo e na roupa (enquadramento de corpo).
+ */
+const CUTOUT_BACKGROUND_NOTE =
+  'The flat solid green or blue background is an INTENTIONAL chroma-key background used to cut ' +
+  'the character out later: it is NEVER a defect, so do not report it as deformed or as text. ' +
+  'Any text, letters, numbers, scribbles or glyphs that look like writing on the clothing or on ' +
+  'the body of the character DO count as unwanted_text, also in a full-body framing.';
+
 export function buildClipInspectionPrompt(ctx: ClipInspectionContext, pairs: number): string {
   const subject =
     ctx.source === 'logo'
@@ -94,6 +110,7 @@ export function buildClipInspectionPrompt(ctx: ClipInspectionContext, pairs: num
     `You are the QA reviewer of a short animated commercial. The images are frames sampled from ONE`,
     `generated video clip of ${subject}${style}, speaking to the camera in Brazilian Portuguese.`,
     background,
+    ...(ctx.cutoutKey ? [CUTOUT_BACKGROUND_NOTE] : []),
     'Check 1 (unwanted_text): detect text rendered inside the clip by the video generator:',
     'captions, subtitles, signs, boards, banners, posters, price tags, stickers, watermarks or',
     "garbled glyphs that look like writing. Lettering that is part of the character's own logo",

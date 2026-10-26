@@ -163,6 +163,23 @@ describe('McClipInspectorService — inspeção por contexto e janelas de fala (
     expect(scene).not.toContain('PAIRS');
   });
 
+  it('modo sem fundo (D13): o fundo-chave é intencional e texto na roupa/corpo continua reprovado; sem cutoutKey o prompt é o de sempre', () => {
+    const base = buildClipInspectionPrompt(PLAIN_CTX, 3);
+    expect(buildClipInspectionPrompt({ ...PLAIN_CTX, cutoutKey: null }, 3)).toBe(base);
+    expect(base).not.toContain('INTENTIONAL');
+
+    const cutout = buildClipInspectionPrompt({ ...PLAIN_CTX, cutoutKey: '#00B140' }, 3);
+    expect(cutout).toContain('INTENTIONAL chroma-key background');
+    expect(cutout).toContain('NEVER a defect');
+    expect(cutout).toContain('on the clothing or on the body');
+    expect(cutout).toContain('DO count as unwanted_text');
+    // as regras de sempre seguem intactas no prompt de corpo
+    expect(cutout).toContain('Check 1 (unwanted_text)');
+    expect(cutout).toContain('Check 2 (deformed)');
+    expect(cutout).toContain('3 PAIRS of consecutive frames');
+    expect(cutout.startsWith(base.slice(0, 120))).toBe(true);
+  });
+
   describe('inspect()', () => {
     let ffmpeg: { run: jest.Mock };
     let gemini: { describeImages: jest.Mock };
@@ -204,6 +221,26 @@ describe('McClipInspectorService — inspeção por contexto e janelas de fala (
       });
       expect(McClipInspectorService.decision(result, 1)).toBe('retry');
       expect(McClipInspectorService.errorCodeFor(result)).toBe(MC_CLIP_MOUTH_STILL_ERROR_CODE);
+    });
+
+    it('modo sem fundo: o prompt enviado informa o fundo intencional; texto no peito reprova pela mesma regra e fundo liso sozinho não reprova', async () => {
+      const ctx = { ...PLAIN_CTX, cutoutKey: '#00B140' };
+      gemini.describeImages.mockResolvedValue(
+        '{"unwanted_text": true, "where": "middle", "deformed": false, "mouth_moving": true, "description": "garbled letters on the shirt"}',
+      );
+      const text = await service.inspect('/tmp/v.mp4', 6000, '/tmp', ctx);
+      expect((gemini.describeImages.mock.calls[0][0] as { prompt: string }).prompt).toContain(
+        'INTENTIONAL chroma-key background',
+      );
+      expect(text).toMatchObject({ flagged: true, reasons: ['text'], verdict: 'reprovado' });
+      expect(McClipInspectorService.decision(text, 1)).toBe('retry');
+      expect(McClipInspectorService.decision(text, 3)).toBe('accept'); // teto de re-execuções de sempre
+
+      gemini.describeImages.mockResolvedValue(
+        '{"unwanted_text": false, "where": null, "deformed": false, "mouth_moving": true, "description": "flat green background"}',
+      );
+      const clean = await service.inspect('/tmp/v.mp4', 6000, '/tmp', ctx);
+      expect(clean).toMatchObject({ flagged: false, reasons: [], verdict: 'ok' });
     });
 
     it('sem alinhamento (sem janelas): só a checagem de boca é pulada e registrada; texto e deformação seguem', async () => {

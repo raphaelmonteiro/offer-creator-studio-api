@@ -220,6 +220,11 @@ export class McIngestProcessor {
           style: kit?.style ?? null,
           backgroundKind: talk ? 'plain' : 'scene',
           speechWindows,
+          // modo sem fundo: o clipe cru ainda tem o fundo-chave, que NÃO é defeito (D13)
+          cutoutKey: talk
+            ? ((step.inputSnapshot as { cutout?: { keyColor?: string } } | null)?.cutout
+                ?.keyColor ?? null)
+            : null,
         };
         inspection = await this.inspector.inspect(
           finalVideoPath,
