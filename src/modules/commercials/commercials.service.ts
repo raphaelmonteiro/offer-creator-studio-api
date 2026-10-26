@@ -56,11 +56,7 @@ import {
 } from './domain/mc-types';
 import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
 import { availableProjectActions, McProjectAction } from './domain/mc-project-available-actions';
-import {
-  buildCutoutIssue,
-  CHARACTER_CUTOUT_FAILED,
-  McCutoutIssue,
-} from './domain/mc-cutout-quality';
+import { buildCutoutIssue, CHARACTER_CUTOUT_FAILED, McCutoutIssue } from './domain/mc-cutout-issue';
 import {
   clipInspectionView,
   McClipInspectionView,
@@ -669,11 +665,6 @@ export class CommercialsService {
   }
 
   /**
-   * Resolve fileUrl/posterUrl de um conjunto de asset ids (ignora nulos e
-   * ausentes), com tipo/medidas/metadata para a visão do clipe (motor e
-   * resolução, 7.2).
-   */
-  /**
    * `cutoutIssue` (D7): último `cutout_rejected` do `compose_ffmpeg` falho da revisão corrente,
    * só com o projeto em `needs_attention` por `character_cutout_failed`.
    */
@@ -704,6 +695,11 @@ export class CommercialsService {
     return buildCutoutIssue(event?.detail, actions);
   }
 
+  /**
+   * Resolve fileUrl/posterUrl de um conjunto de asset ids (ignora nulos e
+   * ausentes), com tipo/medidas/metadata para a visão do clipe (motor e
+   * resolução, 7.2).
+   */
   private async resolveAssetUrls(ids: Array<string | null | undefined>): Promise<
     Map<
       string,

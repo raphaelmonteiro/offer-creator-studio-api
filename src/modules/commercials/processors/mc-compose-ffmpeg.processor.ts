@@ -9,7 +9,7 @@ import { TerminalProviderError } from '../../../shared/providers/provider-errors
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { CommercialsService } from '../commercials.service';
 import { buildConcatListContent } from '../domain/mc-assembly-graph';
-import { CHARACTER_CUTOUT_FAILED, cutoutFailureMessage } from '../domain/mc-cutout-quality';
+import { CHARACTER_CUTOUT_FAILED, cutoutFailureMessage } from '../domain/mc-cutout-issue';
 import { compositionDimensions } from '../domain/mc-composition.config';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import { MC_TALK_GAP_MS } from '../domain/mc-talk-conform-graph';

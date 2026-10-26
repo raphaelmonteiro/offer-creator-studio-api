@@ -1,5 +1,7 @@
 import { deltaE76, hexToRgb, McCutoutKeyColor, McLab, rgbToLab } from './mc-cutout-key';
 import { cutoutDespillType } from './mc-cutout-graph';
+import { dilate, erode } from './mc-cutout-morphology';
+import { MC_CUTOUT_REASONS, McCutoutReason } from './mc-cutout-issue';
 
 /**
  * Verificação de qualidade do recorte (change video-mascote-transparente, D7): medidas sobre
@@ -22,26 +24,6 @@ const ALPHA_OPAQUE = 128;
 const ALPHA_BACKGROUND = 10;
 /** Pixel do resto da chave: cor original a ΔE ≤ 25 da média do fundo. */
 const RESIDUE_DE = 25;
-
-export const MC_CUTOUT_REASONS = [
-  'matte_empty',
-  'matte_full',
-  'background_not_key',
-  'background_unstable',
-  'key_residue',
-  'edge_fringe',
-] as const;
-export type McCutoutReason = (typeof MC_CUTOUT_REASONS)[number];
-
-/** Textos pt-BR de cada motivo (uma tabela, no código). */
-export const MC_CUTOUT_REASON_MESSAGES: Record<McCutoutReason, string> = {
-  matte_empty: 'A personagem não foi encontrada no quadro.',
-  matte_full: 'O recorte pegou o quadro quase inteiro.',
-  background_not_key: 'O fundo da fala saiu de outra cor que não a de recorte.',
-  background_unstable: 'O fundo mudou de tom durante a fala.',
-  key_residue: 'Sobrou a cor do fundo dentro da personagem.',
-  edge_fringe: 'Ficou um halo da cor do fundo na borda da personagem.',
-};
 
 export interface McCutoutFrame {
   /** RGB8 (3 canais) do quadro original do clipe. */
@@ -84,47 +66,6 @@ export interface McCutoutClipVerdict {
   metrics: McCutoutClipMetrics;
 }
 
-/** Máscara binária dilatada em `radius` px (janela quadrada, separável). */
-function dilate(mask: Uint8Array, width: number, height: number, radius: number): Uint8Array {
-  const horizontal = new Uint8Array(mask.length);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let hit = 0;
-      for (let k = Math.max(0, x - radius); k <= Math.min(width - 1, x + radius); k++) {
-        if (mask[y * width + k]) {
-          hit = 1;
-          break;
-        }
-      }
-      horizontal[y * width + x] = hit;
-    }
-  }
-  const out = new Uint8Array(mask.length);
-  for (let x = 0; x < width; x++) {
-    for (let y = 0; y < height; y++) {
-      let hit = 0;
-      for (let k = Math.max(0, y - radius); k <= Math.min(height - 1, y + radius); k++) {
-        if (horizontal[k * width + x]) {
-          hit = 1;
-          break;
-        }
-      }
-      out[y * width + x] = hit;
-    }
-  }
-  return out;
-}
-
-/** Erosão = complemento da dilatação do complemento. */
-function erode(mask: Uint8Array, width: number, height: number, radius: number): Uint8Array {
-  const inverse = new Uint8Array(mask.length);
-  for (let i = 0; i < mask.length; i++) inverse[i] = mask[i] ? 0 : 1;
-  const grown = dilate(inverse, width, height, radius);
-  const out = new Uint8Array(mask.length);
-  for (let i = 0; i < mask.length; i++) out[i] = grown[i] ? 0 : 1;
-  return out;
-}
-
 /**
  * Excesso POSITIVO da cor de recorte num pixel: (G − max(R,B))/255 na chave verde; (B − max(R,G))/255
  * na azul; negativo vira 0. Sem o corte, o contorno escuro de uma personagem (menos "azul" que o
@@ -148,75 +89,112 @@ function labAt(rgb: Uint8Array, index: number, cache: Map<number, McLab>): McLab
   return lab;
 }
 
-/** Métricas de um quadro (D7): cobertura, fundo, resto da chave e halo. */
-export function measureCutoutFrame(
-  frame: McCutoutFrame,
-  keyColor: McCutoutKeyColor,
-): McCutoutFrameMetrics {
-  const { rgb, alpha, width, height } = frame;
-  const total = width * height;
-  const silhouette = new Uint8Array(total);
+interface BackgroundStats {
+  mean: McLab;
+  spread: number;
+}
+
+/** Silhueta binária (alfa opaco) e o número de pixels opacos. */
+function silhouetteOf(alpha: Uint8Array): { silhouette: Uint8Array; opaque: number } {
+  const silhouette = new Uint8Array(alpha.length);
   let opaque = 0;
-  for (let i = 0; i < total; i++) {
+  for (let i = 0; i < alpha.length; i++) {
     if (alpha[i] >= ALPHA_OPAQUE) {
       silhouette[i] = 1;
       opaque += 1;
     }
   }
-  const keyLab = rgbToLab(...hexToRgb(keyColor));
-  const cache = new Map<number, McLab>();
-  const guard = dilate(silhouette, width, height, BACKGROUND_GUARD_PX);
-  const bgLabs: McLab[] = [];
+  return { silhouette, opaque };
+}
+
+/** Média e dispersão (desvio-padrão do ΔE76) do fundo; null sem pixel de fundo. */
+function backgroundStats(labs: McLab[]): BackgroundStats | null {
+  if (labs.length === 0) return null;
   const sum: McLab = [0, 0, 0];
-  for (let i = 0; i < total; i++) {
-    if (alpha[i] >= ALPHA_BACKGROUND || guard[i]) continue;
-    const lab = labAt(rgb, i, cache);
-    bgLabs.push(lab);
+  for (const lab of labs) {
     sum[0] += lab[0];
     sum[1] += lab[1];
     sum[2] += lab[2];
   }
-  const empty = {
-    matteCoverage: opaque / total,
-    backgroundMean: null,
-    backgroundOffsetDeltaE: 0,
-    backgroundSpread: 0,
-    keyResidue: 0,
-    fringeExcess: 0,
-  };
-  if (bgLabs.length === 0 || opaque === 0) return empty;
-  const mean: McLab = [sum[0] / bgLabs.length, sum[1] / bgLabs.length, sum[2] / bgLabs.length];
+  const mean: McLab = [sum[0] / labs.length, sum[1] / labs.length, sum[2] / labs.length];
   let variance = 0;
-  for (const lab of bgLabs) variance += deltaE76(lab, mean) ** 2;
-  const spread = Math.sqrt(variance / bgLabs.length);
+  for (const lab of labs) variance += deltaE76(lab, mean) ** 2;
+  return { mean, spread: Math.sqrt(variance / labs.length) };
+}
+
+/** Pixels de fundo: alfa < 10 e fora da guarda (dilatação da silhueta). */
+function backgroundLabs(
+  frame: McCutoutFrame,
+  silhouette: Uint8Array,
+  cache: Map<number, McLab>,
+): McLab[] {
+  const guard = dilate(silhouette, frame.width, frame.height, BACKGROUND_GUARD_PX);
+  const labs: McLab[] = [];
+  for (let i = 0; i < frame.alpha.length; i++) {
+    if (frame.alpha[i] < ALPHA_BACKGROUND && !guard[i]) labs.push(labAt(frame.rgb, i, cache));
+  }
+  return labs;
+}
+
+/** Pixels da silhueta que ainda têm a cor média do fundo (resto da chave), em fração do quadro. */
+function keyResidueOf(
+  frame: McCutoutFrame,
+  silhouette: Uint8Array,
+  mean: McLab,
+  cache: Map<number, McLab>,
+): number {
   let residue = 0;
-  for (let i = 0; i < total; i++) {
-    if (silhouette[i] && deltaE76(labAt(rgb, i, cache), mean) <= RESIDUE_DE) residue += 1;
+  for (let i = 0; i < silhouette.length; i++) {
+    if (silhouette[i] && deltaE76(labAt(frame.rgb, i, cache), mean) <= RESIDUE_DE) residue += 1;
+  }
+  return residue / silhouette.length;
+}
+
+/** Métricas de um quadro (D7): cobertura, fundo, resto da chave e halo. */
+export function measureCutoutFrame(
+  frame: McCutoutFrame,
+  keyColor: McCutoutKeyColor,
+): McCutoutFrameMetrics {
+  const { silhouette, opaque } = silhouetteOf(frame.alpha);
+  const matteCoverage = opaque / silhouette.length;
+  const cache = new Map<number, McLab>();
+  const stats = opaque === 0 ? null : backgroundStats(backgroundLabs(frame, silhouette, cache));
+  if (!stats) {
+    return {
+      matteCoverage,
+      backgroundMean: null,
+      backgroundOffsetDeltaE: 0,
+      backgroundSpread: 0,
+      keyResidue: 0,
+      fringeExcess: 0,
+    };
   }
   return {
-    matteCoverage: opaque / total,
-    backgroundMean: mean,
-    backgroundOffsetDeltaE: deltaE76(mean, keyLab),
-    backgroundSpread: spread,
-    keyResidue: residue / total,
-    fringeExcess: fringeExcess(
-      frame.despilled ?? rgb,
+    matteCoverage,
+    backgroundMean: stats.mean,
+    backgroundOffsetDeltaE: deltaE76(stats.mean, rgbToLab(...hexToRgb(keyColor))),
+    backgroundSpread: stats.spread,
+    keyResidue: keyResidueOf(frame, silhouette, stats.mean, cache),
+    fringeExcess: fringeExcess({
+      rgb: frame.despilled ?? frame.rgb,
       silhouette,
-      width,
-      height,
-      cutoutDespillType(keyColor),
-    ),
+      width: frame.width,
+      height: frame.height,
+      type: cutoutDespillType(keyColor),
+    }),
   };
 }
 
+interface FringeInput {
+  rgb: Uint8Array;
+  silhouette: Uint8Array;
+  width: number;
+  height: number;
+  type: 'green' | 'blue';
+}
+
 /** Anel de largura R dentro da silhueta menos a região interna (silhueta erodida em 3R). */
-function fringeExcess(
-  rgb: Uint8Array,
-  silhouette: Uint8Array,
-  width: number,
-  height: number,
-  type: 'green' | 'blue',
-): number {
+function fringeExcess({ rgb, silhouette, width, height, type }: FringeInput): number {
   const ringWidth = Math.max(2, Math.round(0.006 * Math.max(width, height)));
   const inner = erode(silhouette, width, height, ringWidth);
   const core = erode(silhouette, width, height, ringWidth * 3);
@@ -244,37 +222,38 @@ function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-/**
- * Veredito de um clipe a partir das métricas dos quadros: qualquer quadro fora do limite reprova;
- * a deriva é o ΔE máximo entre a média de fundo de cada quadro e a mediana dos quadros.
- */
-export function evaluateCutoutClip(frames: McCutoutFrameMetrics[]): McCutoutClipVerdict {
-  const reasons = new Set<McCutoutReason>();
-  for (const m of frames) {
-    if (m.matteCoverage < MC_CUTOUT_MATTE_COVERAGE_MIN) reasons.add('matte_empty');
-    if (m.matteCoverage > MC_CUTOUT_MATTE_COVERAGE_MAX) reasons.add('matte_full');
-    if (m.backgroundMean === null) continue;
-    if (m.backgroundOffsetDeltaE > MC_CUTOUT_BACKGROUND_OFFSET_MAX_DE) {
-      reasons.add('background_not_key');
-    }
-    if (m.backgroundSpread > MC_CUTOUT_BACKGROUND_SPREAD_MAX_DE) reasons.add('background_unstable');
-    if (m.keyResidue > MC_CUTOUT_KEY_RESIDUE_MAX) reasons.add('key_residue');
-    if (m.fringeExcess > MC_CUTOUT_FRINGE_EXCESS_MAX) reasons.add('edge_fringe');
+/** Motivos de reprovação de um quadro, pelas métricas dele. */
+function frameReasons(m: McCutoutFrameMetrics): McCutoutReason[] {
+  const reasons: McCutoutReason[] = [];
+  if (m.matteCoverage < MC_CUTOUT_MATTE_COVERAGE_MIN) reasons.push('matte_empty');
+  if (m.matteCoverage > MC_CUTOUT_MATTE_COVERAGE_MAX) reasons.push('matte_full');
+  if (m.backgroundMean === null) return reasons;
+  if (m.backgroundOffsetDeltaE > MC_CUTOUT_BACKGROUND_OFFSET_MAX_DE) {
+    reasons.push('background_not_key');
   }
+  if (m.backgroundSpread > MC_CUTOUT_BACKGROUND_SPREAD_MAX_DE) reasons.push('background_unstable');
+  if (m.keyResidue > MC_CUTOUT_KEY_RESIDUE_MAX) reasons.push('key_residue');
+  if (m.fringeExcess > MC_CUTOUT_FRINGE_EXCESS_MAX) reasons.push('edge_fringe');
+  return reasons;
+}
+
+/** Deriva do fundo: ΔE máximo entre a média de fundo de cada quadro e a mediana dos quadros. */
+function backgroundDriftOf(frames: McCutoutFrameMetrics[]): number {
   const means = frames.map((m) => m.backgroundMean).filter((m): m is McLab => m !== null);
-  let drift = 0;
-  if (means.length > 1) {
-    const mid: McLab = [
-      median(means.map((m) => m[0])),
-      median(means.map((m) => m[1])),
-      median(means.map((m) => m[2])),
-    ];
-    drift = Math.max(...means.map((m) => deltaE76(m, mid)));
-    if (drift > MC_CUTOUT_BACKGROUND_DRIFT_MAX_DE) reasons.add('background_unstable');
-  }
+  if (means.length < 2) return 0;
+  const mid: McLab = [
+    median(means.map((m) => m[0])),
+    median(means.map((m) => m[1])),
+    median(means.map((m) => m[2])),
+  ];
+  return Math.max(...means.map((m) => deltaE76(m, mid)));
+}
+
+/** Métricas do clipe: média da cobertura e pior valor das demais entre os quadros. */
+function clipMetricsOf(frames: McCutoutFrameMetrics[], drift: number): McCutoutClipMetrics {
   const max = (pick: (m: McCutoutFrameMetrics) => number) =>
     frames.length ? Math.max(...frames.map(pick)) : 0;
-  const metrics: McCutoutClipMetrics = {
+  return {
     matteCoverage: frames.length
       ? frames.reduce((s, m) => s + m.matteCoverage, 0) / frames.length
       : 0,
@@ -284,8 +263,18 @@ export function evaluateCutoutClip(frames: McCutoutFrameMetrics[]): McCutoutClip
     keyResidue: max((m) => m.keyResidue),
     fringeExcess: max((m) => m.fringeExcess),
   };
+}
+
+/**
+ * Veredito de um clipe a partir das métricas dos quadros: qualquer quadro fora do limite reprova;
+ * a deriva é o ΔE máximo entre a média de fundo de cada quadro e a mediana dos quadros.
+ */
+export function evaluateCutoutClip(frames: McCutoutFrameMetrics[]): McCutoutClipVerdict {
+  const reasons = new Set<McCutoutReason>(frames.flatMap(frameReasons));
+  const drift = backgroundDriftOf(frames);
+  if (drift > MC_CUTOUT_BACKGROUND_DRIFT_MAX_DE) reasons.add('background_unstable');
   const ordered = MC_CUTOUT_REASONS.filter((r) => reasons.has(r));
-  return { passed: ordered.length === 0, reasons: ordered, metrics };
+  return { passed: ordered.length === 0, reasons: ordered, metrics: clipMetricsOf(frames, drift) };
 }
 
 /** Índices (base 0) dos quadros medidos: instantes `(i + 0,5) / 8 × duração` a 30 fps. */
@@ -295,56 +284,4 @@ export function cutoutSampleFrameIndexes(durationS: number, fps = 30): number[] 
     Math.min(total - 1, Math.floor(((i + 0.5) / MC_CUTOUT_FRAMES_PER_CLIP) * total)),
   );
   return Array.from(new Set(indexes));
-}
-
-export const CHARACTER_CUTOUT_FAILED = 'character_cutout_failed';
-
-/** Mensagem padrão do projeto em `needs_attention` (pt-BR). */
-export function cutoutFailureMessage(failedScenes: number): string {
-  return (
-    `O recorte da personagem ficou com falhas em ${failedScenes} fala(s) (fundo instável, ` +
-    'resto da cor de fundo ou halo na borda). Gere a fala de novo ou use um painel liso.'
-  );
-}
-
-/** Cena reprovada como o `cutoutIssue` do projeto expõe (motivos com texto em pt-BR). */
-export interface McCutoutIssueScene {
-  sceneId: string;
-  idx: number;
-  reasons: Array<{ code: McCutoutReason; message: string }>;
-  metrics: Partial<McCutoutClipMetrics>;
-}
-
-export interface McCutoutIssue {
-  code: typeof CHARACTER_CUTOUT_FAILED;
-  message: string;
-  keyColor: string | null;
-  scenes: McCutoutIssueScene[];
-  /** Espelho de `availableActions`. */
-  actions: string[];
-}
-
-/** `cutoutIssue` de `GET projects/:id` a partir do detalhe do evento `cutout_rejected` (D7). */
-export function buildCutoutIssue(
-  detail: Record<string, unknown> | null | undefined,
-  actions: string[],
-): McCutoutIssue {
-  const rawScenes = Array.isArray(detail?.scenes)
-    ? (detail?.scenes as Array<Record<string, unknown>>)
-    : [];
-  const scenes: McCutoutIssueScene[] = rawScenes.map((s) => ({
-    sceneId: String(s.sceneId),
-    idx: Number(s.idx),
-    reasons: (Array.isArray(s.reasons) ? (s.reasons as McCutoutReason[]) : [])
-      .filter((code) => code in MC_CUTOUT_REASON_MESSAGES)
-      .map((code) => ({ code, message: MC_CUTOUT_REASON_MESSAGES[code] })),
-    metrics: (s.metrics ?? {}) as Partial<McCutoutClipMetrics>,
-  }));
-  return {
-    code: CHARACTER_CUTOUT_FAILED,
-    message: cutoutFailureMessage(scenes.length),
-    keyColor: typeof detail?.keyColor === 'string' ? detail.keyColor : null,
-    scenes,
-    actions,
-  };
 }

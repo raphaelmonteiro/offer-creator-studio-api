@@ -1,5 +1,5 @@
+import { buildCutoutIssue } from './mc-cutout-issue';
 import {
-  buildCutoutIssue,
   cutoutSampleFrameIndexes,
   evaluateCutoutClip,
   McCutoutFrame,

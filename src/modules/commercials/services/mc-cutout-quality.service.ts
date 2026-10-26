@@ -9,9 +9,9 @@ import {
   evaluateCutoutClip,
   McCutoutClipMetrics,
   McCutoutFrame,
-  McCutoutReason,
   measureCutoutFrame,
 } from '../domain/mc-cutout-quality';
+import { McCutoutReason } from '../domain/mc-cutout-issue';
 
 /** Maior lado (px) dos quadros medidos: custo de CPU previsível; o anel de borda escala junto. */
 const MEASURE_MAX_SIDE = 480;
@@ -31,6 +31,45 @@ export interface McCutoutSceneVerdict {
   passed: boolean;
   reasons: McCutoutReason[];
   metrics: McCutoutClipMetrics;
+}
+
+/** Grafo do ffmpeg: quadros escolhidos, original e alfa/cor depois da cadeia de recorte (D5). */
+function buildCutoutSampleGraph(indexes: number[], keyColor: McCutoutKeyColor): string {
+  const fit = `scale=${MEASURE_MAX_SIDE}:${MEASURE_MAX_SIDE}:force_original_aspect_ratio=decrease`;
+  return [
+    `[0:v]fps=${SAMPLE_FPS},select='${indexes.map((n) => `eq(n\\,${n})`).join('+')}',` +
+      `setpts=N/${SAMPLE_FPS}/TB,split=2[orig][src]`,
+    buildCutoutKeyChain('src', keyColor, 'q', 'keyed'),
+    `[keyed]split=2[kalpha][kcolor]`,
+    `[kalpha]alphaextract,${fit}[alpha]`,
+    `[kcolor]format=rgb24,${fit}[despilled]`,
+    `[orig]${fit}[origs]`,
+  ].join(';');
+}
+
+/** Argumentos do ffmpeg que gravam `<prefix>-o|a|d-NN.png` (original, alfa, despilled). */
+export function buildCutoutSampleArgs(
+  clipPath: string,
+  indexes: number[],
+  keyColor: McCutoutKeyColor,
+  prefix: string,
+): string[] {
+  const outputs: Array<[string, string]> = [
+    ['[origs]', `${prefix}-o-%02d.png`],
+    ['[alpha]', `${prefix}-a-%02d.png`],
+    ['[despilled]', `${prefix}-d-%02d.png`],
+  ];
+  return [
+    '-y',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-i',
+    clipPath,
+    '-filter_complex',
+    buildCutoutSampleGraph(indexes, keyColor),
+    ...outputs.flatMap(([label, file]) => ['-map', label, '-start_number', '0', file]),
+  ];
 }
 
 /**
@@ -60,44 +99,10 @@ export class McCutoutQualityService {
   ): Promise<McCutoutSceneVerdict> {
     const indexes = cutoutSampleFrameIndexes(clip.durationMs / 1000, SAMPLE_FPS);
     const prefix = path.join(tempDir, `q${clip.idx}`);
-    const fit = `scale=${MEASURE_MAX_SIDE}:${MEASURE_MAX_SIDE}:force_original_aspect_ratio=decrease`;
-    const graph = [
-      `[0:v]fps=${SAMPLE_FPS},select='${indexes.map((n) => `eq(n\\,${n})`).join('+')}',` +
-        `setpts=N/${SAMPLE_FPS}/TB,split=2[orig][src]`,
-      buildCutoutKeyChain('src', keyColor, 'q', 'keyed'),
-      `[keyed]split=2[kalpha][kcolor]`,
-      `[kalpha]alphaextract,${fit}[alpha]`,
-      `[kcolor]format=rgb24,${fit}[despilled]`,
-      `[orig]${fit}[origs]`,
-    ].join(';');
-    await this.ffmpeg.run(
-      [
-        '-y',
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-i',
-        clip.path,
-        '-filter_complex',
-        graph,
-        '-map',
-        '[origs]',
-        '-start_number',
-        '0',
-        `${prefix}-o-%02d.png`,
-        '-map',
-        '[alpha]',
-        '-start_number',
-        '0',
-        `${prefix}-a-%02d.png`,
-        '-map',
-        '[despilled]',
-        '-start_number',
-        '0',
-        `${prefix}-d-%02d.png`,
-      ],
-      { durationMs: clip.durationMs, timeoutMs: EXTRACT_TIMEOUT_MS },
-    );
+    await this.ffmpeg.run(buildCutoutSampleArgs(clip.path, indexes, keyColor, prefix), {
+      durationMs: clip.durationMs,
+      timeoutMs: EXTRACT_TIMEOUT_MS,
+    });
     const metrics = [];
     for (let i = 0; i < indexes.length; i++) {
       const n = String(i).padStart(2, '0');

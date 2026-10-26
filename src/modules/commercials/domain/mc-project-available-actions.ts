@@ -1,4 +1,4 @@
-import { CHARACTER_CUTOUT_FAILED } from './mc-cutout-quality';
+import { CHARACTER_CUTOUT_FAILED } from './mc-cutout-issue';
 import { McProjectStatus, McStepStatus } from './mc-state-machines';
 import { McProjectTier, McStepType } from './mc-types';
 
