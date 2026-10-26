@@ -41,7 +41,7 @@ export interface McTileCropPlan {
   output: { width: number; height: number };
 }
 
-function clampRect(rect: McPixelRect, width: number, height: number): McPixelRect {
+export function clampRect(rect: McPixelRect, width: number, height: number): McPixelRect {
   const left = Math.max(0, rect.left);
   const top = Math.max(0, rect.top);
   const right = Math.min(width, rect.left + rect.width);

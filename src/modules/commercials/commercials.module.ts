@@ -41,6 +41,7 @@ import { McScriptProcessor } from './processors/mc-script.processor';
 import { McTalkingProcessor } from './processors/mc-talking.processor';
 import { McTtsProcessor } from './processors/mc-tts.processor';
 import { McKitCandidatesService, McKitReferencesJob } from './services/mc-kit-candidates.service';
+import { McKitBodyTileService } from './services/mc-kit-body-tile.service';
 import { McKitTileService } from './services/mc-kit-tile.service';
 import { McKitViewService } from './services/mc-kit-view.service';
 import { McKitsService } from './services/mc-kits.service';
@@ -120,6 +121,7 @@ import { McWindowPriceService } from './services/mc-window-price.service';
     McKitViewService,
     McKitCandidatesService,
     McKitTileService,
+    McKitBodyTileService,
     McMouthGateService,
     McKitCandidatesProcessor,
     McVoicesService,

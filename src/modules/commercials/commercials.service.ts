@@ -1,3 +1,4 @@
+import { isCharacterCutoutEnabled } from './domain/mc-cutout.config';
 import {
   BadRequestException,
   ForbiddenException,
@@ -124,6 +125,8 @@ export const MC_PAUSED_KEY = 'mc_paused';
 export interface McCommercialsConfig {
   formats: Record<McProjectFormat, boolean>;
   render: Record<RenderFormat, RenderFormatAvailability> | null;
+  /** Recorte do personagem (video-mascote-transparente): `MC_CHARACTER_CUTOUT` ligado. */
+  characterCutout: { enabled: boolean };
 }
 
 /**
@@ -278,6 +281,7 @@ export class CommercialsService {
         offer_piece: admitted('offer_piece'),
       },
       render: heartbeat?.render?.formats ?? null,
+      characterCutout: { enabled: isCharacterCutoutEnabled(env) },
     };
   }
 

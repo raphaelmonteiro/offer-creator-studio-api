@@ -12,6 +12,13 @@ import {
 } from '../domain/mc-kit-costs';
 import { decideMouthGate, McMouthDecision } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
+import {
+  MC_BODY_TILE_MIN_FACE_FRACTION,
+  MC_BODY_TILE_WARNING_MESSAGES,
+  McBodyTileWarningCode,
+} from '../domain/mc-body-tile';
+import { isCharacterCutoutEnabled } from '../domain/mc-cutout.config';
+import { McCutoutKeyDecision } from '../domain/mc-cutout-key';
 import { MC_TILE_MIN_FACE_FRACTION } from '../domain/mc-tile';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McEvent } from '../entities/mc-event.entity';
@@ -36,6 +43,24 @@ export interface KitTileView extends KitAssetView {
   faceFraction: number | null;
   /** Rosto abaixo de 60% da altura (rosto muito largo: a proporção mandou) — a UI avisa, não bloqueia. */
   faceBelowMinimum: boolean;
+}
+
+/** Tile de corpo (video-mascote-transparente, R2): personagem inteira com alfa; `null` até ser calculado. */
+export interface KitBodyTileView extends KitAssetView {
+  width: number | null;
+  height: number | null;
+  ratio: number | null;
+  faceFraction: number | null;
+  faceBelowMinimum: boolean;
+  cutAtBottom: boolean;
+  warnings: Array<{ code: McBodyTileWarningCode; message: string }>;
+}
+
+/** Regra da cor-chave do recorte exposta no kit (D3). */
+export interface KitCutoutView {
+  keyColor: string | null;
+  safe: boolean;
+  candidates: Array<{ color: string; nearFraction40: number; nearFraction60: number }>;
 }
 
 /** Uma chamada paga do kit (evento `provider_cost`), na ordem em que aconteceu. */
@@ -65,6 +90,10 @@ export type McKitView = McCharacterKit & {
   /** Identidade efetiva: `identityAssetId` ou a referência frontal (slot 2) do kit de mascote. */
   identity: KitAssetView | null;
   tile: KitTileView | null;
+  /** Tile de corpo; `null` = ainda não calculado (POST kits/:id/body-tile) ou recorte desligado. */
+  bodyTile: KitBodyTileView | null;
+  /** Cor-chave do recorte; `null` com o recorte desligado ou sem tile de corpo. */
+  cutout: KitCutoutView | null;
   /** "Usar o logo como está" disponível (ver `kitUseAsIsAvailable`). */
   useAsIsAvailable: boolean;
   /** Decisão do gate de boca sobre o logo cru e sobre a identidade avaliada (null = ainda não rodou). */
@@ -175,6 +204,7 @@ export class McKitViewService {
       for (const id of kit.referenceAssetIds ?? []) assetIds.add(id);
       if (kit.identityAssetId) assetIds.add(kit.identityAssetId);
       if (kit.tileAssetId) assetIds.add(kit.tileAssetId);
+      if (kit.bodyTileAssetId) assetIds.add(kit.bodyTileAssetId);
       if (kit.mascotId) mascotIds.add(kit.mascotId);
     }
     const [assets, mascots] = await Promise.all([
@@ -216,6 +246,7 @@ export class McKitViewService {
       typeof tileAsset?.metadata?.faceFraction === 'number'
         ? (tileAsset.metadata.faceFraction as number)
         : null;
+    const { bodyTile, cutout } = this.cutoutViews(kit, byId);
     const logoDecision = kit.mouthGate?.logo ? decideMouthGate(kit.mouthGate.logo) : null;
     const mascotName = mascotNameById.get(kit.mascotId) ?? null;
     // a entidade já traz número (transformer); Number() cobre linha crua/mocks
@@ -233,6 +264,8 @@ export class McKitViewService {
             faceBelowMinimum: faceFraction != null && faceFraction < MC_TILE_MIN_FACE_FRACTION,
           }
         : null,
+      bodyTile,
+      cutout,
       useAsIsAvailable: kitUseAsIsAvailable(kit),
       mouthGateStatus: {
         logo: logoDecision,
@@ -240,6 +273,47 @@ export class McKitViewService {
       },
       mascotName,
       label: kitLabel(kit, mascotName),
+    };
+  }
+
+  /** Tile de corpo e cor-chave; ambos `null` com o recorte desligado ou sem tile calculado. */
+  private cutoutViews(
+    kit: McCharacterKit,
+    byId: Map<string, AnimationAsset>,
+  ): { bodyTile: KitBodyTileView | null; cutout: KitCutoutView | null } {
+    const asset = kit.bodyTileAssetId ? byId.get(kit.bodyTileAssetId) : undefined;
+    if (!isCharacterCutoutEnabled() || !asset) return { bodyTile: null, cutout: null };
+    const meta = asset.metadata ?? {};
+    const logoAsIs = asset.id === kit.tileAssetId;
+    const faceFraction =
+      !logoAsIs && typeof meta.faceFraction === 'number' ? (meta.faceFraction as number) : null;
+    const codes: McBodyTileWarningCode[] = logoAsIs
+      ? ['LOGO_AS_IS_NO_BODY']
+      : ((meta.warnings as McBodyTileWarningCode[] | undefined) ?? []);
+    const key = meta.cutoutKey as McCutoutKeyDecision | undefined;
+    return {
+      bodyTile: {
+        assetId: asset.id,
+        url: asset.fileUrl,
+        width: asset.width ?? null,
+        height: asset.height ?? null,
+        ratio: typeof meta.ratio === 'number' ? (meta.ratio as number) : null,
+        faceFraction,
+        faceBelowMinimum: faceFraction != null && faceFraction < MC_BODY_TILE_MIN_FACE_FRACTION,
+        cutAtBottom: meta.cutAtBottom === true,
+        warnings: codes.map((code) => ({ code, message: MC_BODY_TILE_WARNING_MESSAGES[code] })),
+      },
+      cutout: key
+        ? {
+            keyColor: key.chosen,
+            safe: key.safe,
+            candidates: key.candidates.map((c) => ({
+              color: c.color,
+              nearFraction40: c.near40,
+              nearFraction60: c.near60,
+            })),
+          }
+        : null,
     };
   }
 }

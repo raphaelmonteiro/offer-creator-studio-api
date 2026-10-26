@@ -60,8 +60,16 @@ describe('CommercialsService.getConfig — formatos habilitados + render do hear
     expect(config).toEqual({
       formats: { scenes: true, talking_art: true, offer_carousel: false, offer_piece: false },
       render: null,
+      characterCutout: { enabled: false },
     });
     expect(settings.getFresh).toHaveBeenCalledWith(WORKER_HEARTBEAT_KEY);
+  });
+
+  it('MC_CHARACTER_CUTOUT=true liga o recorte no config; sem a variável fica desligado', async () => {
+    expect((await service.getConfig({})).characterCutout).toEqual({ enabled: false });
+    expect((await service.getConfig({ MC_CHARACTER_CUTOUT: 'true' })).characterCutout).toEqual({
+      enabled: true,
+    });
   });
 
   it('MC_FORMATS vazio → só scenes (o F3 nunca é gated por MC_FORMATS)', async () => {

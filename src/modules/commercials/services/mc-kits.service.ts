@@ -23,6 +23,7 @@ import { MascotsService, MascotView } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import { McVoicesService } from './mc-voices.service';
 import { kitProviderCost, McKitProviderCost, openAiUsage } from '../domain/mc-kit-costs';
+import { isCharacterCutoutEnabled } from '../domain/mc-cutout.config';
 import { McKitSource } from '../domain/mc-kit-identity';
 import {
   decideMouthGate,
@@ -46,6 +47,7 @@ import { CreateKitDto } from '../dto/create-kit.dto';
 import { ApproveKitDto, RegenerateReferenceDto, UpdateKitSheetDto } from '../dto/kit-actions.dto';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { MC_IMAGE_EXPIRE_S, McKitCandidatesService } from './mc-kit-candidates.service';
+import { McKitBodyTileService } from './mc-kit-body-tile.service';
 import { McKitTileService } from './mc-kit-tile.service';
 import { recordKitProviderCost } from './mc-kit-costs';
 import { McKitView, McKitViewService } from './mc-kit-view.service';
@@ -89,6 +91,7 @@ export class McKitsService {
     private readonly mouthGate: McMouthGateService,
     private readonly tile: McKitTileService,
     private readonly storage: McStorageService,
+    private readonly bodyTile: McKitBodyTileService,
   ) {}
 
   /**
@@ -501,7 +504,11 @@ export class McKitsService {
       return true;
     });
     if (!won) await this.approvalLost(kit, tile);
-    return this.dataSource.getRepository(McCharacterKit).findOneByOrFail({ id: kit.id });
+    const approved = await this.dataSource
+      .getRepository(McCharacterKit)
+      .findOneByOrFail({ id: kit.id });
+    await this.tryBodyTileOnApproval(approved);
+    return approved;
   }
 
   /**
@@ -625,6 +632,39 @@ export class McKitsService {
       await this.persistMouthGate(kit.id, gateRecord);
       throw err;
     }
+  }
+
+  /**
+   * Com o recorte ligado, a aprovação calcula também o tile de corpo (local, sem custo).
+   * Falha dele nunca derruba a aprovação: o editor chama `POST kits/:id/body-tile` e
+   * mostra o erro 422 na tela de edição da peça.
+   */
+  private async tryBodyTileOnApproval(kit: McCharacterKit): Promise<void> {
+    if (!isCharacterCutoutEnabled()) return;
+    try {
+      await this.bodyTile.ensure(kit);
+    } catch (err) {
+      this.logger.warn(`Kit ${kit.id}: tile de corpo não calculado na aprovação (${String(err)})`);
+    }
+  }
+
+  /** `POST kits/:id/body-tile` (R2b): calcula o tile de corpo e a chave se faltarem; idempotente. */
+  async ensureBodyTile(userId: string, id: string): Promise<McKitView> {
+    if (!isCharacterCutoutEnabled()) {
+      throw new UnprocessableEntityException({
+        code: 'CHARACTER_CUTOUT_DISABLED',
+        message: 'O personagem sem fundo e o enquadramento de corpo não estão habilitados.',
+      });
+    }
+    const kit = await this.view.findOwned(userId, id);
+    if (kit.status !== McKitStatus.APPROVED) {
+      throw new UnprocessableEntityException({
+        code: 'KIT_NOT_APPROVED',
+        message: 'Aprove o kit antes de calcular o tile de corpo.',
+      });
+    }
+    await this.bodyTile.ensure(kit);
+    return this.view.findOne(userId, id);
   }
 
   private async persistMouthGate(kitId: string, mouthGate: McKitMouthGate): Promise<void> {

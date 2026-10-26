@@ -21,6 +21,7 @@ import { McMouthVerdict } from '../domain/mc-mouth-gate';
 import { McKitStatus } from '../domain/mc-state-machines';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McKitCandidatesService } from './mc-kit-candidates.service';
+import { McKitBodyTileService } from './mc-kit-body-tile.service';
 import { McKitTileService } from './mc-kit-tile.service';
 import { McKitViewService } from './mc-kit-view.service';
 import { MC_IMAGE_EXPIRE_S, McKitsService } from './mc-kits.service';
@@ -95,6 +96,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
   let committed: jest.Mock;
   let mouthGate: { inspect: jest.Mock; inspectWithCost: jest.Mock };
   let tile: { build: jest.Mock; discard: jest.Mock };
+  let bodyTile: { ensure: jest.Mock };
   let service: McKitsService;
   /** Origem mascote com estilo — o mínimo que gera referências (STYLE_REQUIRED sem o estilo). */
   const mascotDto = {
@@ -214,6 +216,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       }),
       discard: jest.fn().mockResolvedValue(undefined),
     };
+    bodyTile = { ensure: jest.fn().mockResolvedValue({ id: 'body-1' }) };
     service = new McKitsService(
       dataSource as unknown as DataSource,
       transitions as unknown as TaskTransitionService,
@@ -229,6 +232,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
       mouthGate as unknown as McMouthGateService,
       tile as unknown as McKitTileService,
       new McStorageService(config as unknown as ConfigService),
+      bodyTile as unknown as McKitBodyTileService,
     );
   });
 
@@ -628,6 +632,46 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
         { kind: 'mc_kit', kitId: 'kit-r', status: McKitStatus.APPROVED },
         MC_EVENTS_CHANNEL,
       );
+    });
+
+    describe('tile de corpo (video-mascote-transparente)', () => {
+      const original = process.env.MC_CHARACTER_CUTOUT;
+      afterEach(() => {
+        if (original === undefined) delete process.env.MC_CHARACTER_CUTOUT;
+        else process.env.MC_CHARACTER_CUTOUT = original;
+      });
+
+      it('aprovação com o recorte ligado calcula o tile de corpo; falha dele não derruba a aprovação', async () => {
+        process.env.MC_CHARACTER_CUTOUT = 'true';
+        bodyTile.ensure.mockRejectedValueOnce(new Error('boom'));
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        await expect(
+          service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' }),
+        ).resolves.toBeDefined();
+        expect(bodyTile.ensure).toHaveBeenCalledTimes(1);
+      });
+
+      it('aprovação com o recorte desligado não calcula o tile de corpo', async () => {
+        delete process.env.MC_CHARACTER_CUTOUT;
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        await service.approveKit('u1', 'kit-r', { voiceId: 'voice-3' });
+        expect(bodyTile.ensure).not.toHaveBeenCalled();
+      });
+
+      it('POST body-tile: flag desligada → 422 CHARACTER_CUTOUT_DISABLED; kit não aprovado → 422 KIT_NOT_APPROVED; ok → view', async () => {
+        delete process.env.MC_CHARACTER_CUTOUT;
+        await expect(service.ensureBodyTile('u1', 'kit-r')).rejects.toMatchObject({
+          response: { code: 'CHARACTER_CUTOUT_DISABLED' },
+        });
+        process.env.MC_CHARACTER_CUTOUT = 'true';
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit });
+        await expect(service.ensureBodyTile('u1', 'kit-r')).rejects.toMatchObject({
+          response: { code: 'KIT_NOT_APPROVED' },
+        });
+        kitRepo.findOneBy.mockResolvedValue({ ...reviewKit, status: McKitStatus.APPROVED });
+        await expect(service.ensureBodyTile('u1', 'kit-r')).resolves.toMatchObject({ id: 'kit-r' });
+        expect(bodyTile.ensure).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('ajuste de entrega (velocidade/expressividade) do body é gravado no kit, já clampado', async () => {
@@ -1270,6 +1314,7 @@ describe('McKitsService — fluxo real do kit (plano §4/§6.8)', () => {
           mouthGate as unknown as McMouthGateService,
           tile as unknown as McKitTileService,
           new McStorageService(keyed as unknown as ConfigService),
+          {} as unknown as McKitBodyTileService,
         );
         const legacy = {
           ...reviewKit,

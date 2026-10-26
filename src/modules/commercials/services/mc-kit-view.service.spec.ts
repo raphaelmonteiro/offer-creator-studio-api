@@ -189,6 +189,68 @@ describe('McKitViewService — view do kit para a API (D1/D4)', () => {
     expect((await service.toView(baseKit)).tile).toBeNull();
   });
 
+  describe('tile de corpo e cor-chave (video-mascote-transparente, R2)', () => {
+    const original = process.env.MC_CHARACTER_CUTOUT;
+    const bodyKit = { ...baseKit, tileAssetId: 'tile-1', bodyTileAssetId: 'body-1' };
+    const bodyAsset = {
+      id: 'body-1',
+      fileUrl: '/uploads/commercials/kits/k/tile-corpo.png',
+      width: 720,
+      height: 1440,
+      metadata: {
+        ratio: 0.5,
+        faceFraction: 0.2,
+        cutAtBottom: true,
+        warnings: ['IDENTITY_BUST_ONLY'],
+        cutoutKey: {
+          ruleVersion: 1,
+          chosen: '#00B140',
+          safe: true,
+          candidates: [{ color: '#00B140', near40: 0.001, near60: 0.01 }],
+        },
+      },
+    };
+    afterEach(() => {
+      if (original === undefined) delete process.env.MC_CHARACTER_CUTOUT;
+      else process.env.MC_CHARACTER_CUTOUT = original;
+    });
+
+    it('recorte desligado: bodyTile e cutout null mesmo com o tile gravado', async () => {
+      delete process.env.MC_CHARACTER_CUTOUT;
+      assetRepo.find.mockResolvedValue([bodyAsset]);
+      const view = await service.toView(bodyKit);
+      expect(view.bodyTile).toBeNull();
+      expect(view.cutout).toBeNull();
+    });
+
+    it('recorte ligado: expõe tile de corpo com avisos em pt-BR e a chave escolhida', async () => {
+      process.env.MC_CHARACTER_CUTOUT = 'true';
+      assetRepo.find.mockResolvedValue([bodyAsset]);
+      const view = await service.toView(bodyKit);
+      expect(view.bodyTile).toMatchObject({
+        assetId: 'body-1',
+        width: 720,
+        height: 1440,
+        ratio: 0.5,
+        faceBelowMinimum: true,
+        cutAtBottom: true,
+        warnings: [
+          { code: 'IDENTITY_BUST_ONLY', message: expect.stringContaining('não mostra as mãos') },
+        ],
+      });
+      expect(view.cutout).toEqual({
+        keyColor: '#00B140',
+        safe: true,
+        candidates: [{ color: '#00B140', nearFraction40: 0.001, nearFraction60: 0.01 }],
+      });
+    });
+
+    it('ainda não calculado: bodyTile null', async () => {
+      process.env.MC_CHARACTER_CUTOUT = 'true';
+      expect((await service.toView(baseKit)).bodyTile).toBeNull();
+    });
+  });
+
   it('references ordenadas por slot, identity = identityAssetId ou a frontal; toViewMany faz UMA consulta de cada', async () => {
     assetRepo.find.mockResolvedValue([
       { id: 'r2', fileUrl: '/r2.png', metadata: { slot: 2 }, createdAt: new Date() },

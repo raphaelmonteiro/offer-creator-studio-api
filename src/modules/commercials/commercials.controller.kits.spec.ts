@@ -24,7 +24,10 @@ describe('CommercialsController — rotas de candidatos do kit (D4)', () => {
   let controller: CommercialsController;
 
   beforeEach(() => {
-    kits = { approveKit: jest.fn().mockResolvedValue({ id: 'kit-1' }) };
+    kits = {
+      approveKit: jest.fn().mockResolvedValue({ id: 'kit-1' }),
+      ensureBodyTile: jest.fn().mockResolvedValue({ id: 'kit-1', bodyTile: null }),
+    };
     candidates = {
       list: jest.fn().mockResolvedValue({ rounds: [] }),
       startRound: jest.fn().mockResolvedValue({ id: 'kit-1' }),
@@ -71,6 +74,11 @@ describe('CommercialsController — rotas de candidatos do kit (D4)', () => {
     expect(candidates.useAsIs).toHaveBeenCalledWith('u1', 'kit-1');
     await controller.requestKitMouthVariant(user, 'kit-1');
     expect(candidates.requestMouthVariant).toHaveBeenCalledWith('u1', 'kit-1');
+  });
+
+  it('POST /kits/:id/body-tile delega ao service com o dono', async () => {
+    await controller.ensureKitBodyTile(user, 'kit-1');
+    expect(kits.ensureBodyTile).toHaveBeenCalledWith('u1', 'kit-1');
   });
 
   it('POST /kits/:id/approve repassa acceptMouthRisk no DTO', async () => {

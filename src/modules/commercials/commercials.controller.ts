@@ -173,6 +173,13 @@ export class CommercialsController {
     return this.kits.findOne(user.id, id);
   }
 
+  /** Tile de corpo do kit (video-mascote-transparente, R2b): calcula se faltar; idempotente e sem custo. */
+  @Post('kits/:id/body-tile')
+  @HttpCode(200)
+  ensureKitBodyTile(@CurrentUser() user: { id: string }, @Param('id', ParseUUIDPipe) id: string) {
+    return this.kits.ensureBodyTile(user.id, id);
+  }
+
   /** Gate humano do kit (review → approved). Exige voz definida — aqui ou na criação. */
   @Post('kits/:id/approve')
   approveKit(

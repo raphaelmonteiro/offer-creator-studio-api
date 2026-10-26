@@ -1,0 +1,31 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`McKitBodyTileService — tile de corpo (video-mascote-transparente, D4) o tile de busto segue igual (snapshot do plano de recorte) 1`] = `
+{
+  "extend": {
+    "bottom": 0,
+    "left": 0,
+    "right": 0,
+    "top": 0,
+  },
+  "extract": {
+    "height": 1066,
+    "left": 200,
+    "top": 112,
+    "width": 800,
+  },
+  "faceFraction": 0.600375234521576,
+  "output": {
+    "height": 1066,
+    "width": 800,
+  },
+  "ratio": 0.7504690431519699,
+  "scale": 1,
+  "tile": {
+    "height": 1066,
+    "left": 200,
+    "top": 112,
+    "width": 800,
+  },
+}
+`;
