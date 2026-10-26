@@ -1,3 +1,4 @@
+import { characterUsesCutout, McPieceFraming, resolveCharacterFraming } from './mc-piece-character';
 import { computeContentHash } from './input-hash';
 import { McKitIdentityMode } from './mc-kit-identity';
 import type { McProjectLogoBox } from './mc-logo-face';
@@ -153,8 +154,13 @@ export interface McPieceCharacterBlock extends McPieceBlockBase {
   type: 'character';
   kitId: string;
   mode: 'in_piece' | 'logo_face';
-  /** Painel liso atrás do personagem (lançamento: sempre liso; `none` só com chroma, fase 2). */
+  /**
+   * Painel atrás do personagem. `none` = sem fundo (recorte por cor-chave no vídeo, flag
+   * `MC_CHARACTER_CUTOUT`); a cor segue obrigatória (fallback "usar painel liso").
+   */
   panel: { shape: 'none' | 'card' | 'circle'; color: string };
+  /** Enquadramento (video-mascote-transparente): ausente = `corpo` se `shape = 'none'`, senão `busto`. */
+  framing?: McPieceFraming;
 }
 
 export type McPieceBlock =
@@ -230,6 +236,11 @@ export interface McPieceValidationContext {
   kitIdentityMode?: McKitIdentityMode | null;
   /** Famílias de fontes da conta; ausente = não checa a fonte dos textos. */
   fontFamilies?: readonly string[] | null;
+  /**
+   * `MC_CHARACTER_CUTOUT` ligado (video-mascote-transparente). `false` marca como
+   * `CHARACTER_CUTOUT_DISABLED` o modo sem fundo e o enquadramento de corpo; ausente = não checa.
+   */
+  cutoutEnabled?: boolean;
 }
 
 const HEX_COLOR = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
@@ -614,6 +625,7 @@ export function validatePieceDocument(
             message: 'O modo "rosto do logo" só funciona com um kit de logo usado como está.',
           });
         }
+        issues.push(...characterCutoutIssues(block, ctx));
         if (!block.panel || !HEX_COLOR.test(block.panel.color ?? '')) {
           issues.push({
             code: 'CHARACTER_PANEL_INVALID',
@@ -641,6 +653,31 @@ export function validatePieceDocument(
     issues.push({
       code: 'TEXTS_TOO_MANY',
       message: `A peça aceita até ${MC_PIECE_MAX_TEXTS} textos soltos.`,
+    });
+  }
+  return issues;
+}
+
+/** Issues do recorte (não estruturais): flag desligada e rosto do logo com sem fundo/corpo. */
+function characterCutoutIssues(
+  block: McPieceCharacterBlock,
+  ctx: McPieceValidationContext,
+): McPieceIssue[] {
+  const cutout = characterUsesCutout(block);
+  const body = resolveCharacterFraming(block) === 'corpo';
+  const issues: McPieceIssue[] = [];
+  if (ctx.cutoutEnabled === false && (cutout || body)) {
+    issues.push({
+      code: 'CHARACTER_CUTOUT_DISABLED',
+      blockId: block.id,
+      message: 'O personagem sem fundo e o enquadramento de corpo não estão habilitados.',
+    });
+  }
+  if (block.mode === 'logo_face' && (cutout || body)) {
+    issues.push({
+      code: 'CHARACTER_CUTOUT_LOGO_FACE',
+      blockId: block.id,
+      message: 'O modo "rosto do logo" não aceita personagem sem fundo nem enquadramento de corpo.',
     });
   }
   return issues;
@@ -801,13 +838,21 @@ export function pieceCharacterVideoFields(document: McPieceDocument): {
   window: McPieceRect;
   logoFace: boolean;
   talkBackgroundColor: string | null;
+  /** Só presente (true) no modo sem fundo — Card, Círculo e busto seguem sem o campo (hashes iguais). */
+  cutout?: boolean;
+  /** Só presente com sem fundo ou corpo (video-mascote-transparente, D9). */
+  framing?: McPieceFraming;
 } | null {
   const character = pieceBlock(document, 'character');
   if (!character) return null;
+  const cutout = characterUsesCutout(character);
+  const framing = resolveCharacterFraming(character);
   return {
     window: { ...character.rect },
     logoFace: character.mode === 'logo_face',
     talkBackgroundColor: character.panel?.color ?? null,
+    ...(cutout ? { cutout: true } : {}),
+    ...(cutout || framing === 'corpo' ? { framing } : {}),
   };
 }
 

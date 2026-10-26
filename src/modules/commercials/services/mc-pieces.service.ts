@@ -1,6 +1,5 @@
 import {
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -9,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, In, Not } from 'typeorm';
 import { Client } from '../../clients/entities/client.entity';
 import { Font } from '../../fonts/entities/font.entity';
+import { isCharacterCutoutEnabled } from '../domain/mc-cutout.config';
 import {
   applyClientToPiece,
   defaultPieceDocument,
@@ -25,6 +25,7 @@ import { McProjectStatus } from '../domain/mc-state-machines';
 import { McCharacterKit, McKitStatus } from '../entities/mc-character-kit.entity';
 import { McPiece, McPieceKind } from '../entities/mc-piece.entity';
 import { McProject } from '../entities/mc-project.entity';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import {
   CreatePieceDto,
   ListPiecesQueryDto,
@@ -68,7 +69,10 @@ const PROJECT_ACTIVE_STATUSES: McProjectStatus[] = [
  */
 @Injectable()
 export class McPiecesService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly cutout: McCutoutGuardService,
+  ) {}
 
   async create(userId: string, dto: CreatePieceDto): Promise<McPieceView> {
     const client = await this.dataSource.getRepository(Client).findOneBy({ id: dto.clientId });
@@ -127,6 +131,8 @@ export class McPiecesService {
   async update(userId: string, id: string, dto: UpdatePieceDto): Promise<McPieceView> {
     const piece = await this.findOwned(userId, id);
     const document = dto.document;
+    // video-mascote-transparente: forma (400) e recorte (422) ANTES de gravar qualquer coisa
+    await this.cutout.assertPiece(userId, document);
     if (pieceDocumentBytes(document) > MC_PIECE_MAX_BYTES) {
       throw new UnprocessableEntityException({
         code: 'PIECE_TOO_LARGE',
@@ -202,7 +208,10 @@ export class McPiecesService {
     if (!piece) {
       throw new NotFoundException({ code: 'PIECE_NOT_FOUND', message: 'Peça não encontrada.' });
     }
-    if (piece.userId !== userId) throw new ForbiddenException();
+    // outro dono = 404 (não revela a existência; padroes.md)
+    if (!piece || piece.userId !== userId) {
+      throw new NotFoundException({ code: 'PIECE_NOT_FOUND', message: 'Peça não encontrada.' });
+    }
     return piece;
   }
 
@@ -231,7 +240,14 @@ export class McPiecesService {
         kitIdentityMode = kit.identityMode;
       }
     }
-    return [...validatePieceDocument(document, { kitIdentityMode, fontFamilies }), ...issues];
+    return [
+      ...validatePieceDocument(document, {
+        kitIdentityMode,
+        fontFamilies,
+        cutoutEnabled: isCharacterCutoutEnabled(),
+      }),
+      ...issues,
+    ];
   }
 
   private async toView(userId: string, piece: McPiece): Promise<McPieceView> {

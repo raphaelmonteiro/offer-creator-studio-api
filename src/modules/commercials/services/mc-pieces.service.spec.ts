@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { Client } from '../../clients/entities/client.entity';
 import { Font } from '../../fonts/entities/font.entity';
@@ -6,6 +6,7 @@ import { defaultPieceDocument, MC_PIECE_MAX_BYTES, McPieceDocument } from '../do
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McPiece } from '../entities/mc-piece.entity';
 import { McProject } from '../entities/mc-project.entity';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McPiecesService } from './mc-pieces.service';
 
 const CLIENT = {
@@ -47,6 +48,7 @@ describe('McPiecesService — CRUD, autosave por revisão, modelos (grupo 4)', (
   let pieces: Map<string, McPiece>;
   let repos: Map<unknown, Record<string, jest.Mock>>;
   let service: McPiecesService;
+  let cutout: { assertPiece: jest.Mock };
 
   function row(over: Partial<McPiece>): McPiece {
     return {
@@ -123,7 +125,13 @@ describe('McPiecesService — CRUD, autosave por revisão, modelos (grupo 4)', (
       [McProject, { count: jest.fn().mockResolvedValue(0) }],
     ]);
     const dataSource = { getRepository: jest.fn((entity: unknown) => repos.get(entity)) };
-    service = new McPiecesService(dataSource as unknown as DataSource);
+    cutout = {
+      assertPiece: jest.fn().mockResolvedValue({ cutout: false, framing: 'busto', keyColor: null }),
+    };
+    service = new McPiecesService(
+      dataSource as unknown as DataSource,
+      cutout as unknown as McCutoutGuardService,
+    );
   });
 
   it('create: peça em branco do cliente com logo e rodapé do cadastro, nome padrão e issues do que falta', async () => {
@@ -149,7 +157,7 @@ describe('McPiecesService — CRUD, autosave por revisão, modelos (grupo 4)', (
     );
   });
 
-  it('create: cliente inexistente → 404; modelo que não é modelo → 422; modelo de outro dono → 403', async () => {
+  it('create: cliente inexistente → 404; modelo que não é modelo → 422; modelo de outro dono → 404', async () => {
     await expect(
       service.create('u1', { clientId: 'zz', aspectRatio: '9:16' }),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -162,7 +170,7 @@ describe('McPiecesService — CRUD, autosave por revisão, modelos (grupo 4)', (
     pieces.set('tpl-x', row({ id: 'tpl-x', userId: 'u2', kind: 'template' }));
     await expect(
       service.create('u1', { clientId: 'c1', aspectRatio: '9:16', templateId: 'tpl-x' }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('create a partir de modelo: visual do modelo, formato pedido, logo e rodapé do cliente', async () => {
@@ -210,7 +218,7 @@ describe('McPiecesService — CRUD, autosave por revisão, modelos (grupo 4)', (
         expect.objectContaining({ code: 'FONT_UNKNOWN', blockId: 'title' }),
       ]),
     );
-    await expect(service.findOne('u2', 'piece-1')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.findOne('u2', 'piece-1')).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.findOne('u1', 'nope')).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -234,6 +242,32 @@ describe('McPiecesService — CRUD, autosave por revisão, modelos (grupo 4)', (
     await expect(
       service.update('u1', 'piece-1', { document, expectedRevision: 3 }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('update: o guard do recorte roda antes de gravar; recusa (400/422) não grava e não sobe a revisão', async () => {
+    pieces.set('piece-1', row({ revision: 3 }));
+    cutout.assertPiece.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { response: { code: 'CHARACTER_CUTOUT_DISABLED' } }),
+    );
+    await expect(
+      service.update('u1', 'piece-1', { document: fullDocument(), expectedRevision: 3 }),
+    ).rejects.toMatchObject({ response: { code: 'CHARACTER_CUTOUT_DISABLED' } });
+    expect(pieces.get('piece-1')?.revision).toBe(3);
+    expect(cutout.assertPiece).toHaveBeenCalledWith(
+      'u1',
+      expect.objectContaining({ blocks: expect.any(Array) }),
+    );
+  });
+
+  it('update de peça de outro usuário ou inexistente → 404 PIECE_NOT_FOUND, sem chamar o guard', async () => {
+    pieces.set('piece-1', row({}));
+    await expect(
+      service.update('u2', 'piece-1', { document: fullDocument(), expectedRevision: 3 }),
+    ).rejects.toMatchObject({ status: 404, response: { code: 'PIECE_NOT_FOUND' } });
+    await expect(
+      service.update('u1', 'nope', { document: fullDocument(), expectedRevision: 3 }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(cutout.assertPiece).not.toHaveBeenCalled();
   });
 
   it('update: regras de negócio abertas NÃO bloqueiam (voltam em issues); estrutura inválida → 422 PIECE_INVALID; tamanho → 422', async () => {

@@ -18,7 +18,7 @@ import { mcExpireForQueue } from './mc-pipeline.config';
  * - `MC_CAROUSEL_RENDERER` (`remotion` | `mock`): força o renderizador; sem
  *   ele, `MC_PIPELINE_PROVIDER=mock` usa o mock em ffmpeg e o resto, o Remotion.
  */
-export const MC_DEFAULT_COMPOSITION_VERSION = '0.2.0';
+export const MC_DEFAULT_COMPOSITION_VERSION = '0.3.0';
 export const MC_DEFAULT_RENDER_ASSET_BASE_URL = 'http://127.0.0.1:3001';
 
 /** Id da composição registrada no Root do pacote (`OFFER_CAROUSEL_COMPOSITION_ID`). */

@@ -854,7 +854,7 @@ export function isCompositionOnlyChange(
   );
   if (touchesMedia) return false;
   // a cor da janela está gravada nos clipes de fala: trocá-la regrava, não é só composição
-  if (talkColorChanged(previous, next)) return false;
+  if (talkColorChanged(previous, next) || talkTileChanged(previous, next)) return false;
   const productsChanged =
     JSON.stringify(canonicalProducts(previous.products)) !==
     JSON.stringify(canonicalProducts(next.products));
@@ -950,10 +950,20 @@ export function compositionFieldsChanged(previous: McScript, next: McScript): bo
   return pick(previous) !== pick(next);
 }
 
-/** Cor da janela/painel mudou (#RRGGBB sem distinção de caixa; ausente = null). */
+/**
+ * Cor da janela/painel mudou (#RRGGBB sem distinção de caixa; ausente = null). No modo sem fundo
+ * a cor não é enviada ao motor (vale a cor-chave): trocá-la ali não regrava.
+ */
 export function talkColorChanged(previous: McScript, next: McScript): boolean {
+  if (previous.cutout === true && next.cutout === true) return false;
   const norm = (s: McScript) => (s.talkBackgroundColor ?? null)?.trim().toUpperCase() ?? null;
   return norm(previous) !== norm(next);
+}
+
+/** Sem fundo, enquadramento ou cor-chave mudou: o tile enviado ao motor muda, então regrava. */
+export function talkTileChanged(previous: McScript, next: McScript): boolean {
+  const pick = (s: McScript) => [s.cutout === true, s.framing ?? 'busto', s.cutoutKeyColor ?? null];
+  return JSON.stringify(pick(previous)) !== JSON.stringify(pick(next));
 }
 
 /**
@@ -997,6 +1007,10 @@ export function scriptContentHash(script: McScript): string {
     talkBackgroundColor: script.talkBackgroundColor ?? null,
     layoutPreset: script.layoutPreset ?? null,
     captions: script.captions ?? null,
+    // só quando o modo está em uso: a impressão de todo roteiro existente segue a mesma
+    ...(script.cutout === true ? { cutout: true } : {}),
+    ...(script.framing ? { framing: script.framing } : {}),
+    ...(script.cutoutKeyColor ? { cutoutKeyColor: script.cutoutKeyColor } : {}),
   });
 }
 

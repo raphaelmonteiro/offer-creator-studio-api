@@ -12,6 +12,7 @@ import { MC_DEFAULT_PROJECT_TIER, McSealProduct } from '../domain/mc-types';
 import { CreateProjectDto } from '../dto/create-project.dto';
 import { CreateProjectFromPieceDto } from '../dto/piece.dto';
 import { McProject } from '../entities/mc-project.entity';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McPiecesService } from './mc-pieces.service';
 
 /**
@@ -27,6 +28,7 @@ export class McFromPieceService {
   constructor(
     private readonly pieces: McPiecesService,
     private readonly commercials: CommercialsService,
+    private readonly cutout: McCutoutGuardService,
   ) {}
 
   async createFromPiece(userId: string, dto: CreateProjectFromPieceDto): Promise<McProject> {
@@ -40,6 +42,8 @@ export class McFromPieceService {
         message: 'Um modelo não vira vídeo: crie uma peça a partir dele e escolha os produtos.',
       });
     }
+    // a flag pode ter sido desligada depois de gravar a peça: repete as checagens do recorte (422)
+    await this.cutout.assertPiece(userId, piece.document);
     const issues = await this.pieces.issuesFor(userId, piece.document);
     if (issues.length > 0) {
       throw new UnprocessableEntityException({

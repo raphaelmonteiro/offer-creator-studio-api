@@ -99,7 +99,7 @@ describe('render_remotion — fila mc.render e configuração (tarefa 6.5)', () 
   });
 
   it('env: versão da composição (default = a do pacote), base das URLs (default 127.0.0.1:3001) e renderizador por provider', () => {
-    expect(mcCompositionVersion({})).toBe('0.2.0');
+    expect(mcCompositionVersion({})).toBe('0.3.0');
     expect(mcCompositionVersion({ MC_COMPOSITION_VERSION: '0.3.0' })).toBe('0.3.0');
     expect(mcRenderAssetBaseUrl({})).toBe('http://127.0.0.1:3001');
     expect(mcRenderAssetBaseUrl({ MC_RENDER_ASSET_BASE_URL: 'http://backend:3001/' })).toBe(

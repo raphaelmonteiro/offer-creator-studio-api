@@ -358,6 +358,15 @@ export interface McScript {
    */
   talkBackgroundColor?: string | null;
   /**
+   * video-mascote-transparente (D9): só existem com o modo em uso (ausentes em tudo que já
+   * existe, para hashes e `scriptContentHash` não mudarem). `cutout` = personagem sem fundo;
+   * `framing` = tile enviado ao motor (resolvido na criação/edição); `cutoutKeyColor` = cor-chave
+   * congelada pelo serviço (regra D3), nunca enviada pelo cliente.
+   */
+  cutout?: boolean;
+  framing?: 'busto' | 'corpo';
+  cutoutKeyColor?: '#00B140' | '#0047BB';
+  /**
    * F2 (tarefa 6.6): ofertas CONGELADAS na ordem do vídeo (3 a 6, cada uma com
    * foto) — nome, preço, preço anterior, unidade, badge, foto e `catalogId`.
    * `products[]` é sempre o ESPELHO desta lista (mesmos ids e ordem) para que

@@ -38,9 +38,11 @@ import {
   RawDirectorSceneV2,
 } from '../domain/mc-director';
 import { compositionDimensions } from '../domain/mc-composition.config';
+import { McCutoutKeyColor, McCutoutKeyDecision } from '../domain/mc-cutout-key';
 import {
   MC_PIECE_MAX_SPOKEN,
   pieceBlock,
+  pieceCharacterVideoFields,
   pieceSpokenOffers,
   pieceValidityHint,
 } from '../domain/mc-piece';
@@ -382,6 +384,8 @@ export class McScriptProcessor {
     });
     const options = resolveProjectOptions(project.options);
     const footer = pieceBlock(piece, 'footer');
+    const video = pieceCharacterVideoFields(piece);
+    const cutoutKeyColor = video?.cutout ? await this.cutoutKeyOf(kit) : null;
     return {
       offers: pieceSpokenOffers(piece).slice(0, MC_PIECE_MAX_SPOKEN),
       storeName,
@@ -397,7 +401,20 @@ export class McScriptProcessor {
       logoFace: character.mode === 'logo_face',
       talkBackgroundColor: character.panel?.color ?? null,
       closingHint: pieceValidityHint(footer?.validity),
+      // sem fundo / corpo (video-mascote-transparente): só presentes com o modo em uso
+      ...(video?.cutout ? { cutout: true, cutoutKeyColor } : {}),
+      ...(video?.framing ? { framing: video.framing } : {}),
     };
+  }
+
+  /** Cor-chave que a API congelou no tile de corpo do kit (regra D3); a flag nunca é lida aqui. */
+  private async cutoutKeyOf(kit: McCharacterKit | null): Promise<McCutoutKeyColor | null> {
+    if (!kit?.bodyTileAssetId) return null;
+    const asset = await this.dataSource
+      .getRepository(AnimationAsset)
+      .findOneBy({ id: kit.bodyTileAssetId });
+    const key = asset?.metadata?.cutoutKey as McCutoutKeyDecision | undefined;
+    return key?.chosen ?? null;
   }
 
   /**

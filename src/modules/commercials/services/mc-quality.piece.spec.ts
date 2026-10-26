@@ -23,6 +23,7 @@ import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McMaterializerService } from './mc-materializer.service';
 import { McPieceProjectService } from './mc-piece-project.service';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McPiecesService } from './mc-pieces.service';
 import { McPipelineService } from './mc-pipeline.service';
 import { McQualityService } from './mc-quality.service';
@@ -216,10 +217,14 @@ function harness(document: McPieceDocument = fixturePieceDocument()) {
     } as unknown as McTranslationService,
   );
   const pieces = { issuesFor: jest.fn().mockResolvedValue([]) };
+  const cutout = {
+    assertPiece: jest.fn().mockResolvedValue({ cutout: false, framing: 'busto', keyColor: null }),
+  };
   const pieceProject = new McPieceProjectService(
     dataSource as unknown as DataSource,
     pieces as unknown as McPiecesService,
     service,
+    cutout as unknown as McCutoutGuardService,
   );
   const deliver = () => {
     project.status = McProjectStatus.SUCCEEDED;
@@ -239,6 +244,7 @@ function harness(document: McPieceDocument = fixturePieceDocument()) {
     service,
     pieces,
     pieceProject,
+    cutout,
     deliver,
   };
 }
@@ -356,10 +362,95 @@ describe('McPieceProjectService — edição falada (fala reescrita, revisão do
       scope: 'visual',
       effect: 'recording',
       rewrittenLines: [],
+      recordingReasons: ['panel_color'],
     });
     expect(h.project.status).toBe(McProjectStatus.STORYBOARD_REVIEW);
     expect((h.project.script as McScript).talkBackgroundColor).toBe('#112233');
     expect(dialogues(h.project)).toEqual(dialogues({ id: 'x', script: h.script }));
+  });
+});
+
+/** video-mascote-transparente (1.5): troca de modo do personagem depois do vídeo. */
+describe('McPieceProjectService — personagem sem fundo (troca de modo)', () => {
+  const noBackground = () =>
+    fixturePieceDocument({
+      character: { panel: { shape: 'none', color: '#FFFFFF' } },
+    });
+
+  it('card → sem fundo depois da entrega: regrava (revisão do roteiro) e congela modo, enquadramento e chave no roteiro', async () => {
+    const h = harness();
+    h.deliver();
+    h.cutout.assertPiece.mockResolvedValueOnce({
+      cutout: true,
+      framing: 'corpo',
+      keyColor: '#00B140',
+    });
+    const result = await h.pieceProject.updatePiece(userId, 'p1', {
+      document: noBackground(),
+      expectedRevision: 1,
+    });
+    expect(result.pieceChange).toMatchObject({
+      scope: 'visual',
+      effect: 'recording',
+      recordingReasons: ['character_cutout', 'character_framing'],
+    });
+    expect(h.project.status).toBe(McProjectStatus.STORYBOARD_REVIEW);
+    expect(h.project.script).toMatchObject({
+      cutout: true,
+      framing: 'corpo',
+      cutoutKeyColor: '#00B140',
+    });
+  });
+
+  it('reenvio do mesmo modo sem fundo → 422 NO_PIECE_CHANGE e nada muda', async () => {
+    const h = harness(noBackground());
+    h.deliver();
+    const before = JSON.stringify(h.project.script);
+    await expect(
+      h.pieceProject.updatePiece(userId, 'p1', { document: noBackground(), expectedRevision: 1 }),
+    ).rejects.toMatchObject({ response: { code: 'NO_PIECE_CHANGE' } });
+    expect(JSON.stringify(h.project.script)).toBe(before);
+    expect(h.project.revision).toBe(1);
+  });
+
+  it('card → círculo é só visual: não regrava e a lista de motivos vem vazia', async () => {
+    const h = harness();
+    h.deliver();
+    const result = await h.pieceProject.updatePiece(userId, 'p1', {
+      document: fixturePieceDocument({
+        character: {
+          panel: { shape: 'circle', color: character(fixturePieceDocument()).panel.color },
+        },
+      }),
+      expectedRevision: 1,
+    });
+    expect(result.pieceChange).toMatchObject({ effect: 'composition', recordingReasons: [] });
+    expect(h.project.script).not.toHaveProperty('cutout');
+  });
+
+  it('recusa do recorte (400/422 do guard): nada é gravado', async () => {
+    const h = harness();
+    h.deliver();
+    const before = JSON.stringify(h.project.script);
+    h.cutout.assertPiece.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { response: { code: 'CHARACTER_CUTOUT_KEY_UNSAFE' } }),
+    );
+    await expect(
+      h.pieceProject.updatePiece(userId, 'p1', { document: noBackground(), expectedRevision: 1 }),
+    ).rejects.toMatchObject({ response: { code: 'CHARACTER_CUTOUT_KEY_UNSAFE' } });
+    expect(JSON.stringify(h.project.script)).toBe(before);
+    expect(h.updates).toEqual([]);
+    expect(h.project.revision).toBe(1);
+  });
+
+  it('projeto de outro usuário → 404 PROJECT_NOT_FOUND (não 403)', async () => {
+    const h = harness();
+    await expect(
+      h.pieceProject.updatePiece('u-outro', 'p1', {
+        document: fixturePieceDocument(),
+        expectedRevision: 1,
+      }),
+    ).rejects.toMatchObject({ status: 404, response: { code: 'PROJECT_NOT_FOUND' } });
   });
 });
 
@@ -377,6 +468,7 @@ describe('McPieceProjectService — edição só visual', () => {
       scope: 'visual',
       effect: 'composition',
       rewrittenLines: [],
+      recordingReasons: [],
     });
     expect(h.project.status).toBe(McProjectStatus.VISUAL_REVIEW);
     expect(h.project.revision).toBe(2);

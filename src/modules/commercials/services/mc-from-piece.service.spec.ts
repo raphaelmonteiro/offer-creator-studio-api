@@ -3,6 +3,7 @@ import { CommercialsService } from '../commercials.service';
 import { defaultPieceDocument, McPieceDocument } from '../domain/mc-piece';
 import { McPiece } from '../entities/mc-piece.entity';
 import { McFromPieceService } from './mc-from-piece.service';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McPiecesService } from './mc-pieces.service';
 
 function readyDocument(mode: 'in_piece' | 'logo_face' = 'in_piece'): McPieceDocument {
@@ -66,6 +67,7 @@ describe('McFromPieceService — ponte peça → projeto (tarefa 5.1)', () => {
   let pieces: { findOwned: jest.Mock; issuesFor: jest.Mock };
   let commercials: { createProject: jest.Mock };
   let service: McFromPieceService;
+  let cutout: { assertPiece: jest.Mock };
   const piece = (over: Partial<McPiece> = {}): McPiece =>
     ({
       id: 'piece-1',
@@ -86,6 +88,9 @@ describe('McFromPieceService — ponte peça → projeto (tarefa 5.1)', () => {
       findOwned: jest.fn().mockResolvedValue(piece()),
       issuesFor: jest.fn().mockResolvedValue([]),
     };
+    cutout = {
+      assertPiece: jest.fn().mockResolvedValue({ cutout: false, framing: 'busto', keyColor: null }),
+    };
     commercials = {
       createProject: jest.fn((userId: string, dto: unknown, extras: unknown) =>
         Promise.resolve({ id: 'proj-1', userId, dto, extras }),
@@ -94,11 +99,23 @@ describe('McFromPieceService — ponte peça → projeto (tarefa 5.1)', () => {
     service = new McFromPieceService(
       pieces as unknown as McPiecesService,
       commercials as unknown as CommercialsService,
+      cutout as unknown as McCutoutGuardService,
     );
   });
 
   afterEach(() => {
     process.env = { ...env };
+  });
+
+  it('recusa do recorte (flag desligada depois de gravar a peça) → erro do guard antes de PIECE_INVALID e sem projeto', async () => {
+    cutout.assertPiece.mockRejectedValueOnce(
+      Object.assign(new Error('x'), { response: { code: 'CHARACTER_CUTOUT_DISABLED' } }),
+    );
+    await expect(service.createFromPiece('u1', { pieceId: 'piece-1' })).rejects.toMatchObject({
+      response: { code: 'CHARACTER_CUTOUT_DISABLED' },
+    });
+    expect(pieces.issuesFor).not.toHaveBeenCalled();
+    expect(commercials.createProject).not.toHaveBeenCalled();
   });
 
   it('peça pronta → createProject com offer_piece, ofertas FALADAS na ordem, snapshot e defaults', async () => {

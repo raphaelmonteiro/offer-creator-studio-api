@@ -57,6 +57,7 @@ import {
   upsertPhaseBudget,
 } from '../domain/mc-quality';
 import { assertLogoFaceReady } from '../domain/mc-logo-face';
+import { McCutoutKeyColor } from '../domain/mc-cutout-key';
 import { McProjectPieceExtras, pieceCanonicalHash } from '../domain/mc-piece';
 import { voiceoverPlanExcessMs } from '../domain/mc-scene-compose-graph';
 import { preparationComplete } from '../domain/mc-scheduler';
@@ -159,6 +160,25 @@ export function spokenTextHistory(
   return out;
 }
 
+/**
+ * Campos do modo sem fundo no roteiro (video-mascote-transparente, D9): omitidos do DTO preservam
+ * o valor atual; só existem com o modo em uso (`cutout` ou `framing = corpo`), para o
+ * `scriptContentHash` e os hashes dos steps de tudo que já existe não mudarem.
+ */
+export function cutoutScriptFields(
+  previous: McScript | null | undefined,
+  dto: { cutout?: boolean; framing?: 'busto' | 'corpo' },
+  keyColor?: McCutoutKeyColor | null,
+): Partial<Pick<McScript, 'cutout' | 'framing' | 'cutoutKeyColor'>> {
+  const cutout = dto.cutout ?? previous?.cutout;
+  const framing = dto.framing ?? previous?.framing;
+  const key = keyColor ?? previous?.cutoutKeyColor;
+  return {
+    ...(cutout ? { cutout: true, ...(key ? { cutoutKeyColor: key } : {}) } : {}),
+    ...(framing && (cutout || framing === 'corpo') ? { framing } : {}),
+  };
+}
+
 @Injectable()
 export class McQualityService {
   private readonly logger = new Logger(McQualityService.name);
@@ -190,6 +210,8 @@ export class McQualityService {
     dto: UpdateScriptV2Dto,
     /** Peça de ofertas (5.4): descritor/caixa do logo/opções gravados na MESMA transação. */
     pieceExtras?: McProjectPieceExtras,
+    /** Cor-chave do kit, congelada no roteiro quando `cutout` (D3): resolvida pelo guard do chamador. */
+    cutoutKeyColor?: McCutoutKeyColor | null,
   ): Promise<McProject> {
     const project = await this.getV2Project(userId, projectId);
     this.assertRevision(project, dto.expectedRevision);
@@ -285,6 +307,7 @@ export class McQualityService {
         : previous?.talkBackgroundColor !== undefined
           ? { talkBackgroundColor: previous.talkBackgroundColor }
           : {}),
+      ...cutoutScriptFields(previous, dto, cutoutKeyColor),
       // F2 (6.6): ofertas = produtos mesclados (ordem acompanha as falas na
       // normalização), preset e legendas do DTO ou preservados; falas derivadas.
       ...(carousel

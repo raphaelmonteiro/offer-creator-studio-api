@@ -318,6 +318,16 @@ export class UpdateScriptV2Dto {
   @IsString()
   @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'talkBackgroundColor precisa ser #RRGGBB' })
   talkBackgroundColor?: string | null;
+
+  /** video-mascote-transparente: personagem sem fundo (só janela; 422 se a flag estiver desligada). */
+  @IsOptional()
+  @IsBoolean()
+  cutout?: boolean;
+
+  /** video-mascote-transparente: enquadramento enviado ao motor (`busto` ou `corpo`). */
+  @IsOptional()
+  @IsIn(['busto', 'corpo'])
+  framing?: 'busto' | 'corpo';
 }
 
 export class RevisionDto {

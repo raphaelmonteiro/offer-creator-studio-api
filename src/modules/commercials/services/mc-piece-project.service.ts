@@ -1,6 +1,5 @@
 import {
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -20,6 +19,7 @@ import {
   pieceDocumentBytes,
   pieceSpokenOffers,
 } from '../domain/mc-piece';
+import { McPieceRecordingReason, pieceRecordingReasons } from '../domain/mc-piece-character';
 import { isPipelineV2, resolveQuality } from '../domain/mc-quality';
 import { carouselOffers, deriveCarouselLines, isScriptV2 } from '../domain/mc-script-v2';
 import { McProjectStatus } from '../domain/mc-state-machines';
@@ -27,6 +27,7 @@ import { McScript, McSealProduct, resolveProjectOptions } from '../domain/mc-typ
 import { UpdateProjectPieceDto } from '../dto/piece.dto';
 import { ScriptProductV2Dto, ScriptSceneV2Dto, UpdateScriptV2Dto } from '../dto/quality-v2.dto';
 import { McProject } from '../entities/mc-project.entity';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McFromPieceService } from './mc-from-piece.service';
 import { McPiecesService } from './mc-pieces.service';
 import { McQualityService } from './mc-quality.service';
@@ -48,6 +49,8 @@ export interface McPieceChange {
    */
   effect: 'recording' | 'composition';
   rewrittenLines: McPieceLineRewrite[];
+  /** Por que regrava (vazio com `composition`): sem fundo, enquadramento, cor do painel visível, modo. */
+  recordingReasons: McPieceRecordingReason[];
 }
 
 /**
@@ -74,6 +77,7 @@ export class McPieceProjectService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly pieces: McPiecesService,
     private readonly quality: McQualityService,
+    private readonly cutout: McCutoutGuardService,
   ) {}
 
   async updatePiece(
@@ -82,6 +86,9 @@ export class McPieceProjectService {
     dto: UpdateProjectPieceDto,
   ): Promise<McProject & { pieceChange: McPieceChange }> {
     const project = await this.pieceProject(userId, projectId);
+    const after = dto.document;
+    // video-mascote-transparente: forma (400) e recorte (422) antes de qualquer gravação
+    const resolution = await this.cutout.assertPiece(userId, after);
     if (project.revision !== dto.expectedRevision) {
       throw new ConflictException({
         code: 'REVISION_CONFLICT',
@@ -90,7 +97,6 @@ export class McPieceProjectService {
       });
     }
     const before = project.pieceSnapshot as McPieceDocument;
-    const after = dto.document;
     if (after.aspectRatio !== project.aspectRatio) {
       throw new UnprocessableEntityException({
         code: 'PIECE_ASPECT_MISMATCH',
@@ -136,12 +142,8 @@ export class McPieceProjectService {
         message: 'Nada mudou na peça.',
       });
     }
-    const previousCharacter = pieceBlock(before, 'character');
-    const panelChanged =
-      (previousCharacter?.panel?.color ?? '').trim().toUpperCase() !==
-      (character.panel?.color ?? '').trim().toUpperCase();
-    const modeChanged = (previousCharacter?.mode ?? null) !== character.mode;
-    const recording = scope === 'spoken' || panelChanged || modeChanged;
+    const reasons = pieceRecordingReasons(pieceBlock(before, 'character'), character);
+    const recording = scope === 'spoken' || reasons.length > 0;
 
     const script = project.script as McScript;
     const extras: McProjectPieceExtras = {
@@ -163,7 +165,13 @@ export class McPieceProjectService {
     if (recording) {
       const built = this.scriptDto(script, after, dto.expectedRevision, video);
       rewrittenLines = built.rewritten;
-      updated = await this.quality.updateScript(userId, projectId, built.dto, extras);
+      updated = await this.quality.updateScript(
+        userId,
+        projectId,
+        built.dto,
+        extras,
+        resolution.keyColor,
+      );
     } else if (delivered) {
       updated = await this.quality.updateComposition(
         userId,
@@ -184,6 +192,7 @@ export class McPieceProjectService {
         scope,
         effect: recording ? 'recording' : 'composition',
         rewrittenLines,
+        recordingReasons: recording ? reasons : [],
       },
     };
   }
@@ -195,7 +204,10 @@ export class McPieceProjectService {
     if (!project) {
       throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Projeto não encontrado' });
     }
-    if (project.userId !== userId) throw new ForbiddenException();
+    // outro dono = 404 (não revela a existência; padroes.md)
+    if (project.userId !== userId) {
+      throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Projeto não encontrado' });
+    }
     if (
       project.format !== 'offer_piece' ||
       !isPipelineV2(project) ||
@@ -313,6 +325,9 @@ export class McPieceProjectService {
         window: { ...video.window },
         logoFace: video.logoFace,
         talkBackgroundColor: video.talkBackgroundColor,
+        // explícitos: voltar ao painel liso (cutout false) limpa o modo no roteiro
+        cutout: video.cutout ?? false,
+        framing: video.framing ?? 'busto',
       },
       rewritten,
     };

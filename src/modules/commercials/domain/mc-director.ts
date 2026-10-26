@@ -1,3 +1,5 @@
+import { McCutoutKeyColor } from './mc-cutout-key';
+import { McPieceFraming } from './mc-piece-character';
 import { MC_OFFER_PIECE_MIN_OFFERS } from './mc-piece';
 import { numeroPorExtenso, parsePreco, precoPorExtenso } from './mc-preco-extenso';
 import { MC_SCRIPT_SCHEMA_V2 } from './mc-quality';
@@ -1277,6 +1279,10 @@ export interface DirectorPieceContext extends DirectorF2Context {
   logoFace: boolean;
   talkBackgroundColor: string | null;
   closingHint: string | null;
+  /** video-mascote-transparente: só presente com o modo em uso (D9). */
+  cutout?: boolean;
+  framing?: McPieceFraming;
+  cutoutKeyColor?: McCutoutKeyColor | null;
 }
 
 /** Roteiro da peça: as falas do F2 (≥ 1 oferta) + janela, rosto do logo e cor do painel. */
@@ -1295,6 +1301,9 @@ export function buildOfferPieceScript(
     window: { ...ctx.window },
     logoFace: ctx.logoFace,
     talkBackgroundColor: ctx.talkBackgroundColor,
+    ...(ctx.cutout ? { cutout: true } : {}),
+    ...(ctx.framing ? { framing: ctx.framing } : {}),
+    ...(ctx.cutout && ctx.cutoutKeyColor ? { cutoutKeyColor: ctx.cutoutKeyColor } : {}),
   };
 }
 
