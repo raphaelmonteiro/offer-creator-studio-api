@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { kitTileIdForFraming } from '../domain/mc-cutout-request';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CreditsService } from '../../../shared/credits/credits.service';
@@ -299,7 +300,7 @@ export class McScriptProcessor {
       .findOneBy({ id: project.kitId });
     // video-mascote-transparente: a janela segue o aspecto do tile ESCOLHIDO (corpo ou busto)
     const framing = options.framing;
-    const tileId = framing === 'corpo' ? kit?.bodyTileAssetId : kit?.tileAssetId;
+    const tileId = kitTileIdForFraming(kit, framing);
     const tile = tileId
       ? await this.dataSource.getRepository(AnimationAsset).findOneBy({ id: tileId })
       : null;

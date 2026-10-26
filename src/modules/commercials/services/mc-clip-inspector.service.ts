@@ -83,7 +83,6 @@ const STYLE_WORDS: Record<McKitStyle, string> = {
   realistic: 'photorealistic',
 };
 
-/** Prompt de QA dirigido pelo contexto: nunca presume "mascote num corredor de loja". */
 /**
  * Modo sem fundo: o fundo liso da geração é o fundo de recorte (chroma key) — nunca um defeito —, e
  * a proibição de texto vale também no corpo e na roupa (enquadramento de corpo).
@@ -94,6 +93,7 @@ const CUTOUT_BACKGROUND_NOTE =
   'Any text, letters, numbers, scribbles or glyphs that look like writing on the clothing or on ' +
   'the body of the character DO count as unwanted_text, also in a full-body framing.';
 
+/** Prompt de QA dirigido pelo contexto: nunca presume "mascote num corredor de loja". */
 export function buildClipInspectionPrompt(ctx: ClipInspectionContext, pairs: number): string {
   const subject =
     ctx.source === 'logo'

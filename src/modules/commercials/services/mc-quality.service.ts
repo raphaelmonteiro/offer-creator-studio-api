@@ -9,6 +9,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { kitTileIdForFraming, resolveCutoutRequest } from '../domain/mc-cutout-request';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, In } from 'typeorm';
@@ -2277,7 +2278,7 @@ export class McQualityService {
         .getRepository(McCharacterKit)
         .findOneBy({ id: project.kitId });
       // a trava de aspecto usa o tile do enquadramento do roteiro (corpo ⇒ tile de corpo)
-      const tileId = framing === 'corpo' ? kit?.bodyTileAssetId : kit?.tileAssetId;
+      const tileId = kitTileIdForFraming(kit, framing);
       if (!tileId) return ctx;
       const tile = await this.dataSource.getRepository(AnimationAsset).findOneBy({ id: tileId });
       if (tile?.width && tile?.height) ctx.tileRatio = tile.width / tile.height;
@@ -2307,17 +2308,13 @@ export class McQualityService {
             : 'O personagem sem fundo e o enquadramento de corpo só existem na arte que fala.',
       });
     }
-    const previous = project.script;
-    const cutout = dto.cutout ?? previous?.cutout ?? false;
-    const framing = dto.framing ?? previous?.framing ?? (cutout ? 'corpo' : 'busto');
+    const request = resolveCutoutRequest(dto, project.script);
     const resolution = await this.cutoutGuard.resolve({
       userId,
       kitId: project.kitId,
-      cutout,
-      framing,
-      logoFace: dto.logoFace ?? previous?.logoFace ?? false,
+      ...request,
     });
-    return { keyColor: resolution.keyColor, framing };
+    return { keyColor: resolution.keyColor, framing: request.framing };
   }
 
   private async getOwnedProject(userId: string, id: string): Promise<McProject> {

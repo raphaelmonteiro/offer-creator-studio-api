@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { kitTileIdForFraming } from '../domain/mc-cutout-request';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as sharp from 'sharp';
@@ -186,7 +187,7 @@ export class McWindowPriceService {
   ): Promise<{ width: number | null; height: number | null }> {
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: kitId });
     // o aspecto da janela é o do tile do enquadramento do roteiro (video-mascote-transparente)
-    const tileId = framing === 'corpo' ? kit?.bodyTileAssetId : kit?.tileAssetId;
+    const tileId = kitTileIdForFraming(kit, framing);
     if (!tileId) return { width: null, height: null };
     const tile = await this.dataSource.getRepository(AnimationAsset).findOneBy({ id: tileId });
     return { width: tile?.width ?? null, height: tile?.height ?? null };

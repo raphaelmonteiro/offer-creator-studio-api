@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { kitTileIdForFraming, McTalkPreconditionError } from '../domain/mc-cutout-request';
 import { EntityManager, In } from 'typeorm';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { CommercialsService } from '../commercials.service';
@@ -101,6 +102,8 @@ import { McStep } from '../entities/mc-step.entity';
  */
 @Injectable()
 export class McMaterializerService {
+  private readonly logger = new Logger(McMaterializerService.name);
+
   constructor(private readonly commercials: CommercialsService) {}
 
   /**
@@ -841,12 +844,8 @@ export class McMaterializerService {
     scenes: McScene[],
   ): Promise<McTalkQuote | null> {
     if (project.format !== 'talking_art' && project.format !== 'offer_piece') return null;
-    let ctx: Awaited<ReturnType<McMaterializerService['talkProductionContext']>>;
-    try {
-      ctx = await this.talkProductionContext(manager, project, script);
-    } catch {
-      return null;
-    }
+    const ctx = await this.quoteContext(manager, project, script);
+    if (!ctx) return null;
     const audioIds = scenes.map((s) => s.audioAssetId).filter((id): id is string => !!id);
     const audios = audioIds.length
       ? await manager.find(AnimationAsset, { where: { id: In(audioIds) } })
@@ -857,40 +856,7 @@ export class McMaterializerService {
       const row = scenes.find((s) => s.scriptSceneId === scriptScene.sceneId);
       if (!row) continue;
       const audio = audios.find((a) => a.id === row.audioAssetId);
-      const speechS = audio?.durationMs ? audio.durationMs / 1000 : row.durationS;
-      const padded = planTalkAudioPadding(ctx.engine.model, speechS * 1000);
-      const billedSeconds = Number((padded ? padded.submittedMs / 1000 : speechS).toFixed(3));
-      const motion = (
-        effectiveScenePrompts(scriptScene)?.motion ??
-        scriptScene.actionPrompt ??
-        ''
-      ).trim();
-      let rewrite = true;
-      if (row.audioAssetId) {
-        const attempt = await this.currentOrFirstAttempt(manager, row, McStepType.TALK);
-        const { inputHash } = this.talkStepInput(ctx, {
-          audioAssetId: row.audioAssetId,
-          motion,
-          lang: effectiveScenePrompts(scriptScene)?.lang ?? 'pt',
-          sceneType: scriptScene.sceneType,
-          attempt,
-        });
-        rewrite = !(await this.findCachedOutput(
-          manager,
-          project.userId,
-          McStepType.TALK,
-          inputHash,
-        ));
-      }
-      quoted.push({
-        sceneId: scriptScene.sceneId as string,
-        idx: row.idx,
-        rewrite,
-        billedSeconds,
-        engineModel: ctx.engine.model,
-        usdPerSecond: ctx.engine.usdPerSecond,
-        estimatedUsd: rewrite ? Number((billedSeconds * ctx.engine.usdPerSecond).toFixed(4)) : 0,
-      });
+      quoted.push(await this.quoteOneTalk({ manager, project, ctx, scriptScene, row, audio }));
     }
     return {
       mode: {
@@ -901,6 +867,61 @@ export class McMaterializerService {
       scenes: quoted,
       rewriteCount: quoted.filter((q) => q.rewrite).length,
       estimatedUsd: Number(quoted.reduce((sum, q) => sum + q.estimatedUsd, 0).toFixed(4)),
+    };
+  }
+
+  /** Contexto do `talk` para a cotação; `null` (e log, se não for pré-condição) quando não monta. */
+  private async quoteContext(
+    manager: EntityManager,
+    project: McProject,
+    script: McScript,
+  ): Promise<Awaited<ReturnType<McMaterializerService['talkProductionContext']>> | null> {
+    try {
+      return await this.talkProductionContext(manager, project, script);
+    } catch (err) {
+      if (!(err instanceof McTalkPreconditionError)) {
+        this.logger.warn(
+          `Cotação das falas do projeto ${project.id} sem contexto: ${(err as Error).message}`,
+        );
+      }
+      return null;
+    }
+  }
+
+  /** Cotação de uma fala: segundos cobrados, e se o hash não tem clipe concluído em cache. */
+  private async quoteOneTalk(input: {
+    manager: EntityManager;
+    project: McProject;
+    ctx: Awaited<ReturnType<McMaterializerService['talkProductionContext']>>;
+    scriptScene: McScriptScene;
+    row: McScene;
+    audio: AnimationAsset | undefined;
+  }): Promise<McTalkQuote['scenes'][number]> {
+    const { manager, project, ctx, scriptScene, row, audio } = input;
+    const speechS = audio?.durationMs ? audio.durationMs / 1000 : row.durationS;
+    const padded = planTalkAudioPadding(ctx.engine.model, speechS * 1000);
+    const billedSeconds = Number((padded ? padded.submittedMs / 1000 : speechS).toFixed(3));
+    const prompts = effectiveScenePrompts(scriptScene);
+    let rewrite = true;
+    if (row.audioAssetId) {
+      const attempt = await this.currentOrFirstAttempt(manager, row, McStepType.TALK);
+      const { inputHash } = this.talkStepInput(ctx, {
+        audioAssetId: row.audioAssetId,
+        motion: (prompts?.motion ?? scriptScene.actionPrompt ?? '').trim(),
+        lang: prompts?.lang ?? 'pt',
+        sceneType: scriptScene.sceneType,
+        attempt,
+      });
+      rewrite = !(await this.findCachedOutput(manager, project.userId, McStepType.TALK, inputHash));
+    }
+    return {
+      sceneId: scriptScene.sceneId as string,
+      idx: row.idx,
+      rewrite,
+      billedSeconds,
+      engineModel: ctx.engine.model,
+      usdPerSecond: ctx.engine.usdPerSecond,
+      estimatedUsd: rewrite ? Number((billedSeconds * ctx.engine.usdPerSecond).toFixed(4)) : 0,
     };
   }
 
@@ -927,14 +948,17 @@ export class McMaterializerService {
     engine: { key: string; model: string; usdPerSecond: number; maxChunkS: number };
   }> {
     const kit = await manager.findOne(McCharacterKit, { where: { id: project.kitId } });
-    if (!kit) throw new Error(`Kit ${project.kitId} não encontrado`);
-    if (!kit.tileAssetId)
-      throw new Error(`Kit ${kit.id} sem tile de fala (aprovar o kit gera o tile)`);
+    if (!kit) throw new McTalkPreconditionError(`Kit ${project.kitId} não encontrado`);
+    if (!kit.tileAssetId) {
+      throw new McTalkPreconditionError(
+        `Kit ${kit.id} sem tile de fala (aprovar o kit gera o tile)`,
+      );
+    }
     // video-mascote-transparente (D9): `framing = corpo` envia o tile de corpo; faltar é erro de
     // pré-condição (nunca cai em silêncio para o busto).
-    const tileAssetId = script.framing === 'corpo' ? kit.bodyTileAssetId : kit.tileAssetId;
+    const tileAssetId = kitTileIdForFraming(kit, script.framing);
     if (!tileAssetId) {
-      throw new Error(
+      throw new McTalkPreconditionError(
         `BODY_TILE_MISSING: kit ${kit.id} sem tile de corpo (calcular antes de gerar)`,
       );
     }
@@ -983,7 +1007,9 @@ export class McMaterializerService {
   private talkCutoutOf(script: McScript, kitId: string): TalkPromptCutout | null {
     if (script.cutout !== true) return null;
     if (!script.cutoutKeyColor) {
-      throw new Error(`CUTOUT_KEY_MISSING: roteiro sem cor-chave para o kit ${kitId}`);
+      throw new McTalkPreconditionError(
+        `CUTOUT_KEY_MISSING: roteiro sem cor-chave para o kit ${kitId}`,
+      );
     }
     return { keyColor: script.cutoutKeyColor, framing: script.framing ?? 'corpo' };
   }
