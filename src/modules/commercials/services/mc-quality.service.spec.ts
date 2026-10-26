@@ -241,6 +241,7 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
         cb(manager as unknown as EntityManager),
       ),
     };
+    (dataSource as { manager?: unknown }).manager = manager;
     transitions = {
       casTransition: jest.fn().mockResolvedValue(true),
       notify: jest.fn().mockResolvedValue(undefined),
@@ -276,6 +277,7 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
         .fn()
         .mockResolvedValue({ id: 'st-new', attempt: 2, status: McStepStatus.PENDING }),
       ensureAssemblyStepV2: jest.fn().mockResolvedValue({ id: 'asm' }),
+      quoteTalk: jest.fn().mockResolvedValue(null),
       buildPreparationManifest: jest
         .fn()
         .mockImplementation(
@@ -1309,6 +1311,51 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
             }),
           ]),
         },
+      });
+    });
+
+    describe('cotação e repetição da produção com o modo sem fundo (R9/R12)', () => {
+      const talkQuote = {
+        mode: { cutout: true, framing: 'corpo', keyColor: '#00B140' },
+        scenes: [
+          {
+            sceneId: 'fx-talk-1',
+            idx: 0,
+            rewrite: true,
+            billedSeconds: 6,
+            engineModel: 'fal-ai/kling-video/ai-avatar/v2/standard',
+            usdPerSecond: 0.0562,
+            estimatedUsd: 0.3372,
+          },
+        ],
+        rewriteCount: 1,
+        estimatedUsd: 0.3372,
+      };
+
+      it('quote da produção devolve `talk` do materializer (sem reserva nem chamada paga); outras fases e formatos → null', async () => {
+        materializer.quoteTalk.mockResolvedValue(talkQuote);
+        const production = await service.quote(userId, 'p1', 'production');
+        expect(production.talk).toEqual(talkQuote);
+        expect(materializer.quoteTalk).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ id: 'p1' }),
+          project.script,
+          scenes,
+        );
+        expect(credits.reserve).not.toHaveBeenCalled();
+        materializer.quoteTalk.mockClear();
+        expect((await service.quote(userId, 'p1', 'preparation')).talk).toBeNull();
+        expect(materializer.quoteTalk).not.toHaveBeenCalled();
+      });
+
+      it('repetir approve-production: a segunda chamada falha pelo estado e NÃO materializa nem cobra de novo', async () => {
+        await approve();
+        expect(project.status).toBe(McProjectStatus.GENERATING);
+        const materialized = materializer.materializeProductionV2.mock.calls.length;
+        const reserved = credits.reserve.mock.calls.length;
+        await expect(approve()).rejects.toBeDefined();
+        expect(materializer.materializeProductionV2.mock.calls.length).toBe(materialized);
+        expect(credits.reserve.mock.calls.length).toBe(reserved);
       });
     });
 

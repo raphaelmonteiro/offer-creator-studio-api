@@ -16,6 +16,7 @@ import {
   McPreparationManifest,
   McPreparationScene,
   McQuoteItem,
+  McTalkQuote,
   McSelectedReference,
 } from '../domain/mc-quality';
 import { keyframeReferenceLimit, selectReferences } from '../domain/mc-references';
@@ -34,6 +35,7 @@ import {
 } from '../domain/mc-piece';
 import { Font } from '../../fonts/entities/font.entity';
 import { carouselOffers, effectiveScenePrompts } from '../domain/mc-script-v2';
+import { planTalkAudioPadding } from '../domain/mc-talk-engines';
 import { composeCutoutHashInput } from '../domain/mc-cutout-graph';
 import { MC_CUTOUT_KEY_RULE_VERSION } from '../domain/mc-cutout-key';
 import { buildTalkPrompt, TalkPromptCutout } from '../domain/mc-talk-prompts';
@@ -685,33 +687,13 @@ export class McMaterializerService {
           // e o ingest precisam sem reler o kit (motor efetivo é gravado
           // pelo submit em caso de fallback).
           const ctx = talkContext as NonNullable<typeof talkContext>;
-          const prompt = buildTalkPrompt(prompts.motion, ctx.cutout);
-          inputHash = computeTalkHashV2({
-            engineModel: ctx.engine.model,
-            tileAssetId: ctx.tileAssetId,
+          ({ inputHash, snapshot } = this.talkStepInput(ctx, {
             audioAssetId: scene.audioAssetId as string,
-            prompt,
-            backgroundColor: ctx.backgroundColor,
-            attempt,
-            cutout: ctx.cutout
-              ? { ...ctx.cutout, keyRuleVersion: MC_CUTOUT_KEY_RULE_VERSION }
-              : null,
-          });
-          snapshot = {
-            tileAssetId: ctx.tileAssetId,
-            tileWidth: ctx.tileWidth,
-            tileHeight: ctx.tileHeight,
-            audioAssetId: scene.audioAssetId,
-            backgroundColor: ctx.backgroundColor,
-            ...(ctx.cutout ? { cutout: ctx.cutout, framing: ctx.cutout.framing } : {}),
             motion: prompts.motion,
             lang: prompts.lang,
-            prompt,
-            engine: ctx.engine,
-            tier: ctx.tier,
-            identityMode: ctx.identityMode,
             sceneType: scriptScene.sceneType,
-          };
+            attempt,
+          }));
         } else if (type === McStepType.VIDEO) {
           inputHash = computeVideoHashV2({
             keyframeAssetId: scene.keyframeAssetId,
@@ -802,6 +784,124 @@ export class McMaterializerService {
       }
     }
     return { steps, items };
+  }
+
+  /**
+   * Hash e snapshot do `talk` de uma fala — a MESMA conta da produção e da cotação (sem gravar nada):
+   * motor, tile escolhido, áudio, prompt, cor (a chave no modo sem fundo) e tentativa.
+   */
+  private talkStepInput(
+    ctx: Awaited<ReturnType<McMaterializerService['talkProductionContext']>>,
+    input: {
+      audioAssetId: string;
+      motion: string;
+      lang: string;
+      sceneType: string | null | undefined;
+      attempt: number;
+    },
+  ): { inputHash: string; snapshot: Record<string, unknown> } {
+    const prompt = buildTalkPrompt(input.motion, ctx.cutout);
+    const inputHash = computeTalkHashV2({
+      engineModel: ctx.engine.model,
+      tileAssetId: ctx.tileAssetId,
+      audioAssetId: input.audioAssetId,
+      prompt,
+      backgroundColor: ctx.backgroundColor,
+      attempt: input.attempt,
+      cutout: ctx.cutout ? { ...ctx.cutout, keyRuleVersion: MC_CUTOUT_KEY_RULE_VERSION } : null,
+    });
+    const snapshot = {
+      tileAssetId: ctx.tileAssetId,
+      tileWidth: ctx.tileWidth,
+      tileHeight: ctx.tileHeight,
+      audioAssetId: input.audioAssetId,
+      backgroundColor: ctx.backgroundColor,
+      ...(ctx.cutout ? { cutout: ctx.cutout, framing: ctx.cutout.framing } : {}),
+      motion: input.motion,
+      lang: input.lang,
+      prompt,
+      engine: ctx.engine,
+      tier: ctx.tier,
+      identityMode: ctx.identityMode,
+      sceneType: input.sceneType,
+    };
+    return { inputHash, snapshot };
+  }
+
+  /**
+   * Cotação das falas da produção (R9, video-mascote-transparente): por fala, se o `talk` seria
+   * regravado (hash sem clipe concluído em cache) e quanto custaria, SEM chamada paga nem
+   * reserva. Só `talking_art` e `offer_piece`; contexto de tile ausente (ex.: sem tile de corpo)
+   * devolve `null` para a cotação não quebrar.
+   */
+  async quoteTalk(
+    manager: EntityManager,
+    project: McProject,
+    script: McScript,
+    scenes: McScene[],
+  ): Promise<McTalkQuote | null> {
+    if (project.format !== 'talking_art' && project.format !== 'offer_piece') return null;
+    let ctx: Awaited<ReturnType<McMaterializerService['talkProductionContext']>>;
+    try {
+      ctx = await this.talkProductionContext(manager, project, script);
+    } catch {
+      return null;
+    }
+    const audioIds = scenes.map((s) => s.audioAssetId).filter((id): id is string => !!id);
+    const audios = audioIds.length
+      ? await manager.find(AnimationAsset, { where: { id: In(audioIds) } })
+      : [];
+    const quoted: McTalkQuote['scenes'] = [];
+    for (const scriptScene of script.scenes) {
+      if (scriptScene.sceneType !== 'talk_tile') continue;
+      const row = scenes.find((s) => s.scriptSceneId === scriptScene.sceneId);
+      if (!row) continue;
+      const audio = audios.find((a) => a.id === row.audioAssetId);
+      const speechS = audio?.durationMs ? audio.durationMs / 1000 : row.durationS;
+      const padded = planTalkAudioPadding(ctx.engine.model, speechS * 1000);
+      const billedSeconds = Number((padded ? padded.submittedMs / 1000 : speechS).toFixed(3));
+      const motion = (
+        effectiveScenePrompts(scriptScene)?.motion ??
+        scriptScene.actionPrompt ??
+        ''
+      ).trim();
+      let rewrite = true;
+      if (row.audioAssetId) {
+        const attempt = await this.currentOrFirstAttempt(manager, row, McStepType.TALK);
+        const { inputHash } = this.talkStepInput(ctx, {
+          audioAssetId: row.audioAssetId,
+          motion,
+          lang: effectiveScenePrompts(scriptScene)?.lang ?? 'pt',
+          sceneType: scriptScene.sceneType,
+          attempt,
+        });
+        rewrite = !(await this.findCachedOutput(
+          manager,
+          project.userId,
+          McStepType.TALK,
+          inputHash,
+        ));
+      }
+      quoted.push({
+        sceneId: scriptScene.sceneId as string,
+        idx: row.idx,
+        rewrite,
+        billedSeconds,
+        engineModel: ctx.engine.model,
+        usdPerSecond: ctx.engine.usdPerSecond,
+        estimatedUsd: rewrite ? Number((billedSeconds * ctx.engine.usdPerSecond).toFixed(4)) : 0,
+      });
+    }
+    return {
+      mode: {
+        cutout: script.cutout === true,
+        framing: script.framing ?? 'busto',
+        keyColor: ctx.cutout?.keyColor ?? null,
+      },
+      scenes: quoted,
+      rewriteCount: quoted.filter((q) => q.rewrite).length,
+      estimatedUsd: Number(quoted.reduce((sum, q) => sum + q.estimatedUsd, 0).toFixed(4)),
+    };
   }
 
   /**

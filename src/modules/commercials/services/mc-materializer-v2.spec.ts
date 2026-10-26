@@ -745,6 +745,91 @@ describe('McMaterializerService — cenas talk_tile (tarefas 3.3/3.4/3.8)', () =
       await expect(production(cardBody, talkKit)).rejects.toThrow(/BODY_TILE_MISSING/);
     });
 
+    describe('cotação das falas (R9)', () => {
+      const cutoutScript = (over: Record<string, unknown> = {}) =>
+        ({
+          ...fixtureTalkTileScript({ backgroundColor: '#ff8800' }),
+          cutout: true,
+          framing: 'corpo',
+          cutoutKeyColor: '#00B140',
+          ...over,
+        }) as McScript;
+
+      async function quote(
+        script: McScript,
+        opts: {
+          cache?: Array<{ id: string; outputAssetId: string } | null>;
+          kit?: McCharacterKit;
+        } = {},
+      ) {
+        const audios = ['fx-talk-1', 'fx-talk-2', 'fx-talk-3'].map((id) => ({
+          id: `au-${id}`,
+          durationMs: 6000,
+        }));
+        const manager = fakeManager({
+          assets: [tileAsset, bodyAsset, ...audios],
+          cache: opts.cache,
+        });
+        manager.seed(McCharacterKit, [{ ...(opts.kit ?? bodyKit) }]);
+        const project = talkProject(script);
+        const scenes = await service.syncScenesV2(manager, project, script, { rearm: true });
+        for (const scene of scenes)
+          Object.assign(scene, { audioAssetId: `au-${scene.scriptSceneId}` });
+        return service.quoteTalk(manager, project, script, scenes);
+      }
+
+      it('nenhum clipe em cache: todas as falas a regravar, com o custo estimado e o modo', async () => {
+        const quoted = await quote(cutoutScript());
+        expect(quoted?.mode).toEqual({ cutout: true, framing: 'corpo', keyColor: '#00B140' });
+        expect(quoted?.scenes.map((q) => q.rewrite)).toEqual([true, true, true]);
+        expect(quoted?.rewriteCount).toBe(3);
+        const one = quoted!.scenes[0];
+        expect(one.billedSeconds).toBe(6);
+        expect(one.estimatedUsd).toBeCloseTo(6 * one.usdPerSecond, 4);
+        expect(quoted?.estimatedUsd).toBeCloseTo(3 * one.estimatedUsd, 3);
+        expect(one.engineModel).toBe(KLING_AVATAR_MODEL);
+      });
+
+      it('fala com clipe de MESMO hash concluído: rewrite false e custo 0 (repetir não cobra de novo)', async () => {
+        const quoted = await quote(cutoutScript(), {
+          cache: [{ id: 'st-old', outputAssetId: 'clip-1' }, null, null],
+        });
+        expect(quoted?.scenes.map((q) => [q.rewrite, q.estimatedUsd > 0])).toEqual([
+          [false, false],
+          [true, true],
+          [true, true],
+        ]);
+        expect(quoted?.rewriteCount).toBe(2);
+      });
+
+      it('mesmo hash da produção: a cotação consulta o cache com os MESMOS hashes dos steps que a produção cria, sem criar step', async () => {
+        const script = cutoutScript();
+        const manager = fakeManager({ assets: [tileAsset, bodyAsset] });
+        manager.seed(McCharacterKit, [{ ...bodyKit }]);
+        const project = talkProject(script);
+        const scenes = await service.syncScenesV2(manager, project, script, { rearm: true });
+        for (const scene of scenes)
+          Object.assign(scene, { audioAssetId: `au-${scene.scriptSceneId}` });
+        const produced = await service.materializeProductionV2(manager, project, script, scenes);
+        const before = manager.steps().length;
+        const lookup = jest.spyOn(service, 'findCachedOutput');
+        await service.quoteTalk(manager, project, script, scenes);
+        const quotedHashes = lookup.mock.calls.map((call) => call[3]);
+        expect(quotedHashes).toEqual(produced.steps.map((step) => step.inputHash));
+        expect(manager.steps()).toHaveLength(before); // nenhuma chamada paga nem step novo
+      });
+
+      it('Card: modo sem fundo desligado e sem chave; kit sem tile de corpo ou outro formato → null', async () => {
+        const card = await quote(fixtureTalkTileScript({ backgroundColor: '#ff8800' }));
+        expect(card?.mode).toEqual({ cutout: false, framing: 'busto', keyColor: null });
+        expect(await quote(cutoutScript(), { kit: talkKit })).toBeNull();
+        const manager = fakeManager({ assets: [tileAsset] });
+        manager.seed(McCharacterKit, [{ ...talkKit }]);
+        const f3 = { ...talkProject(cutoutScript()), format: 'scenes' } as McProject;
+        expect(await service.quoteTalk(manager, f3, cutoutScript(), [])).toBeNull();
+      });
+    });
+
     it('sem fundo sem cor-chave congelada no roteiro é erro de pré-condição', async () => {
       const script = { ...fixtureTalkTileScript(), cutout: true, framing: 'corpo' } as McScript;
       await expect(production(script)).rejects.toThrow(/CUTOUT_KEY_MISSING/);

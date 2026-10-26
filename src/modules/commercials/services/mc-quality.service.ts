@@ -48,6 +48,7 @@ import {
   McPhase,
   McPhaseBudget,
   McPhaseQuote,
+  McTalkQuote,
   McQualityState,
   McQuoteItem,
   MC_PIPELINE_V2,
@@ -503,7 +504,11 @@ export class McQualityService {
     phase: McPhase,
     overrides: { musicEnabled?: boolean } = {},
   ): Promise<
-    McPhaseQuote & { issues: Array<{ code: string; sceneId?: string; message: string }> }
+    McPhaseQuote & {
+      issues: Array<{ code: string; sceneId?: string; message: string }>;
+      /** Falas a regravar e custo estimado (R9); só na produção de `talking_art`/`offer_piece`. */
+      talk: McTalkQuote | null;
+    }
   > {
     const project = await this.getV2Project(userId, projectId);
     const script = project.script as McScript;
@@ -526,9 +531,14 @@ export class McQualityService {
     // revisão) prevalece sobre a opção do projeto.
     const musicEnabled =
       overrides.musicEnabled ?? resolveProjectOptions(project.options).musicEnabled;
+    const talk =
+      phase === 'production'
+        ? await this.materializer.quoteTalk(this.dataSource.manager, project, script, scenes)
+        : null;
     return {
       ...quotePhase(phase, project.revision, inputs, { format: project.format, musicEnabled }),
       issues,
+      talk,
     };
   }
 

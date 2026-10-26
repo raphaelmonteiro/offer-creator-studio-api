@@ -56,6 +56,26 @@ export interface McQuoteItem {
   cached: boolean;
 }
 
+/**
+ * Cotação das falas da produção (R9, video-mascote-transparente): quais `talk` seriam regravados e o
+ * custo estimado de fornecedor (informativo; o custo real vem de `providerCostUsd` do step).
+ */
+export interface McTalkQuote {
+  mode: { cutout: boolean; framing: 'busto' | 'corpo'; keyColor: string | null };
+  scenes: Array<{
+    sceneId: string;
+    idx: number;
+    /** false = já existe `talk` concluído com o MESMO hash (reaproveitado, custo 0). */
+    rewrite: boolean;
+    billedSeconds: number;
+    engineModel: string;
+    usdPerSecond: number;
+    estimatedUsd: number;
+  }>;
+  rewriteCount: number;
+  estimatedUsd: number;
+}
+
 export interface McPhaseQuote {
   phase: McPhase;
   revision: number;
