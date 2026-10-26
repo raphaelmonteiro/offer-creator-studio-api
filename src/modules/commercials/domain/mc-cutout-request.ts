@@ -3,7 +3,7 @@
  * video-mascote-transparente, D9): qual tile vai ao motor e como o pedido herda o roteiro anterior.
  */
 
-export type McFraming = 'busto' | 'corpo';
+import type { McPieceFraming as McFraming } from './mc-piece-character';
 
 /** Tile enviado ao motor: o de corpo no enquadramento "corpo"; senão o do kit (busto). */
 export function kitTileIdForFraming(
@@ -34,6 +34,3 @@ export function resolveCutoutRequest(
     logoFace: dto.logoFace ?? previous?.logoFace ?? false,
   };
 }
-
-/** Pré-condição do `talk` que falta (kit/tile/tile de corpo/chave): a cotação responde `null`. */
-export class McTalkPreconditionError extends Error {}

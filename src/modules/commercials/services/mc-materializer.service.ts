@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { kitTileIdForFraming, McTalkPreconditionError } from '../domain/mc-cutout-request';
+import { kitTileIdForFraming } from '../domain/mc-cutout-request';
+import { McTalkPreconditionError } from '../domain/mc-talk-precondition.error';
 import { EntityManager, In } from 'typeorm';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { CommercialsService } from '../commercials.service';

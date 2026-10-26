@@ -1,30 +1,19 @@
 import { Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import * as sharp from 'sharp';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { McBodyTilePlan, planBodyTile } from '../domain/mc-body-tile';
-import { chooseCutoutKey, McCutoutKeyDecision } from '../domain/mc-cutout-key';
 import { McNormalizedBox } from '../domain/mc-mouth-gate';
-import {
-  edgeUniformity,
-  keyEdgeBackground,
-  MC_TILE_EDGE_TOLERANCE,
-  McEdgeUniformity,
-} from '../domain/mc-tile';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
+import {
+  assertBorder,
+  decideKey,
+  keyBackground,
+  RawImage,
+  readRaw,
+  renderTile,
+} from './mc-body-tile-image';
 import { McStorageService } from './mc-storage.service';
-
-const EDGE_SAMPLE_SIZE = 256;
-const KEY_SAMPLE_SIZE = 512;
-/** Anel (px) de alfa zerado nas bordas de cima e dos lados do tile final: ruído nunca encosta. */
-const EDGE_CLEAR_PX = 2;
-
-interface RawImage {
-  data: Buffer;
-  width: number;
-  height: number;
-}
 
 /**
  * Tile de corpo do kit (video-mascote-transparente, D4): derivado da identidade
@@ -63,8 +52,8 @@ export class McKitBodyTileService {
   private async useLogoAsBody(kit: McCharacterKit, tile: AnimationAsset): Promise<AnimationAsset> {
     const source = tile.fileUrl ? await this.storage.readUploadsFile(tile.fileUrl) : null;
     if (!source) throw this.identityMissing();
-    const raw = await this.readRaw(source);
-    const cutoutKey = await this.decideKey(raw);
+    const raw = await readRaw(source);
+    const cutoutKey = await decideKey(raw);
     const repo = this.dataSource.getRepository(AnimationAsset);
     tile.metadata = { ...tile.metadata, cutoutKey };
     await repo.update({ id: tile.id }, { metadata: tile.metadata });
@@ -101,12 +90,12 @@ export class McKitBodyTileService {
         details: { actions: ['use_bust'] },
       });
     }
-    const raw = await this.readRaw(source);
-    const uniformity = await this.assertBorder(raw);
-    this.keyBackground(raw, uniformity);
+    const raw = await readRaw(source);
+    const uniformity = await assertBorder(raw);
+    keyBackground(raw, uniformity);
     const plan = this.planFromRaw(raw, bbox);
-    const png = await this.renderTile(raw, plan);
-    const cutoutKey = await this.decideKey(raw);
+    const png = await renderTile(raw, plan);
+    const cutoutKey = await decideKey(raw);
     const created = await this.saveBodyAsset({
       kit,
       identity,
@@ -199,87 +188,6 @@ export class McKitBodyTileService {
     const assets = this.dataSource.getRepository(AnimationAsset);
     if (asset.id !== kit.tileAssetId) await assets.softDelete(asset.id);
     return assets.findOneByOrFail({ id: current.bodyTileAssetId as string });
-  }
-
-  private async readRaw(source: Buffer): Promise<RawImage> {
-    const { data, info } = await sharp(source)
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    if (!info.width || !info.height) {
-      throw new UnprocessableEntityException({
-        code: 'KIT_IDENTITY_FILE_INVALID',
-        message: 'A imagem da identidade do kit não pôde ser lida.',
-      });
-    }
-    return { data, width: info.width, height: info.height };
-  }
-
-  /** Borda de cima e laterais livres (o corpo pode sair por baixo): senão 422 com saída "busto". */
-  private async assertBorder(raw: RawImage): Promise<McEdgeUniformity> {
-    const sample = await sharp(raw.data, {
-      raw: { width: raw.width, height: raw.height, channels: 4 },
-    })
-      .resize(EDGE_SAMPLE_SIZE, EDGE_SAMPLE_SIZE, { fit: 'fill' })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const uniformity = edgeUniformity(
-      { data: sample.data, width: sample.info.width, height: sample.info.height, channels: 4 },
-      { bodyMayCrossSides: true },
-    );
-    if (uniformity.uniform) return uniformity;
-    throw new UnprocessableEntityException({
-      code: 'BODY_TILE_BORDER_NOT_UNIFORM',
-      message:
-        'O fundo da identidade não é liso (gradiente, cenário ou a cabeça encosta na borda): ' +
-        'não dá para recortar o corpo. Use o enquadramento de busto.',
-      details: { fractions: uniformity.fractions, actions: ['use_bust'] },
-    });
-  }
-
-  /** Fundo liso vira alfa (mesma inundação do tile de busto); no-op se a identidade já é transparente. */
-  private keyBackground(raw: RawImage, uniformity: McEdgeUniformity): void {
-    if (uniformity.transparent) return;
-    keyEdgeBackground(
-      { data: raw.data, width: raw.width, height: raw.height, channels: 4 },
-      uniformity.background,
-      MC_TILE_EDGE_TOLERANCE,
-    );
-  }
-
-  private async renderTile(raw: RawImage, plan: McBodyTilePlan): Promise<Buffer> {
-    const { data, info } = await sharp(raw.data, {
-      raw: { width: raw.width, height: raw.height, channels: 4 },
-    })
-      .extract(plan.extract)
-      .extend({ ...plan.extend, background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      .resize(plan.output.width, plan.output.height, { fit: 'fill', kernel: 'lanczos3' })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    this.clearEdges(data, info.width, info.height);
-    return sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
-      .png()
-      .toBuffer();
-  }
-
-  /** Nenhum pixel opaco encosta nas bordas de cima, esquerda e direita. */
-  private clearEdges(data: Buffer, width: number, height: number): void {
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const onEdge = y < EDGE_CLEAR_PX || x < EDGE_CLEAR_PX || x >= width - EDGE_CLEAR_PX;
-        if (onEdge) data[(y * width + x) * 4 + 3] = 0;
-      }
-    }
-  }
-
-  private async decideKey(raw: RawImage): Promise<McCutoutKeyDecision> {
-    const sample = await sharp(raw.data, {
-      raw: { width: raw.width, height: raw.height, channels: 4 },
-    })
-      .resize(KEY_SAMPLE_SIZE, KEY_SAMPLE_SIZE, { fit: 'inside' })
-      .raw()
-      .toBuffer();
-    return chooseCutoutKey({ data: sample, channels: 4 });
   }
 
   private identityMissing(): UnprocessableEntityException {
