@@ -9,8 +9,8 @@ import { hexToRgb, McCutoutKeyColor, MC_CUTOUT_KEY_RULE_VERSION } from './mc-cut
 /** Versão do recorte: entra no hash do `compose_ffmpeg` (só no modo sem fundo). */
 export const MC_CUTOUT_GRAPH_VERSION = 1;
 /** Tolerâncias do chromakey: constantes no código (API e worker precisam concordar com o hash). */
-export const MC_CUTOUT_SIMILARITY = 0.12;
-export const MC_CUTOUT_BLEND = 0.05;
+export const MC_CUTOUT_SIMILARITY = 0.16;
+export const MC_CUTOUT_BLEND = 0.08;
 /** Versão do matte (despill + erosão + suavização). */
 export const MC_CUTOUT_MATTE_VERSION = 1;
 

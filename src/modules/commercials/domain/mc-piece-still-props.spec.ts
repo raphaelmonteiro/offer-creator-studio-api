@@ -156,4 +156,21 @@ describe('mc-piece-still-props — props do quadro parado', () => {
     expect(plan.overlaySvg).toContain('<circle');
     expect(plan.overlaySvg).not.toContain('vermelho');
   });
+
+  it('personagem sem fundo: o quadro parado não desenha painel nem a personagem sob a janela; Card e Círculo seguem com painel', () => {
+    const none = buildMockStillPlan({
+      document: fixturePieceDocument({ character: { panel: { shape: 'none', color: '#1F3A8A' } } }),
+      width: 1080,
+      height: 1920,
+      fonts: [],
+    });
+    expect(none.overlaySvg).not.toContain('#1F3A8A');
+    const card = buildMockStillPlan({
+      document: fixturePieceDocument({ character: { panel: { shape: 'card', color: '#1F3A8A' } } }),
+      width: 1080,
+      height: 1920,
+      fonts: [],
+    });
+    expect(card.overlaySvg).toContain('#1F3A8A');
+  });
 });

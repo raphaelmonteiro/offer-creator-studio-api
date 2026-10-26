@@ -123,6 +123,26 @@ export function mockTalkClipDurationS(audioDurationMs: number): number {
   return Math.max(1, Number((audioDurationMs / 1000 + MC_MOCK_TALK_MARGIN_S).toFixed(3)));
 }
 
+/**
+ * Fixture de fundo instável do mock (`MC_CUTOUT_MOCK=unstable`): a 1ª metade do clipe sobre a cor-chave
+ * e a 2ª sobre um tom deslocado (o motor "repintando o fundo"); a verificação do recorte tem de reprovar.
+ */
+export function buildUnstableCutoutGraph(durationS: number): string {
+  const half = Number((durationS / 2).toFixed(3));
+  return (
+    `[0:v]trim=duration=${half},setpts=PTS-STARTPTS[a];` +
+    `[1:v]trim=duration=${Number((durationS - half).toFixed(3))},setpts=PTS-STARTPTS[b];` +
+    '[a][b]concat=n=2:v=1:a=0,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[v]'
+  );
+}
+
+/** Tom de fundo deslocado da fixture instável: ΔE bem acima da deriva tolerada. */
+export function shiftedKeyColor(hex: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const shift = (v: number, d: number) => Math.max(0, Math.min(255, v + d));
+  return `#${[shift(r, 48), shift(g, 31), shift(b, 56)].map((v) => v.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+}
+
 /** Áudio que vai ao motor de fala: o TTS como está ou a cópia com silêncio no fim. */
 interface McTalkSentAudio {
   buffer: Buffer;
@@ -598,6 +618,31 @@ export class McTalkingProcessor {
   }
 
   /**
+   * Quadros do clipe mock sem fundo: o tile escolhido (`snapshot.tileAssetId`) achatado sobre a cor
+   * recebida (`snapshot.backgroundColor` = a cor-chave) e, com `MC_CUTOUT_MOCK=unstable`, um segundo
+   * quadro sobre o tom deslocado. Só o tile da personagem entra (nunca arte, logo ou preço).
+   */
+  private async writeCutoutMockFrames(
+    snapshot: {
+      tileAssetId?: string | null;
+      backgroundColor?: string | null;
+      cutout?: { keyColor: string } | null;
+    },
+    dir: string,
+  ): Promise<string[]> {
+    const key =
+      normalizeHexColor(snapshot.backgroundColor) ?? normalizeHexColor(snapshot.cutout?.keyColor);
+    if (!key) throw new TerminalProviderError('Mock sem cor-chave recebida', 'validation');
+    const tile = await this.loadAssetBuffer(snapshot.tileAssetId ?? null, 'tile de fala');
+    const stable = path.join(dir, 'cutout-key.png');
+    await fs.writeFile(stable, await recolorTileBackground(tile, key));
+    if (process.env.MC_CUTOUT_MOCK !== 'unstable') return [stable];
+    const shifted = path.join(dir, 'cutout-key-shifted.png');
+    await fs.writeFile(shifted, await recolorTileBackground(tile, shiftedKeyColor(key)));
+    return [stable, shifted];
+  }
+
+  /**
    * Clipe sintético (cor + áudio muxado quando houver) em mock-jobs/{jobId}.mp4 — custo zero.
    *
    * talk (D7): a duração do clipe é a do áudio ENVIADO mais `MC_MOCK_TALK_MARGIN_S`,
@@ -628,6 +673,9 @@ export class McTalkingProcessor {
       tier?: string | null;
       identityMode?: string | null;
       engine?: McTalkEngineSnapshot | null;
+      tileAssetId?: string | null;
+      backgroundColor?: string | null;
+      cutout?: { keyColor: string; framing: 'busto' | 'corpo' } | null;
     } | null;
     let audioPath: string | null = null;
     let audioDir: string | null = null;
@@ -678,10 +726,40 @@ export class McTalkingProcessor {
           identityMode: snapshot?.identityMode ?? null,
         });
       const size = talk ? (premium ? '1080x1440' : '720x960') : '720x1280';
-      args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`);
+      let cutoutGraph: string | null = null;
+      if (talk && snapshot?.cutout && audioDir) {
+        // modo sem fundo (video-mascote-transparente, 1.12): o "motor" mock devolve o tile ESCOLHIDO
+        // achatado sobre a cor-chave RECEBIDA; MC_CUTOUT_MOCK=unstable muda o tom do fundo no meio
+        const inputs = await this.writeCutoutMockFrames(snapshot, audioDir);
+        cutoutGraph = inputs.length === 2 ? buildUnstableCutoutGraph(durationS) : null;
+        for (const input of inputs) {
+          args.push('-loop', '1', '-framerate', '30', '-t', String(durationS), '-i', input);
+        }
+      } else {
+        args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`);
+      }
+      const audioIndex = cutoutGraph ? 2 : 1;
+      if (cutoutGraph) {
+        args.push('-filter_complex', cutoutGraph);
+      }
       if (audioPath) {
-        args.push('-i', audioPath, '-map', '0:v', '-map', '1:a', '-c:a', 'aac');
+        args.push(
+          '-i',
+          audioPath,
+          '-map',
+          cutoutGraph ? '[v]' : '0:v',
+          '-map',
+          `${audioIndex}:a`,
+          '-c:a',
+          'aac',
+        );
         if (!talk) args.push('-shortest');
+      } else if (cutoutGraph) {
+        args.push('-map', '[v]');
+      }
+      if (talk && snapshot?.cutout) {
+        // dimensões pares (yuv420p) sem alterar o aspecto do tile
+        if (!cutoutGraph) args.push('-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2');
       }
       // -f mp4 explícito: o sufixo .part (escrita atômica) impede o ffmpeg de
       // inferir o muxer pela extensão.

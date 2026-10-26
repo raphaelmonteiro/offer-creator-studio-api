@@ -125,9 +125,14 @@ function erode(mask: Uint8Array, width: number, height: number, radius: number):
   return out;
 }
 
-/** Excesso da cor de recorte num pixel: (G − max(R,B))/255 na chave verde; (B − max(R,G))/255 na azul. */
+/**
+ * Excesso POSITIVO da cor de recorte num pixel: (G − max(R,B))/255 na chave verde; (B − max(R,G))/255
+ * na azul; negativo vira 0. Sem o corte, o contorno escuro de uma personagem (menos "azul" que o
+ * miolo avermelhado ou claro) apareceria como halo mesmo sem nenhum reflexo da chave.
+ */
 function keyExcess(r: number, g: number, b: number, type: 'green' | 'blue'): number {
-  return type === 'green' ? (g - Math.max(r, b)) / 255 : (b - Math.max(r, g)) / 255;
+  const value = type === 'green' ? (g - Math.max(r, b)) / 255 : (b - Math.max(r, g)) / 255;
+  return Math.max(0, value);
 }
 
 function labAt(rgb: Uint8Array, index: number, cache: Map<number, McLab>): McLab {

@@ -23,12 +23,14 @@ import { classifyMcError } from '../domain/mc-error-classes';
 import { OMNIHUMAN_V15_MODEL } from '../domain/mc-talk-engines';
 import { buildTalkPrompt } from '../domain/mc-talk-prompts';
 import { McStepStatus } from '../domain/mc-state-machines';
+import { deltaE76, rgbToLab } from '../domain/mc-cutout-key';
 import { McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McPipelineService } from '../services/mc-pipeline.service';
+import { McCutoutQualityService } from '../services/mc-cutout-quality.service';
 import { McStorageService } from '../services/mc-storage.service';
 import {
   ensureImageUnderCap,
@@ -1268,6 +1270,99 @@ describe('McTalkingProcessor — provider mock: clipe talk com a duração do á
     expect(mockTalkClipDurationS(300)).toBe(1);
   });
 
+  describe('modo sem fundo (video-mascote-transparente, 1.12)', () => {
+    const originalCutoutMock = process.env.MC_CUTOUT_MOCK;
+    const KEY = '#00B140';
+    let tilePng: Buffer;
+    let frames: Array<{ name: string; corner: number[]; centre: number[] }>;
+
+    beforeAll(async () => {
+      // 40×80: figura laranja no meio, alfa 0 em volta (tile de corpo sintético)
+      const raw = Buffer.alloc(40 * 80 * 4, 0);
+      for (let y = 20; y < 60; y += 1) {
+        for (let x = 10; x < 30; x += 1) raw.set([0xe0, 0x60, 0x2a, 0xff], (y * 40 + x) * 4);
+      }
+      tilePng = await sharp(raw, { raw: { width: 40, height: 80, channels: 4 } })
+        .png()
+        .toBuffer();
+    });
+
+    beforeEach(() => {
+      frames = [];
+      Object.assign(step.inputSnapshot as Record<string, unknown>, {
+        tileAssetId: 'a-body',
+        tileWidth: 40,
+        tileHeight: 80,
+        backgroundColor: KEY,
+        framing: 'corpo',
+        cutout: { keyColor: KEY, framing: 'corpo' },
+      });
+      // os quadros ficam em disco só durante o `run`: lê-os na hora
+      ffmpeg.run.mockImplementation(async (args: string[]) => {
+        for (let i = 0; i < args.length; i += 1) {
+          if (args[i] === '-i' && args[i + 1].endsWith('.png')) {
+            const { data, info } = await sharp(args[i + 1])
+              .raw()
+              .toBuffer({ resolveWithObject: true });
+            const px = (x: number, y: number) =>
+              Array.from(
+                data.subarray(
+                  (y * info.width + x) * info.channels,
+                  (y * info.width + x) * info.channels + 3,
+                ),
+              );
+            frames.push({ name: path.basename(args[i + 1]), corner: px(0, 0), centre: px(20, 40) });
+          }
+        }
+      });
+      (
+        processor as unknown as { storage: { readUploadsFile: jest.Mock } }
+      ).storage.readUploadsFile = jest.fn((url: string) =>
+        Promise.resolve(url.includes('a-body') ? tilePng : Buffer.from('mp3-bytes')),
+      );
+    });
+
+    afterEach(() => {
+      if (originalCutoutMock === undefined) delete process.env.MC_CUTOUT_MOCK;
+      else process.env.MC_CUTOUT_MOCK = originalCutoutMock;
+    });
+
+    it('estável: o clipe é o tile de corpo achatado sobre a cor-chave RECEBIDA (sem lavfi color, sem filter_complex)', async () => {
+      delete process.env.MC_CUTOUT_MOCK;
+      await processor.process({ stepId: 'st-mock' });
+      const args = ffmpeg.run.mock.calls[0][0] as string[];
+      expect(args).not.toContain('lavfi');
+      expect(args).not.toContain('-filter_complex');
+      expect(args).toEqual(expect.arrayContaining(['-loop', '1', '-map', '0:v', '-map', '1:a']));
+      expect(args).toContain('-vf'); // dimensões pares sem mexer no aspecto
+      expect(frames).toEqual([
+        { name: 'cutout-key.png', corner: [0x00, 0xb1, 0x40], centre: [0xe0, 0x60, 0x2a] },
+      ]);
+    });
+
+    it('unstable (MC_CUTOUT_MOCK): segundo quadro sobre o tom deslocado e concat; o áudio passa a ser a entrada 2', async () => {
+      process.env.MC_CUTOUT_MOCK = 'unstable';
+      await processor.process({ stepId: 'st-mock' });
+      const args = ffmpeg.run.mock.calls[0][0] as string[];
+      const graph = args[args.indexOf('-filter_complex') + 1];
+      expect(graph).toContain('concat=n=2');
+      expect(args).toEqual(expect.arrayContaining(['-map', '[v]', '-map', '2:a']));
+      expect(frames.map((f) => f.name)).toEqual(['cutout-key.png', 'cutout-key-shifted.png']);
+      expect(frames[0].corner).toEqual([0x00, 0xb1, 0x40]);
+      expect(frames[1].corner).not.toEqual(frames[0].corner);
+      expect(frames[1].centre).toEqual([0xe0, 0x60, 0x2a]); // a personagem não muda
+      const [a, b] = [frames[0].corner, frames[1].corner].map(([r, g, bl]) => rgbToLab(r, g, bl));
+      expect(deltaE76(a, b)).toBeGreaterThan(15);
+    });
+
+    it('sem `cutout` no snapshot (Card, Círculo, busto) o mock é o de sempre: lavfi color liso', async () => {
+      delete (step.inputSnapshot as Record<string, unknown>).backgroundColor;
+      delete (step.inputSnapshot as Record<string, unknown>).cutout;
+      await processor.process({ stepId: 'st-mock' });
+      expect(lavfiInput(ffmpeg.run.mock.calls[0][0] as string[])).toMatch(/^color=c=0x2E5E9E/);
+    });
+  });
+
   it('talk: d= é o áudio medido (12,434 s) + margem = 12.534, SEM -shortest; provider mock agendado', async () => {
     await processor.process({ stepId: 'st-mock' });
     expect(ffmpeg.run).toHaveBeenCalledTimes(1);
@@ -1608,3 +1703,167 @@ describeIfFfmpeg('McTalkingProcessor — mock talk com ffmpeg real (MC_TEST_FFMP
     expect(clip.durationMs as number).toBeLessThanOrEqual((padding.submittedMs as number) + 300);
   }, 90_000);
 });
+
+/**
+ * Mock `talk` do modo sem fundo com FFmpeg REAL (video-mascote-transparente, 1.12): o clipe mock sobre
+ * a cor-chave passa na verificação do recorte; a fixture instável (`MC_CUTOUT_MOCK=unstable`) reprova.
+ */
+describeIfFfmpeg(
+  'McTalkingProcessor — mock talk sem fundo + verificação do recorte (MC_TEST_FFMPEG=1)',
+  () => {
+    const originalProvider = process.env.MC_PIPELINE_PROVIDER;
+    const originalCutoutMock = process.env.MC_CUTOUT_MOCK;
+    const KEY = '#00B140';
+    let dir: string;
+    let runner: FfmpegRunner;
+    let voice: Buffer;
+    let tile: Buffer;
+
+    beforeAll(async () => {
+      runner = new FfmpegRunner({
+        get: (key: string, fallback?: string) => process.env[key] ?? fallback,
+      } as unknown as ConfigService);
+      dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mc-talking-cutout-real-'));
+      const voicePath = path.join(dir, 'voice.mp3');
+      await runner.run(
+        [
+          '-y',
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-f',
+          'lavfi',
+          '-i',
+          'sine=frequency=440:sample_rate=44100',
+          '-t',
+          '2',
+          '-codec:a',
+          'libmp3lame',
+          '-q:a',
+          '6',
+          voicePath,
+        ],
+        { durationMs: 2000, timeoutMs: 60_000 },
+      );
+      voice = await fs.readFile(voicePath);
+      // tile de corpo sintético 360×720 com alfa: cabeça, tronco, pernas e uma cesta
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="360" height="720">' +
+        '<circle cx="180" cy="160" r="90" fill="#E0A070"/><rect x="135" y="250" width="90" height="260" fill="#2255CC"/>' +
+        '<rect x="135" y="510" width="35" height="165" fill="#1A2F7A"/><rect x="190" y="510" width="35" height="165" fill="#1A2F7A"/>' +
+        '<rect x="270" y="345" width="60" height="50" fill="#8B4513"/></svg>';
+      tile = await sharp(Buffer.from(svg)).png().toBuffer();
+    }, 60_000);
+
+    afterAll(async () => {
+      if (originalProvider === undefined) delete process.env.MC_PIPELINE_PROVIDER;
+      else process.env.MC_PIPELINE_PROVIDER = originalProvider;
+      if (originalCutoutMock === undefined) delete process.env.MC_CUTOUT_MOCK;
+      else process.env.MC_CUTOUT_MOCK = originalCutoutMock;
+      await fs.rm(dir, { recursive: true, force: true });
+    });
+
+    async function mockClip(name: string): Promise<string> {
+      process.env.MC_PIPELINE_PROVIDER = 'mock';
+      const step = {
+        id: `st-${name}`,
+        projectId: 'p1',
+        sceneId: 'sc1',
+        sceneGeneration: 1,
+        type: McStepType.TALK,
+        status: McStepStatus.RUNNING,
+        phase: 'production',
+        projectRevision: 1,
+        costCredits: 56,
+        attempts: 1,
+        providerJobId: null,
+        inputSnapshot: {
+          audioAssetId: 'a-audio',
+          tileAssetId: 'a-body',
+          tileWidth: 360,
+          tileHeight: 720,
+          backgroundColor: KEY,
+          cutout: { keyColor: KEY, framing: 'corpo' },
+        },
+      };
+      const scene = {
+        id: 'sc1',
+        projectId: 'p1',
+        idx: 0,
+        generation: 1,
+        durationS: 2,
+        audioAssetId: 'a-audio',
+      };
+      const project = { id: 'p1', userId: 'u1', kitId: 'kit-1', title: 'T', tier: 'economico' };
+      const transitions = { casTransition: jest.fn().mockResolvedValue(true) };
+      const jobs = path.join(dir, `jobs-${name}`);
+      const processor = new McTalkingProcessor(
+        {
+          getRepository: jest.fn((entity: unknown) => ({
+            findOneBy: jest.fn((where: { id: string }) => {
+              if (entity === McScene) return Promise.resolve(scene);
+              if (entity === McProject) return Promise.resolve(project);
+              if (entity === McStep) return Promise.resolve(step);
+              if (entity === AnimationAsset)
+                return Promise.resolve({ id: where.id, fileUrl: `/uploads/${where.id}.bin` });
+              return Promise.resolve(null);
+            }),
+          })),
+          transaction: jest.fn((cb: (m: unknown) => Promise<unknown>) =>
+            cb({ findOneByOrFail: jest.fn().mockResolvedValue(project) }),
+          ),
+        } as unknown as DataSource,
+        {
+          claimStep: jest.fn(() => Promise.resolve({ ...step })),
+          failStep: jest.fn((_s: unknown, _f: unknown, err: Error) => {
+            throw err;
+          }),
+          consumeStepCredits: jest.fn().mockResolvedValue(undefined),
+          notifyStep: jest.fn().mockResolvedValue(undefined),
+          assertSubmitAllowed: jest.fn().mockResolvedValue(true),
+        } as unknown as McPipelineService,
+        transitions as unknown as TaskTransitionService,
+        { appendEvent: jest.fn().mockResolvedValue(undefined) } as unknown as CommercialsService,
+        { publish: jest.fn().mockResolvedValue(undefined) } as unknown as AnimationQueueService,
+        { submit: jest.fn() } as unknown as FalQueueClient,
+        runner,
+        {
+          readUploadsFile: jest.fn((url: string) =>
+            Promise.resolve(url.includes('a-body') ? tile : voice),
+          ),
+          mockJobsAbsDir: jest.fn().mockReturnValue(jobs),
+          mockJobAbsPath: jest.fn((jobId: string) => path.join(jobs, `${jobId}.mp4`)),
+        } as unknown as McStorageService,
+      );
+      await processor.process({ stepId: `st-${name}` });
+      const written = transitions.casTransition.mock.calls[0][5] as { providerJobId: string };
+      return path.join(jobs, `${written.providerJobId}.mp4`);
+    }
+
+    async function verdict(file: string) {
+      const probe = await runner.probe(file);
+      const quality = new McCutoutQualityService(runner);
+      const report = await quality.verifyClips({
+        clips: [{ sceneId: 's1', idx: 0, path: file, durationMs: probe.durationMs as number }],
+        keyColor: KEY,
+        tempDir: dir,
+      });
+      return { probe, scene: report.scenes[0], passed: report.passed };
+    }
+
+    it('estável: clipe no aspecto do tile (360×720), fundo na cor-chave → a verificação do recorte aprova', async () => {
+      delete process.env.MC_CUTOUT_MOCK;
+      const result = await verdict(await mockClip('stable'));
+      expect([result.probe.width, result.probe.height]).toEqual([360, 720]);
+      expect(result.scene.reasons).toEqual([]);
+      expect(result.passed).toBe(true);
+    }, 120_000);
+
+    it('instável (MC_CUTOUT_MOCK=unstable): o fundo muda de tom no meio → a verificação reprova com background_unstable', async () => {
+      process.env.MC_CUTOUT_MOCK = 'unstable';
+      const result = await verdict(await mockClip('unstable'));
+      expect(result.passed).toBe(false);
+      expect(result.scene.reasons).toContain('background_unstable');
+    }, 120_000);
+  },
+);

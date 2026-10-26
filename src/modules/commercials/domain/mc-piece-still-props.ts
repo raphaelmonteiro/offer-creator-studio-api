@@ -297,6 +297,9 @@ export function buildMockStillPlan(props: OfferPieceStillProps): MockStillPlan {
         break;
       }
       case 'character': {
+        // sem fundo (video-mascote-transparente): o quadro não desenha painel nem a personagem — o fundo
+        // da peça aparece sob a janela e a personagem vem do vídeo (mesma regra do `OfferPieceStill`)
+        if (block.panel?.shape === 'none') break;
         const color = safeColor(block.panel?.color, '#FFFFFF');
         if (block.panel?.shape === 'circle') {
           const r = Math.round(Math.min(px.width, px.height) / 2);

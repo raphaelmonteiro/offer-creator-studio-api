@@ -80,6 +80,17 @@ describe('verificação do recorte (D7)', () => {
     expect(halo.metrics.fringeExcess).toBeGreaterThan(0.04);
   });
 
+  it('chave azul: contorno escuro da personagem NÃO é halo; reflexo azul na borda é (só o excesso positivo conta)', () => {
+    const BLUE: [number, number, number] = [0x00, 0x47, 0xbb];
+    const blue = (f: McCutoutFrame) => measureCutoutFrame(f, '#0047BB');
+    const outlined = blue(frame({ background: BLUE, ring: [0x70, 0x40, 0x20] }));
+    expect(outlined.fringeExcess).toBeLessThanOrEqual(0.001);
+    expect(evaluateCutoutClip([outlined]).passed).toBe(true);
+    const haloed = blue(frame({ background: BLUE, ring: [0x40, 0x60, 0xd0] }));
+    expect(haloed.fringeExcess).toBeGreaterThan(0.04);
+    expect(evaluateCutoutClip([haloed]).reasons).toContain('edge_fringe');
+  });
+
   it('matte vazio ou cheio → matte_empty / matte_full', () => {
     const empty = frame({ figure: { x: 0, y: 0, w: 2, h: 2 } });
     expect(evaluateCutoutClip(metrics([empty])).reasons).toContain('matte_empty');

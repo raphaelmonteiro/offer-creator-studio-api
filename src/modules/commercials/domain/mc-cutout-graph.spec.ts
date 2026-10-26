@@ -38,7 +38,7 @@ const graphOf = (args: string[]) => args[args.indexOf('-filter_complex') + 1];
 describe('recorte por cor-chave no compose (video-mascote-transparente, D5)', () => {
   it('cadeia da chave: 4:4:4, chromakey, despill do tipo da chave, matte erodido e suavizado, alphamerge', () => {
     expect(buildCutoutKeyChain('1:v', '#00B140', '0', 'ck0')).toBe(
-      '[1:v]format=yuv444p,chromakey=color=0x00B140:similarity=0.12:blend=0.05,' +
+      '[1:v]format=yuv444p,chromakey=color=0x00B140:similarity=0.16:blend=0.08,' +
         'despill=type=green:mix=0.5:expand=0.1,split=2[k0][m0];' +
         '[m0]alphaextract,erosion,gblur=sigma=0.7[mm0];[k0][mm0]alphamerge[ck0]',
     );
@@ -126,8 +126,8 @@ describe('recorte por cor-chave no compose (video-mascote-transparente, D5)', ()
     expect(computeComposeFfmpegHash({ ...hashBase, cutout: null })).toBe(plain);
     const cutout = composeCutoutHashInput({ keyColor: '#00B140', framing: 'corpo' });
     expect(cutout).toMatchObject({
-      similarity: 0.12,
-      blend: 0.05,
+      similarity: 0.16,
+      blend: 0.08,
       graphVersion: MC_CUTOUT_GRAPH_VERSION,
     });
     const withCutout = computeComposeFfmpegHash({ ...hashBase, cutout });
