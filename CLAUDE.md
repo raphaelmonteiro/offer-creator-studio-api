@@ -83,7 +83,9 @@ MC_RENDER_BROWSER             # navegador do render Remotion (offer_carousel e o
 MC_RENDER_FONT_FILE           # dica só para o preflight (DejaVuSans.ttf fora dos caminhos usuais); o drawtext usa o fontconfig
 MC_CAROUSEL_RENDERER          # mock (default com pipeline mock) | remotion — renderizador do F2
 MC_RENDER_ASSET_BASE_URL      # base absoluta das mídias passadas ao Remotion (default http://127.0.0.1:3001)
-MC_COMPOSITION_VERSION        # versão das composições @chroma/video-templates no hash do render (default 0.2.0; vale a do pacote quando carregado)
+MC_COMPOSITION_VERSION        # versão das composições @chroma/video-templates no hash do render (default 0.3.0; vale a do pacote quando carregado)
+MC_CHARACTER_CUTOUT           # `true` liga o personagem SEM FUNDO e o enquadramento de corpo (só a API lê; padrão desligado); GET config informa
+MC_CUTOUT_MOCK                # `unstable` (só no worker, só com MC_PIPELINE_PROVIDER=mock): o talk mock devolve fundo-chave que muda de tom (fixture da reprovação)
 MC_VIDEO_TEMPLATES_DIR        # checkout local do pacote de composição (dev, enquanto ele não é dependência)
 MC_KIT_CANDIDATE_COUNT / MC_KIT_STYLE_REFS_DIR
                               # candidatos por rodada (4–6) e referências de estilo opcionais da mascotização
@@ -607,7 +609,7 @@ com o TTS original e o custo conta os segundos enviados (uma fala de 2 s custa 5
 | Grupo | Rotas |
 |-------|-------|
 | Config | `GET config` (formatos habilitados e render por formato) |
-| Kits | `POST/GET kits`, `GET kits/suggest?clientId=`, `GET kits/:id`, `POST kits/:id/approve`, `POST kits/:id/regenerate-reference`, `PATCH kits/:id/sheet`, `POST kits/:id/sheet/translate`, `GET/POST kits/:id/candidates`, `POST kits/:id/candidates/:cid/choose`, `POST kits/:id/use-as-is`, `POST kits/:id/mouth-variant` |
+| Kits | `POST/GET kits`, `GET kits/suggest?clientId=`, `GET kits/:id`, `POST kits/:id/body-tile`, `POST kits/:id/approve`, `POST kits/:id/regenerate-reference`, `PATCH kits/:id/sheet`, `POST kits/:id/sheet/translate`, `GET/POST kits/:id/candidates`, `POST kits/:id/candidates/:cid/choose`, `POST kits/:id/use-as-is`, `POST kits/:id/mouth-variant` |
 | Vozes | `GET voices` (curadas + do próprio usuário), `POST voices/preview` |
 | Arte | `POST art` (PNG/JPEG → asset `video_art` com aspecto inferido), `GET art/:id`, `GET art-sources/:kind/:id/offers` |
 | Projetos | `POST projects`, `POST projects/from-art`, `GET projects[?sourceKind&sourceId]`, `GET projects/:id`, `POST projects/:id/duplicate`, `PATCH projects/:id/script`, `GET projects/:id/quote`, `POST projects/:id/prepare`, `POST projects/:id/approve-production`, `PATCH projects/:id/composition`, `POST projects/:id/approve-assembly`, `POST projects/:id/cancel` |
@@ -616,6 +618,34 @@ com o TTS original e o custo conta os segundos enviados (uma fala de 2 s custa 5
 | Peças | `POST/GET pieces`, `GET/PATCH/DELETE pieces/:id` (PATCH com `expectedRevision` → 409 `REVISION_CONFLICT`), `POST pieces/:id/save-as-template`, `POST projects/from-piece`, `PATCH projects/:id/piece` |
 | Admin (JWT + `x-admin-token`) | `POST admin/pause`, `GET admin/costs?month=YYYY-MM` |
 | SSE | `GET events` |
+
+**Personagem sem fundo e enquadramento de corpo** (change `video-mascote-transparente`; atrás de `MC_CHARACTER_CUTOUT`,
+desligada por padrão: `GET config` → `characterCutout.enabled`; contrato completo no `design.md` da change). No bloco do
+personagem da peça (`panel.shape: 'none'` + `framing: 'busto' | 'corpo'`, padrão `corpo` no sem fundo) e na arte que
+fala em modo janela (`cutout`/`framing` em `from-art` e `PATCH projects/:id/script`; `logoFace`, `offer_carousel` e
+`scenes` não têm o modo). Técnica A (P-16, US$ 0 a mais): o `talk` manda ao motor SÓ o tile (de corpo ou de busto)
+achatado sobre a cor-chave do kit (`#00B140` ou `#0047BB`, escolhida por distância Lab às cores da identidade,
+`domain/mc-cutout-key.ts`) e o `compose_ffmpeg` remove a chave de cada clipe (`domain/mc-cutout-graph.ts`: 4:4:4,
+chromakey, despill, matte erodido e suavizado), encaixa o clipe inteiro na janela, colado embaixo, sem crossfade. O
+**tile de corpo** (`kit.bodyTileAssetId`, migration `AddKitBodyTile`, `services/mc-kit-body-tile.service.ts`,
+`domain/mc-body-tile.ts`) sai da identidade já aprovada só com sharp (alfa, margem, proporção 1:2–1:1, rosto ≥ 25% da
+altura com encurtamento por baixo, avisos `IDENTITY_BUST_ONLY`/`BODY_TRIMMED_FOR_FACE`...), sob demanda por `POST
+kits/:id/body-tile` (idempotente) ou no primeiro uso; o GC conhece a coluna. Modo e chave ficam congelados no roteiro
+(`cutout`, `framing`, `cutoutKeyColor`) e entram nos hashes do `talk` e do `compose_ffmpeg` só quando em uso (todo hash
+existente segue igual). Recusas (guard único `services/mc-cutout-guard.service.ts`, antes de gravar ou gastar): 400
+`PIECE_CHARACTER_FIELD_INVALID`; 422 `CHARACTER_CUTOUT_DISABLED`, `CHARACTER_CUTOUT_LOGO_FACE`,
+`CHARACTER_CUTOUT_FORMAT_NOT_SUPPORTED`, `CHARACTER_CUTOUT_KEY_UNSAFE` (sem fallback para outra cor) e os do tile de corpo
+(`BODY_TILE_BORDER_NOT_UNIFORM`, `BODY_TILE_FIGURE_NOT_FOUND`, `TILE_FACE_NOT_FOUND`); peça de outro usuário nas rotas de
+peça é 404. **Verificação do recorte** (local, sem API) no `compose_ffmpeg` ANTES dos passes
+(`domain/mc-cutout-quality.ts`, `services/mc-cutout-quality.service.ts`): 8 quadros por clipe, cobertura do matte, cor e
+estabilidade do fundo, resto da chave e halo na borda; reprovado ⇒ evento `cutout_rejected`, `TerminalProviderError
+character_cutout_failed` (sem re-execução paga) e projeto em `needs_attention` com `availableActions`
+(`gerar_fala_de_novo`, `usar_painel_liso`) e `cutoutIssue` em `GET projects/:id`; nada é gravado pela metade. A cotação
+(`GET projects/:id/quote?phase=production`) devolve `talk` com as falas a regravar e o custo estimado (sem chamada paga);
+`PATCH projects/:id/piece` devolve `pieceChange.recordingReasons`. A inspeção de visão sabe que o fundo-chave é intencional
+e segue reprovando texto no corpo/roupa. O pacote `@chroma/video-templates` 0.3.0 não desenha painel no modo sem fundo
+(`COMPOSITION_VERSION` 0.3.0; o pin do `package.json` sobe quando o desenvolvedor publicar o pacote). e2e mock:
+`docs/evidence/mascot-quality/e2e/e2e-piece-cutout.mjs` (modos `stable` e `unstable`).
 
 **Convenção de erros**: forma de DTO → 400 pelo pipe global; regra de negócio → 422 `{code, message, details?}`
 (ex.: `SPEECH_SENTENCE_TOO_LONG`, `SPEECH_DURATION_OUT_OF_RANGE`, `SPEECH_OVER_LENGTH`,
