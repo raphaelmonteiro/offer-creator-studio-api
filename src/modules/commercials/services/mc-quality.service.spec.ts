@@ -870,6 +870,88 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
       );
     });
 
+    describe('rerollCutoutScenes (B2: todas as falas reprovadas do recorte)', () => {
+      const issue = (...ids: string[]) => ({
+        code: 'character_cutout_failed',
+        scenes: ids.map((sceneId) => ({ sceneId, idx: 0, reasons: [], metrics: {} })),
+      });
+      const withIssue = (value: unknown) => {
+        (
+          service as unknown as { commercials: Record<string, unknown> }
+        ).commercials.cutoutIssueOfProject = jest.fn().mockResolvedValue(value);
+      };
+      beforeEach(() => {
+        project.status = McProjectStatus.NEEDS_ATTENTION;
+        project.errorCode = 'character_cutout_failed';
+        project.quality = resolveQuality({
+          approval: {
+            scope: 'production',
+            revision: 1,
+            manifestHash: 'm',
+            approvedAt: 'now',
+            userId,
+            budgetCredits: 145,
+          },
+        });
+        scenes.forEach((s) => {
+          s.status = McSceneStatus.READY;
+          s.finalAssetId = 'final';
+        });
+      });
+
+      it('regrava as 2 falas numa transação, o projeto vai a generating uma vez; 1º reroll de cada é grátis', async () => {
+        withIssue(issue(S1, S2));
+        await service.rerollCutoutScenes(userId, 'p1', 1);
+        expect(credits.reserve).not.toHaveBeenCalled();
+        expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+        expect(materializer.materializeProductionV2).toHaveBeenCalledTimes(1);
+        const passed = materializer.materializeProductionV2.mock.calls[0][3] as Row[];
+        expect(passed.map((r) => r.id)).toEqual(['row-1', 'row-2']);
+        expect(project.status).toBe(McProjectStatus.GENERATING);
+        expect(pipeline.appendProjectTransition).toHaveBeenCalledTimes(1);
+        for (const id of ['row-1', 'row-2'])
+          expect(manager.update).toHaveBeenCalledWith(
+            McScene,
+            { id },
+            expect.objectContaining({ status: McSceneStatus.PENDING, rerollCount: 1 }),
+          );
+      });
+
+      it('cobra só as falas que já tinham reroll (2ª vez de row-2: 89)', async () => {
+        scenes[1].rerollCount = 1;
+        withIssue(issue(S1, S2));
+        await service.rerollCutoutScenes(userId, 'p1', 1);
+        expect(credits.reserve).toHaveBeenCalledTimes(1);
+        expect(credits.reserve).toHaveBeenCalledWith(
+          expect.anything(),
+          userId,
+          expect.stringContaining('reroll:row-2:2'),
+          89,
+        );
+      });
+
+      it('repetição (sem cutoutIssue aberto) → 422 CUTOUT_ISSUE_NOT_OPEN sem escrever nem cobrar', async () => {
+        withIssue(null);
+        await expect(service.rerollCutoutScenes(userId, 'p1', 1)).rejects.toMatchObject({
+          response: { code: 'CUTOUT_ISSUE_NOT_OPEN' },
+        });
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+        expect(credits.reserve).not.toHaveBeenCalled();
+      });
+
+      it('revisão antiga → 409; cena ainda em produção → 422 SCENE_NOT_REROLLABLE', async () => {
+        withIssue(issue(S1, S2));
+        await expect(service.rerollCutoutScenes(userId, 'p1', 0)).rejects.toBeInstanceOf(
+          ConflictException,
+        );
+        scenes[1].status = McSceneStatus.RUNNING;
+        await expect(service.rerollCutoutScenes(userId, 'p1', 1)).rejects.toMatchObject({
+          response: { code: 'SCENE_NOT_REROLLABLE' },
+        });
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+      });
+    });
+
     it('rerollScene após remontagem assembly_only continua autorizado (prévias inalteradas)', async () => {
       project.status = McProjectStatus.SUCCEEDED;
       project.revision = 2;

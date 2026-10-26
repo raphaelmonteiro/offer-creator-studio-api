@@ -1286,48 +1286,115 @@ export class McQualityService {
         message: `A cena está em '${scene.status}'.`,
       });
     }
+    await this.rerollScenesInTransaction(userId, project, script, quality, [
+      { scene, scriptScene },
+    ]);
+    return this.reload(project.id);
+  }
 
+  /**
+   * POST /projects/:id/cutout/reroll-scenes (video-mascote-transparente, correção B2): regrava,
+   * numa única transação, TODAS as falas listadas em `cutoutIssue` (recorte reprovado). O
+   * `rerollScene` por cena não serve aqui: o 1º reroll leva o projeto a `generating` e o 2º
+   * (cena `READY`) recebe 422. Tudo ou nada: falta de crédito ou conflito de revisão não regrava
+   * nenhuma. Repetir (projeto já em `generating`) → 422 `CUTOUT_ISSUE_NOT_OPEN`, sem cobrança.
+   */
+  async rerollCutoutScenes(
+    userId: string,
+    projectId: string,
+    expectedRevision: number,
+  ): Promise<McProject> {
+    await this.assertNotPaused();
+    const project = await this.getV2Project(userId, projectId);
+    this.assertRevision(project, expectedRevision);
+    const issue = await this.commercials.cutoutIssueOfProject(project);
+    if (!issue || issue.scenes.length === 0) {
+      throw new UnprocessableEntityException({
+        code: 'CUTOUT_ISSUE_NOT_OPEN',
+        message: 'Este projeto não tem falas com recorte reprovado para regravar.',
+      });
+    }
+    const quality = resolveQuality(project.quality);
+    if (!approvalAuthorizes(quality, project.revision, 'production')) {
+      throw new UnprocessableEntityException({
+        code: 'APPROVAL_MISSING',
+        message:
+          'Esta revisão não tem produção aprovada — aprove as prévias antes de refazer um vídeo.',
+      });
+    }
+    const script = this.validatedScript(project);
+    const targets: Array<{ scene: McScene; scriptScene: McScriptScene }> = [];
+    for (const failed of issue.scenes) {
+      const scriptScene = this.scriptSceneOrFail(script, failed.sceneId);
+      const scene = await this.sceneRowOrFail(project.id, failed.sceneId);
+      if (scene.status !== McSceneStatus.READY && scene.status !== McSceneStatus.FAILED) {
+        throw new UnprocessableEntityException({
+          code: 'SCENE_NOT_REROLLABLE',
+          message: `A cena está em '${scene.status}'.`,
+        });
+      }
+      targets.push({ scene, scriptScene });
+    }
+    await this.rerollScenesInTransaction(userId, project, script, quality, targets);
+    return this.reload(project.id);
+  }
+
+  /** Re-arma 1..N cenas (re-roll) e leva o projeto a `generating` numa só transação com CAS de revisão. */
+  private async rerollScenesInTransaction(
+    userId: string,
+    project: McProject,
+    script: McScript,
+    quality: ReturnType<typeof resolveQuality>,
+    targets: Array<{ scene: McScene; scriptScene: McScriptScene }>,
+  ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const from = project.status;
-      const newCount = scene.rerollCount + 1;
-      const paid = creditsEnabled('commercials') && newCount > 1;
-      const amount = paid ? custoProducaoDaCena(scriptScene.sceneType as McSceneType) : 0;
       const budget =
         findPhaseBudget(quality, 'production', project.revision) ??
         this.emptyBudget(project, 'production');
-      if (amount > 0)
-        await this.credits.reserve(
-          manager,
-          userId,
-          `${budget.ledgerKey}:reroll:${scene.id}:${newCount}`,
-          amount,
+      let totalAmount = 0;
+      const rerolls: Array<{ scene: McScene; newCount: number; paid: boolean; amount: number }> =
+        [];
+      for (const { scene, scriptScene } of targets) {
+        const newCount = scene.rerollCount + 1;
+        const paid = creditsEnabled('commercials') && newCount > 1;
+        const amount = paid ? custoProducaoDaCena(scriptScene.sceneType as McSceneType) : 0;
+        if (amount > 0)
+          await this.credits.reserve(
+            manager,
+            userId,
+            `${budget.ledgerKey}:reroll:${scene.id}:${newCount}`,
+            amount,
+          );
+        totalAmount += amount;
+        // re-arma SEM zerar o vídeo (o cache decide); nova tentativa de produção
+        await manager.update(
+          McScene,
+          { id: scene.id },
+          {
+            status: McSceneStatus.PENDING,
+            finalAssetId: null,
+            errorCode: null,
+            errorMessage: null,
+            rerollCount: newCount,
+          },
         );
-      // re-arma SEM zerar o vídeo (o cache decide); nova tentativa de produção
-      await manager.update(
-        McScene,
-        { id: scene.id },
-        {
-          status: McSceneStatus.PENDING,
-          finalAssetId: null,
-          errorCode: null,
-          errorMessage: null,
-          rerollCount: newCount,
-        },
-      );
-      scene.status = McSceneStatus.PENDING;
-      scene.finalAssetId = null;
-      await this.pipeline.cancelIdleSteps(manager, project.id, scene.id);
+        scene.status = McSceneStatus.PENDING;
+        scene.finalAssetId = null;
+        await this.pipeline.cancelIdleSteps(manager, project.id, scene.id);
+        rerolls.push({ scene, newCount, paid, amount });
+      }
       const { items } = await this.materializer.materializeProductionV2(
         manager,
         project,
         script,
-        [scene],
+        targets.map((t) => t.scene),
         { forceNewAttempt: true },
       );
       const nextBudget: McPhaseBudget = {
         ...budget,
         quotedCredits: budget.quotedCredits + items.reduce((s, i) => s + i.credits, 0),
-        reservedCredits: budget.reservedCredits + amount,
+        reservedCredits: budget.reservedCredits + totalAmount,
         items: [...budget.items, ...items],
       };
       const nextQuality = upsertPhaseBudget(
@@ -1342,30 +1409,38 @@ export class McQualityService {
               .update(
                 McProject,
                 { id: project.id, revision: project.revision },
-                { quality: nextQuality, reservedCredits: project.reservedCredits + amount },
+                { quality: nextQuality, reservedCredits: project.reservedCredits + totalAmount },
               )
               .then((r) => (r.affected ?? 0) === 1)
           : await this.casTransitionWithRevision(manager, project, target, {
               quality: nextQuality,
-              reservedCredits: project.reservedCredits + amount,
+              reservedCredits: project.reservedCredits + totalAmount,
               errorCode: null,
               errorMessage: null,
               finishedAt: null,
             });
       if (!won) throw this.conflict();
-      await this.commercials.appendEvent(manager, {
-        userId,
-        refKind: 'scene',
-        refId: scene.id,
-        kind: 'reroll',
-        fromStatus: McSceneStatus.READY,
-        toStatus: McSceneStatus.PENDING,
-        detail: { sceneId, rerollCount: newCount, paid, credits: amount },
-      });
+      for (const r of rerolls) {
+        await this.commercials.appendEvent(manager, {
+          userId,
+          refKind: 'scene',
+          refId: r.scene.id,
+          kind: 'reroll',
+          fromStatus: McSceneStatus.READY,
+          toStatus: McSceneStatus.PENDING,
+          detail: {
+            sceneId: r.scene.scriptSceneId,
+            rerollCount: r.newCount,
+            paid: r.paid,
+            credits: r.amount,
+          },
+        });
+      }
       if (from !== target)
         await this.pipeline.appendProjectTransition(manager, userId, project.id, from, target, {
-          sceneId,
-          reroll: newCount,
+          sceneId: targets[0].scriptScene.sceneId,
+          reroll: rerolls[0].newCount,
+          ...(targets.length > 1 ? { scenes: targets.length } : {}),
         });
       const fresh = await manager.findOneByOrFail(McProject, { id: project.id });
       const scenes = (await manager.find(McScene, { where: { projectId: project.id } })).filter(
@@ -1374,7 +1449,6 @@ export class McQualityService {
       await this.materializer.ensureAssemblyStepV2(manager, fresh, script, scenes);
       await this.pipeline.enqueueReadySteps(manager, project.id);
     });
-    return this.reload(project.id);
   }
 
   // ───────────────────── composição pós-entrega (assembly_only) ─────────────────────

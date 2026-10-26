@@ -17,6 +17,7 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  ValidationPipe,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -106,6 +107,13 @@ export class CommercialsController {
     const project = await this.commercials.findOneProject(userId, projectId);
     return isPipelineV2(project);
   }
+
+  private static readonly scriptV2Pipe = new ValidationPipe({
+    whitelist: true,
+    // não rejeita campos extras (o cliente já os envia hoje); só valida o que o DTO declara
+    forbidNonWhitelisted: false,
+    transform: true,
+  });
 
   private static isUuid(value: string): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -478,9 +486,33 @@ export class CommercialsController {
     @Body() dto: UpdateScriptDto | UpdateScriptV2Dto,
   ) {
     if (await this.isV2(user.id, id)) {
-      return this.quality.updateScript(user.id, id, dto as UpdateScriptV2Dto);
+      // O corpo é uma união de DTOs: o pipe global não enxerga a classe (metatype Object) e não
+      // valida nada. Valida o DTO v2 aqui (B1 da QA: `framing`/`cutout` inválidos davam 200).
+      const v2 = (await CommercialsController.scriptV2Pipe.transform(dto, {
+        type: 'body',
+        metatype: UpdateScriptV2Dto,
+      })) as UpdateScriptV2Dto;
+      return this.quality.updateScript(user.id, id, v2);
     }
     return this.actions.updateScript(user.id, id, dto as UpdateScriptDto);
+  }
+
+  /**
+   * Regrava TODAS as falas reprovadas pela verificação do recorte (`cutoutIssue`), em lote e
+   * numa transação (correção B2): o reroll por cena só serve para a 1ª, pois leva o projeto a `generating`.
+   */
+  @Post('projects/:id/cutout/reroll-scenes')
+  rerollCutoutScenes(
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: Partial<RevisionDto> | undefined,
+  ) {
+    // corpo vazio escapa do pipe global (SmartValidationPipe ignora `{}`): checa aqui
+    const revision = dto?.expectedRevision;
+    if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 0) {
+      throw new BadRequestException('expectedRevision é obrigatório (inteiro >= 0).');
+    }
+    return this.quality.rerollCutoutScenes(user.id, id, revision);
   }
 
   /**

@@ -664,6 +664,14 @@ export class CommercialsService {
     };
   }
 
+  /** `cutoutIssue` do projeto (D7) lido do banco; usado pela regravação em lote das falas reprovadas. */
+  async cutoutIssueOfProject(project: McProject): Promise<McCutoutIssue | null> {
+    const steps = await this.dataSource
+      .getRepository(McStep)
+      .find({ where: { projectId: project.id }, order: { createdAt: 'ASC' } });
+    return this.cutoutIssueOf(project, steps, availableProjectActions(project, steps));
+  }
+
   /**
    * `cutoutIssue` (D7): último `cutout_rejected` do `compose_ffmpeg` falho da revisão corrente,
    * só com o projeto em `needs_attention` por `character_cutout_failed`.
