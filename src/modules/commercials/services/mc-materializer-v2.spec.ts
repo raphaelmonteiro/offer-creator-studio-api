@@ -670,6 +670,87 @@ describe('McMaterializerService — cenas talk_tile (tarefas 3.3/3.4/3.8)', () =
     expect(again.steps[0].inputHash).toBe(talk1.inputHash);
   });
 
+  describe('personagem sem fundo e corpo (video-mascote-transparente, 1.6)', () => {
+    const bodyKit = { ...talkKit, bodyTileAssetId: 'body-1' } as unknown as McCharacterKit;
+    const bodyAsset = { id: 'body-1', fileUrl: '/uploads/body.png', width: 720, height: 1440 };
+
+    async function production(script: McScript, kit: McCharacterKit = bodyKit) {
+      const manager = fakeManager({ assets: [tileAsset, bodyAsset] });
+      manager.seed(McCharacterKit, [{ ...kit }]);
+      const project = talkProject(script);
+      const scenes = await service.syncScenesV2(manager, project, script, { rearm: true });
+      for (const scene of scenes)
+        Object.assign(scene, { audioAssetId: `au-${scene.scriptSceneId}` });
+      return service.materializeProductionV2(manager, project, script, scenes);
+    }
+
+    it('sem fundo + corpo: tile de corpo, cor-chave no lugar da cor do painel, prompt de recorte e cutout no snapshot', async () => {
+      const script = {
+        ...fixtureTalkTileScript({ backgroundColor: '#ff8800' }),
+        cutout: true,
+        framing: 'corpo',
+        cutoutKeyColor: '#00B140',
+      } as McScript;
+      const { steps } = await production(script);
+      const snapshot = steps[0].inputSnapshot as Record<string, unknown>;
+      expect(snapshot).toMatchObject({
+        tileAssetId: 'body-1',
+        tileWidth: 720,
+        tileHeight: 1440,
+        backgroundColor: '#00B140',
+        framing: 'corpo',
+        cutout: { keyColor: '#00B140', framing: 'corpo' },
+      });
+      expect(snapshot.prompt).toContain('whole figure in frame');
+      expect(snapshot.prompt).toContain('green background');
+      expect(snapshot.prompt).toContain('Absolutely no text anywhere in the frame');
+    });
+
+    it('a cor do painel não entra no hash do sem fundo; o hash muda com o modo, o enquadramento e a chave', async () => {
+      const base = {
+        ...fixtureTalkTileScript({ backgroundColor: '#ff8800' }),
+        cutout: true,
+        framing: 'corpo',
+        cutoutKeyColor: '#00B140',
+      } as McScript;
+      const hashOf = async (script: McScript) => (await production(script)).steps[0].inputHash;
+      const reference = await hashOf(base);
+      expect(await hashOf({ ...base, talkBackgroundColor: '#123456' })).toBe(reference);
+      expect(await hashOf({ ...base, framing: 'busto' })).not.toBe(reference);
+      expect(await hashOf({ ...base, cutoutKeyColor: '#0047BB' })).not.toBe(reference);
+      const card = fixtureTalkTileScript({ backgroundColor: '#ff8800' });
+      expect(await hashOf(card)).not.toBe(reference);
+    });
+
+    it('Card e busto: hash igual ao de antes (sem os campos novos no payload nem no snapshot)', async () => {
+      const card = fixtureTalkTileScript({ backgroundColor: '#ff8800' });
+      const withKitBody = await production(card);
+      const withoutBody = await production(card, talkKit);
+      expect(withKitBody.steps[0].inputHash).toBe(withoutBody.steps[0].inputHash);
+      expect(withKitBody.steps[0].inputSnapshot).not.toHaveProperty('cutout');
+      expect(withKitBody.steps[0].inputSnapshot).toMatchObject({ tileAssetId: 'tile-1' });
+    });
+
+    it('Card com corpo: tile de corpo sem cutout no hash; sem tile de corpo → BODY_TILE_MISSING (nunca cai no busto)', async () => {
+      const cardBody = {
+        ...fixtureTalkTileScript({ backgroundColor: '#ff8800' }),
+        framing: 'corpo',
+      } as McScript;
+      const { steps } = await production(cardBody);
+      expect(steps[0].inputSnapshot).toMatchObject({
+        tileAssetId: 'body-1',
+        backgroundColor: '#FF8800',
+      });
+      expect(steps[0].inputSnapshot).not.toHaveProperty('cutout');
+      await expect(production(cardBody, talkKit)).rejects.toThrow(/BODY_TILE_MISSING/);
+    });
+
+    it('sem fundo sem cor-chave congelada no roteiro é erro de pré-condição', async () => {
+      const script = { ...fixtureTalkTileScript(), cutout: true, framing: 'corpo' } as McScript;
+      await expect(production(script)).rejects.toThrow(/CUTOUT_KEY_MISSING/);
+    });
+  });
+
   it('cor da janela ausente cai no tileBackgroundColor do kit; tier premium troca o motor (e o hash)', async () => {
     const script = fixtureTalkTileScript();
     const { manager, scenes } = await prepared(script, 'premium');

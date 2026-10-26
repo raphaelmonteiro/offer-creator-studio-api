@@ -417,6 +417,7 @@ export class McTalkingProcessor {
       backgroundColor?: string | null;
       motion?: string | null;
       prompt?: string | null;
+      cutout?: { keyColor: string; framing: 'busto' | 'corpo' } | null;
       engine?: McTalkEngineSnapshot | null;
       tier?: string | null;
       identityMode?: McKitIdentityMode | null;
@@ -443,7 +444,7 @@ export class McTalkingProcessor {
     const speakingTile = await ensureImageUnderCap(
       await recolorTileBackground(tile, backgroundColor),
     );
-    const prompt = snapshot.prompt?.trim() || buildTalkPrompt(snapshot.motion);
+    const prompt = snapshot.prompt?.trim() || buildTalkPrompt(snapshot.motion, snapshot.cutout);
     const tier = (snapshot.tier ?? project.tier ?? 'economico') as 'economico' | 'premium';
     const identityMode = snapshot.identityMode ?? kit?.identityMode ?? 'generated';
     // Motor ESCOLHIDO: o do snapshot (o hash assinou aquele modelo; completado

@@ -200,6 +200,31 @@ describe('mc-step-hashes — talk (change video-formatos-personagem, D1/D2/D7)',
     expect(computeTalkHashV2({ ...base, attempt: 2 })).not.toBe(computeTalkHashV2(base));
   });
 
+  it('sem modo sem fundo o hash é o MESMO de antes da change (valor fixado do código anterior)', () => {
+    expect(computeTalkHashV2(base)).toBe(
+      '29d75a235bd02a36f3f637dbdae25b11decb87b969b8c2e838c284379d3ecfb9',
+    );
+    expect(computeTalkHashV2({ ...base, cutout: null })).toBe(computeTalkHashV2(base));
+  });
+
+  it('modo sem fundo: o modo, a chave, o enquadramento e a versão da regra entram no hash', () => {
+    const cutout = { keyColor: '#00B140', framing: 'corpo', keyRuleVersion: 1 };
+    const withCutout = computeTalkHashV2({ ...base, cutout });
+    expect(withCutout).not.toBe(computeTalkHashV2(base));
+    expect(computeTalkHashV2({ ...base, cutout: { ...cutout, framing: 'busto' } })).not.toBe(
+      withCutout,
+    );
+    expect(computeTalkHashV2({ ...base, cutout: { ...cutout, keyColor: '#0047BB' } })).not.toBe(
+      withCutout,
+    );
+    expect(computeTalkHashV2({ ...base, cutout: { ...cutout, keyRuleVersion: 2 } })).not.toBe(
+      withCutout,
+    );
+    expect(computeTalkHashV2({ ...base, cutout })).toBe(
+      computeTalkHashV2({ ...base, cutout: { ...cutout } }),
+    );
+  });
+
   it('cor da janela alterada → hash novo (clipe regerado; o TTS é outro step e não muda)', () => {
     expect(computeTalkHashV2({ ...base, backgroundColor: '#00FF00' })).not.toBe(
       computeTalkHashV2(base),

@@ -34,7 +34,8 @@ import {
 } from '../domain/mc-piece';
 import { Font } from '../../fonts/entities/font.entity';
 import { carouselOffers, effectiveScenePrompts } from '../domain/mc-script-v2';
-import { buildTalkPrompt } from '../domain/mc-talk-prompts';
+import { MC_CUTOUT_KEY_RULE_VERSION } from '../domain/mc-cutout-key';
+import { buildTalkPrompt, TalkPromptCutout } from '../domain/mc-talk-prompts';
 import { kitVoiceDelivery } from '../domain/mc-voice-delivery';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import {
@@ -683,7 +684,7 @@ export class McMaterializerService {
           // e o ingest precisam sem reler o kit (motor efetivo é gravado
           // pelo submit em caso de fallback).
           const ctx = talkContext as NonNullable<typeof talkContext>;
-          const prompt = buildTalkPrompt(prompts.motion);
+          const prompt = buildTalkPrompt(prompts.motion, ctx.cutout);
           inputHash = computeTalkHashV2({
             engineModel: ctx.engine.model,
             tileAssetId: ctx.tileAssetId,
@@ -691,6 +692,9 @@ export class McMaterializerService {
             prompt,
             backgroundColor: ctx.backgroundColor,
             attempt,
+            cutout: ctx.cutout
+              ? { ...ctx.cutout, keyRuleVersion: MC_CUTOUT_KEY_RULE_VERSION }
+              : null,
           });
           snapshot = {
             tileAssetId: ctx.tileAssetId,
@@ -698,6 +702,7 @@ export class McMaterializerService {
             tileHeight: ctx.tileHeight,
             audioAssetId: scene.audioAssetId,
             backgroundColor: ctx.backgroundColor,
+            ...(ctx.cutout ? { cutout: ctx.cutout, framing: ctx.cutout.framing } : {}),
             motion: prompts.motion,
             lang: prompts.lang,
             prompt,
@@ -814,6 +819,8 @@ export class McMaterializerService {
     tileWidth: number | null;
     tileHeight: number | null;
     backgroundColor: string;
+    /** Modo sem fundo: cor-chave e enquadramento (D9); null nos demais modos. */
+    cutout: TalkPromptCutout | null;
     tier: McProject['tier'];
     identityMode: McCharacterKit['identityMode'];
     engine: { key: string; model: string; usdPerSecond: number; maxChunkS: number };
@@ -822,22 +829,35 @@ export class McMaterializerService {
     if (!kit) throw new Error(`Kit ${project.kitId} não encontrado`);
     if (!kit.tileAssetId)
       throw new Error(`Kit ${kit.id} sem tile de fala (aprovar o kit gera o tile)`);
-    const tile = await manager.findOne(AnimationAsset, { where: { id: kit.tileAssetId } });
+    // video-mascote-transparente (D9): `framing = corpo` envia o tile de corpo; faltar é erro de
+    // pré-condição (nunca cai em silêncio para o busto).
+    const tileAssetId = script.framing === 'corpo' ? kit.bodyTileAssetId : kit.tileAssetId;
+    if (!tileAssetId) {
+      throw new Error(
+        `BODY_TILE_MISSING: kit ${kit.id} sem tile de corpo (calcular antes de gerar)`,
+      );
+    }
+    const cutout = this.talkCutoutOf(script, kit.id);
+    const tile = await manager.findOne(AnimationAsset, { where: { id: tileAssetId } });
     const tier = project.tier ?? 'economico';
     const identityMode = kit.identityMode ?? 'generated';
     const engine = talkEngineFor({ tier, identityMode });
-    const backgroundColor = resolveTalkWindowColor({
-      scriptColor: script.talkBackgroundColor,
-      logoFace: script.logoFace === true,
-      logoBox: project.logoBox,
-      kitColor: kit.tileBackgroundColor,
-      fallback: '#FFFFFF',
-    });
+    // sem fundo: a cor enviada ao motor é a cor-chave, nunca a do painel
+    const backgroundColor =
+      cutout?.keyColor ??
+      resolveTalkWindowColor({
+        scriptColor: script.talkBackgroundColor,
+        logoFace: script.logoFace === true,
+        logoBox: project.logoBox,
+        kitColor: kit.tileBackgroundColor,
+        fallback: '#FFFFFF',
+      });
     return {
-      tileAssetId: kit.tileAssetId,
+      tileAssetId,
       tileWidth: tile?.width ?? null,
       tileHeight: tile?.height ?? null,
       backgroundColor,
+      cutout,
       tier,
       identityMode,
       engine: {
@@ -847,6 +867,15 @@ export class McMaterializerService {
         maxChunkS: engine.maxChunkS,
       },
     };
+  }
+
+  /** Modo sem fundo do roteiro: cor-chave congelada + enquadramento; falta de chave é pré-condição. */
+  private talkCutoutOf(script: McScript, kitId: string): TalkPromptCutout | null {
+    if (script.cutout !== true) return null;
+    if (!script.cutoutKeyColor) {
+      throw new Error(`CUTOUT_KEY_MISSING: roteiro sem cor-chave para o kit ${kitId}`);
+    }
+    return { keyColor: script.cutoutKeyColor, framing: script.framing ?? 'corpo' };
   }
 
   /**

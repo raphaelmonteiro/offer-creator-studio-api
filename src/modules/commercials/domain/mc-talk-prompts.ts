@@ -14,10 +14,42 @@ export const TALK_PROMPT_SUFFIX =
   'captions, no subtitles, no signs, no banners, no price tags, no logos other than the ' +
   "character's own design.";
 
-/** Gesto opcional da fala (EN efetivo ou pt) + sufixo fixo; sem gesto, só o sufixo. */
-export function buildTalkPrompt(motion?: string | null): string {
+/** Modo sem fundo (video-mascote-transparente, D13): a cor-chave vai no prompt; o corpo muda o plano. */
+export interface TalkPromptCutout {
+  keyColor: string;
+  framing: 'busto' | 'corpo';
+}
+
+const KEY_COLOR_NAMES: Record<string, string> = { '#00B140': 'green', '#0047BB': 'blue' };
+
+/** Sufixo do modo sem fundo: fundo-chave chapado, plano com a figura inteira (corpo), proibição de texto até na roupa. */
+function cutoutSuffix(cutout: TalkPromptCutout): string {
+  const colorName = KEY_COLOR_NAMES[cutout.keyColor.toUpperCase()] ?? 'flat';
+  let suffix = TALK_PROMPT_SUFFIX.replace(
+    'Keep the plain solid background unchanged.',
+    `Keep the plain solid ${colorName} background exactly the same flat color in every frame, ` +
+      'with no shadow, gradient, vignette, floor, reflection or camera light change on it.',
+  ).replace(
+    "no logos other than the character's own design.",
+    "no logos other than the character's own design, including on the clothing.",
+  );
+  if (cutout.framing === 'corpo') {
+    suffix = suffix.replace(
+      'Static medium shot',
+      'Static shot that keeps the whole figure in frame',
+    );
+  }
+  return suffix;
+}
+
+/**
+ * Gesto opcional da fala (EN efetivo ou pt) + sufixo fixo; sem gesto, só o sufixo. Sem `cutout`
+ * o texto é o de sempre, byte a byte (hash de todo `talk` existente intacto).
+ */
+export function buildTalkPrompt(motion?: string | null, cutout?: TalkPromptCutout | null): string {
+  const suffix = cutout ? cutoutSuffix(cutout) : TALK_PROMPT_SUFFIX;
   const action = (motion ?? '').trim().replace(/\s+/g, ' ');
-  if (!action) return TALK_PROMPT_SUFFIX;
+  if (!action) return suffix;
   const withStop = /[.!?]$/.test(action) ? action : `${action}.`;
-  return `${withStop} ${TALK_PROMPT_SUFFIX}`;
+  return `${withStop} ${suffix}`;
 }

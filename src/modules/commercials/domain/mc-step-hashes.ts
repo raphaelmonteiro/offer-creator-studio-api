@@ -301,6 +301,12 @@ export interface TalkHashInputV2 {
   /** Cor da janela/preset para a qual o fundo do tile é recolorido (#RRGGBB). */
   backgroundColor: string;
   attempt: number;
+  /**
+   * Modo sem fundo (video-mascote-transparente, D10): presente ⇒ `backgroundColor` é a cor-chave,
+   * `tileAssetId` o tile escolhido e `prompt` o prompt de recorte. Ausente ⇒ payload idêntico ao
+   * de hoje (Card, Círculo e busto: hash igual).
+   */
+  cutout?: { keyColor: string; framing: string; keyRuleVersion: number } | null;
 }
 
 /**
@@ -316,6 +322,7 @@ export function computeTalkHashV2(input: TalkHashInputV2): string {
     prompt: input.prompt,
     backgroundColor: input.backgroundColor.trim().toUpperCase(),
     attempt: input.attempt,
+    ...(input.cutout ? { cutout: input.cutout } : {}),
   });
 }
 

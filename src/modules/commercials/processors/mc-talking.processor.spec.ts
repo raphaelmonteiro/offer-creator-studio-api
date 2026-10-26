@@ -21,6 +21,7 @@ import {
 } from '../domain/mc-pipeline.config';
 import { classifyMcError } from '../domain/mc-error-classes';
 import { OMNIHUMAN_V15_MODEL } from '../domain/mc-talk-engines';
+import { buildTalkPrompt } from '../domain/mc-talk-prompts';
 import { McStepStatus } from '../domain/mc-state-machines';
 import { McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -642,6 +643,33 @@ describe('McTalkingProcessor — step talk a partir do tile (D1/D2/D7, tarefa 3.
       expect.objectContaining({ stepId: 'st-talk', attempt: 1 }),
       expect.objectContaining({ singletonKey: 'poll:st-talk:1' }),
     );
+  });
+
+  it('sem fundo: envia SÓ o tile de corpo achatado sobre a cor-chave + áudio + prompt de recorte; nada de logo, preço, arte ou fundo da peça', async () => {
+    Object.assign(step.inputSnapshot as Record<string, unknown>, {
+      tileAssetId: 'a-body',
+      backgroundColor: '#00B140',
+      framing: 'corpo',
+      cutout: { keyColor: '#00B140', framing: 'corpo' },
+      prompt: buildTalkPrompt('Waves.', { keyColor: '#00B140', framing: 'corpo' }),
+    });
+    storage.readUploadsFile.mockImplementation((url: string) =>
+      Promise.resolve(url.includes('a-body') ? tilePng : Buffer.from('mp3-pequeno')),
+    );
+    await processor.process({ stepId: 'st-talk' });
+    expect(pipeline.failStep).not.toHaveBeenCalled();
+    const { input } = submitted();
+    // snapshot da entrada do provider: exatamente imagem, áudio e prompt
+    expect(Object.keys(input).sort()).toEqual(['audio_url', 'image_url', 'prompt']);
+    const image = Buffer.from((input.image_url as string).split(',')[1], 'base64');
+    const { data, info } = await sharp(image).raw().toBuffer({ resolveWithObject: true });
+    expect(info.channels).toBe(3);
+    expect([data[0], data[1], data[2]]).toEqual([0x00, 0xb1, 0x40]); // canto = cor-chave
+    expect(input.prompt).toContain('plain solid green background');
+    expect(input.prompt).toContain('Absolutely no text anywhere in the frame');
+    // só o tile e o áudio foram lidos do disco: nada de arte, logo, preço ou fundo da peça
+    const read = storage.readUploadsFile.mock.calls.map((c) => String(c[0]));
+    expect(read.every((url) => url.includes('a-body') || url.includes('a-audio'))).toBe(true);
   });
 
   it('sem cor no snapshot usa a cor padrão do tile do kit', async () => {
