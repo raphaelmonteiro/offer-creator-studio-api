@@ -58,6 +58,7 @@ import {
 } from '../domain/mc-quality';
 import { assertLogoFaceReady } from '../domain/mc-logo-face';
 import { McCutoutKeyColor } from '../domain/mc-cutout-key';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McProjectPieceExtras, pieceCanonicalHash } from '../domain/mc-piece';
 import { voiceoverPlanExcessMs } from '../domain/mc-scene-compose-graph';
 import { preparationComplete } from '../domain/mc-scheduler';
@@ -193,6 +194,7 @@ export class McQualityService {
     private readonly materializer: McMaterializerService,
     private readonly pipeline: McPipelineService,
     private readonly translation: McTranslationService,
+    private readonly cutoutGuard: McCutoutGuardService,
   ) {}
 
   // ───────────────────────────── roteiro (P1) ─────────────────────────────
@@ -222,6 +224,10 @@ export class McQualityService {
       McProjectStatus.SUCCEEDED,
     ]);
     const previous = project.script;
+    // video-mascote-transparente (R7): sem fundo/enquadramento só na janela da arte que fala; a
+    // peça chega pela rota própria (`pieceExtras`) já validada pelo guard, com a chave resolvida
+    const requested = pieceExtras ? null : await this.assertCutoutRequest(userId, project, dto);
+    const cutoutKey = pieceExtras ? (cutoutKeyColor ?? null) : (requested?.keyColor ?? null);
     const prevById = new Map((previous?.scenes ?? []).map((s) => [s.sceneId as string, s]));
     // A peça de ofertas tem o roteiro do F2 (ofertas + uma fala por oferta).
     const carousel = project.format === 'offer_carousel' || project.format === 'offer_piece';
@@ -307,7 +313,11 @@ export class McQualityService {
         : previous?.talkBackgroundColor !== undefined
           ? { talkBackgroundColor: previous.talkBackgroundColor }
           : {}),
-      ...cutoutScriptFields(previous, dto, cutoutKeyColor),
+      ...cutoutScriptFields(
+        previous,
+        { cutout: dto.cutout, framing: requested?.framing ?? dto.framing },
+        cutoutKey,
+      ),
       // F2 (6.6): ofertas = produtos mesclados (ordem acompanha as falas na
       // normalização), preset e legendas do DTO ou preservados; falas derivadas.
       ...(carousel
@@ -339,7 +349,7 @@ export class McQualityService {
     }
     const issues = validateScriptV2(script, {
       format: project.format ?? 'scenes',
-      ...(await this.windowContext(project)),
+      ...(await this.windowContext(project, script.framing)),
     });
     if (issues.length > 0) {
       throw new UnprocessableEntityException({
@@ -2246,22 +2256,58 @@ export class McQualityService {
    * projeto + razão largura/altura do tile do kit. Fora do F1 (ou sem tile
    * ainda) devolve só o aspecto — a trava de aspecto fica para quando o tile existir.
    */
-  private async windowContext(project: McProject): Promise<McScriptWindowContext> {
+  private async windowContext(
+    project: McProject,
+    framing: McScript['framing'] = project.script?.framing,
+  ): Promise<McScriptWindowContext> {
     const ctx: McScriptWindowContext = { aspectRatio: project.aspectRatio };
     if (project.format !== 'talking_art' || !project.kitId) return ctx;
     try {
       const kit = await this.dataSource
         .getRepository(McCharacterKit)
         .findOneBy({ id: project.kitId });
-      if (!kit?.tileAssetId) return ctx;
-      const tile = await this.dataSource
-        .getRepository(AnimationAsset)
-        .findOneBy({ id: kit.tileAssetId });
+      // a trava de aspecto usa o tile do enquadramento do roteiro (corpo ⇒ tile de corpo)
+      const tileId = framing === 'corpo' ? kit?.bodyTileAssetId : kit?.tileAssetId;
+      if (!tileId) return ctx;
+      const tile = await this.dataSource.getRepository(AnimationAsset).findOneBy({ id: tileId });
       if (tile?.width && tile?.height) ctx.tileRatio = tile.width / tile.height;
     } catch {
       // contexto só refina a validação da janela: sem tile legível, valida só a área segura
     }
     return ctx;
+  }
+
+  /**
+   * R7: `cutout`/`framing` do PATCH script. Peça e carrossel → 422 (a peça muda por
+   * `PATCH projects/:id/piece`); arte que fala → o guard (flag, rosto do logo, tile de corpo, chave).
+   * Devolve a cor-chave a congelar no roteiro; sem pedido do modo devolve null.
+   */
+  private async assertCutoutRequest(
+    userId: string,
+    project: McProject,
+    dto: UpdateScriptV2Dto,
+  ): Promise<{ keyColor: McCutoutKeyColor | null; framing: 'busto' | 'corpo' } | null> {
+    if (dto.cutout === undefined && dto.framing === undefined) return null;
+    if (project.format !== 'talking_art') {
+      throw new UnprocessableEntityException({
+        code: 'CHARACTER_CUTOUT_FORMAT_NOT_SUPPORTED',
+        message:
+          project.format === 'offer_piece'
+            ? 'Na peça de ofertas o modo do personagem muda pela edição da peça.'
+            : 'O personagem sem fundo e o enquadramento de corpo só existem na arte que fala.',
+      });
+    }
+    const previous = project.script;
+    const cutout = dto.cutout ?? previous?.cutout ?? false;
+    const framing = dto.framing ?? previous?.framing ?? (cutout ? 'corpo' : 'busto');
+    const resolution = await this.cutoutGuard.resolve({
+      userId,
+      kitId: project.kitId,
+      cutout,
+      framing,
+      logoFace: dto.logoFace ?? previous?.logoFace ?? false,
+    });
+    return { keyColor: resolution.keyColor, framing };
   }
 
   private async getOwnedProject(userId: string, id: string): Promise<McProject> {

@@ -29,6 +29,7 @@ import { McArtService } from './mc-art.service';
 import { McFromArtService } from './mc-from-art.service';
 import { McKitViewService } from './mc-kit-view.service';
 import { McLogoLocatorService } from './mc-logo-locator.service';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McStorageService } from './mc-storage.service';
 
 type Row = Record<string, unknown> & { id?: string };
@@ -99,6 +100,7 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
   let kitView: { toView: jest.Mock };
   let locator: { locate: jest.Mock };
   let storage: { absoluteFromUrl: jest.Mock };
+  let cutoutGuard: { resolve: jest.Mock };
   let service: McFromArtService;
 
   const flyerRow = (configuration: unknown, extra: Partial<Flyer> = {}) => ({
@@ -169,6 +171,9 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
     };
     locator = { locate: jest.fn().mockResolvedValue(detection()) };
     storage = { absoluteFromUrl: jest.fn((url: string) => `/srv${url}`) };
+    cutoutGuard = {
+      resolve: jest.fn().mockResolvedValue({ cutout: true, framing: 'corpo', keyColor: '#00B140' }),
+    };
     service = new McFromArtService(
       dataSource as unknown as DataSource,
       commercials as unknown as CommercialsService,
@@ -176,6 +181,7 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
       kitView as unknown as McKitViewService,
       locator as unknown as McLogoLocatorService,
       storage as unknown as McStorageService,
+      cutoutGuard as unknown as McCutoutGuardService,
     );
   });
 
@@ -281,6 +287,89 @@ describe('McFromArtService — ponte arte → projeto (tarefas 5.3–5.6)', () =
       expect.objectContaining({ catalogId: ART_CATALOG_B, name: 'Feijão Carioca 1kg' }),
     ]);
     expect(project).toMatchObject({ id: 'p-new', format: 'talking_art' });
+  });
+
+  describe('personagem sem fundo na arte que fala (video-mascote-transparente, R6)', () => {
+    beforeEach(() => {
+      repos.get(Flyer)!.findOne.mockResolvedValue(flyerRow(LEGACY_FLYER_CONFIGURATION));
+    });
+
+    it('sem os campos novos nada muda: o guard não é chamado e createProject recebe o de sempre', async () => {
+      await service.createFromArt('u1', dto());
+      expect(cutoutGuard.resolve).not.toHaveBeenCalled();
+      expect(commercials.createProject.mock.calls[0][3]).toBeUndefined();
+      // busto explícito equivale ao que sempre existiu
+      await service.createFromArt('u1', dto({ framing: 'busto' }));
+      expect(cutoutGuard.resolve).not.toHaveBeenCalled();
+    });
+
+    it('cutout true: corpo por padrão, guard com o kit e o rosto do logo, modo repassado a createProject', async () => {
+      await service.createFromArt('u1', dto({ cutout: true }));
+      expect(cutoutGuard.resolve).toHaveBeenCalledWith({
+        userId: 'u1',
+        kitId: KIT_ID,
+        cutout: true,
+        framing: 'corpo',
+        logoFace: false,
+      });
+      expect(commercials.createProject.mock.calls[0][3]).toEqual({
+        cutout: true,
+        framing: 'corpo',
+      });
+    });
+
+    it('corpo sem recorte (Card com corpo) e sem fundo com busto são aceitos', async () => {
+      await service.createFromArt('u1', dto({ framing: 'corpo' }));
+      expect(commercials.createProject.mock.calls[0][3]).toEqual({ framing: 'corpo' });
+      commercials.createProject.mockClear();
+      await service.createFromArt('u1', dto({ cutout: true, framing: 'busto' }));
+      expect(commercials.createProject.mock.calls[0][3]).toEqual({
+        cutout: true,
+        framing: 'busto',
+      });
+    });
+
+    it('rosto do logo (logoFace) é repassado ao guard, que recusa: nenhum projeto é criado', async () => {
+      cutoutGuard.resolve.mockRejectedValueOnce(
+        new HttpException({ code: 'CHARACTER_CUTOUT_LOGO_FACE' }, 422),
+      );
+      expect(
+        await responseOf(service.createFromArt('u1', dto({ cutout: true, logoFace: true }))),
+      ).toMatchObject({ status: 422, body: { code: 'CHARACTER_CUTOUT_LOGO_FACE' } });
+      expect(cutoutGuard.resolve).toHaveBeenCalledWith(expect.objectContaining({ logoFace: true }));
+      expect(commercials.createProject).not.toHaveBeenCalled();
+    });
+
+    it('ofertas em sequência com cutout/corpo → 422 CHARACTER_CUTOUT_FORMAT_NOT_SUPPORTED, sem guard nem projeto', async () => {
+      const offers = [1, 2, 3].map((n) => ({ id: `o${n}` }));
+      for (const over of [{ cutout: true }, { framing: 'corpo' as const }]) {
+        expect(
+          await responseOf(
+            service.createFromArt('u1', dto({ format: 'offer_carousel', offers, ...over })),
+          ),
+        ).toMatchObject({
+          status: 422,
+          body: { code: 'CHARACTER_CUTOUT_FORMAT_NOT_SUPPORTED' },
+        });
+      }
+      expect(cutoutGuard.resolve).not.toHaveBeenCalled();
+      expect(commercials.createProject).not.toHaveBeenCalled();
+    });
+
+    it('flag desligada / chave insegura / erro do tile: o 422 do guard propaga antes de criar', async () => {
+      for (const code of [
+        'CHARACTER_CUTOUT_DISABLED',
+        'CHARACTER_CUTOUT_KEY_UNSAFE',
+        'BODY_TILE_BORDER_NOT_UNIFORM',
+      ]) {
+        cutoutGuard.resolve.mockRejectedValueOnce(new HttpException({ code }, 422));
+        expect(await responseOf(service.createFromArt('u1', dto({ cutout: true })))).toMatchObject({
+          status: 422,
+          body: { code },
+        });
+      }
+      expect(commercials.createProject).not.toHaveBeenCalled();
+    });
   });
 
   it('trilha: desligada por padrão; ligada só por escolha explícita (achado 5 da 3.7)', async () => {

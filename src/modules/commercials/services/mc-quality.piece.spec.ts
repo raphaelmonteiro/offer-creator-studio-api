@@ -185,6 +185,9 @@ function harness(document: McPieceDocument = fixturePieceDocument()) {
       cb(manager as unknown as EntityManager),
     ),
   };
+  const cutout = {
+    assertPiece: jest.fn().mockResolvedValue({ cutout: false, framing: 'busto', keyColor: null }),
+  };
   const moderate = jest.fn().mockResolvedValue({ flagged: false, categories: [] });
   const service = new McQualityService(
     dataSource as unknown as DataSource,
@@ -215,11 +218,9 @@ function harness(document: McPieceDocument = fixturePieceDocument()) {
     {
       deriveScript: jest.fn((s: McScript) => Promise.resolve({ script: s, translated: 0 })),
     } as unknown as McTranslationService,
+    cutout as unknown as McCutoutGuardService,
   );
   const pieces = { issuesFor: jest.fn().mockResolvedValue([]) };
-  const cutout = {
-    assertPiece: jest.fn().mockResolvedValue({ cutout: false, framing: 'busto', keyColor: null }),
-  };
   const pieceProject = new McPieceProjectService(
     dataSource as unknown as DataSource,
     pieces as unknown as McPiecesService,

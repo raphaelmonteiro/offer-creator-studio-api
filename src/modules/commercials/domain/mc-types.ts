@@ -401,6 +401,12 @@ export interface McProjectOptions {
   lowerThirdBlur?: boolean;
   /** Produtos do catálogo que viram selos determinísticos (máx. 6). */
   products: McSealProduct[];
+  /**
+   * Arte que fala (video-mascote-transparente): personagem sem fundo e enquadramento pedidos na
+   * criação; o worker os lê para montar o roteiro. Ausentes na maioria dos projetos.
+   */
+  cutout?: boolean;
+  framing?: 'busto' | 'corpo';
 }
 
 export const MC_DEFAULT_PROJECT_OPTIONS: McProjectOptions = {
@@ -430,6 +436,8 @@ export function resolveProjectOptions(options: Partial<McProjectOptions> | null)
     captionsEnabled: options?.captionsEnabled ?? MC_DEFAULT_PROJECT_OPTIONS.captionsEnabled,
     lowerThirdBlur: options?.lowerThirdBlur ?? false,
     products: (options?.products ?? []).slice(0, MC_MAX_SEAL_PRODUCTS),
+    ...(options?.cutout ? { cutout: true } : {}),
+    ...(options?.framing ? { framing: options.framing } : {}),
   };
 }
 

@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import * as sharp from 'sharp';
@@ -54,6 +55,7 @@ import { McProject } from '../entities/mc-project.entity';
 import { McArtService } from './mc-art.service';
 import { McKitView, McKitViewService } from './mc-kit-view.service';
 import { McLogoLocatorService } from './mc-logo-locator.service';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McStorageService } from './mc-storage.service';
 import { McOfferCatalogChange, offersCatalogChanges } from './mc-offer-carousel.service';
 
@@ -178,6 +180,7 @@ export class McFromArtService {
     private readonly kitView: McKitViewService,
     private readonly locator: McLogoLocatorService,
     private readonly storage: McStorageService,
+    private readonly cutoutGuard: McCutoutGuardService,
   ) {}
 
   // ───────────────────────────── origem e ofertas ─────────────────────────────
@@ -274,6 +277,7 @@ export class McFromArtService {
     // acrescenta kill-switch, preflight de render e validação do asset/kit.
     assertFormatEnabled(format);
     assertPipelineV2ForFormat(format);
+    const cutoutRequest = McFromArtService.cutoutRequestOf(format, dto);
 
     const asset = await this.art.findOwned(userId, dto.artAssetId);
     const aspectRatio: McAspectRatio = McArtService.aspectRatioOf(asset);
@@ -283,6 +287,11 @@ export class McFromArtService {
     const offers = this.extract(source, pageIndex);
     const selected = await this.selectWithCatalog(format, offers, dto.offers);
     const kitId = dto.kitId ?? (await this.suggestedKitIdOrThrow(userId, source.clientId));
+    // video-mascote-transparente (R6): flag, formato, rosto do logo, tile de corpo e chave (422)
+    // ANTES de qualquer detecção ou gasto
+    const cutoutOptions = cutoutRequest
+      ? await this.resolveCutout(userId, kitId, cutoutRequest, dto)
+      : undefined;
     // D9b: (a) caixa do layout como está; (b/c) com `logoFace` e sem caixa,
     // UMA detecção — proposta ≥ 0,7 gravada sem confirmação, senão sem caixa.
     // F1: a caixa leva a cor da arte em volta (cor da janela no rosto do logo).
@@ -332,7 +341,44 @@ export class McFromArtService {
       logoBox: logoBox ?? undefined,
       sourceArt,
     };
-    return this.commercials.createProject(userId, createDto);
+    return this.commercials.createProject(userId, createDto, undefined, cutoutOptions);
+  }
+
+  /**
+   * Pedido do modo sem fundo / corpo (R6): só `talking_art` (janela). Sem o modo (nem `corpo`)
+   * devolve `null` e o projeto nasce como sempre; em `offer_carousel` é 422, antes de ler qualquer coisa.
+   */
+  private static cutoutRequestOf(
+    format: McProjectFormat,
+    dto: CreateProjectFromArtDto,
+  ): { cutout: boolean; framing: 'busto' | 'corpo' } | null {
+    const cutout = dto.cutout === true;
+    const framing = dto.framing ?? (cutout ? 'corpo' : 'busto');
+    if (!cutout && framing !== 'corpo') return null;
+    if (format !== 'talking_art') {
+      throw new UnprocessableEntityException({
+        code: 'CHARACTER_CUTOUT_FORMAT_NOT_SUPPORTED',
+        message: 'O personagem sem fundo e o enquadramento de corpo só existem na arte que fala.',
+      });
+    }
+    return { cutout, framing };
+  }
+
+  /** Flag, rosto do logo, tile de corpo e chave segura (422) ANTES de qualquer detecção ou gasto. */
+  private async resolveCutout(
+    userId: string,
+    kitId: string,
+    request: { cutout: boolean; framing: 'busto' | 'corpo' },
+    dto: CreateProjectFromArtDto,
+  ): Promise<{ cutout?: boolean; framing: 'busto' | 'corpo' }> {
+    await this.cutoutGuard.resolve({
+      userId,
+      kitId,
+      cutout: request.cutout,
+      framing: request.framing,
+      logoFace: dto.logoFace === true || !!dto.logoBox,
+    });
+    return { ...(request.cutout ? { cutout: true } : {}), framing: request.framing };
   }
 
   /**

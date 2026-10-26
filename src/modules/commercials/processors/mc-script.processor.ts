@@ -293,11 +293,15 @@ export class McScriptProcessor {
     optionProducts: McSealProduct[],
     storeName: string | null,
   ): Promise<DirectorF1Context> {
+    const options = resolveProjectOptions(project.options);
     const kit = await this.dataSource
       .getRepository(McCharacterKit)
       .findOneBy({ id: project.kitId });
-    const tile = kit?.tileAssetId
-      ? await this.dataSource.getRepository(AnimationAsset).findOneBy({ id: kit.tileAssetId })
+    // video-mascote-transparente: a janela segue o aspecto do tile ESCOLHIDO (corpo ou busto)
+    const framing = options.framing;
+    const tileId = framing === 'corpo' ? kit?.bodyTileAssetId : kit?.tileAssetId;
+    const tile = tileId
+      ? await this.dataSource.getRepository(AnimationAsset).findOneBy({ id: tileId })
       : null;
     const art = project.backgroundArtAssetId
       ? await this.dataSource
@@ -322,6 +326,8 @@ export class McScriptProcessor {
       art: art ? { width: art.width ?? null, height: art.height ?? null } : null,
       logoFace: kit?.identityMode === 'logo_as_is' && !!project.logoBox,
       logoBox: project.logoBox ?? null,
+      ...(options.cutout ? { cutout: true, cutoutKeyColor: await this.cutoutKeyOf(kit) } : {}),
+      ...(options.cutout || framing === 'corpo' ? { framing: framing ?? 'corpo' } : {}),
     };
   }
 

@@ -162,6 +162,19 @@ export class CreateProjectFromArtDto {
   logoFace?: boolean;
 
   /**
+   * video-mascote-transparente (R6): personagem sem fundo sobre a arte (só `talking_art` em modo
+   * janela). 422 com a flag desligada, com `logoFace` ou em `offer_carousel`.
+   */
+  @IsOptional()
+  @IsBoolean()
+  cutout?: boolean;
+
+  /** Enquadramento enviado ao motor: `busto` ou `corpo` (padrão `corpo` com `cutout`, senão `busto`). */
+  @IsOptional()
+  @IsIn(['busto', 'corpo'])
+  framing?: 'busto' | 'corpo';
+
+  /**
    * Seleção de ofertas, NA ORDEM: 3 a 6 para `offer_carousel` (obrigatória —
    * por isso `@ValidateIf` em vez de `@IsOptional`, que pularia a checagem
    * com o campo ausente); até 3 citadas para `talking_art` (opcional — sem

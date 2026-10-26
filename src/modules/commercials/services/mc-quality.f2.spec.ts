@@ -20,6 +20,7 @@ import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McMaterializerService } from './mc-materializer.service';
 import { McOfferCarouselService } from './mc-offer-carousel.service';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McPipelineService } from './mc-pipeline.service';
 import { McQualityService } from './mc-quality.service';
 import { McTranslationService } from './mc-translation.service';
@@ -224,6 +225,7 @@ function harness(format: 'talking_art' | 'offer_carousel', script: McScript) {
     {
       deriveScript: jest.fn((s: McScript) => Promise.resolve({ script: s, translated: 0 })),
     } as unknown as McTranslationService,
+    {} as unknown as McCutoutGuardService,
   );
   const offers = new McOfferCarouselService(dataSource as unknown as DataSource, service);
   const deliver = () => {

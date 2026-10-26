@@ -140,7 +140,7 @@ export class McWindowPriceService {
       .findOneBy({ id: project.backgroundArtAssetId as string });
     if (!art?.fileUrl) return { ...base, skipped: 'no_art' };
 
-    const tile = await this.tileDims(project.kitId);
+    const tile = await this.tileDims(project.kitId, project.script?.framing);
     const tileRatio = tileRatioOf(tile.width, tile.height);
     const script = project.script;
     const window = isWindowWellFormed(script?.window)
@@ -180,12 +180,15 @@ export class McWindowPriceService {
   }
 
   /** Dimensões do tile do kit (aspecto da janela default); ausentes → default 3:4. */
-  private async tileDims(kitId: string): Promise<{ width: number | null; height: number | null }> {
+  private async tileDims(
+    kitId: string,
+    framing?: 'busto' | 'corpo',
+  ): Promise<{ width: number | null; height: number | null }> {
     const kit = await this.dataSource.getRepository(McCharacterKit).findOneBy({ id: kitId });
-    if (!kit?.tileAssetId) return { width: null, height: null };
-    const tile = await this.dataSource
-      .getRepository(AnimationAsset)
-      .findOneBy({ id: kit.tileAssetId });
+    // o aspecto da janela é o do tile do enquadramento do roteiro (video-mascote-transparente)
+    const tileId = framing === 'corpo' ? kit?.bodyTileAssetId : kit?.tileAssetId;
+    if (!tileId) return { width: null, height: null };
+    const tile = await this.dataSource.getRepository(AnimationAsset).findOneBy({ id: tileId });
     return { width: tile?.width ?? null, height: tile?.height ?? null };
   }
 

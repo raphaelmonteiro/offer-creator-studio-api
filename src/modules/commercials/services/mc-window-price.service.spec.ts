@@ -67,10 +67,12 @@ describe('McWindowPriceService — janela sobre preço (4.7)', () => {
       getRepository: jest.fn((entity: unknown) => ({
         findOneBy: jest.fn(({ id }: { id: string }) => {
           if (entity === McProject) return Promise.resolve(id === 'p1' ? project : null);
-          if (entity === McCharacterKit) return Promise.resolve({ id: 'k1', tileAssetId: 'tile1' });
+          if (entity === McCharacterKit)
+            return Promise.resolve({ id: 'k1', tileAssetId: 'tile1', bodyTileAssetId: 'body1' });
           if (entity === AnimationAsset) {
             if (id === 'art1') return Promise.resolve(art);
             if (id === 'tile1') return Promise.resolve({ id: 'tile1', width: 720, height: 960 });
+            if (id === 'body1') return Promise.resolve({ id: 'body1', width: 720, height: 1440 });
           }
           return Promise.resolve(null);
         }),
@@ -133,6 +135,14 @@ describe('McWindowPriceService — janela sobre preço (4.7)', () => {
         { text: 'OFERTAS DA SEMANA', kind: 'text' },
       ],
     });
+  });
+
+  it('janela default segue o aspecto do tile do enquadramento do roteiro: corpo (1:2) em vez de busto (3:4)', async () => {
+    const aspect = (view: { window?: { w: number; h: number } }) =>
+      ((view.window as { w: number }).w * 1080) / ((view.window as { h: number }).h * 1350);
+    expect(aspect(await service.check(project as unknown as McProject))).toBeCloseTo(0.75, 2);
+    project.script = { framing: 'corpo' };
+    expect(aspect(await service.check(project as unknown as McProject))).toBeCloseTo(0.5, 2);
   });
 
   it('janela num preset livre (canto superior esquerdo) → sem aviso', async () => {

@@ -21,6 +21,7 @@ import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McMaterializerService } from './mc-materializer.service';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McPipelineService } from './mc-pipeline.service';
 import { McQualityService } from './mc-quality.service';
 import { McTranslationService } from './mc-translation.service';
@@ -94,6 +95,7 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
   let materializer: Record<string, jest.Mock>;
   let pipeline: Record<string, jest.Mock>;
   let translation: { deriveScript: jest.Mock };
+  let cutoutGuard: { resolve: jest.Mock };
   let service: McQualityService;
 
   beforeEach(() => {
@@ -308,6 +310,9 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
         .fn()
         .mockImplementation((script: McScript) => Promise.resolve({ script, translated: 0 })),
     };
+    cutoutGuard = {
+      resolve: jest.fn().mockResolvedValue({ cutout: true, framing: 'corpo', keyColor: '#00B140' }),
+    };
     service = new McQualityService(
       dataSource as unknown as DataSource,
       transitions as unknown as TaskTransitionService,
@@ -320,6 +325,7 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
       materializer as unknown as McMaterializerService,
       pipeline as unknown as McPipelineService,
       translation as unknown as McTranslationService,
+      cutoutGuard as unknown as McCutoutGuardService,
     );
   });
 
@@ -1303,6 +1309,138 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
             }),
           ]),
         },
+      });
+    });
+
+    describe('personagem sem fundo na arte que fala (video-mascote-transparente, R7)', () => {
+      const sceneDtos = () =>
+        (project.script as McScript).scenes.map((s) => ({
+          sceneId: s.sceneId,
+          sceneType: 'talk_tile' as const,
+          dialogue: s.dialogue,
+          durationS: s.durationS,
+          productRef: null,
+        }));
+
+      beforeEach(() => {
+        project.status = McProjectStatus.STORYBOARD_REVIEW;
+        project.revision = 1;
+      });
+
+      it('cutout true: o guard resolve com o roteiro resultante e a chave é congelada no roteiro', async () => {
+        await service.updateScript(userId, 'p1', {
+          expectedRevision: 1,
+          scenes: sceneDtos(),
+          cutout: true,
+        });
+        expect(cutoutGuard.resolve).toHaveBeenCalledWith({
+          userId,
+          kitId: 'k1',
+          cutout: true,
+          framing: 'corpo', // padrão do sem fundo
+          logoFace: false,
+        });
+        expect(project.script).toMatchObject({
+          cutout: true,
+          framing: 'corpo',
+          cutoutKeyColor: '#00B140',
+        });
+      });
+
+      it('omitidos preservam o modo atual; cutout false limpa os três campos', async () => {
+        await service.updateScript(userId, 'p1', {
+          expectedRevision: 1,
+          scenes: sceneDtos(),
+          cutout: true,
+        });
+        project.status = McProjectStatus.STORYBOARD_REVIEW;
+        await service.updateScript(userId, 'p1', {
+          expectedRevision: 2,
+          scenes: sceneDtos(),
+          window: { x: 0.1, y: 0.2, w: 0.3, h: 0.3 },
+        });
+        expect(project.script).toMatchObject({ cutout: true, cutoutKeyColor: '#00B140' });
+        expect(cutoutGuard.resolve).toHaveBeenCalledTimes(1); // sem pedido do modo, sem guard
+        project.status = McProjectStatus.STORYBOARD_REVIEW;
+        cutoutGuard.resolve.mockResolvedValueOnce({
+          cutout: false,
+          framing: 'busto',
+          keyColor: null,
+        });
+        await service.updateScript(userId, 'p1', {
+          expectedRevision: 3,
+          scenes: sceneDtos(),
+          cutout: false,
+          framing: 'busto',
+        });
+        expect(project.script).not.toHaveProperty('cutout');
+        expect(project.script).not.toHaveProperty('cutoutKeyColor');
+        expect(project.script).not.toHaveProperty('framing');
+      });
+
+      it('recusa do guard (rosto do logo, flag, chave insegura): nada é gravado', async () => {
+        cutoutGuard.resolve.mockRejectedValueOnce(
+          Object.assign(new Error('x'), { response: { code: 'CHARACTER_CUTOUT_LOGO_FACE' } }),
+        );
+        const before = JSON.stringify(project.script);
+        await expect(
+          service.updateScript(userId, 'p1', {
+            expectedRevision: 1,
+            scenes: sceneDtos(),
+            cutout: true,
+            logoFace: true,
+          }),
+        ).rejects.toMatchObject({ response: { code: 'CHARACTER_CUTOUT_LOGO_FACE' } });
+        expect(JSON.stringify(project.script)).toBe(before);
+        expect(project.revision).toBe(1);
+      });
+
+      it('peça e ofertas em sequência: cutout/framing no PATCH script → 422 CHARACTER_CUTOUT_FORMAT_NOT_SUPPORTED', async () => {
+        for (const format of ['offer_piece', 'offer_carousel'] as const) {
+          project.format = format;
+          await expect(
+            service.updateScript(userId, 'p1', {
+              expectedRevision: 1,
+              scenes: sceneDtos(),
+              framing: 'corpo',
+            }),
+          ).rejects.toMatchObject({
+            status: 422,
+            response: { code: 'CHARACTER_CUTOUT_FORMAT_NOT_SUPPORTED' },
+          });
+        }
+        expect(cutoutGuard.resolve).not.toHaveBeenCalled();
+      });
+
+      it('a janela é validada com o aspecto do tile do enquadramento: corpo usa o tile de corpo', async () => {
+        kit.tileAssetId = 'tile-1';
+        kit.bodyTileAssetId = 'body-1';
+        assets.push(
+          { id: 'tile-1', userId, fileUrl: '/uploads/t.png', width: 720, height: 960 },
+          { id: 'body-1', userId, fileUrl: '/uploads/b.png', width: 720, height: 1440 },
+        );
+        const w = (ratio: number) => ({
+          x: 0.5,
+          y: 0.2,
+          w: 0.3,
+          h: Number(((0.3 * (1080 / 1920)) / ratio).toFixed(4)),
+        });
+        // 9:16 → janela com o aspecto do tile de CORPO (0,5) passa; a de busto (0,75) é recusada
+        await service.updateScript(userId, 'p1', {
+          expectedRevision: 1,
+          scenes: sceneDtos(),
+          cutout: true,
+          window: w(0.5),
+        });
+        expect(project.script).toMatchObject({ framing: 'corpo' });
+        project.status = McProjectStatus.STORYBOARD_REVIEW;
+        await expect(
+          service.updateScript(userId, 'p1', {
+            expectedRevision: 2,
+            scenes: sceneDtos(),
+            window: w(0.75),
+          }),
+        ).rejects.toMatchObject({ response: { code: 'SCRIPT_INVALID' } });
       });
     });
 

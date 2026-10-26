@@ -13,6 +13,7 @@ import { McCharacterKit, McKitStatus } from '../entities/mc-character-kit.entity
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McMaterializerService } from './mc-materializer.service';
+import { McCutoutGuardService } from './mc-cutout-guard.service';
 import { McPipelineService } from './mc-pipeline.service';
 import { McQualityService } from './mc-quality.service';
 import { McTranslationService } from './mc-translation.service';
@@ -79,6 +80,7 @@ describe('McQualityService.approveProduction — rosto do logo exige caixa confi
       materializer as unknown as McMaterializerService,
       {} as McPipelineService,
       {} as McTranslationService,
+      {} as McCutoutGuardService,
     );
   });
 

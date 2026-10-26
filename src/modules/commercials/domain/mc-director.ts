@@ -589,6 +589,10 @@ export interface DirectorF1Context {
   art?: { width: number | null; height: number | null } | null;
   logoFace: boolean;
   logoBox: McLogoBox | null;
+  /** video-mascote-transparente: só presentes com o modo em uso (D9). */
+  cutout?: boolean;
+  framing?: McPieceFraming;
+  cutoutKeyColor?: McCutoutKeyColor | null;
 }
 
 /**
@@ -866,6 +870,9 @@ export function buildTalkingArtScript(
     window: talkingArtWindow(ctx),
     logoFace: ctx.logoFace && !!ctx.logoBox,
     citedOfferIds,
+    ...(ctx.cutout ? { cutout: true } : {}),
+    ...(ctx.framing ? { framing: ctx.framing } : {}),
+    ...(ctx.cutout && ctx.cutoutKeyColor ? { cutoutKeyColor: ctx.cutoutKeyColor } : {}),
   };
 }
 

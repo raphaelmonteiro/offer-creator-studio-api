@@ -65,6 +65,28 @@ describe('recorte por cor-chave no compose (video-mascote-transparente, D5)', ()
     expect(graph).toContain('stop_mode=clone:stop_duration=0.2');
   });
 
+  it('arte que fala (F1): arte 1:1 contain-fit em 9:16 com a janela do tile de corpo; sem fundo remove a chave de cada clipe', () => {
+    const plan = buildComposeGraph(
+      baseInput({
+        format: 'talking_art',
+        aspectRatio: '9:16',
+        width: 1080,
+        height: 1920,
+        artWidth: 1080,
+        artHeight: 1080,
+        window: { x: 0.55, y: 0.3, w: 0.4, h: 0.4219 },
+        cutout: { keyColor: '#0047BB', framing: 'corpo' },
+      }),
+      '/tmp/work',
+    );
+    const graph = graphOf(plan.passes[0].args);
+    expect(plan.artRect).toEqual({ x: 0, y: 420, width: 1080, height: 1080 });
+    expect(graph).toContain('pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=0x112233'); // a arte, como sempre
+    expect(graph.match(/chromakey=color=0x0047BB/g)).toHaveLength(2);
+    expect(graph).toContain('despill=type=blue');
+    expect(plan.windowPx).toEqual({ x: 594, y: 576, width: 432, height: 810 });
+  });
+
   it('Card, Círculo e rosto do logo ficam byte a byte como antes: sem chave, com pad da cor e com crossfade', () => {
     const card = graphOf(buildComposeGraph(baseInput(), '/tmp/w').passes[0].args);
     expect(card).not.toContain('chromakey');

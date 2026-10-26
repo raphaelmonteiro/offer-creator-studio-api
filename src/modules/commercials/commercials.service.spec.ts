@@ -156,6 +156,19 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
       expect(f3).toMatchObject({ options: expect.objectContaining({ musicEnabled: true }) });
     });
 
+    it('modo sem fundo da arte que fala vai para as opções do projeto (o worker monta o roteiro); sem o modo, as opções não ganham campo', async () => {
+      process.env.MC_FORMATS = 'talking_art';
+      process.env.MC_PIPELINE_V2 = 'all';
+      const plain = await service.createProject('u1', f1);
+      expect(plain.options).not.toHaveProperty('cutout');
+      expect(plain.options).not.toHaveProperty('framing');
+      const cutout = await service.createProject('u1', f1, undefined, {
+        cutout: true,
+        framing: 'corpo',
+      });
+      expect(cutout.options).toMatchObject({ cutout: true, framing: 'corpo' });
+    });
+
     it('`scenes` passa sempre, mesmo com MC_FORMATS vazio e MC_PIPELINE_V2=off (legado)', async () => {
       const project = await service.createProject('u1', { ...dto, format: 'scenes' });
       expect(project).toMatchObject({ format: 'scenes', pipelineVersion: 1, channel: 'instagram' });

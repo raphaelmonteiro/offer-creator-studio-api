@@ -188,3 +188,18 @@ describe('caixa do logo (D9b, tarefa 4.6) — forma dos DTOs (400 pelo pipe)', (
     );
   });
 });
+
+describe('CreateProjectFromArtDto — cutout e framing (video-mascote-transparente, R6)', () => {
+  it('aceita cutout booleano e framing busto|corpo; fora da lista → 400', async () => {
+    expect(
+      await errorsOf(CreateProjectFromArtDto, { ...base, cutout: true, framing: 'corpo' }),
+    ).toEqual([]);
+    expect(await errorsOf(CreateProjectFromArtDto, { ...base, framing: 'busto' })).toEqual([]);
+    expect(await errorsOf(CreateProjectFromArtDto, { ...base, framing: 'inteiro' })).toEqual([
+      'framing.isIn',
+    ]);
+    expect(await errorsOf(CreateProjectFromArtDto, { ...base, cutout: 'sim' })).toEqual([
+      'cutout.isBoolean',
+    ]);
+  });
+});

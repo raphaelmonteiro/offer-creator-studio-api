@@ -300,6 +300,8 @@ export class CommercialsService {
     userId: string,
     dto: CreateProjectDto,
     piece?: McProjectPieceInput,
+    /** Arte que fala (video-mascote-transparente): modo sem fundo e enquadramento já validados pelo guard. */
+    cutoutOptions?: { cutout?: boolean; framing?: 'busto' | 'corpo' },
   ): Promise<McProject> {
     // Kill-switch em banco (plano §6.7): pausa operacional sem redeploy.
     // `get` com cache de 10s — a pausa/retomada propaga em até 10s por processo.
@@ -400,6 +402,8 @@ export class CommercialsService {
         musicEnabled: dto.musicEnabled ?? defaultMusicEnabled(format),
         captionsEnabled: dto.captionsEnabled,
         lowerThirdBlur: dto.lowerThirdBlur,
+        cutout: cutoutOptions?.cutout,
+        framing: cutoutOptions?.framing,
         // v2: chave estável por produto desde a criação (snapshot do roteiro)
         products:
           pipelineVersion === MC_PIPELINE_V2
