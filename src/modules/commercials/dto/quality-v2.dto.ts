@@ -64,8 +64,12 @@ export class ScriptProductV2Dto {
   @Length(1, 20)
   unit?: string | null;
 
+  /**
+   * Até 120: a criação (`from-art`/`from-piece`) grava o nome da arte/peça sem teto, então a
+   * edição não pode recusar o que ela grava (B6 da QA; decisão de 27/10/2026).
+   */
   @IsString()
-  @Length(1, 60)
+  @Length(1, 120)
   name: string;
 
   @IsString()

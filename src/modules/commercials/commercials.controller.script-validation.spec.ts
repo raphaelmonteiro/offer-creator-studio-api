@@ -106,6 +106,33 @@ describe('PATCH /commercials/projects/:id/script — validação de cutout e fra
     expect(quality.updateScript.mock.calls[0][2]).toMatchObject(extra);
   });
 
+  /** B6: o nome do produto vem da arte (sem teto na criação); a edição aceita até 120. */
+  describe('nome do produto (snapshot e ofertas do F2)', () => {
+    const product = (name: string) => ({ name, price: '9,99' });
+
+    it.each([
+      ['products', 60],
+      ['products', 61],
+      ['products', 103],
+      ['products', 120],
+      ['offers', 61],
+      ['offers', 103],
+      ['offers', 120],
+    ])('%s com nome de %i caracteres → 200 e chega ao service', async (field, size) => {
+      await patch({ [field]: [product('A'.repeat(size))] }).expect(200);
+      expect(quality.updateScript.mock.calls[0][2][field][0].name).toHaveLength(size);
+    });
+
+    it.each(['products', 'offers'])(
+      '%s com nome de 121 caracteres → 400 e nada chega ao service',
+      async (field) => {
+        const res = await patch({ [field]: [product('A'.repeat(121))] }).expect(400);
+        expect(JSON.stringify(res.body)).toContain('name must be shorter than or equal to 120');
+        expect(quality.updateScript).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   it('campo extra do cliente é descartado, não rejeitado (sem regressão)', async () => {
     await patch({ campoDesconhecido: 1 }).expect(200);
     expect(quality.updateScript.mock.calls[0][2]).not.toHaveProperty('campoDesconhecido');
