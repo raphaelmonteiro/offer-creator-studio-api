@@ -21,6 +21,7 @@ import {
   isProjectAssemblyStep,
   isSceneIndependentProjectStep,
 } from '../domain/mc-execution-plan';
+import { storedFailureMessage } from '../domain/mc-failure-messages';
 import { mcExpireForQueue, mcQueueForStep } from '../domain/mc-pipeline.config';
 import {
   approvalAuthorizes,
@@ -577,6 +578,8 @@ export class McPipelineService {
     const errorClass = opts.errorClass ?? classifyMcError(err);
     const message = ((err as Error)?.message ?? 'erro desconhecido').slice(0, 1000);
     const code = mcErrorCode(err, opts.fallbackCode ?? `${step.type}_failed`);
+    // Projeto e cena guardam o texto pt-BR do catálogo; a mensagem crua fica só no step e no evento.
+    const failureMessage = storedFailureMessage(code, message);
     const fresh = await this.dataSource.getRepository(McStep).findOneBy({ id: step.id });
     if (!fresh) return;
     const executions = fresh.attempts;
@@ -665,7 +668,7 @@ export class McPipelineService {
           McProjectStatus.NEEDS_ATTENTION,
           {
             errorCode: code,
-            errorMessage: message.slice(0, 300),
+            errorMessage: failureMessage,
             quality: { ...resolveQuality(project.quality), resumePhase: 'assembly' },
           },
         );
@@ -693,7 +696,7 @@ export class McPipelineService {
           project.id,
           McProjectStatus.ASSEMBLING,
           McProjectStatus.FAILED,
-          { errorCode: code, errorMessage: message.slice(0, 300), finishedAt: new Date() },
+          { errorCode: code, errorMessage: failureMessage, finishedAt: new Date() },
         );
         if (wonProject) {
           await this.credits.refundUnconsumed(
@@ -733,7 +736,7 @@ export class McPipelineService {
             scene.id,
             McSceneStatus.RUNNING,
             McSceneStatus.FAILED,
-            { errorCode: code, errorMessage: message.slice(0, 300) },
+            { errorCode: code, errorMessage: failureMessage },
           );
           if (wonScene) {
             await this.commercials.appendEvent(manager, {
@@ -768,7 +771,7 @@ export class McPipelineService {
           : McProjectStatus.GENERATING;
       const resumePhase: McPhase =
         fromStatus === McProjectStatus.PREPARING ? 'preparation' : 'production';
-      const patch: Record<string, unknown> = { errorCode: code };
+      const patch: Record<string, unknown> = { errorCode: code, errorMessage: failureMessage };
       if (isPipelineV2(project)) {
         patch.quality = { ...resolveQuality(project.quality), resumePhase };
       }

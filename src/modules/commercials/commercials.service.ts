@@ -56,6 +56,7 @@ import {
 } from './domain/mc-types';
 import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
 import { availableProjectActions, McProjectAction } from './domain/mc-project-available-actions';
+import { McErrorAction, presentFailure } from './domain/mc-failure-messages';
 import { buildCutoutIssue, CHARACTER_CUTOUT_FAILED, McCutoutIssue } from './domain/mc-cutout-issue';
 import {
   clipInspectionView,
@@ -547,7 +548,11 @@ export class CommercialsService {
   async findAllProjects(
     userId: string,
     filter?: { sourceKind?: McSourceArtKind; sourceId?: string },
-  ): Promise<Array<McProject & { finalUrl: string | null; posterUrl: string | null }>> {
+  ): Promise<
+    Array<
+      McProject & { finalUrl: string | null; posterUrl: string | null; errorAction: McErrorAction }
+    >
+  > {
     const repo = this.dataSource.getRepository(McProject);
     let projects: McProject[];
     if (filter?.sourceKind || filter?.sourceId) {
@@ -569,6 +574,7 @@ export class CommercialsService {
     const urls = await this.resolveAssetUrls(projects.map((p) => p.finalAssetId));
     return projects.map((p) => ({
       ...p,
+      ...presentFailure(p.errorCode, p.errorMessage),
       finalUrl: (p.finalAssetId && urls.get(p.finalAssetId)?.fileUrl) || null,
       posterUrl: (p.finalAssetId && urls.get(p.finalAssetId)?.posterUrl) || null,
     }));
@@ -588,6 +594,8 @@ export class CommercialsService {
     McProject & {
       finalUrl: string | null;
       posterUrl: string | null;
+      /** Ação sugerida à UI para a falha (catálogo pt-BR, `errorMessage` já vem recomputado do `errorCode`). */
+      errorAction: McErrorAction;
       /** v2: URL da última entrega válida preservada em `quality.lastDelivery` (revisão anterior). */
       lastDeliveryUrl: string | null;
       /**
@@ -597,6 +605,7 @@ export class CommercialsService {
       scenes: Array<
         McScene &
           McClipView & {
+            errorAction: McErrorAction;
             keyframeUrl: string | null;
             finalUrl: string | null;
             audioUrl: string | null;
@@ -641,6 +650,7 @@ export class CommercialsService {
     const availableActions = availableProjectActions(project, steps);
     return {
       ...project,
+      ...presentFailure(project.errorCode, project.errorMessage),
       cutoutIssue: await this.cutoutIssueOf(project, steps, availableActions),
       finalUrl: url(project.finalAssetId),
       posterUrl: (project.finalAssetId && urls.get(project.finalAssetId)?.posterUrl) || null,
@@ -648,6 +658,7 @@ export class CommercialsService {
       availableActions,
       scenes: scenes.map((s) => ({
         ...s,
+        ...presentFailure(s.errorCode, s.errorMessage),
         keyframeUrl: url(s.keyframeAssetId),
         finalUrl: url(s.finalAssetId),
         audioUrl: url(s.audioAssetId),
@@ -657,6 +668,7 @@ export class CommercialsService {
       })),
       steps: steps.map((s) => ({
         ...s,
+        errorMessage: presentFailure(s.errorCode, s.errorMessage).errorMessage,
         outputUrl: url(s.outputAssetId),
         outputPosterUrl: (s.outputAssetId && urls.get(s.outputAssetId)?.posterUrl) || null,
         ...stepClipView(s, s.outputAssetId ? urls.get(s.outputAssetId) : null),
