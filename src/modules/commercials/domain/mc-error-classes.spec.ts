@@ -31,8 +31,18 @@ describe('mc-error-classes — classificação e política por classe (plano §6
     expect(classifyMcError(new TerminalProviderError('HTTP 402', 'quota'))).toBe('quota');
   });
 
-  it('só quota avisa o administrador', () => {
+  it('TerminalProviderError provider_auth (chave inválida) → config: 1 execução, estorno, alerta ao admin', () => {
+    const err = new TerminalProviderError('HTTP 401', 'provider_auth');
+    expect(classifyMcError(err)).toBe('config');
+    expect(mcErrorCode(err, 'x')).toBe('provider_auth');
+    expect(MC_MAX_EXECUTIONS.config).toBe(1);
+    expect(mcShouldRetry('config', 1)).toBe(false);
+    expect(mcRefundsOnTerminal('config')).toBe(true);
+  });
+
+  it('só quota e config avisam o administrador', () => {
     expect(mcAlertsAdmin('quota')).toBe(true);
+    expect(mcAlertsAdmin('config')).toBe(true);
     for (const cls of ['transient', 'validation', 'content_policy', 'internal'] as const) {
       expect(mcAlertsAdmin(cls)).toBe(false);
     }

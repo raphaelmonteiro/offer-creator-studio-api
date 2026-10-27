@@ -40,7 +40,7 @@ export const PROVIDER_ERROR_FIXTURES: readonly ProviderErrorFixture[] = [
     status: 403,
     body: '{"detail":"Forbidden"}',
     origin: 'control',
-    expected: 'provider_rejected',
+    expected: 'provider_auth',
   },
   {
     name: 'fal 401 chave inválida',
@@ -48,7 +48,7 @@ export const PROVIDER_ERROR_FIXTURES: readonly ProviderErrorFixture[] = [
     status: 401,
     body: '{"detail":"Invalid key"}',
     origin: 'fake',
-    expected: 'provider_rejected',
+    expected: 'provider_auth',
   },
   {
     name: 'fal 400 entrada inválida',
@@ -107,7 +107,7 @@ export const PROVIDER_ERROR_FIXTURES: readonly ProviderErrorFixture[] = [
     status: 401,
     body: eleven('invalid_api_key', 'Invalid API key'),
     origin: 'docs',
-    expected: 'provider_rejected',
+    expected: 'provider_auth',
   },
   {
     name: 'ElevenLabs 429 too_many_concurrent_requests',

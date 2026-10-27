@@ -28,11 +28,13 @@ describe('classifyHttpRejection — fixtures de corpo dos fornecedores (B1)', ()
 });
 
 describe('providerErrorForRejection', () => {
-  it('cota vira TerminalProviderError com o código estável', () => {
+  it('cota e chave inválida viram TerminalProviderError com o código estável', () => {
     const quota = providerErrorForRejection(403, 'User is locked. Reason: Exhausted balance');
     expect(quota).toBeInstanceOf(TerminalProviderError);
     expect((quota as TerminalProviderError).code).toBe('quota');
-    expect(quota.message).toContain('HTTP 403');
+    const auth = providerErrorForRejection(401, '{"detail":"Invalid key"}');
+    expect((auth as TerminalProviderError).code).toBe('provider_auth');
+    expect(auth.message).toContain('HTTP 401');
   });
 
   it('transitório carrega o Retry-After e recusa comum segue provider_rejected', () => {

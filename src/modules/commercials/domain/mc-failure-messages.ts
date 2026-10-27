@@ -49,6 +49,8 @@ const QUALITY_ENTRIES: Record<string, CatalogEntry> = Object.fromEntries(
 const CATALOG: Readonly<Record<string, CatalogEntry>> = {
   ...QUALITY_ENTRIES,
   quota: { message: MC_FAILURE_UNAVAILABLE_MESSAGE, action: 'tentar_mais_tarde' },
+  // Chave do fornecedor inválida (Q4): mesmo texto da cota (P-27), sem revelar a causa ao cliente.
+  provider_auth: { message: MC_FAILURE_UNAVAILABLE_MESSAGE, action: 'tentar_mais_tarde' },
   provider_transient: {
     message:
       'O serviço de produção do vídeo está fora do ar no momento. Tente de novo em alguns minutos.',

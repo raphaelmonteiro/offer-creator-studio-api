@@ -1,4 +1,5 @@
 import {
+  PROVIDER_AUTH_CODE,
   PROVIDER_QUOTA_CODE,
   TerminalProviderError,
   TransientProviderError,
@@ -16,6 +17,8 @@ import {
  * | validation        | terminal SEM retry (input/resposta inválida); mesmo fluxo acima     |
  * | provider_timeout  | terminal (teto duro do poll); estorno                               |
  * | quota             | terminal + evento admin_alert (NÃO liga mc_paused automático)       |
+ * | config            | chave do fornecedor inválida (401/403 sem saldo): como quota —      |
+ * |                   | 1 execução, estorno, admin_alert, sem mc_paused                     |
  * | internal          | retry 1×; depois terminal SEM estorno automático (reconciliação)    |
  * | quality           | clipe reprovado na inspeção (texto inventado): NOVA geração no      |
  * |                   | provider até 3 execuções; esgotou → o ingest ACEITA o clipe (nunca  |
@@ -27,6 +30,7 @@ export type McErrorClass =
   | 'validation'
   | 'provider_timeout'
   | 'quota'
+  | 'config'
   | 'internal'
   | 'quality';
 
@@ -38,6 +42,7 @@ export const MC_MAX_EXECUTIONS: Record<McErrorClass, number> = {
   validation: 1,
   provider_timeout: 1,
   quota: 1,
+  config: 1,
   quality: 3, // 1ª geração + 2 regerações automáticas por texto inventado
 };
 
@@ -119,6 +124,7 @@ export function classifyMcError(err: unknown): McErrorClass {
   if (err instanceof TerminalProviderError) {
     if (err.code === 'content_policy') return 'content_policy';
     if (err.code === PROVIDER_QUOTA_CODE) return 'quota';
+    if (err.code === PROVIDER_AUTH_CODE) return 'config';
     if (MC_QUALITY_ERROR_CODES.includes(err.code)) return 'quality';
     return 'validation';
   }
@@ -139,9 +145,9 @@ export function mcRefundsOnTerminal(errorClass: McErrorClass): boolean {
   return errorClass !== 'internal';
 }
 
-/** Classes que exigem aviso ao administrador (`admin_alert` + log `ADMIN_ALERT`): falta de crédito. */
+/** Classes que exigem aviso ao administrador (`admin_alert` + log `ADMIN_ALERT`): falta de crédito e chave inválida. */
 export function mcAlertsAdmin(errorClass: McErrorClass): boolean {
-  return errorClass === 'quota';
+  return errorClass === 'quota' || errorClass === 'config';
 }
 
 /** Código curto e estável do erro para errorCode/UI (cap de 40 chars da coluna). */

@@ -20,8 +20,8 @@ import { McPipelineService } from './mc-pipeline.service';
 
 type Row = Record<string, unknown> & { id: string };
 
-/** Alerta de crédito/chave do fornecedor: um por projeto, log ADMIN_ALERT, sem pausar o módulo (Q2, Q3). */
-describe('McPipelineService.failStep — admin_alert de quota', () => {
+/** Alerta de crédito/chave do fornecedor: um por projeto, log ADMIN_ALERT, sem pausar o módulo (Q2, Q3, Q4). */
+describe('McPipelineService.failStep — admin_alert de quota e chave inválida', () => {
   const projects: Row[] = [];
   const steps: Row[] = [];
   const events: Array<{ refId: string; kind: string; detail: Record<string, unknown> }> = [];
@@ -147,6 +147,7 @@ describe('McPipelineService.failStep — admin_alert de quota', () => {
     events.filter((e) => e.kind === 'admin_alert' && (!projectId || e.refId === projectId));
   const alertLines = () =>
     errorLog.mock.calls.map(([line]) => String(line)).filter((l) => l.startsWith('ADMIN_ALERT'));
+  const chave = () => new TerminalProviderError('HTTP 401: Invalid key', 'provider_auth');
   const saldo = () =>
     new TerminalProviderError('HTTP 403: User is locked. Reason: Exhausted balance', 'quota');
 
@@ -203,6 +204,48 @@ describe('McPipelineService.failStep — admin_alert de quota', () => {
     steps.push(talk('t1', 'p1'), talk('t2', 'p2'));
     await fail(steps[0], saldo());
     await fail(steps[1], saldo());
+    expect(alerts('p1')).toHaveLength(1);
+    expect(alerts('p2')).toHaveLength(1);
+    expect(alertLines()).toHaveLength(2);
+  });
+
+  it('chave inválida (provider_auth): falha de configuração com estorno, alerta e sem retry', async () => {
+    steps.push(talk('t1', 'p1'));
+    await fail(steps[0], chave());
+    expect(queue.publish).not.toHaveBeenCalled();
+    expect(credits.refundUnconsumed).toHaveBeenCalledWith(expect.anything(), 'u1', 't1', 56, 0);
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0].detail).toMatchObject({ errorClass: 'config', errorCode: 'provider_auth' });
+    expect(alertLines()).toHaveLength(1);
+    expect(alertLines()[0]).toContain('ADMIN_ALERT config projeto=p1');
+    expect(transitions.casTransition).toHaveBeenCalledWith(
+      expect.anything(),
+      McProject,
+      'p1',
+      McProjectStatus.GENERATING,
+      McProjectStatus.NEEDS_ATTENTION,
+      expect.objectContaining({
+        errorCode: 'provider_auth',
+        errorMessage:
+          'O estúdio de vídeo está indisponível no momento. Nossa equipe já foi avisada; tente de novo mais tarde.',
+      }),
+    );
+    expect(manager.upsert).not.toHaveBeenCalled(); // mc_paused não é ligado
+  });
+
+  it('três falas com chave inválida no mesmo projeto: um alerta e uma linha, três estornos', async () => {
+    steps.push(talk('t1', 'p1'), talk('t2', 'p1'), talk('t3', 'p1'));
+    await Promise.all(steps.map((row) => fail(row, chave())));
+    expect(alerts('p1')).toHaveLength(1);
+    expect(alertLines()).toHaveLength(1);
+    expect(credits.refundUnconsumed).toHaveBeenCalledTimes(3);
+  });
+
+  it('quota e chave inválida no mesmo projeto: ainda um alerta só; em outro projeto, outro alerta', async () => {
+    steps.push(talk('t1', 'p1'), talk('t2', 'p1'), talk('t3', 'p2'));
+    await fail(steps[0], saldo());
+    await fail(steps[1], chave());
+    await fail(steps[2], chave());
     expect(alerts('p1')).toHaveLength(1);
     expect(alerts('p2')).toHaveLength(1);
     expect(alertLines()).toHaveLength(2);

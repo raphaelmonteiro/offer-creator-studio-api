@@ -23,6 +23,15 @@ describe('mc-failure-messages — catálogo pt-BR por código (design B2)', () =
     });
   });
 
+  it('chave inválida do fornecedor (provider_auth) mostra o mesmo texto da cota e tentar_mais_tarde', () => {
+    expect(mcFailurePresentation('provider_auth')).toMatchObject({
+      message: P27,
+      action: 'tentar_mais_tarde',
+      passthrough: false,
+    });
+    expect(MC_FAILURE_CATALOG_CODES).toContain('provider_auth');
+  });
+
   it.each([
     ['provider_transient', /fora do ar/, 'refazer'],
     ['provider_timeout', /demorou demais/, 'refazer'],

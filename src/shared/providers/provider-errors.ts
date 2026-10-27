@@ -29,6 +29,8 @@ export class TerminalProviderError extends Error {
 
 /** Código estável: fornecedor sem saldo/cota (fal 403 de saldo, ElevenLabs 401/402 de cota, OpenAI, Gemini). */
 export const PROVIDER_QUOTA_CODE = 'quota';
+/** Código estável: chave do fornecedor inválida, revogada ou expirada (401/403 sem marcador de saldo). */
+export const PROVIDER_AUTH_CODE = 'provider_auth';
 
 /** Marcadores de saldo esgotado/cota excedida no corpo da resposta (texto cru, JSON inclusive). */
 const QUOTA_BODY_PATTERNS: readonly RegExp[] = [
@@ -41,13 +43,19 @@ const QUOTA_BODY_PATTERNS: readonly RegExp[] = [
   /payment[_ ]required/i,
 ];
 
-export type HttpRejectionKind = 'transient' | 'quota' | 'content_policy' | 'provider_rejected';
+export type HttpRejectionKind =
+  | 'transient'
+  | 'quota'
+  | 'provider_auth'
+  | 'content_policy'
+  | 'provider_rejected';
 
 /**
  * Classifica a resposta HTTP de erro de um fornecedor (design B1 da change
  * video-worker-confiabilidade). Em ordem: 5xx transitório; 402 cota; 401/403/429
  * com marcador de saldo no corpo = cota; 429 sem marcador transitório (limite de
- * taxa); 422 política de conteúdo; demais 4xx (inclui 401/403 sem marcador) = recusa comum. Corpo desconhecido nunca vira `quota`.
+ * taxa); 422 política de conteúdo; 401/403 sem marcador = chave inválida; demais
+ * 4xx = recusa comum. Corpo desconhecido nunca vira `quota`.
  */
 export function classifyHttpRejection(status: number, body: string): HttpRejectionKind {
   if (status >= 500) return 'transient';
@@ -56,6 +64,7 @@ export function classifyHttpRejection(status: number, body: string): HttpRejecti
   if ([401, 403, 429].includes(status) && hasQuotaMarker) return 'quota';
   if (status === 429) return 'transient';
   if (status === 422) return 'content_policy';
+  if (status === 401 || status === 403) return 'provider_auth';
   return 'provider_rejected';
 }
 

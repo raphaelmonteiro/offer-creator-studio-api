@@ -11,6 +11,7 @@ import {
   ElevenLabsProvider,
 } from '../../../shared/providers/elevenlabs.provider';
 import {
+  PROVIDER_AUTH_CODE,
   PROVIDER_QUOTA_CODE,
   TerminalProviderError,
 } from '../../../shared/providers/provider-errors';
@@ -239,8 +240,8 @@ export class McTtsProcessor {
       // Resposta perdida/timeout: a geração pode ter sido feita e cobrada —
       // o fallback seria outra geração paga do mesmo texto (achado 2 da 3.7).
       if ((ELEVENLABS_AMBIGUOUS_CODES as readonly string[]).includes(err.code)) throw err;
-      // Sem cota: o outro modelo falharia igual (2ª chamada inútil).
-      if (err.code === PROVIDER_QUOTA_CODE) throw err;
+      // Sem cota ou chave inválida: o outro modelo falharia igual (2ª chamada inútil).
+      if (err.code === PROVIDER_QUOTA_CODE || err.code === PROVIDER_AUTH_CODE) throw err;
       this.logger.warn(`TTS ${MC_TTS_PRIMARY_MODEL} falhou (${err.message}) — fallback.`);
       return this.elevenLabs.synthesizeWithTimestamps({
         text,

@@ -229,7 +229,7 @@ describe('TTS por fala com prosódia (change video-formatos-personagem, D7, tare
       },
     );
 
-    it.each(['quota'])(
+    it.each(['quota', 'provider_auth'])(
       '%s → sem fallback: o outro modelo falharia igual (2ª chamada inútil)',
       async (code) => {
         elevenLabs.synthesizeWithTimestamps.mockRejectedValue(
