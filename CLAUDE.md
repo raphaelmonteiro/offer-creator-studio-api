@@ -154,6 +154,7 @@ The frontend `httpClient` unwraps `data` automatically.
 - Files stored in `./uploads/<folder>/` by domain: `products/`, `logos/`, `avatars/`, `templates/`, `fonts/`, `thumbnails/`, `gallery/`, `general/`.
 - Served statically from `/uploads`. Referenced in DB as paths prefixed with `CDN_URL`.
 - `UploadsService` is the shared service used by all modules for file saving.
+- **`UPLOAD_DEST` é fixado em caminho absoluto no boot** (`src/common/config/uploads-dir.ts`, change `video-worker-confiabilidade`): `main.ts` e `worker.ts` chamam `pinUploadsDirEnv()` na primeira linha do `bootstrap()` (log `Uploads em <caminho>`), e todo ponto que resolve o diretório usa `resolveUploadsDir(config.get('UPLOAD_DEST'))` (relativo é ancorado no diretório do processo no carregamento do módulo; absoluto passa intacto). Nunca `path.resolve`/`join` relativo sobre `UPLOAD_DEST` nem `process.cwd()` fora do helper: o `@remotion/bundler` faz `process.chdir` durante o `bundle()` e um caminho relativo resolvido a cada uso cai na pasta do Remotion (`missing_input_asset` no `talk`, ENOENT em `uploads/mascots`). `uploads-dir.guard.spec.ts` quebra o `npm test` se aparecer um ponto novo. Recomendado valor absoluto na VM (relativo é resolvido contra o `exec cwd` `/opt/encarte/backend`).
 
 ### Pagination
 
@@ -647,6 +648,26 @@ e segue reprovando texto no corpo/roupa. O pacote `@chroma/video-templates` 0.3.
 (`COMPOSITION_VERSION` 0.3.0; o pin do `package.json` sobe quando o desenvolvedor publicar o pacote). e2e mock:
 `docs/evidence/mascot-quality/e2e/e2e-piece-cutout.mjs` (modos `stable` e `unstable`).
 
+**Falhas de fornecedor e motivo em pt-BR** (change `video-worker-confiabilidade`; contrato no `design.md` da change):
+`shared/providers/provider-errors.ts#classifyHttpRejection(status, corpo)` é a regra única (fal/Runway/HeyGen pela
+`HttpProviderBase` e ElevenLabs pelo `postGeneration`): 5xx e 429 sem marcador são transitórios (4 execuções, espera
+15/30/60 s, código `provider_transient` ao esgotar); 402 e 401/403/429 com marcador de saldo no corpo (`User is locked`,
+`Exhausted balance`, `quota_exceeded`...) viram `TerminalProviderError('quota')`; 401/403 SEM marcador (chave inválida,
+revogada ou expirada) viram `provider_auth` (classe `config`); 422 `content_policy`; os demais 4xx `provider_rejected`.
+Corpo desconhecido nunca vira `quota`; corpos de referência em `shared/providers/__fixtures__/provider-error-bodies.ts`
+(só o 403 de saldo do fal é capturado de produção). `quota` e `config` são terminais numa execução, estornam o step e
+gravam `admin_alert` em `mc_events` **uma vez por projeto** (`services/mc-admin-alert.ts`, trava `FOR UPDATE` no projeto)
+mais uma linha de log de nível `error` `ADMIN_ALERT <quota|config> projeto=<id> step=<id> tipo=<t> provider=<p>: <motivo>`
+(é como o administrador lê o aviso nos logs do PM2: `pm2 logs flyer-media-worker | grep ADMIN_ALERT`; canal real é a
+P-28); o canal SSE do cliente (`mc_admin_alert`) leva só `{ projectId }`, e o módulo NÃO é pausado (`mc_paused`).
+O fallback de TTS não tenta `eleven_v3` com `quota`/`provider_auth`. O que o cliente vê vem do catálogo
+`domain/mc-failure-messages.ts` (texto por `errorCode`, sem fornecedor/saldo/HTTP; cota e chave inválida mostram o texto
+da P-27): `failStep`, a falha do roteiro (`script_failed`) e a montagem gravam esse texto em `errorMessage` do projeto e da
+cena (a mensagem crua fica só em `mc_steps.errorMessage` e no evento), e `GET projects/:id` e `GET projects` recomputam
+`errorMessage`/`errorAction` (`refazer | tentar_mais_tarde | ajustar_cena | null`) do `errorCode`, também em cenas e
+steps (linhas antigas com texto cru em inglês saem em pt-BR; `character_cutout_failed` mantém o texto gravado). Código
+novo de falha precisa de entrada no catálogo (`mc-failure-messages.spec.ts`).
+
 **Convenção de erros**: forma de DTO → 400 pelo pipe global; regra de negócio → 422 `{code, message, details?}`
 (ex.: `SPEECH_SENTENCE_TOO_LONG`, `SPEECH_DURATION_OUT_OF_RANGE`, `SPEECH_OVER_LENGTH`,
 `SPEECH_ALIGNMENT_MISSING`, `RENDER_UNAVAILABLE`, `LOGO_BOX_REQUIRED`, `KIT_TILE_MISSING`); `details.actions`
@@ -658,7 +679,8 @@ criação de projetos F1/F2/peça recusa com `RENDER_UNAVAILABLE` quando falta r
 
 **e2e mock**: `docs/evidence/mascot-quality/e2e/run-e2e.sh` (raiz do monorepo) roda `e2e-v2.mjs` (cenas),
 `e2e-logo.mjs` (kit de logo), `e2e-f1.mjs` (arte que fala) e `e2e-f2.mjs` (ofertas em sequência) contra a
-stack `docker-compose.e2e.yml`, sem chamadas pagas.
+stack `docker-compose.e2e.yml`, sem chamadas pagas. `e2e-worker-race.mjs` (corrida do `render_still` com os `talk` logo
+depois de reiniciar o worker, com `UPLOAD_DEST` relativo) também roda no `run-e2e.sh`.
 
 ---
 
