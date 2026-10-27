@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import * as fs from 'fs';
 import * as os from 'os';
-import * as path from 'path';
+import { resolveUploadsDir } from '../../common/config/uploads-dir';
 
 export type DegradedReason = 'cpu' | 'ram' | 'disk';
 
@@ -172,7 +172,7 @@ export class ResourceGuardService implements OnModuleInit, OnModuleDestroy {
   /** Espaço livre (statfs) do filesystem de UPLOAD_DEST; null se indisponível. */
   private readFreeDiskBytes(): number | null {
     try {
-      const uploadsDir = path.resolve(process.env.UPLOAD_DEST || './uploads');
+      const uploadsDir = resolveUploadsDir(process.env.UPLOAD_DEST);
       const stats = fs.statfsSync(uploadsDir);
       return stats.bavail * stats.bsize;
     } catch {

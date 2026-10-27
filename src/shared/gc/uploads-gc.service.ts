@@ -21,6 +21,7 @@ import {
   selectCommercialsGarbage,
   selectGarbage,
 } from './uploads-gc.rules';
+import { resolveUploadsDir } from '../../common/config/uploads-dir';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Espera pós-boot antes da primeira varredura (não competir com o start dos consumers). */
@@ -172,7 +173,7 @@ export class UploadsGcService implements OnModuleInit, OnModuleDestroy {
     selections: GcSelection[],
     dryRun: boolean,
   ): Promise<{ deleted: number; skipped: number }> {
-    const uploadsDir = path.resolve(this.config.get('UPLOAD_DEST', './uploads'));
+    const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
     let deleted = 0;
     let skipped = 0;
     for (const selection of selections) {

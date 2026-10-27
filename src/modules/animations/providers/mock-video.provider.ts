@@ -9,6 +9,7 @@ import {
   ProviderSubmitResult,
   TerminalProviderError,
 } from './provider.types';
+import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
 /** Tamanho de saída por proporção — espelha o que os providers reais aceitam. */
 const SIZE_BY_ASPECT: Record<string, { w: number; h: number }> = {
@@ -58,7 +59,7 @@ export class MockVideoProvider {
     const size = SIZE_BY_ASPECT[params.aspectRatio ?? '1:1'] ?? SIZE_BY_ASPECT['1:1'];
     const durationS = Math.min(10, Math.max(2, params.durationS || 5));
 
-    const dir = path.join(path.resolve(this.config.get('UPLOAD_DEST', './uploads')), MOCK_DIR);
+    const dir = path.join(resolveUploadsDir(this.config.get<string>('UPLOAD_DEST')), MOCK_DIR);
     await fs.mkdir(dir, { recursive: true });
     const imagePath = path.join(dir, `${jobId}.png`);
     const videoPath = path.join(dir, `${jobId}.mp4`);
@@ -78,7 +79,7 @@ export class MockVideoProvider {
 
   async getStatus(providerJobId: string): Promise<ProviderStatusResult> {
     const videoPath = path.join(
-      path.resolve(this.config.get('UPLOAD_DEST', './uploads')),
+      resolveUploadsDir(this.config.get<string>('UPLOAD_DEST')),
       MOCK_DIR,
       `${providerJobId}.mp4`,
     );
@@ -115,7 +116,7 @@ export class MockVideoProvider {
       return Buffer.from(base64, 'base64');
     }
     if (imageUrl.startsWith('/uploads/')) {
-      const uploadsDir = path.resolve(this.config.get('UPLOAD_DEST', './uploads'));
+      const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
       const abs = path.resolve(uploadsDir, imageUrl.replace(/^\/uploads\//, ''));
       if (!abs.startsWith(uploadsDir + path.sep)) {
         throw new TerminalProviderError(`Caminho inválido: ${imageUrl}`, 'invalid_asset_path');

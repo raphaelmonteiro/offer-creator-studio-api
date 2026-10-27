@@ -1,12 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
+import { Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { SmartValidationPipe } from './common/pipes/smart-validation.pipe';
+import { pinUploadsDirEnv, resolveUploadsDir } from './common/config/uploads-dir';
 
 async function bootstrap() {
+  new Logger('Bootstrap').log(`Uploads em ${pinUploadsDirEnv()}`);
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false, // Disable default body parser to have full control
   });
@@ -54,8 +56,7 @@ async function bootstrap() {
   // The social media flow rasterizes uploaded assets into a final art via
   // html-to-image (which uses canvas internally), so CORS on /uploads/* is
   // mandatory there.
-  const uploadPath = process.env.UPLOAD_DEST || './uploads';
-  app.useStaticAssets(join(process.cwd(), uploadPath), {
+  app.useStaticAssets(resolveUploadsDir(process.env.UPLOAD_DEST), {
     prefix: '/uploads/',
     setHeaders: (res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');

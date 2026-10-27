@@ -29,6 +29,7 @@ import {
   isMascotEntrance,
   isMascotGesture,
 } from './domain/presence-animation';
+import { resolveUploadsDir } from '../../common/config/uploads-dir';
 
 const UPLOAD_FOLDER = 'mascots';
 const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
@@ -617,7 +618,7 @@ export class MascotsService {
   private resolveLocalPath(url: string): string | null {
     const uploadsPath = this.toUploadsPath(url);
     if (!uploadsPath) return null;
-    const uploadsDir = path.resolve(this.config.get<string>('UPLOAD_DEST', './uploads'));
+    const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
     const filePath = path.resolve(uploadsDir, uploadsPath.replace(/^\/uploads\//, ''));
     return filePath.startsWith(uploadsDir + path.sep) ? filePath : null;
   }

@@ -54,6 +54,7 @@ import { McKitCandidate } from '../entities/mc-kit-candidate.entity';
 import { McKitReferencesJob } from '../services/mc-kit-candidates.service';
 import { costMetadata, MC_KIT_COST_EVENT, recordKitProviderCost } from '../services/mc-kit-costs';
 import { McKitViewService } from '../services/mc-kit-view.service';
+import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
 /** Identidade do kit resolvida para prompt e hash (kits anteriores: mascote, sem estilo, cinza claro). */
 type KitIdentity = Required<KitReferencePromptOptions> & {
@@ -1032,7 +1033,7 @@ export class McKitProcessor {
 
   /** Padrão de gravação do repo (ai-generation.processor.saveFile), na área do commercials. */
   private async saveFile(kitId: string, name: string, data: Buffer): Promise<string> {
-    const uploadsDir = this.config.get<string>('UPLOAD_DEST', './uploads');
+    const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
     const dir = path.join(uploadsDir, 'commercials', 'kits', kitId);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, name), data);
@@ -1044,7 +1045,7 @@ export class McKitProcessor {
     const index = url.indexOf(marker);
     const uploadsPath = url.startsWith('/uploads/') ? url : index >= 0 ? url.slice(index) : null;
     if (!uploadsPath) return null;
-    const uploadsDir = path.resolve(this.config.get<string>('UPLOAD_DEST', './uploads'));
+    const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
     const filePath = path.resolve(uploadsDir, uploadsPath.replace(/^\/uploads\//, ''));
     if (!filePath.startsWith(uploadsDir + path.sep)) return null;
     try {

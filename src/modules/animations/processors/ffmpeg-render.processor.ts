@@ -12,6 +12,7 @@ import { TaskTransitionService } from '../../../shared/state/task-transition.ser
 import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
 import { FfmpegGraphBuilder, RenderSpec } from '../domain/ffmpeg-graph-builder';
 import { AnyRenderLayer, isSyncedClip } from '../domain/synced-clip';
+import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
 /**
  * Consumer render.export (TDD §6.1/§6.5): resolve camadas em caminhos locais,
@@ -46,7 +47,7 @@ export class FfmpegRenderProcessor {
     const tmpDir = await this.runner.createTempDir(`render-${renderId.slice(0, 8)}-`);
     try {
       const spec = await this.resolveSpec(job);
-      const uploadsDir = this.config.get('UPLOAD_DEST', './uploads');
+      const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
       const outDir = path.join(uploadsDir, 'animations', job.userId, 'exports');
       await fs.mkdir(outDir, { recursive: true });
       const fileName = `${renderId}.${spec.format}`;
@@ -140,7 +141,7 @@ export class FfmpegRenderProcessor {
     const raw = job.spec as unknown as RenderSpec & {
       layers: Array<AnyRenderLayer & { assetId?: string; url?: string }>;
     };
-    const uploadsDir = path.resolve(this.config.get('UPLOAD_DEST', './uploads'));
+    const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
     const layers: AnyRenderLayer[] = [];
     for (const layer of raw.layers) {
       if (isSyncedClip(layer)) {

@@ -11,6 +11,7 @@ import {
   ProductMetadata,
 } from './product-metadata.schema';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
+import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
 const MODEL_VERSION = 'vision-v1-2026-06';
 const VISION_LOW_PROMOTION_THRESHOLD = 0.5;
@@ -53,7 +54,7 @@ export class ImageMetadataService {
     const parsed = Number.parseInt(raw, 10);
     this.maxConcurrency = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_CONCURRENCY;
 
-    this.uploadDest = path.resolve(configService.get<string>('UPLOAD_DEST', './uploads'));
+    this.uploadDest = resolveUploadsDir(configService.get<string>('UPLOAD_DEST'));
   }
 
   isEnabled(): boolean {

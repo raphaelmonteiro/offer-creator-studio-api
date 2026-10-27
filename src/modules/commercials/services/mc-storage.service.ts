@@ -4,6 +4,7 @@ import { createReadStream, createWriteStream } from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { pipeline } from 'stream/promises';
+import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
 /**
  * Layout de storage do pipeline (plano-comerciais §6.6):
@@ -20,7 +21,7 @@ export class McStorageService {
   constructor(private readonly config: ConfigService) {}
 
   uploadsDir(): string {
-    return path.resolve(this.config.get<string>('UPLOAD_DEST', './uploads'));
+    return resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
   }
 
   /** Diretório (relativo a /uploads) dos artefatos de uma cena/geração. */

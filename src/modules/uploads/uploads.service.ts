@@ -4,13 +4,14 @@ import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { generateFileName, getFileMimeType } from '../../common/utils/file.util';
 import * as fs from 'fs/promises';
+import { resolveUploadsDir } from '../../common/config/uploads-dir';
 
 @Injectable()
 export class UploadsService {
   private uploadPath: string;
 
   constructor(private configService: ConfigService) {
-    this.uploadPath = this.configService.get<string>('UPLOAD_DEST', './uploads');
+    this.uploadPath = resolveUploadsDir(this.configService.get<string>('UPLOAD_DEST'));
     this.ensureUploadDirectories();
   }
 

@@ -13,6 +13,7 @@ import {
   mcRenderTimeouts,
   MC_OFFER_CAROUSEL_COMPOSITION_ID,
 } from '../domain/mc-render.config';
+import { bootCwd, resolveAppPath } from '../../../common/config/uploads-dir';
 
 /**
  * Renderização da composição `OfferCarousel` do F2 (change
@@ -124,10 +125,10 @@ export async function loadRemotionModules(
     let pkgDir: string;
     let resolveFrom: NodeJS.Require;
     if (templatesDir) {
-      pkgDir = path.resolve(templatesDir);
+      pkgDir = resolveAppPath(templatesDir);
       resolveFrom = createRequire(path.join(pkgDir, 'package.json'));
     } else {
-      resolveFrom = createRequire(path.join(process.cwd(), 'package.json'));
+      resolveFrom = createRequire(path.join(bootCwd(), 'package.json'));
       pkgDir = path.dirname(resolveFrom.resolve('@chroma/video-templates/package.json'));
     }
     const pkg = JSON.parse(await fs.readFile(path.join(pkgDir, 'package.json'), 'utf8')) as {

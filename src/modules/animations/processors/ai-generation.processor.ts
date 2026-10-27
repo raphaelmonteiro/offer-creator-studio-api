@@ -19,6 +19,7 @@ import { MockVideoProvider } from '../providers/mock-video.provider';
 import { TerminalProviderError } from '../providers/provider.types';
 import { OpenAiImageService } from '../../ai/openai-image.service';
 import { OpenAiImageSize } from '../../ai/utils/ai-image.util';
+import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
 const POLL_BACKOFF_S = [15, 30, 60];
 const TASK_TIMEOUT_MS = 10 * 60 * 1000;
@@ -526,7 +527,7 @@ export class AiGenerationProcessor {
 
   /** Lê o arquivo em uploads e devolve `data:<mime>;base64,...`. */
   private async toDataUri(fileUrl: string): Promise<string> {
-    const uploadsDir = path.resolve(this.config.get('UPLOAD_DEST', './uploads'));
+    const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
     const abs = path.resolve(uploadsDir, fileUrl.replace(/^\/uploads\//, ''));
     if (!abs.startsWith(uploadsDir + path.sep)) {
       throw new TerminalProviderError(
@@ -553,7 +554,7 @@ export class AiGenerationProcessor {
     name: string,
     data: Buffer,
   ): Promise<string> {
-    const uploadsDir = this.config.get('UPLOAD_DEST', './uploads');
+    const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
     const dir = path.join(uploadsDir, 'animations', userId, taskId);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, name), data);

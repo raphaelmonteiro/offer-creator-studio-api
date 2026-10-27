@@ -15,6 +15,7 @@ import {
 } from '../prompts/ean-judge.prompts';
 import { withAiLogging } from '../utils/ai-telemetry.util';
 import type { EanCandidateRecord, EanReferenceRecord, JudgmentRecord } from './ean-match.types';
+import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
 const LETRAS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const FETCH_TIMEOUT_MS = 10_000;
@@ -63,7 +64,7 @@ export class EanJudgeService {
     this.modelB = configService.get<string>('EAN_JUDGE_MODEL_B') || this.modelA;
     const r = Number.parseInt(configService.get<string>('EAN_JUDGE_MAX_RETRIES', '1'), 10);
     this.maxRetries = Number.isFinite(r) && r >= 0 ? Math.min(r, 3) : 1;
-    this.uploadDest = path.resolve(configService.get<string>('UPLOAD_DEST', './uploads'));
+    this.uploadDest = resolveUploadsDir(configService.get<string>('UPLOAD_DEST'));
     const apiKey = configService.get<string>('OPENAI_API_KEY');
     this.openai = apiKey ? new OpenAI({ apiKey }) : null;
   }

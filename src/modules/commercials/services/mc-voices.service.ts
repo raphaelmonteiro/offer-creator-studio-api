@@ -17,6 +17,7 @@ import {
   resolveVoiceDelivery,
   voiceDeliveryKey,
 } from '../domain/mc-voice-delivery';
+import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
 /** Modelo preferido do preview (melhor pt-BR + tags de emoção, plano §5.3) e fallback. */
 // multilingual_v2 primeiro: é o modelo que OBEDECE velocidade/expressividade
@@ -342,7 +343,7 @@ export class McVoicesService {
   }
 
   private uploadsAbsolute(relativeUrl: string): string {
-    const uploadsDir = path.resolve(this.config.get<string>('UPLOAD_DEST', './uploads'));
+    const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
     return path.join(uploadsDir, relativeUrl.replace(/^\/uploads\//, ''));
   }
 
