@@ -5,6 +5,7 @@ import {
 import {
   classifyMcError,
   MC_MAX_EXECUTIONS,
+  mcAlertsAdmin,
   mcErrorCode,
   mcRefundsOnTerminal,
   mcRetryDelayS,
@@ -28,6 +29,13 @@ describe('mc-error-classes — classificação e política por classe (plano §6
 
   it('TerminalProviderError quota → quota', () => {
     expect(classifyMcError(new TerminalProviderError('HTTP 402', 'quota'))).toBe('quota');
+  });
+
+  it('só quota avisa o administrador', () => {
+    expect(mcAlertsAdmin('quota')).toBe(true);
+    for (const cls of ['transient', 'validation', 'content_policy', 'internal'] as const) {
+      expect(mcAlertsAdmin(cls)).toBe(false);
+    }
   });
 
   it('TerminalProviderError com qualquer outro code → validation', () => {

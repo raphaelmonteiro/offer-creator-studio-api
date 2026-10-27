@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { TerminalProviderError, TransientProviderError } from './provider-errors';
+import { providerErrorFromResponse, TransientProviderError } from './provider-errors';
 
 /** Base HTTP dos adapters: classifica erros em transiente × terminal e respeita Retry-After. */
 export abstract class HttpProviderBase {
@@ -20,15 +20,7 @@ export abstract class HttpProviderBase {
     } finally {
       clearTimeout(timer);
     }
-    if (response.status === 429 || response.status >= 500) {
-      const retryAfter = Number(response.headers.get('retry-after')) || undefined;
-      throw new TransientProviderError(`HTTP ${response.status}`, retryAfter);
-    }
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      const code = response.status === 422 ? 'content_policy' : 'provider_rejected';
-      throw new TerminalProviderError(`HTTP ${response.status}: ${body.slice(0, 300)}`, code);
-    }
+    if (!response.ok) throw await providerErrorFromResponse(response);
     return (await response.json()) as T;
   }
 }

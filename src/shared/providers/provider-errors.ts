@@ -27,6 +27,62 @@ export class TerminalProviderError extends Error {
   }
 }
 
+/** Código estável: fornecedor sem saldo/cota (fal 403 de saldo, ElevenLabs 401/402 de cota, OpenAI, Gemini). */
+export const PROVIDER_QUOTA_CODE = 'quota';
+
+/** Marcadores de saldo esgotado/cota excedida no corpo da resposta (texto cru, JSON inclusive). */
+const QUOTA_BODY_PATTERNS: readonly RegExp[] = [
+  /quota_exceeded/i,
+  /exceeds your quota/i,
+  /exhausted balance/i,
+  /user is locked/i,
+  /insufficient[_ ](quota|balance|funds|credits?)/i,
+  /out of credits?/i,
+  /payment[_ ]required/i,
+];
+
+export type HttpRejectionKind = 'transient' | 'quota' | 'content_policy' | 'provider_rejected';
+
+/**
+ * Classifica a resposta HTTP de erro de um fornecedor (design B1 da change
+ * video-worker-confiabilidade). Em ordem: 5xx transitório; 402 cota; 401/403/429
+ * com marcador de saldo no corpo = cota; 429 sem marcador transitório (limite de
+ * taxa); 422 política de conteúdo; demais 4xx (inclui 401/403 sem marcador) = recusa comum. Corpo desconhecido nunca vira `quota`.
+ */
+export function classifyHttpRejection(status: number, body: string): HttpRejectionKind {
+  if (status >= 500) return 'transient';
+  if (status === 402) return 'quota';
+  const hasQuotaMarker = QUOTA_BODY_PATTERNS.some((pattern) => pattern.test(body));
+  if ([401, 403, 429].includes(status) && hasQuotaMarker) return 'quota';
+  if (status === 429) return 'transient';
+  if (status === 422) return 'content_policy';
+  return 'provider_rejected';
+}
+
+/** Erro tipado para uma resposta HTTP não-ok: lê Retry-After e (fora 5xx) o corpo. Usado pela base HTTP e pelo ElevenLabs. */
+export async function providerErrorFromResponse(
+  response: Response,
+): Promise<TransientProviderError | TerminalProviderError> {
+  const retryAfter = Number(response.headers.get('retry-after'));
+  const body = response.status >= 500 ? '' : await response.text().catch(() => '');
+  return providerErrorForRejection(
+    response.status,
+    body,
+    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+  );
+}
+
+/** Erro tipado a partir de status + corpo já lidos. */
+export function providerErrorForRejection(
+  status: number,
+  body: string,
+  retryAfterSeconds?: number,
+): TransientProviderError | TerminalProviderError {
+  const kind = classifyHttpRejection(status, body);
+  if (kind === 'transient') return new TransientProviderError(`HTTP ${status}`, retryAfterSeconds);
+  return new TerminalProviderError(`HTTP ${status}: ${body.slice(0, 300)}`, kind);
+}
+
 /** Códigos de erro de rede ANTES de a requisição chegar ao servidor (sem geração possível). */
 const PRE_REQUEST_NETWORK_CODES = new Set([
   'ECONNREFUSED',

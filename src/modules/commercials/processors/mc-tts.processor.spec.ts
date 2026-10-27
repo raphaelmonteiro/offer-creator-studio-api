@@ -229,6 +229,18 @@ describe('TTS por fala com prosódia (change video-formatos-personagem, D7, tare
       },
     );
 
+    it.each(['quota'])(
+      '%s → sem fallback: o outro modelo falharia igual (2ª chamada inútil)',
+      async (code) => {
+        elevenLabs.synthesizeWithTimestamps.mockRejectedValue(
+          new TerminalProviderError('HTTP 401', code),
+        );
+        await processor.process({ stepId: 'st-tts' }).catch(() => undefined);
+        expect(elevenLabs.synthesizeWithTimestamps).toHaveBeenCalledTimes(1);
+        expect(pipeline.completeStepAndAdvance).not.toHaveBeenCalled();
+      },
+    );
+
     it('recusa do modelo (provider_rejected) segue caindo no modelo de fallback', async () => {
       elevenLabs.synthesizeWithTimestamps
         .mockRejectedValueOnce(new TerminalProviderError('HTTP 400', 'provider_rejected'))

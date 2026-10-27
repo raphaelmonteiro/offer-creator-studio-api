@@ -9,6 +9,7 @@ import { EmailService } from '../../email/email.service';
 import { CommercialsService } from '../commercials.service';
 import {
   classifyMcError,
+  mcAlertsAdmin,
   McErrorClass,
   mcErrorCode,
   mcRefundsOnTerminal,
@@ -46,6 +47,7 @@ import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
+import { recordAdminAlertOnce } from './mc-admin-alert';
 import { McMaterializerService } from './mc-materializer.service';
 
 /**
@@ -563,7 +565,7 @@ export class McPipelineService {
    *
    * Terminal: estorno IDEMPOTENTE do que o step consumiu (ledger com
    * taskId=stepId; `internal` não estorna — reconciliação admin), cena failed,
-   * projeto needs_attention com errorCode; quota emite admin_alert (SEM ligar
+   * projeto needs_attention com errorCode; quota emite admin_alert, 1 por projeto (SEM ligar
    * mc_paused automático — decisão humana).
    */
   async failStep(
@@ -590,6 +592,7 @@ export class McPipelineService {
     // Marcado DENTRO da transação por quem vence o CAS; o e-mail sai depois
     // dela (SMTP fora de transação — ver sendCompletionEmail).
     let wonNeedsAttention = false;
+    let adminAlertLine: string | null = null;
     await this.dataSource.transaction(async (manager) => {
       const won = await this.transitions.casTransition(
         manager,
@@ -629,21 +632,18 @@ export class McPipelineService {
         }
       }
 
-      if (errorClass === 'quota') {
-        // Plano §6.4: quota NÃO liga mc_paused sozinho — só alerta o admin.
-        await this.commercials.appendEvent(manager, {
-          userId: project.userId,
-          refKind: 'project',
-          refId: project.id,
-          kind: 'admin_alert',
-          detail: { errorClass, stepId: step.id, message: message.slice(0, 300) },
-        });
-        await this.transitions.notify(
+      if (mcAlertsAdmin(errorClass)) {
+        // Plano §6.4: quota/chave inválida NÃO ligam mc_paused sozinhos — só alertam o admin (1 por projeto).
+        adminAlertLine = await recordAdminAlertOnce({
           manager,
-          project.userId,
-          { kind: 'mc_admin_alert', projectId: project.id, errorClass },
-          MC_EVENTS_CHANNEL,
-        );
+          commercials: this.commercials,
+          transitions: this.transitions,
+          project,
+          step,
+          errorClass,
+          errorCode: code,
+          message,
+        });
       }
 
       if (isProjectAssemblyStep(step.type) && isPipelineV2(project)) {
@@ -793,6 +793,8 @@ export class McPipelineService {
       }
     });
 
+    // Só depois do commit: a linha é o aviso que o administrador lê nos logs do PM2 (Q2).
+    if (adminAlertLine) this.logger.error(adminAlertLine);
     if (wonNeedsAttention) {
       await this.sendCompletionEmail(step.projectId, McProjectStatus.NEEDS_ATTENTION);
     }

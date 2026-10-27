@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   isPreRequestNetworkError,
   networkErrorCodes,
+  providerErrorFromResponse,
   TerminalProviderError,
   TransientProviderError,
   withRetry,
@@ -166,22 +167,8 @@ export class ElevenLabsProvider {
         } finally {
           clearTimeout(timer);
         }
-        if (response.status === 429 || response.status >= 500) {
-          const retryAfter = Number(response.headers.get('retry-after'));
-          throw new TransientProviderError(
-            `HTTP ${response.status}`,
-            Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
-          );
-        }
-        if (!response.ok) {
-          // O corpo da ElevenLabs diz o MOTIVO (ex.: invalid_uid) — sem ele o
-          // "HTTP 400" seco já mascarou diagnóstico em produção real.
-          const body = await response.text().catch(() => '');
-          throw new TerminalProviderError(
-            `HTTP ${response.status}: ${body.slice(0, 300)}`,
-            'provider_rejected',
-          );
-        }
+        // O corpo da ElevenLabs diz o MOTIVO (quota_exceeded, invalid_uid...): sem ele o "HTTP 400" seco já mascarou diagnóstico.
+        if (!response.ok) throw await providerErrorFromResponse(response);
         return response;
       },
       {

@@ -1,4 +1,5 @@
 import {
+  PROVIDER_QUOTA_CODE,
   TerminalProviderError,
   TransientProviderError,
 } from '../../../shared/providers/provider-errors';
@@ -117,7 +118,7 @@ export function classifyMcError(err: unknown): McErrorClass {
   if (err instanceof TransientProviderError) return 'transient';
   if (err instanceof TerminalProviderError) {
     if (err.code === 'content_policy') return 'content_policy';
-    if (err.code === 'quota') return 'quota';
+    if (err.code === PROVIDER_QUOTA_CODE) return 'quota';
     if (MC_QUALITY_ERROR_CODES.includes(err.code)) return 'quality';
     return 'validation';
   }
@@ -136,6 +137,11 @@ export function mcShouldRetry(errorClass: McErrorClass, executionsSoFar: number)
  */
 export function mcRefundsOnTerminal(errorClass: McErrorClass): boolean {
   return errorClass !== 'internal';
+}
+
+/** Classes que exigem aviso ao administrador (`admin_alert` + log `ADMIN_ALERT`): falta de crédito. */
+export function mcAlertsAdmin(errorClass: McErrorClass): boolean {
+  return errorClass === 'quota';
 }
 
 /** Código curto e estável do erro para errorCode/UI (cap de 40 chars da coluna). */

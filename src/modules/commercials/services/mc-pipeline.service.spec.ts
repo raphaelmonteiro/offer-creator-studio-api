@@ -37,6 +37,10 @@ function fixture(opts: { project: Row; scenes?: Row[]; steps?: Row[] }) {
       const row = pick(entity).find((r) => r.id === where.id);
       return row ? Promise.resolve(row) : Promise.reject(new Error('not found'));
     }),
+    findOne: jest.fn((entity: unknown, opts: { where: { id: string } }) =>
+      Promise.resolve(pick(entity).find((r) => r.id === opts.where.id) ?? null),
+    ),
+    count: jest.fn().mockResolvedValue(0),
     update: jest.fn().mockResolvedValue({ affected: 1 }),
     increment: jest.fn().mockResolvedValue(undefined),
     insert: jest.fn().mockResolvedValue(undefined),
