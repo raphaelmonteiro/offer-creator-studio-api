@@ -66,6 +66,7 @@ import {
   McStepType,
   resolveProjectOptions,
 } from '../domain/mc-types';
+import { storedFailureMessage } from '../domain/mc-failure-messages';
 import { McProject } from '../entities/mc-project.entity';
 import { McStep } from '../entities/mc-step.entity';
 
@@ -189,7 +190,12 @@ export class McScriptProcessor {
           project.id,
           McProjectStatus.SCRIPTING,
           McProjectStatus.FAILED,
-          { errorCode: code, errorMessage: message, finishedAt: new Date() },
+          // texto pt-BR do catálogo no projeto; a mensagem crua do modelo fica só no step
+          {
+            errorCode: code,
+            errorMessage: storedFailureMessage(code, message),
+            finishedAt: new Date(),
+          },
         );
         if (wonProject) {
           // Falha terminal do script = projeto falhou inteiro → estorno TOTAL

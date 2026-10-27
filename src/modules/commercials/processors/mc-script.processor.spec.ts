@@ -86,6 +86,25 @@ describe('McScriptProcessor — estorno da mini-reserva na falha terminal (plano
     );
   });
 
+  it('falha terminal do roteiro grava o texto pt-BR do catálogo no projeto, sem a mensagem crua', async () => {
+    process.env.MC_SCRIPT_PROVIDER = 'openai'; // sem OPENAI_API_KEY no teste → falha terminal
+    await processor.process({ stepId: 'step-1' });
+
+    const stepPatch = transitions.casTransition.mock.calls.find(
+      (call) => call[1] === McStep && call[4] === McStepStatus.FAILED,
+    )?.[5] as { errorMessage: string; errorCode: string };
+    const projectPatch = transitions.casTransition.mock.calls.find(
+      (call) => call[1] === McProject && call[4] === McProjectStatus.FAILED,
+    )?.[5] as { errorMessage: string; errorCode: string };
+    expect(projectPatch.errorCode).toBe('script_failed');
+    expect(projectPatch.errorMessage).toBe(
+      'Não foi possível criar o roteiro do vídeo. Crie o vídeo de novo.',
+    );
+    // a mensagem crua do modelo/provider segue só no step (diagnóstico do administrador)
+    expect(stepPatch.errorMessage).not.toBe(projectPatch.errorMessage);
+    expect(stepPatch.errorMessage.length).toBeGreaterThan(0);
+  });
+
   it('estorno só acontece para quem VENCE o CAS do projeto (idempotência de job duplicado)', async () => {
     process.env.MC_SCRIPT_PROVIDER = 'openai';
     transitions.casTransition
