@@ -61,7 +61,7 @@ export class ScriptProductV2Dto {
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @IsString()
-  @Length(1, 20)
+  @Length(1, 40)
   unit?: string | null;
 
   /**
@@ -73,7 +73,7 @@ export class ScriptProductV2Dto {
   name: string;
 
   @IsString()
-  @Length(1, 20)
+  @Length(1, 40) // preço/unidade/preço anterior até 40, como o nome (B6; decisão de 27/10/2026)
   price: string;
 
   /** Foto real do produto (URL em /uploads/*, do catálogo ou da galeria) — referência do keyframe (v2). */
@@ -91,7 +91,7 @@ export class ScriptProductV2Dto {
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @IsString()
-  @Length(1, 20)
+  @Length(1, 40)
   originalPrice?: string | null;
 
   /** Selo do card do F2 ("OFERTA", "-18%"). Omitido = preserva; `null` remove. */
@@ -444,13 +444,13 @@ export class CompositionOfferDto {
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @IsString()
-  @Length(1, 20)
+  @Length(1, 40)
   unit?: string | null;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @IsString()
-  @Length(1, 20)
+  @Length(1, 40)
   originalPrice?: string | null;
 
   @IsOptional()
@@ -460,7 +460,7 @@ export class CompositionOfferDto {
 
   @IsOptional()
   @IsString()
-  @Length(1, 20)
+  @Length(1, 40)
   price?: string;
 }
 

@@ -30,6 +30,7 @@ describe('PATCH /commercials/projects/:id/script — validação de cutout e fra
   let app: INestApplication;
   const quality = {
     updateScript: jest.fn().mockResolvedValue({ id: PROJECT }),
+    updateComposition: jest.fn().mockResolvedValue({ id: PROJECT }),
     rerollCutoutScenes: jest.fn().mockResolvedValue({ id: PROJECT }),
   };
 
@@ -131,6 +132,71 @@ describe('PATCH /commercials/projects/:id/script — validação de cutout e fra
         expect(quality.updateScript).not.toHaveBeenCalled();
       },
     );
+  });
+
+  /** Preço, unidade e preço anterior vêm da arte sem teto: a edição aceita até 40 (decisão de 27/10/2026). */
+  describe('price, originalPrice e unit (até 40)', () => {
+    const fields = ['price', 'originalPrice', 'unit'] as const;
+    const withField = (field: string, size: number) => ({
+      name: 'Arroz',
+      price: '9,99',
+      [field]: 'X'.repeat(size),
+    });
+
+    describe.each(['products', 'offers'])('%s do PATCH script', (list) => {
+      it.each(fields.flatMap((f) => [21, 40].map((n) => [f, n] as const)))(
+        '%s com %i caracteres → 200 e chega ao service',
+        async (field, size) => {
+          await patch({ [list]: [withField(field, size)] }).expect(200);
+          expect(quality.updateScript.mock.calls[0][2][list][0][field]).toHaveLength(size);
+        },
+      );
+
+      it.each(fields)('%s com 41 caracteres → 400 e nada chega ao service', async (field) => {
+        const res = await patch({ [list]: [withField(field, 41)] }).expect(400);
+        expect(JSON.stringify(res.body)).toContain(`${field} must be shorter than or equal to 40`);
+        expect(quality.updateScript).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('offers do PATCH composition', () => {
+      const comp = (offer: Record<string, unknown>) =>
+        request(app.getHttpServer())
+          .patch(`/commercials/projects/${PROJECT}/composition`)
+          .send({ expectedRevision: 1, offers: [{ id: 'o1', ...offer }] });
+
+      it.each(fields.flatMap((f) => [21, 40].map((n) => [f, n] as const)))(
+        '%s com %i caracteres → 200',
+        async (field, size) => {
+          await comp({ [field]: 'X'.repeat(size) }).expect(200);
+          expect(quality.updateComposition).toHaveBeenCalledTimes(1);
+        },
+      );
+
+      it.each(fields)('%s com 41 caracteres → 400', async (field) => {
+        await comp({ [field]: 'X'.repeat(41) }).expect(400);
+        expect(quality.updateComposition).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  /** R31: o `products` do PATCH composition usa o mesmo DTO de produto (nome até 120). */
+  describe('nome do produto no PATCH composition (R31)', () => {
+    const comp = (size: number) =>
+      request(app.getHttpServer())
+        .patch(`/commercials/projects/${PROJECT}/composition`)
+        .send({ expectedRevision: 1, products: [{ name: 'A'.repeat(size), price: '9,99' }] });
+
+    it('nome de 120 → 200 e chega ao service', async () => {
+      await comp(120).expect(200);
+      expect(quality.updateComposition.mock.calls[0][2].products[0].name).toHaveLength(120);
+    });
+
+    it('nome de 121 → 400 e nada chega ao service', async () => {
+      const res = await comp(121).expect(400);
+      expect(JSON.stringify(res.body)).toContain('name must be shorter than or equal to 120');
+      expect(quality.updateComposition).not.toHaveBeenCalled();
+    });
   });
 
   it('campo extra do cliente é descartado, não rejeitado (sem regressão)', async () => {
