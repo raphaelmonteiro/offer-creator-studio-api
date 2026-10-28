@@ -242,7 +242,7 @@ export class McPieceProjectService {
   ): { dto: UpdateScriptV2Dto; rewritten: McPieceLineRewrite[] } {
     const offers = pieceSpokenOffers(after);
     const previousOffers = new Map(carouselOffers(script).map((o) => [o.id as string, o]));
-    const lines = script.lines ?? deriveCarouselLines(script.scenes);
+    const lines = script.lines ?? deriveCarouselLines(script.scenes, 'offer_piece');
     const sceneById = new Map(script.scenes.map((s) => [s.sceneId as string, s]));
     const lineFor = (kind: 'opening' | 'closing') => lines.find((l) => l.kind === kind);
     const offerScene = (offerId: string) => {

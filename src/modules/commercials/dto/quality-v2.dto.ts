@@ -1,7 +1,6 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
-  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -232,8 +231,11 @@ export class UpdateScriptV2Dto {
   @Min(0)
   expectedRevision: number;
 
+  /**
+   * Sem mínimo na forma: roteiro vazio é regra de negócio (422 `SCRIPT_INVALID`; na peça,
+   * `CAROUSEL_LINES_COUNT` "pelo menos N fala(s)", change video-fala-continua D11).
+   */
   @IsArray()
-  @ArrayMinSize(1)
   @ArrayMaxSize(MC_MAX_SCENES)
   @ValidateNested({ each: true })
   @Type(() => ScriptSceneV2Dto)
@@ -272,6 +274,14 @@ export class UpdateScriptV2Dto {
   @ValidateNested({ each: true })
   @Type(() => ScriptProductV2Dto)
   offers?: ScriptProductV2Dto[];
+
+  /**
+   * Aceito e IGNORADO: as falas (`lines`) são sempre derivadas das cenas (na peça, pelo vínculo
+   * `productRef`). Existe só para recusar a forma errada com 400 (change video-fala-continua, 1.8).
+   */
+  @IsOptional()
+  @IsArray()
+  lines?: unknown[];
 
   /** F2: preset de layout (`character_left` | `character_right` | `character_bottom`). */
   @IsOptional()

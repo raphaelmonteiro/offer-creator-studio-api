@@ -2,6 +2,11 @@ import { createHash } from 'crypto';
 import { computeContentHash } from './input-hash';
 import { legacySceneType, isSceneType, sceneTypeDialogueIssue } from './mc-execution-plan';
 import { MC_OFFER_PIECE_MIN_OFFERS, MC_PIECE_MAX_SPOKEN } from './mc-piece';
+import {
+  derivePieceLines,
+  pieceLineKindIssue,
+  pieceLinesCountIssue,
+} from './mc-piece-script-lines';
 import { parsePreco } from './mc-preco-extenso';
 import { MC_SCRIPT_SCHEMA_V2 } from './mc-quality';
 import { MC_COMPOSITION_DIMENSIONS } from './mc-composition.config';
@@ -165,7 +170,9 @@ export function validateScriptV2(
     return issues;
   }
   if (!Array.isArray(script.scenes) || script.scenes.length === 0) {
-    issues.push({ code: 'SCRIPT_EMPTY', message: 'O roteiro não tem cenas.' });
+    const noLines =
+      format === 'offer_piece' ? pieceLinesCountIssue(0, carouselOffers(script).length) : null;
+    issues.push(noLines ?? { code: 'SCRIPT_EMPTY', message: 'O roteiro não tem cenas.' });
     return issues;
   }
   const productIds = new Set<string>();
@@ -394,8 +401,15 @@ export function carouselOffers(script: Pick<McScript, 'offers' | 'products'>): M
  * Falas do F2 derivadas das CENAS (fonte única do texto e da ordem): a
  * primeira é a abertura, a última o fechamento e as do meio, uma por oferta,
  * com `offerRef = productRef` da cena. Reordenar cenas reordena as falas.
+ * Na peça de ofertas (`format = 'offer_piece'`) abertura e fechamento são opcionais e o
+ * papel sai do vínculo (`derivePieceLines`).
  */
-export function deriveCarouselLines(scenes: McScriptScene[]): McCarouselLine[] {
+export function deriveCarouselLines(
+  scenes: McScriptScene[],
+  format?: McProjectFormat | null,
+): McCarouselLine[] {
+  // Peça (video-fala-continua, D11): o papel vem do vínculo com a oferta, não da posição.
+  if (format === 'offer_piece') return derivePieceLines(scenes);
   const last = scenes.length - 1;
   return scenes.map((scene, position) => {
     const kind = position === 0 ? 'opening' : position === last ? 'closing' : 'offer';
@@ -415,7 +429,7 @@ export function deriveCarouselLines(scenes: McScriptScene[]): McCarouselLine[] {
  */
 export function normalizeOfferCarouselScript(script: McScript): McScript {
   if (script.format !== 'offer_carousel' && script.format !== 'offer_piece') return script;
-  const lines = deriveCarouselLines(script.scenes);
+  const lines = deriveCarouselLines(script.scenes, script.format);
   const offers = carouselOffers(script);
   const order = lines.filter((l) => l.kind === 'offer' && l.offerRef).map((l) => l.offerRef);
   const ranked = [
@@ -502,7 +516,18 @@ export function validateOfferCarouselFields(script: McScript): McScriptIssue[] {
   const scenes = Array.isArray(script.scenes) ? script.scenes : [];
   const lines = script.lines ?? [];
   const expectedLines = offers.length + 2;
-  if (scenes.length !== expectedLines || lines.length !== scenes.length) {
+  if (piece) {
+    // Roteiro curto (P-21): de N (uma por oferta falada) a N + 2 falas.
+    const countIssue = pieceLinesCountIssue(scenes.length, offers.length);
+    if (countIssue) issues.push(countIssue);
+    if (lines.length !== scenes.length) {
+      issues.push({
+        code: 'CAROUSEL_LINES_COUNT',
+        element: 'lines',
+        message: 'As falas do roteiro divergem das cenas.',
+      });
+    }
+  } else if (scenes.length !== expectedLines || lines.length !== scenes.length) {
     issues.push({
       code: 'CAROUSEL_LINES_COUNT',
       element: 'lines',
@@ -522,9 +547,11 @@ export function validateOfferCarouselFields(script: McScript): McScriptIssue[] {
       });
       return;
     }
+    const kindIssue = piece ? pieceLineKindIssue(line, position, lines.length) : null;
+    if (kindIssue) issues.push(kindIssue);
     const expectedKind =
       position === 0 ? 'opening' : position === lines.length - 1 ? 'closing' : 'offer';
-    if (line.kind !== expectedKind) {
+    if (!piece && line.kind !== expectedKind) {
       issues.push({
         code: 'CAROUSEL_LINE_KIND',
         sceneId,

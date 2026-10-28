@@ -107,6 +107,25 @@ describe('PATCH /commercials/projects/:id/script — validação de cutout e fra
     expect(quality.updateScript.mock.calls[0][2]).toMatchObject(extra);
   });
 
+  /** video-fala-continua (1.8): roteiro vazio é regra de negócio (422 no service), não forma (400). */
+  describe('roteiro curto da peça — forma do corpo', () => {
+    it('scenes vazio chega ao service (a regra devolve 422 CAROUSEL_LINES_COUNT)', async () => {
+      await request(app.getHttpServer())
+        .patch(`/commercials/projects/${PROJECT}/script`)
+        .send({ expectedRevision: 1, scenes: [] })
+        .expect(200);
+      expect(quality.updateScript.mock.calls[0][2].scenes).toEqual([]);
+    });
+
+    it.each([['texto'], [{ a: 1 }]])(
+      'lines que não é lista (%j) → 400 e nada chega ao service',
+      async (lines) => {
+        await patch({ lines }).expect(400);
+        expect(quality.updateScript).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   /** B6: o nome do produto vem da arte (sem teto na criação); a edição aceita até 120. */
   describe('nome do produto (snapshot e ofertas do F2)', () => {
     const product = (name: string) => ({ name, price: '9,99' });

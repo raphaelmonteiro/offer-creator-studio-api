@@ -604,3 +604,89 @@ describe('McQualityService — campos de composição da peça', () => {
     );
   });
 });
+
+/** video-fala-continua (1.8, D11/P-21): roteiro curto da peça pelo PATCH script e pelo PATCH piece. */
+describe('McQualityService — roteiro curto da peça (P-21)', () => {
+  type SceneIn = Parameters<ReturnType<typeof harness>['service']['updateScript']>[2]['scenes'][0];
+  const sceneDto = (h: ReturnType<typeof harness>, idx: number): SceneIn => {
+    const s = h.script.scenes[idx];
+    return {
+      sceneId: s.sceneId,
+      sceneType: 'talk_tile',
+      actionPrompt: '',
+      dialogue: s.dialogue as string,
+      durationS: s.durationS,
+      productRef: s.productRef ?? null,
+    };
+  };
+  const save = (h: ReturnType<typeof harness>, idxs: number[]) =>
+    h.service.updateScript(userId, 'p1', {
+      expectedRevision: 1,
+      scenes: idxs.map((i) => sceneDto(h, i)),
+    });
+  const kinds = (p: Row) => (p.script as McScript).lines?.map((l) => l.kind);
+
+  it('só as 3 falas de oferta (sem abertura nem fechamento) → gravado; papéis todos offer', async () => {
+    const h = harness();
+    await save(h, [1, 2, 3]);
+    expect(h.project.revision).toBe(2);
+    expect(kinds(h.project)).toEqual(['offer', 'offer', 'offer']);
+  });
+
+  it('abertura sem fechamento e fechamento sem abertura → papel pelo vínculo', async () => {
+    const h = harness();
+    await save(h, [0, 1, 2, 3]);
+    expect(kinds(h.project)).toEqual(['opening', 'offer', 'offer', 'offer']);
+    const g = harness();
+    await save(g, [1, 2, 3, 4]);
+    expect(kinds(g.project)).toEqual(['offer', 'offer', 'offer', 'closing']);
+  });
+
+  it('0 falas → 422 SCRIPT_INVALID com CAROUSEL_LINES_COUNT e nada é gravado', async () => {
+    const h = harness();
+    await expect(save(h, [])).rejects.toMatchObject({
+      response: {
+        code: 'SCRIPT_INVALID',
+        message: expect.stringContaining('O roteiro precisa de pelo menos 3 falas'),
+        issues: expect.arrayContaining([expect.objectContaining({ code: 'CAROUSEL_LINES_COUNT' })]),
+      },
+    });
+    expect(h.project.revision).toBe(1);
+  });
+
+  it('menos falas que ofertas falada → 422 CAROUSEL_LINES_COUNT; fala sem oferta entre ofertas → CAROUSEL_LINE_KIND', async () => {
+    const h = harness();
+    await expect(save(h, [1])).rejects.toMatchObject({
+      response: {
+        issues: expect.arrayContaining([expect.objectContaining({ code: 'CAROUSEL_LINES_COUNT' })]),
+      },
+    });
+    await expect(save(h, [1, 0, 2, 3])).rejects.toMatchObject({
+      response: {
+        issues: expect.arrayContaining([expect.objectContaining({ code: 'CAROUSEL_LINE_KIND' })]),
+      },
+    });
+    expect(h.project.revision).toBe(1);
+  });
+
+  it('preço alterado depois do vídeo com roteiro curto (abertura + ofertas, sem fechamento): só a fala da oferta é reescrita e a abertura é mantida', async () => {
+    const h = harness();
+    await save(h, [0, 1, 2, 3]);
+    const short = (h.project.script as McScript).scenes;
+    const openingDialogue = short[0].dialogue;
+    h.deliver();
+    h.project.revision = 2;
+    const edited = fixturePieceDocument();
+    products(edited).items[2].price = '19,90';
+    const result = await h.pieceProject.updatePiece(userId, 'p1', {
+      document: edited,
+      expectedRevision: 2,
+    });
+    expect(result.pieceChange.rewrittenLines).toHaveLength(1);
+    expect(result.pieceChange.rewrittenLines[0]).toMatchObject({ offerId: 'it-arroz' });
+    const after = h.project.script as McScript;
+    expect(after.scenes).toHaveLength(4);
+    expect(after.scenes[0].dialogue).toBe(openingDialogue);
+    expect(kinds(h.project)).toEqual(['opening', 'offer', 'offer', 'offer']);
+  });
+});
