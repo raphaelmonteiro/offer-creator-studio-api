@@ -6,6 +6,8 @@
  * mesmo vídeo (o piso evita linha de base degenerada em clipe quase parado).
  */
 
+import { ASSEMBLY_FPS } from './mc-assembly-graph';
+
 /** Fator sobre o P95 e piso do critério (D14). */
 export const MC_JUMP_FACTOR = 2;
 export const MC_JUMP_FLOOR = 0.01;
@@ -86,8 +88,8 @@ export interface JumpVerdict {
   passed: boolean;
 }
 
-/** fps do vídeo montado (CFR). */
-export const MC_JUMP_FPS = 30;
+/** fps do vídeo montado (CFR): o da montagem. */
+export const MC_JUMP_FPS = ASSEMBLY_FPS;
 
 /**
  * Veredito de uma sequência de quadros. `boundaryTimesS` são os instantes (s) em que cada fala seguinte começa

@@ -1,12 +1,15 @@
+import { ASSEMBLY_FPS } from './mc-assembly-graph';
+import { MC_JUMP_FPS } from './mc-jump-metric';
 import {
   buildChunkConformSliceArgs,
+  MC_CHUNK_FPS,
   buildChunkSpliceArgs,
   buildLastFrameArgs,
   planChunkSlices,
 } from './mc-talk-chunk-ffmpeg';
 import { ChunkSnapshot } from './mc-talk-chunk-step';
 import { planChunkAudioSplice, planTalkChunks } from './mc-talk-chunks';
-import { planTalkConform } from './mc-talk-conform-graph';
+import { MC_TALK_CONFORM_FPS, planTalkConform } from './mc-talk-conform-graph';
 import { MINIMAX_H3_LIPSYNC_MODEL } from './mc-pipeline.config';
 
 const chunkOf = (durations: number[], model = 'fal-ai/kling-video/ai-avatar/v2/standard') =>
@@ -181,5 +184,13 @@ describe('planChunkSlices + buildChunkConformSliceArgs (D8)', () => {
     expect(args).toEqual(expect.arrayContaining(['-sseof', '-0.1', '-update', '1']));
     expect(args).not.toContain('-frames:v');
     expect(args[args.length - 1]).toBe('f.png');
+  });
+});
+
+describe('grade de quadros', () => {
+  it('trecho, conformação, métrica de salto e montagem usam o mesmo fps (a junção das fatias depende disso)', () => {
+    expect(MC_CHUNK_FPS).toBe(ASSEMBLY_FPS);
+    expect(MC_TALK_CONFORM_FPS).toBe(ASSEMBLY_FPS);
+    expect(MC_JUMP_FPS).toBe(ASSEMBLY_FPS);
   });
 });

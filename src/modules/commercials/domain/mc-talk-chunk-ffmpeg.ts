@@ -3,6 +3,7 @@ import {
   TalkConformPlan,
   MC_TALK_EVEN_DIMS_FILTER,
 } from './mc-talk-conform-graph';
+import { ASSEMBLY_FPS } from './mc-assembly-graph';
 import { ChunkSplicePlan } from './mc-talk-chunks';
 import { ChunkSnapshot } from './mc-talk-chunk-step';
 
@@ -62,8 +63,11 @@ export function buildChunkSpliceArgs(opts: {
   return args;
 }
 
-/** fps da conformação e da montagem: o vídeo é CFR e as fronteiras de vídeo caem na grade de quadros. */
-export const MC_CHUNK_FPS = 30;
+/**
+ * fps da grade de quadros do trecho: é o da montagem (`compose_ffmpeg` usa `ASSEMBLY_FPS`) e o da
+ * conformação (`MC_TALK_CONFORM_FPS`); o corte das fatias só emenda se a grade for a mesma.
+ */
+export const MC_CHUNK_FPS = ASSEMBLY_FPS;
 
 /**
  * Quadros a mais no fim de cada fatia de vídeo (além da fronteira): a cadeia de recorte do `compose_ffmpeg`
@@ -142,33 +146,9 @@ export function buildChunkConformSliceArgs(opts: ChunkConformSlicesInput): strin
   if (opts.plan.durationAction === 'too_short') {
     throw new Error('Plano de conformação too_short não gera comando: reprovar o clipe');
   }
-  const base: string[] = [];
-  if (opts.plan.crop) {
-    const c = opts.plan.crop;
-    base.push(`crop=${c.width}:${c.height}:${c.x}:${c.y}`);
-  } else if (opts.plan.forceEvenDims) base.push(MC_TALK_EVEN_DIMS_FILTER);
-  base.push(`fps=${MC_TALK_CONFORM_FPS}`, 'format=yuv420p');
-  if (opts.plan.durationAction === 'pad' && opts.plan.padS > 0) {
-    base.push(`tpad=stop_mode=clone:stop_duration=${opts.plan.padS.toFixed(3)}`);
-  }
-  // quadros de folga depois do fim do vídeo do motor (cópias do último): a última fatia de um trecho precisa
-  // de `MC_CHUNK_TAIL_FRAMES` além da fronteira mesmo quando o motor entrega o clipe com a duração exata do áudio
-  base.push(
-    `tpad=stop_mode=clone:stop_duration=${((MC_CHUNK_TAIL_FRAMES + 3) / MC_CHUNK_FPS).toFixed(3)}`,
-  );
   const withFull = opts.fullOutput != null && opts.slices.length > 1;
   const outputs = opts.slices.length + (withFull ? 1 : 0);
-  const graph: string[] = [`[0:v]${base.join(',')},split=${outputs}${labels('v', outputs)}`];
-  graph.push(
-    `[1:a]aresample=48000,aformat=channel_layouts=stereo,apad,asplit=${outputs}${labels('a', outputs)}`,
-  );
-  opts.slices.forEach((slice, i) => {
-    graph.push(
-      `[v${i}]trim=${videoTrim(slice)},setpts=PTS-STARTPTS[ov${i}]`,
-      `[a${i}]atrim=start=${sec(slice.startMs)}:end=${sec(slice.endMs)},asetpts=PTS-STARTPTS[oa${i}]`,
-    );
-  });
-  const args = [
+  return [
     '-y',
     '-hide_banner',
     '-loglevel',
@@ -178,38 +158,77 @@ export function buildChunkConformSliceArgs(opts: ChunkConformSlicesInput): strin
     '-i',
     opts.audioPath,
     '-filter_complex',
-    graph.join(';'),
+    sliceFilterGraph(opts, outputs).join(';'),
+    ...sliceOutputArgs(opts),
+    ...(withFull ? fullOutputArgs(opts) : []),
   ];
-  opts.slices.forEach((_slice, i) => {
-    args.push(
-      '-map',
-      `[ov${i}]`,
-      '-map',
-      `[oa${i}]`,
-      ...VIDEO_ENCODE,
-      ...AUDIO_ENCODE,
-      '-movflags',
-      '+faststart',
-      opts.sliceOutputs[i],
+}
+
+/** Cadeia do vídeo do motor, comum a todas as saídas: recorte, fps, formato, `tpad` do plano e a folga final. */
+function conformVideoChain(plan: TalkConformPlan): string[] {
+  const chain: string[] = [];
+  if (plan.crop) {
+    const c = plan.crop;
+    chain.push(`crop=${c.width}:${c.height}:${c.x}:${c.y}`);
+  } else if (plan.forceEvenDims) chain.push(MC_TALK_EVEN_DIMS_FILTER);
+  chain.push(`fps=${MC_TALK_CONFORM_FPS}`, 'format=yuv420p');
+  if (plan.durationAction === 'pad' && plan.padS > 0) {
+    chain.push(`tpad=stop_mode=clone:stop_duration=${plan.padS.toFixed(3)}`);
+  }
+  // quadros de folga depois do fim do vídeo do motor (cópias do último): a última fatia de um trecho precisa
+  // de `MC_CHUNK_TAIL_FRAMES` além da fronteira mesmo quando o motor entrega o clipe com a duração exata do áudio
+  chain.push(
+    `tpad=stop_mode=clone:stop_duration=${((MC_CHUNK_TAIL_FRAMES + 3) / MC_CHUNK_FPS).toFixed(3)}`,
+  );
+  return chain;
+}
+
+/** Grafo: cadeia base, `split`/`asplit` em `outputs` ramos e um `trim`/`atrim` por fatia. */
+function sliceFilterGraph(opts: ChunkConformSlicesInput, outputs: number): string[] {
+  const graph: string[] = [
+    `[0:v]${conformVideoChain(opts.plan).join(',')},split=${outputs}${labels('v', outputs)}`,
+    `[1:a]aresample=48000,aformat=channel_layouts=stereo,apad,asplit=${outputs}${labels('a', outputs)}`,
+  ];
+  opts.slices.forEach((slice, i) => {
+    graph.push(
+      `[v${i}]trim=${videoTrim(slice)},setpts=PTS-STARTPTS[ov${i}]`,
+      `[a${i}]atrim=start=${sec(slice.startMs)}:end=${sec(slice.endMs)},asetpts=PTS-STARTPTS[oa${i}]`,
     );
   });
-  if (withFull) {
-    const last = opts.slices.length;
-    args.push(
-      '-map',
-      `[v${last}]`,
-      '-map',
-      `[a${last}]`,
-      '-t',
-      sec(opts.audioMs),
-      ...FAST_VIDEO_ENCODE,
-      ...AUDIO_ENCODE,
-      '-movflags',
-      '+faststart',
-      opts.fullOutput as string,
-    );
-  }
-  return args;
+  return graph;
+}
+
+/** `-map` e codificação de cada fatia. */
+function sliceOutputArgs(opts: ChunkConformSlicesInput): string[] {
+  return opts.slices.flatMap((_slice, i) => [
+    '-map',
+    `[ov${i}]`,
+    '-map',
+    `[oa${i}]`,
+    ...VIDEO_ENCODE,
+    ...AUDIO_ENCODE,
+    '-movflags',
+    '+faststart',
+    opts.sliceOutputs[i],
+  ]);
+}
+
+/** `-map` e codificação do trecho inteiro (último ramo do `split`), fixado em `audioMs`. */
+function fullOutputArgs(opts: ChunkConformSlicesInput): string[] {
+  const last = opts.slices.length;
+  return [
+    '-map',
+    `[v${last}]`,
+    '-map',
+    `[a${last}]`,
+    '-t',
+    sec(opts.audioMs),
+    ...FAST_VIDEO_ENCODE,
+    ...AUDIO_ENCODE,
+    '-movflags',
+    '+faststart',
+    opts.fullOutput as string,
+  ];
 }
 
 /**
