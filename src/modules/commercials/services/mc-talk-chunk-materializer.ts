@@ -332,3 +332,49 @@ export async function quoteTalkChunks(
     estimatedUsd: Number(chunks.reduce((t, c) => t + c.estimatedUsd, 0).toFixed(4)),
   };
 }
+
+/** Alcance de um reroll em modo contínuo: o trecho pedido (todas as falas dele) e os seguintes (cascata, D7). */
+export interface ChunkRerollScope {
+  /** Índice do primeiro trecho regravado. */
+  chunkIndex: number;
+  /** `sceneId` do roteiro das falas do(s) trecho(s) pedido(s); as demais falas do trecho são regravadas junto. */
+  sceneIds: string[];
+  /** `sceneId` do roteiro das falas dos trechos seguintes, regravados só pela junção (sem crédito, Q2). */
+  cascadeSceneIds: string[];
+  /** Linhas das falas do(s) trecho(s) pedido(s) (inclui as pedidas). */
+  regravar: McScene[];
+  /** Linhas das falas dos trechos seguintes. */
+  cascade: McScene[];
+}
+
+/**
+ * Quais falas um reroll de `targets` regrava em modo contínuo (D13): o trecho de cada fala pedida e todos
+ * os seguintes. `null` fora do modo contínuo (o reroll segue por fala, como hoje).
+ */
+export async function resolveChunkReroll(
+  mat: McMaterializerService,
+  manager: EntityManager,
+  args: { project: McProject; script: McScript; scenes: McScene[]; targets: McScene[] },
+): Promise<ChunkRerollScope | null> {
+  if (!isContinuousProject(args.project, args.script)) return null;
+  const targetIds = args.targets.map((t) => t.id);
+  const planned = await planProjectChunks(mat, manager, {
+    project: args.project,
+    script: args.script,
+    scenes: args.scenes,
+    scope: { targetRowIds: targetIds, forceNewAttempt: true },
+  });
+  const inScope = planned.filter((c) => c.inScope);
+  if (inScope.length === 0) return null;
+  const requested = inScope.filter((c) => c.scenes.some((s) => targetIds.includes(s.id)));
+  const cascade = inScope.filter((c) => !requested.includes(c));
+  const ids = (chunks: PlannedChunk[]) =>
+    chunks.flatMap((c) => c.scenes.map((s) => s.scriptSceneId as string));
+  return {
+    chunkIndex: inScope[0].plan.index,
+    sceneIds: ids(requested),
+    cascadeSceneIds: ids(cascade),
+    regravar: requested.flatMap((c) => c.scenes),
+    cascade: cascade.flatMap((c) => c.scenes),
+  };
+}

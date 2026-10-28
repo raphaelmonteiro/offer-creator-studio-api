@@ -89,6 +89,8 @@ describe('McPipelineService — pipeline v2 (gate do worker, retomada, liquidaç
       }),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       increment: jest.fn().mockResolvedValue(undefined),
+      // P-33: steps ativos do projeto (a cena `failed` do cenário segue com step andando ⇒ não estaciona)
+      count: jest.fn().mockResolvedValue(1),
     };
     dataSource = {
       getRepository: jest.fn((entity: unknown) => ({

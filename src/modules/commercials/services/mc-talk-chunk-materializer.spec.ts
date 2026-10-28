@@ -278,6 +278,39 @@ describe('reroll por trecho e cotação (D13)', () => {
     expect(manager.steps()).toHaveLength(3);
   });
 
+  it('resolveChunkReroll: o trecho da fala pedida (todas as falas dele) + os seguintes em cascata; o anterior fica de fora', async () => {
+    const { manager, service, script, project, scenes } = await delivered();
+    const scope = (await service.resolveChunkReroll(manager, project, script, [scenes[3]]))!;
+    expect(scope.chunkIndex).toBe(1);
+    expect(scope.sceneIds).toEqual(['fx-3', 'fx-4']);
+    expect(scope.cascadeSceneIds).toEqual(['fx-5', 'fx-6']);
+    expect(scope.regravar.map((s) => s.id)).toEqual([scenes[2].id, scenes[3].id]);
+    expect(scope.cascade.map((s) => s.id)).toEqual([scenes[4].id, scenes[5].id]);
+    // o último trecho não tem seguinte; um trecho só: sem cascata
+    const last = (await service.resolveChunkReroll(manager, project, script, [scenes[5]]))!;
+    expect(last.chunkIndex).toBe(2);
+    expect(last.cascadeSceneIds).toEqual([]);
+    // nada é escrito
+    expect(manager.steps()).toHaveLength(3);
+  });
+
+  it('resolveChunkReroll: duas falas pedidas em trechos diferentes regravam os dois e os seguintes; fora do modo contínuo é null', async () => {
+    const { manager, service, script, project, scenes } = await delivered();
+    const scope = (await service.resolveChunkReroll(manager, project, script, [
+      scenes[0],
+      scenes[2],
+    ]))!;
+    expect(scope.chunkIndex).toBe(0);
+    expect(scope.sceneIds).toEqual(['fx-1', 'fx-2', 'fx-3', 'fx-4']);
+    expect(scope.cascadeSceneIds).toEqual(['fx-5', 'fx-6']);
+    const plain = { ...script, talkMode: undefined } as McScript;
+    expect(
+      await service.resolveChunkReroll(manager, { ...project, script: plain } as McProject, plain, [
+        scenes[0],
+      ]),
+    ).toBeNull();
+  });
+
   it('cotação inicial (sem step anterior): todos os trechos new', async () => {
     const { manager, service, script, project, scenes } = await setup(durations);
     const quote = await quoteTalkChunks(service, manager, {

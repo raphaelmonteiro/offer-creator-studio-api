@@ -115,6 +115,7 @@ import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McMaterializerService } from './mc-materializer.service';
+import type { ChunkRerollScope } from './mc-talk-chunk-materializer';
 import { McPipelineService } from './mc-pipeline.service';
 import { McTranslationService } from './mc-translation.service';
 
@@ -192,6 +193,16 @@ interface RerollApplied {
   newCount: number;
   paid: boolean;
   amount: number;
+}
+
+/**
+ * Regravação em fala contínua (D13): `chunkIndex` do 1º trecho regravado, as falas do trecho pedido
+ * (`sceneIds`) e as dos trechos seguintes regravados só pela junção (`cascadeSceneIds`, sem crédito).
+ */
+export interface RerollInfo {
+  chunkIndex: number;
+  sceneIds: string[];
+  cascadeSceneIds: string[];
 }
 
 interface RerollBatchInput {
@@ -542,22 +553,31 @@ export class McQualityService {
     const scenes = await this.dataSource
       .getRepository(McScene)
       .find({ where: { projectId: project.id } });
-    const inputs = script.scenes.map((s) => {
-      const row = scenes.find((r) => r.scriptSceneId === s.sceneId);
-      const cached: McStepType[] = [];
-      // Estimativa conservadora: só o que já está selecionado na cena conta como reaproveitável.
-      if (phase === 'preparation' && row?.keyframeAssetId) cached.push(McStepType.KEYFRAME);
-      if (phase === 'preparation' && row?.audioAssetId) cached.push(McStepType.TTS);
-      return { sceneId: s.sceneId as string, sceneType: s.sceneType as McSceneType, cached };
-    });
-    // Trilha (F1/F2): a escolha ainda não gravada (`?musicEnabled=` da tela de
-    // revisão) prevalece sobre a opção do projeto.
-    const musicEnabled =
-      overrides.musicEnabled ?? resolveProjectOptions(project.options).musicEnabled;
     const talk =
       phase === 'production'
         ? await this.materializer.quoteTalk(this.dataSource.manager, project, script, scenes)
         : null;
+    // Fala contínua (D13, Q2): trecho regravado só pela cascata NÃO entra nos itens nem no total de
+    // créditos; trecho com clipe concluído de mesmo hash conta como reaproveitado.
+    const byReason = (reason: string) =>
+      new Set((talk?.chunks ?? []).filter((c) => c.reason === reason).flatMap((c) => c.sceneIds));
+    const cascade = byReason('cascade');
+    const reused = byReason('cached');
+    const inputs = script.scenes
+      .filter((s) => !cascade.has(s.sceneId as string))
+      .map((s) => {
+        const row = scenes.find((r) => r.scriptSceneId === s.sceneId);
+        const cached: McStepType[] = [];
+        // Estimativa conservadora: só o que já está selecionado na cena conta como reaproveitável.
+        if (phase === 'preparation' && row?.keyframeAssetId) cached.push(McStepType.KEYFRAME);
+        if (phase === 'preparation' && row?.audioAssetId) cached.push(McStepType.TTS);
+        if (reused.has(s.sceneId as string)) cached.push(McStepType.TALK);
+        return { sceneId: s.sceneId as string, sceneType: s.sceneType as McSceneType, cached };
+      });
+    // Trilha (F1/F2): a escolha ainda não gravada (`?musicEnabled=` da tela de
+    // revisão) prevalece sobre a opção do projeto.
+    const musicEnabled =
+      overrides.musicEnabled ?? resolveProjectOptions(project.options).musicEnabled;
     return {
       ...quotePhase(phase, project.revision, inputs, { format: project.format, musicEnabled }),
       issues,
@@ -1276,7 +1296,7 @@ export class McQualityService {
     projectId: string,
     sceneId: string,
     expectedRevision: number,
-  ): Promise<McProject> {
+  ): Promise<McProject & { reroll?: RerollInfo }> {
     await this.assertNotPaused();
     const project = await this.getV2Project(userId, projectId);
     this.assertRevision(project, expectedRevision);
@@ -1297,14 +1317,14 @@ export class McQualityService {
       });
     }
     this.assertSceneRerollable(scene);
-    await this.rerollScenesInTransaction({
+    const reroll = await this.rerollScenesInTransaction({
       userId,
       project,
       script,
       quality,
       targets: [{ scene, scriptScene }],
     });
-    return this.reload(project.id);
+    return this.withReroll(await this.reload(project.id), reroll);
   }
 
   /**
@@ -1318,7 +1338,7 @@ export class McQualityService {
     userId: string,
     projectId: string,
     expectedRevision: number,
-  ): Promise<McProject> {
+  ): Promise<McProject & { reroll?: RerollInfo }> {
     await this.assertNotPaused();
     const project = await this.getV2Project(userId, projectId);
     this.assertRevision(project, expectedRevision);
@@ -1339,8 +1359,22 @@ export class McQualityService {
       this.assertSceneRerollable(scene);
       targets.push({ scene, scriptScene });
     }
-    await this.rerollScenesInTransaction({ userId, project, script, quality, targets });
-    return this.reload(project.id);
+    const reroll = await this.rerollScenesInTransaction({
+      userId,
+      project,
+      script,
+      quality,
+      targets,
+    });
+    return this.withReroll(await this.reload(project.id), reroll);
+  }
+
+  /** Resposta do reroll: o projeto e, só em fala contínua, o alcance da regravação (`reroll`, D12). */
+  private withReroll(
+    project: McProject,
+    reroll: RerollInfo | null,
+  ): McProject & { reroll?: RerollInfo } {
+    return reroll ? Object.assign(project, { reroll }) : project;
   }
 
   /** 422 `APPROVAL_MISSING` quando a revisão não tem produção aprovada. */
@@ -1365,16 +1399,36 @@ export class McQualityService {
     });
   }
 
-  /** Re-arma 1..N cenas (re-roll) e leva o projeto a `generating` numa só transação com CAS de revisão. */
-  private async rerollScenesInTransaction(input: RerollBatchInput): Promise<void> {
+  /**
+   * Re-arma 1..N cenas (re-roll) e leva o projeto a `generating` numa só transação com CAS de revisão.
+   * Em fala contínua o trecho inteiro e os seguintes também voltam a `pending` (só as falas pedidas cobram,
+   * Q2) e a resposta informa o alcance. Ao fim, se só restaram falhas sem nada rodando, o projeto volta a
+   * `needs_attention` em vez de ficar preso em `generating` (P-33, D19).
+   */
+  private async rerollScenesInTransaction(input: RerollBatchInput): Promise<RerollInfo | null> {
     const { project, script, quality, targets } = input;
+    let info: RerollInfo | null = null;
     await this.dataSource.transaction(async (manager) => {
+      const scope = await this.materializer.resolveChunkReroll(
+        manager,
+        project,
+        script,
+        targets.map((t) => t.scene),
+      );
       const budget =
         findPhaseBudget(quality, 'production', project.revision) ??
         this.emptyBudget(project, 'production');
       const rerolls: RerollApplied[] = [];
       for (const target of targets) {
         rerolls.push(await this.applyRerollToScene(manager, input, budget, target));
+      }
+      if (scope) {
+        await this.resetChunkScenes(manager, project, scope, targets);
+        info = {
+          chunkIndex: scope.chunkIndex,
+          sceneIds: scope.sceneIds,
+          cascadeSceneIds: scope.cascadeSceneIds,
+        };
       }
       const totalAmount = rerolls.reduce((sum, r) => sum + r.amount, 0);
       const { items } = await this.materializer.materializeProductionV2(
@@ -1403,7 +1457,34 @@ export class McQualityService {
       );
       await this.materializer.ensureAssemblyStepV2(manager, fresh, script, scenes);
       await this.pipeline.enqueueReadySteps(manager, project.id);
+      // reroll que saiu do cache + outras falas em falha: sem step ativo o projeto não pode ficar em generating
+      await this.pipeline.parkIfOnlyFailuresRemain(manager, project.id);
     });
+    return info;
+  }
+
+  /**
+   * Fala contínua (D13): as demais falas do trecho pedido e as dos trechos seguintes voltam a `pending`
+   * sem contar reroll nem reservar crédito (só a fala pedida cobra, Q2), com os steps ociosos cancelados.
+   */
+  private async resetChunkScenes(
+    manager: EntityManager,
+    project: McProject,
+    scope: ChunkRerollScope,
+    targets: RerollTarget[],
+  ): Promise<void> {
+    const targetIds = new Set(targets.map((t) => t.scene.id));
+    for (const scene of [...scope.regravar, ...scope.cascade]) {
+      if (targetIds.has(scene.id)) continue;
+      await manager.update(
+        McScene,
+        { id: scene.id },
+        { status: McSceneStatus.PENDING, finalAssetId: null, errorCode: null, errorMessage: null },
+      );
+      scene.status = McSceneStatus.PENDING;
+      scene.finalAssetId = null;
+      await this.pipeline.cancelIdleSteps(manager, project.id, scene.id);
+    }
   }
 
   /** Reserva o custo (se houver), re-arma a cena SEM zerar o vídeo (o cache decide) e cancela steps ociosos. */

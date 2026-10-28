@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { CreditsService } from '../../../shared/credits/credits.service';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
@@ -278,6 +278,7 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
         .mockResolvedValue({ id: 'st-new', attempt: 2, status: McStepStatus.PENDING }),
       ensureAssemblyStepV2: jest.fn().mockResolvedValue({ id: 'asm' }),
       quoteTalk: jest.fn().mockResolvedValue(null),
+      resolveChunkReroll: jest.fn().mockResolvedValue(null),
       buildPreparationManifest: jest
         .fn()
         .mockImplementation(
@@ -306,6 +307,7 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
       completePreparationIfReady: jest.fn().mockResolvedValue(true),
       appendProjectTransition: jest.fn().mockResolvedValue(undefined),
       cancelIdleSteps: jest.fn().mockResolvedValue(0),
+      parkIfOnlyFailuresRemain: jest.fn().mockResolvedValue(false),
     };
     translation = {
       deriveScript: jest
@@ -376,6 +378,15 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
       // a cena não editada mantém a derivação válida
       expect(saved.scenes[1].derived?.sourceHash).toBe(sceneSourceHash(saved.scenes[1]));
       expect((project.quality as McQualityState).approval).toBeNull();
+    });
+
+    it('fala contínua: `talkMode` congelado na criação sobrevive à edição do roteiro (nunca vem do cliente)', async () => {
+      (project.script as McScript).talkMode = 'continuous';
+      const edited = scriptV2();
+      edited.scenes[0].dialogue = 'Olá!';
+      await service.updateScript(userId, 'p1', dtoFrom(edited, 1));
+      expect((project.script as McScript).talkMode).toBe('continuous');
+      expect(project.revision).toBe(2);
     });
 
     it('productRef inexistente e action com fala ⇒ 422 SCRIPT_INVALID com issues por cena', async () => {
@@ -868,6 +879,148 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
         expect.stringContaining('reroll:row-2:2'),
         89,
       );
+    });
+
+    describe('fala contínua: reroll por trecho e cotação (change video-fala-continua, 1.7)', () => {
+      const approval = {
+        scope: 'production' as const,
+        revision: 1,
+        manifestHash: 'm',
+        approvedAt: 'now',
+        userId,
+        budgetCredits: 145,
+      };
+      let third: Row;
+      const scope = () => ({
+        chunkIndex: 0,
+        sceneIds: [S1, S2],
+        cascadeSceneIds: ['s3'],
+        regravar: [scenes[0], scenes[1]],
+        cascade: [third],
+      });
+
+      beforeEach(() => {
+        project.status = McProjectStatus.SUCCEEDED;
+        project.quality = resolveQuality({ approval });
+        third = { ...scenes[1], id: 'row-3', idx: 2, scriptSceneId: 's3' };
+        scenes.push(third);
+        scenes.forEach((s) => {
+          s.status = McSceneStatus.READY;
+          s.finalAssetId = `final-${s.id}`;
+        });
+        materializer.resolveChunkReroll.mockResolvedValue(scope());
+      });
+
+      it('regravar uma fala regrava o trecho inteiro e o seguinte: as demais voltam a pending sem reroll nem crédito; só a pedida reserva; a resposta informa o alcance', async () => {
+        scenes[1].rerollCount = 1; // a fala pedida já teve um reroll: o 2º cobra
+        const result = await service.rerollScene(userId, 'p1', S2, 1);
+        expect(result.reroll).toEqual({
+          chunkIndex: 0,
+          sceneIds: [S1, S2],
+          cascadeSceneIds: ['s3'],
+        });
+        // a fala irmã e a de cascata voltam a pending (sem contar reroll); a pedida segue a regra existente
+        expect(scenes[0].status).toBe(McSceneStatus.PENDING);
+        expect(third.status).toBe(McSceneStatus.PENDING);
+        expect(scenes[0].rerollCount).toBe(0);
+        expect(third.rerollCount).toBe(0);
+        expect(pipeline.cancelIdleSteps).toHaveBeenCalledWith(expect.anything(), 'p1', 'row-1');
+        expect(pipeline.cancelIdleSteps).toHaveBeenCalledWith(expect.anything(), 'p1', 'row-3');
+        // um único crédito reservado: o da fala pedida (89 = custo de produção do voiceover desta fixture)
+        expect(credits.reserve).toHaveBeenCalledTimes(1);
+        expect(credits.reserve).toHaveBeenCalledWith(
+          expect.anything(),
+          userId,
+          expect.stringContaining('reroll:row-2:2'),
+          expect.any(Number),
+        );
+        // a materialização recebe SÓ a fala pedida (o plano de trechos decide o resto)
+        expect(materializer.materializeProductionV2).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          expect.anything(),
+          [expect.objectContaining({ id: 'row-2' })],
+          { forceNewAttempt: true },
+        );
+        expect(project.status).toBe(McProjectStatus.GENERATING);
+      });
+
+      it('no modo de hoje (sem plano de trechos) a resposta não traz `reroll` e nenhuma outra fala é tocada', async () => {
+        materializer.resolveChunkReroll.mockResolvedValue(null);
+        const result = await service.rerollScene(userId, 'p1', S2, 1);
+        expect(result).not.toHaveProperty('reroll');
+        expect(scenes[0].status).toBe(McSceneStatus.READY);
+        expect(third.status).toBe(McSceneStatus.READY);
+      });
+
+      it('repetir o comando (duas abas, mesma revisão): a 2ª chamada é 422 SCENE_NOT_REROLLABLE e nenhum talk novo é materializado', async () => {
+        await service.rerollScene(userId, 'p1', S2, 1);
+        expect(materializer.materializeProductionV2).toHaveBeenCalledTimes(1);
+        await expect(service.rerollScene(userId, 'p1', S2, 1)).rejects.toMatchObject({
+          response: { code: 'SCENE_NOT_REROLLABLE' },
+        });
+        expect(materializer.materializeProductionV2).toHaveBeenCalledTimes(1);
+        expect(credits.reserve).not.toHaveBeenCalled(); // o 1º reroll da fala é grátis
+      });
+
+      it('revisão velha ⇒ 409 REVISION_CONFLICT sem tocar em nenhuma fala', async () => {
+        await expect(service.rerollScene(userId, 'p1', S2, 0)).rejects.toBeInstanceOf(
+          ConflictException,
+        );
+        expect(scenes.every((s) => s.status === McSceneStatus.READY)).toBe(true);
+        expect(materializer.resolveChunkReroll).not.toHaveBeenCalled();
+      });
+
+      it('projeto de outro usuário ⇒ 403; inexistente ⇒ 404; nada é agendado', async () => {
+        await expect(service.rerollScene('outro', 'p1', S2, 1)).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+        dataSource.getRepository.mockReturnValueOnce({
+          findOneBy: jest.fn().mockResolvedValue(null),
+        });
+        await expect(service.rerollScene(userId, 'nao-existe', S2, 1)).rejects.toBeInstanceOf(
+          NotFoundException,
+        );
+        expect(materializer.materializeProductionV2).not.toHaveBeenCalled();
+      });
+
+      it('P-33: terminada a regravação com outras falas em falha, o pipeline é chamado para devolver o projeto a needs_attention', async () => {
+        await service.rerollScene(userId, 'p1', S2, 1);
+        expect(pipeline.parkIfOnlyFailuresRemain).toHaveBeenCalledWith(expect.anything(), 'p1');
+        const order = [
+          ...pipeline.enqueueReadySteps.mock.invocationCallOrder,
+          ...pipeline.parkIfOnlyFailuresRemain.mock.invocationCallOrder,
+        ];
+        expect(order[1]).toBeGreaterThan(order[0]);
+      });
+
+      it('cotação de produção: o trecho em cascata NÃO entra nos itens nem no total; o reaproveitado custa 0; o `talk` vem inteiro', async () => {
+        project.status = McProjectStatus.VISUAL_REVIEW;
+        const script = project.script as McScript;
+        script.scenes = [...script.scenes, { ...script.scenes[1], idx: 2, sceneId: 's3' }].map(
+          (sc) => ({ ...sc, sceneType: 'talk_tile' as const }),
+        );
+        const talk = {
+          mode: { cutout: false, framing: 'busto', keyColor: null, continuous: true },
+          chunks: [
+            { index: 0, sceneIds: [S1], reason: 'edited' },
+            { index: 1, sceneIds: [S2], reason: 'cascade' },
+            { index: 2, sceneIds: ['s3'], reason: 'cached' },
+          ],
+          scenes: [],
+          rewriteCount: 2,
+          estimatedUsd: 0.9,
+        };
+        materializer.quoteTalk.mockResolvedValue(talk);
+        const quote = await service.quote(userId, 'p1', 'production');
+        expect(quote.talk).toBe(talk);
+        const talkItems = quote.items.filter((i) => i.stepType === McStepType.TALK);
+        expect(talkItems.map((i) => i.sceneId)).toEqual([S1, 's3']);
+        expect(talkItems.map((i) => [i.credits, i.cached])).toEqual([
+          [56, false],
+          [0, true],
+        ]);
+      });
     });
 
     describe('rerollCutoutScenes (B2: todas as falas reprovadas do recorte)', () => {

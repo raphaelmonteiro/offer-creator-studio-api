@@ -371,6 +371,69 @@ export class McPipelineService {
     if (isPipelineV2(project) && project.status === McProjectStatus.PREPARING) {
       await this.completePreparationIfReady(manager, project);
     }
+    // v2: reroll de uma fala com outras em falha — terminada a regravação, nada mais anda (P-33, D19)
+    if (isPipelineV2(project) && project.status === McProjectStatus.GENERATING) {
+      await this.parkIfOnlyFailuresRemain(manager, project.id);
+    }
+    return true;
+  }
+
+  /**
+   * P-33 (D19): projeto em `generating` em que nenhum step anda (nada `queued`/`running`/`provider_wait`/
+   * `ingesting`, e o `enqueueReadySteps` acabou de enfileirar tudo que destravou) mas há cena `failed` — a
+   * regravação pedida terminou e as outras falas seguem com falha. Em vez de ficar preso sem ações, volta
+   * a `needs_attention` com o motivo da falha que resta (a 1ª cena `failed`, por `idx`) e a fase de
+   * retomada `production`; `availableActions` volta a oferecer "Refazer". Sem falha restante, não faz nada
+   * (a cadeia de montagem segue). Chamar dentro da transação que já travou o projeto.
+   * @returns true se moveu o projeto.
+   */
+  async parkIfOnlyFailuresRemain(manager: EntityManager, projectId: string): Promise<boolean> {
+    const project = await manager.findOneByOrFail(McProject, { id: projectId });
+    if (!isPipelineV2(project) || project.status !== McProjectStatus.GENERATING) return false;
+    const scenes = await manager.find(McScene, { where: { projectId } });
+    const failed = scenes
+      .filter((s) => s.status === McSceneStatus.FAILED)
+      .sort((a, b) => a.idx - b.idx);
+    if (failed.length === 0) return false;
+    const active = await manager.count(McStep, {
+      where: {
+        projectId,
+        status: In([
+          McStepStatus.QUEUED,
+          McStepStatus.RUNNING,
+          McStepStatus.PROVIDER_WAIT,
+          McStepStatus.INGESTING,
+        ]),
+      },
+    });
+    if (active > 0) return false;
+    const won = await this.transitions.casTransition(
+      manager,
+      McProject,
+      projectId,
+      McProjectStatus.GENERATING,
+      McProjectStatus.NEEDS_ATTENTION,
+      {
+        errorCode: failed[0].errorCode,
+        errorMessage: failed[0].errorMessage,
+        quality: { ...resolveQuality(project.quality), resumePhase: 'production' },
+      },
+    );
+    if (!won) return false;
+    await this.appendProjectTransition(
+      manager,
+      project.userId,
+      projectId,
+      McProjectStatus.GENERATING,
+      McProjectStatus.NEEDS_ATTENTION,
+      {
+        reason: 'remaining_failures',
+        errorCode: failed[0].errorCode,
+        sceneId: failed[0].scriptSceneId,
+        failedScenes: failed.length,
+        resumePhase: 'production',
+      },
+    );
     return true;
   }
 

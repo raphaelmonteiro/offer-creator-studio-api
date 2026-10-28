@@ -63,6 +63,7 @@ import {
 import { MC_EMPTY_QUALITY, MC_PIPELINE_LEGACY, MC_PIPELINE_V2 } from './domain/mc-quality';
 import { availableProjectActions, McProjectAction } from './domain/mc-project-available-actions';
 import { McErrorAction, presentFailure } from './domain/mc-failure-messages';
+import { McTalkChunkView, talkChunksView } from './domain/mc-talk-chunks-view';
 import { buildCutoutIssue, CHARACTER_CUTOUT_FAILED, McCutoutIssue } from './domain/mc-cutout-issue';
 import {
   clipInspectionView,
@@ -653,6 +654,8 @@ export class CommercialsService {
       availableActions: McProjectAction[];
       /** Relatório do recorte reprovado (video-mascote-transparente, D7); null fora desse estado. */
       cutoutIssue: McCutoutIssue | null;
+      /** Fala contínua (video-fala-continua, D13): trechos da revisão corrente; null fora do modo ou antes da produção. */
+      talkChunks: McTalkChunkView[] | null;
     }
   > {
     const project = await this.dataSource.getRepository(McProject).findOneBy({ id });
@@ -684,6 +687,7 @@ export class CommercialsService {
       ...project,
       ...presentFailure(project.errorCode, project.errorMessage),
       cutoutIssue: await this.cutoutIssueOf(project, steps, availableActions),
+      talkChunks: talkChunksView(project.script, project.revision, steps),
       finalUrl: url(project.finalAssetId),
       posterUrl: (project.finalAssetId && urls.get(project.finalAssetId)?.posterUrl) || null,
       lastDeliveryUrl: url(lastDeliveryAssetId),

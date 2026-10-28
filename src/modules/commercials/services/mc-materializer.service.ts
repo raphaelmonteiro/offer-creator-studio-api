@@ -2,9 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { kitTileIdForFraming } from '../domain/mc-cutout-request';
 import { McTalkPreconditionError } from '../domain/mc-talk-precondition.error';
 import {
+  ChunkRerollScope,
   isContinuousProject,
   materializeTalkChunks,
   quoteTalkChunks,
+  resolveChunkReroll,
 } from './mc-talk-chunk-materializer';
 import { EntityManager, In } from 'typeorm';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
@@ -892,6 +894,23 @@ export class McMaterializerService {
       rewriteCount: quoted.filter((q) => q.rewrite).length,
       estimatedUsd: Number(quoted.reduce((sum, q) => sum + q.estimatedUsd, 0).toFixed(4)),
     };
+  }
+
+  /**
+   * Fala contínua (D13): o que um reroll das falas `targets` regrava — o trecho delas e os seguintes
+   * (cascata). `null` no modo de hoje. Sem escrita: o chamador reseta as cenas e materializa.
+   */
+  async resolveChunkReroll(
+    manager: EntityManager,
+    project: McProject,
+    script: McScript,
+    targets: McScene[],
+  ): Promise<ChunkRerollScope | null> {
+    if (!isContinuousProject(project, script)) return null;
+    const scenes = (await manager.find(McScene, { where: { projectId: project.id } })).filter(
+      (s) => s.status !== McSceneStatus.CANCELED,
+    );
+    return resolveChunkReroll(this, manager, { project, script, scenes, targets });
   }
 
   /** Cotação por trecho (fala contínua, D13); plano que não fecha (fala acima do motor) → `null`. */

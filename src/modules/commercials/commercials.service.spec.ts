@@ -169,6 +169,23 @@ describe('CommercialsService.createProject — kill-switch + mini-reserva (plano
       expect(cutout.options).toMatchObject({ cutout: true, framing: 'corpo' });
     });
 
+    it('fala contínua: a flag decide NA CRIAÇÃO (talking_art) e vai para as opções; desligada, as opções não ganham campo; scenes nunca recebe', async () => {
+      process.env.MC_FORMATS = 'talking_art';
+      process.env.MC_PIPELINE_V2 = 'all';
+      delete process.env.MC_TALK_CONTINUOUS;
+      const off = await service.createProject('u1', f1);
+      expect(off.options).not.toHaveProperty('talkMode');
+      process.env.MC_TALK_CONTINUOUS = 'true';
+      try {
+        const on = await service.createProject('u1', f1);
+        expect(on.options).toMatchObject({ talkMode: 'continuous' });
+        const f3 = await service.createProject('u1', { ...dto, format: 'scenes' });
+        expect(f3.options).not.toHaveProperty('talkMode');
+      } finally {
+        delete process.env.MC_TALK_CONTINUOUS;
+      }
+    });
+
     it('`scenes` passa sempre, mesmo com MC_FORMATS vazio e MC_PIPELINE_V2=off (legado)', async () => {
       const project = await service.createProject('u1', { ...dto, format: 'scenes' });
       expect(project).toMatchObject({ format: 'scenes', pipelineVersion: 1, channel: 'instagram' });

@@ -238,6 +238,39 @@ describe('McProjectActionsService — duplicar em outro formato (plano §7.2)', 
     expect((saved[0] as { logoBox: unknown }).logoBox).not.toBe(source.logoBox);
   });
 
+  describe('fala contínua: a cópia RELÊ a flag (Q5)', () => {
+    beforeEach(() => {
+      process.env.MC_FORMATS = 'offer_piece,talking_art';
+      Object.assign(source, { pipelineVersion: MC_PIPELINE_V2, format: 'talking_art' });
+    });
+    afterEach(() => delete process.env.MC_TALK_CONTINUOUS);
+
+    it('origem no modo de hoje + flag ligada: a cópia nasce contínua (roteiro e opções) e o original não muda', async () => {
+      process.env.MC_TALK_CONTINUOUS = 'true';
+      await service.duplicateProject(userId, 'p1', {});
+      expect((saved[0].script as McScript).talkMode).toBe('continuous');
+      expect((saved[0].options as { talkMode?: string }).talkMode).toBe('continuous');
+      expect(source.script as McScript).not.toHaveProperty('talkMode');
+      expect(source.options).not.toHaveProperty('talkMode');
+    });
+
+    it('origem contínua + flag desligada: a cópia nasce no modo de hoje; o original segue contínuo', async () => {
+      (source.script as McScript).talkMode = 'continuous';
+      (source.options as Record<string, unknown>).talkMode = 'continuous';
+      await service.duplicateProject(userId, 'p1', {});
+      expect(saved[0].script as McScript).not.toHaveProperty('talkMode');
+      expect(saved[0].options).not.toHaveProperty('talkMode');
+      expect((source.script as McScript).talkMode).toBe('continuous');
+    });
+
+    it('formato F3 (scenes) nunca ganha o modo, mesmo com a flag ligada', async () => {
+      process.env.MC_TALK_CONTINUOUS = 'true';
+      Object.assign(source, { format: 'scenes' });
+      await service.duplicateProject(userId, 'p1', {});
+      expect(saved[0].script as McScript).not.toHaveProperty('talkMode');
+    });
+  });
+
   it('origem legada (pipelineVersion 1) copia sem quality e sem clonar cenas', async () => {
     source.pipelineVersion = 1;
     await service.duplicateProject(userId, 'p1', {});

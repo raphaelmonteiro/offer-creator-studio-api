@@ -528,10 +528,14 @@ export class CommercialsController {
     @Body() dto: Partial<RevisionDto> | undefined,
   ) {
     if (CommercialsController.isUuid(scene)) {
-      if (dto?.expectedRevision == null) {
-        throw new BadRequestException('expectedRevision é obrigatório no pipeline v2.');
+      // corpo com tipo de união escapa do pipe global: `expectedRevision` ausente ou não inteiro → 400
+      const revision = dto?.expectedRevision;
+      if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 0) {
+        throw new BadRequestException(
+          'expectedRevision é obrigatório no pipeline v2 (inteiro >= 0).',
+        );
       }
-      return this.quality.rerollScene(user.id, id, scene, dto.expectedRevision);
+      return this.quality.rerollScene(user.id, id, scene, revision);
     }
     return this.actions.rerollScene(user.id, id, CommercialsController.parseIdx(scene));
   }

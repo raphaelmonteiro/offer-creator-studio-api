@@ -179,6 +179,20 @@ describe('McScriptProcessor — diretor da peça de ofertas (tarefa 5.2)', () =>
     expect(validateScriptV2(script, { format: 'offer_piece' })).toEqual([]);
   });
 
+  it('fala contínua: o modo decidido na criação (options.talkMode) é congelado no roteiro; sem ele o roteiro não ganha o campo', async () => {
+    process.env.MC_SCRIPT_PROVIDER = 'mock';
+    await processor.process({ stepId: 'st' });
+    expect(saved()).not.toHaveProperty('talkMode');
+    manager.update.mockClear();
+    (project.options as Record<string, unknown>).talkMode = 'continuous';
+    try {
+      await processor.process({ stepId: 'st' });
+      expect(saved().talkMode).toBe('continuous');
+    } finally {
+      delete (project.options as Record<string, unknown>).talkMode;
+    }
+  });
+
   it('openai: o prompt leva a validade para o fechamento e o roteiro sai como peça', async () => {
     process.env.MC_SCRIPT_PROVIDER = 'openai';
     process.env.OPENAI_API_KEY = 'sk-test';
