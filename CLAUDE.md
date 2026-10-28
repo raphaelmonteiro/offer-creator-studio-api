@@ -84,6 +84,11 @@ MC_RENDER_FONT_FILE           # dica só para o preflight (DejaVuSans.ttf fora d
 MC_CAROUSEL_RENDERER          # mock (default com pipeline mock) | remotion — renderizador do F2
 MC_RENDER_ASSET_BASE_URL      # base absoluta das mídias passadas ao Remotion (default http://127.0.0.1:3001)
 MC_COMPOSITION_VERSION        # versão das composições @chroma/video-templates no hash do render (default 0.3.0; vale a do pacote quando carregado)
+MC_TALK_CONTINUOUS            # `true` liga a FALA CONTÍNUA (personagem em tomada contínua) para projetos NOVOS de offer_piece e talking_art (só a API lê; padrão desligada; congelada no roteiro); GET config informa
+MC_TALK_CHUNK_MAX_S           # teto (s) de áudio por trecho (padrão 10, ≤ maxChunkS do motor; vazio = maxChunkS; inválido derruba o boot)
+MC_TALK_POLL_PER_AUDIO_S      # s de espera por s de áudio no provider_wait do talk de trecho (padrão 150; piso 15 min, teto 40 min)
+MC_MOCK_POSE / MC_CLIP_INSPECTION_MOCK
+                              # só worker + provider mock: `on` liga a pose do clipe mock também no modo de hoje (medir o salto); `text`|`text_once` inventa o veredito de texto no clipe do trecho (QA sem chamada paga)
 MC_CHARACTER_CUTOUT           # `true` liga o personagem SEM FUNDO e o enquadramento de corpo (só a API lê; padrão desligado); GET config informa
 MC_CUTOUT_MOCK                # `unstable` (só no worker, só com MC_PIPELINE_PROVIDER=mock): o talk mock devolve fundo-chave que muda de tom (fixture da reprovação)
 MC_VIDEO_TEMPLATES_DIR        # checkout local do pacote de composição (dev, enquanto ele não é dependência)
@@ -609,11 +614,11 @@ com o TTS original e o custo conta os segundos enviados (uma fala de 2 s custa 5
 
 | Grupo | Rotas |
 |-------|-------|
-| Config | `GET config` (formatos habilitados e render por formato) |
+| Config | `GET config` (formatos habilitados, render por formato, `characterCutout`, `talkContinuous`) |
 | Kits | `POST/GET kits`, `GET kits/suggest?clientId=`, `GET kits/:id`, `POST kits/:id/body-tile`, `POST kits/:id/approve`, `POST kits/:id/regenerate-reference`, `PATCH kits/:id/sheet`, `POST kits/:id/sheet/translate`, `GET/POST kits/:id/candidates`, `POST kits/:id/candidates/:cid/choose`, `POST kits/:id/use-as-is`, `POST kits/:id/mouth-variant` |
 | Vozes | `GET voices` (curadas + do próprio usuário), `POST voices/preview` |
 | Arte | `POST art` (PNG/JPEG → asset `video_art` com aspecto inferido), `GET art/:id`, `GET art-sources/:kind/:id/offers` |
-| Projetos | `POST projects`, `POST projects/from-art`, `GET projects[?sourceKind&sourceId]`, `GET projects/:id`, `POST projects/:id/duplicate`, `PATCH projects/:id/script`, `GET projects/:id/quote`, `POST projects/:id/prepare`, `POST projects/:id/approve-production`, `PATCH projects/:id/composition`, `POST projects/:id/approve-assembly`, `POST projects/:id/cancel` |
+| Projetos | `POST projects`, `POST projects/from-art`, `GET projects[?sourceKind&sourceId]`, `GET projects/:id`, `POST projects/:id/duplicate`, `PATCH projects/:id/script`, `GET projects/:id/quote`, `POST projects/:id/prepare`, `POST projects/:id/scenes/:scene/reroll`, `POST projects/:id/approve-production`, `PATCH projects/:id/composition`, `POST projects/:id/approve-assembly`, `POST projects/:id/cancel` |
 | F1 | `POST projects/:id/logo-box/detect`, `PUT projects/:id/logo-box`, `GET projects/:id/window-warnings` |
 | F2 | `PATCH projects/:id/offers/:offerId`, `POST projects/:id/offers/:offerId/refresh` |
 | Peças | `POST/GET pieces`, `GET/PATCH/DELETE pieces/:id` (PATCH com `expectedRevision` → 409 `REVISION_CONFLICT`), `POST pieces/:id/save-as-template`, `POST projects/from-piece`, `PATCH projects/:id/piece` |
@@ -647,6 +652,44 @@ character_cutout_failed` (sem re-execução paga) e projeto em `needs_attention`
 e segue reprovando texto no corpo/roupa. O pacote `@chroma/video-templates` 0.3.0 não desenha painel no modo sem fundo
 (`COMPOSITION_VERSION` 0.3.0; o pin do `package.json` sobe quando o desenvolvedor publicar o pacote). e2e mock:
 `docs/evidence/mascot-quality/e2e/e2e-piece-cutout.mjs` (modos `stable` e `unstable`).
+
+**Fala contínua** (change `video-fala-continua`; atrás de `MC_TALK_CONTINUOUS`, desligada por padrão; `GET config` →
+`talkContinuous: { enabled, chunkMaxS: { economico, premium, logo } }`; contrato no `design.md` da change, D20). Em `offer_piece`
+(todos os modos de painel) e `talking_art` o personagem fala várias frases numa **única tomada**: as falas consecutivas que cabem no
+teto do trecho (`MC_TALK_CHUNK_MAX_S`, 10 s, sempre ≤ `maxChunkS` do motor; `domain/mc-talk-chunks.ts`, agrupamento guloso em ordem,
+nenhuma fala dividida; fala sozinha acima do teto e ≤ `maxChunkS` vira trecho próprio) vão ao motor numa chamada só. O modo é
+decidido na CRIAÇÃO do projeto (`options.talkMode` → `script.talkMode`, congelado; desligar a flag depois não muda o projeto,
+`duplicate` relê a flag; projeto sem `talkMode` segue "uma fala, um clipe", mesmos hashes). Peças:
+- **Step `talk` por trecho**, ancorado na cena LÍDER (sem migration): `inputSnapshot.chunk` (falas, instantes, cauda de junção de
+  200 ms, `join`); as cenas seguidoras não têm step e viram `ready` na transação do ingest. O scheduler só libera o trecho com os TTS
+  de todas as falas e o trecho anterior concluído (`domain/mc-scheduler.ts`); geração serial só ENTRE trechos. Hash:
+  `TalkHashInputV2.chunk` só quando há mais de uma fala, cauda ou junção; prompt contínuo (`buildTalkPrompt(..., { continuous })`)
+  troca a pose neutra no início/fim por "mesma pose do primeiro ao último quadro". Falha do trecho derruba todas as falas dele com o
+  mesmo `errorCode` (catálogo `video-provider-failure-reason`; `chunk_join_frame_missing`, `audio_too_large`, `clip_identity_drift`).
+- **Áudio**: o submit emenda os TTS (`processors/mc-talk-chunk-audio.ts`, `domain/mc-talk-chunk-ffmpeg.ts`) com os silêncios da
+  timeline e o enchimento ÚNICO do motor (H3, 5,15 s, uma vez por trecho); uma fala solta sem cauda vai como está. O áudio final do
+  vídeo continua sendo o TTS de cada fala nos instantes da timeline.
+- **Junção** (P-20 (b)): o último quadro do trecho (`talk_join_frame`, PNG da última fatia) é a imagem enviada ao trecho seguinte;
+  só o personagem vai ao motor. Quadro ausente = `chunk_join_frame_missing` (terminal, sem chamada paga). Inspeção do trecho com
+  junção compara a identidade com o tile (`identity_drift`, classe `quality`).
+- **Ingest** (`processors/mc-talk-chunk-ingest.ts`): um passe de ffmpeg conforma e fatia por fala (fronteiras de vídeo na grade de
+  30 fps, `MC_CHUNK_TAIL_FRAMES`); uma inspeção por trecho; um asset `scene_synced` por cena (a líder leva custo/motor/`chunkSlices`).
+- **Compose**: fatias encostadas, sem seguras, entrada atrasada nem fade em nenhuma fronteira (inclui entre trechos); timeline por
+  `metadata.speechMs` (instantes de áudio e legendas = os de hoje); hash do compose leva `continuous` só quando em uso.
+- **Regravação e cotação por trecho**: reroll de qualquer fala regrava o trecho inteiro e os seguintes (resposta `reroll: {
+  chunkIndex, sceneIds, cascadeSceneIds }`); só a fala pedida cobra crédito (regra de reroll existente), a cascata e as irmãs não
+  (Q2); a cotação (`GET quote`) lista `talk.chunks` (`new|edited|cascade|cached`, `chargedSceneIds`, custo de API) e tira da conta de
+  créditos o que não cobra; `GET projects/:id` ganha `talkChunks`. Reroll sem `expectedRevision` inteiro é 400.
+- **Poll**: `talk` de trecho espera `clamp(áudio × MC_TALK_POLL_PER_AUDIO_S, 15 min, 40 min)`; todo `talk` que estoura o tempo pede o
+  cancelamento do job ao fal (`FalQueueClient.cancel`, melhor esforço).
+- **P-33**: projeto em `generating` em que só restam falas em falha e nada anda volta a `needs_attention` com o motivo que resta
+  (`McPipelineService.parkIfOnlyFailuresRemain`, nos dois modos).
+- **Roteiro curto da peça** (P-21): `offer_piece` aceita de N (ofertas faladas) a N + 2 falas, abertura e fechamento opcionais; o
+  papel vem do `productRef` (`domain/mc-piece-script-lines.ts`); 422 `SCRIPT_INVALID` com `issues[].code` `CAROUSEL_LINES_COUNT`,
+  `CAROUSEL_LINE_KIND`...; `offer_carousel` e `scenes` não mudam.
+- **Medida de "sem salto"** (`domain/mc-jump-metric.ts`): 1 − SSIM entre quadros vizinhos na janela do personagem; fronteira
+  passa se ≤ `max(2 × P95, 0,01)`. e2e mock: `docs/evidence/mascot-quality/e2e/e2e-piece-continuous.mjs` (2 e 6 falas; o `talk`
+  mock tem pose que muda com o tempo e recomeça em cada chamada, o que torna o salto do modo de hoje mensurável).
 
 **Falhas de fornecedor e motivo em pt-BR** (change `video-worker-confiabilidade`; contrato no `design.md` da change):
 `shared/providers/provider-errors.ts#classifyHttpRejection(status, corpo)` é a regra única (fal/Runway/HeyGen pela
