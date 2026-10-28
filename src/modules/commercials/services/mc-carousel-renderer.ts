@@ -16,6 +16,7 @@ import {
 } from '../domain/mc-render.config';
 import { bootCwd, resolveAppPath } from '../../../common/config/uploads-dir';
 import { McRenderPhase, toRenderFailure } from './mc-render-failure';
+import { RenderDeathWatch } from './mc-render-watchdog';
 
 /**
  * Renderização da composição `OfferCarousel` do F2 (change
@@ -171,6 +172,8 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
   private modules: Promise<RemotionModules> | null = null;
   private serveUrl: Promise<string> | null = null;
   private browser: Promise<RemotionBrowser> | null = null;
+  /** Renders em curso que querem saber quando o navegador em cache fecha por conta própria. */
+  private readonly closedListeners = new Set<() => void>();
 
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
@@ -272,7 +275,9 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
         .then((browser) => {
           // Chromium morto em cache faria o render seguinte pendurar: zera só se ainda for ESTA instância.
           const forget = () => {
-            if (this.browser === opening) this.browser = null;
+            if (this.browser !== opening) return;
+            this.browser = null;
+            this.closedListeners.forEach((notify) => notify());
           };
           browser.on?.('closed', forget);
           browser.on?.('closed-silent', forget);
@@ -344,6 +349,9 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
     const phase: { current: McRenderPhase } = { current: 'bundle' };
     const { delayRenderTimeoutMs, totalTimeoutMs } = mcRenderTimeouts();
     const { cancelSignal, cancel } = modules.renderer.makeCancelSignal();
+    const watch = new RenderDeathWatch(cancel);
+    const onClosed = () => watch.browserClosed();
+    this.closedListeners.add(onClosed);
     let timer: NodeJS.Timeout | undefined;
     try {
       const { serveUrl, browser } = await this.openRuntime(modules, phase);
@@ -369,6 +377,7 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
         concurrency: 1,
         cancelSignal,
         onProgress: ({ progress }: { progress: number }) => {
+          watch.progressed(progress);
           const pct = Math.round(progress * 100);
           if (pct !== lastPct) {
             lastPct = pct;
@@ -378,11 +387,27 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
       });
     } catch (err) {
       await this.discardUnlessUnavailable(err);
-      throw toRenderFailure(err, phase.current);
+      throw this.failureOf(err, phase.current, watch);
     } finally {
+      this.closedListeners.delete(onClosed);
+      watch.stop();
       if (timer) clearTimeout(timer);
     }
     return { outputPath: request.outputPath, renderer: this.kind, compositionVersion };
+  }
+
+  /** Chromium morto sem retomada (cancelado pela vigia) ou cancelado depois de morrer: render interrompido. */
+  private failureOf(err: unknown, phase: McRenderPhase, watch: RenderDeathWatch): unknown {
+    if (watch.stalledAfterDeath() || (watch.browserDied() && /cancelled/i.test(String(err)))) {
+      this.logger.warn(
+        'Chromium do render morreu e os quadros não voltaram a andar: render cancelado e interrompido (nova execução pela fila)',
+      );
+      const cause = new Error(
+        `o Chromium morreu durante o render e não retomou (${(err as Error)?.message ?? err})`,
+      );
+      return toRenderFailure(cause, 'render_media', true);
+    }
+    return toRenderFailure(err, phase);
   }
 
   async dispose(): Promise<void> {

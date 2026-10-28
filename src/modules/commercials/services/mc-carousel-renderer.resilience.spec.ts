@@ -4,6 +4,7 @@ import { McRenderInterruptedError } from '../domain/mc-error-classes';
 import { MC_NO_MUSIC_SRC, OfferCarouselProps } from '../domain/mc-offer-carousel-props';
 import { RemotionCarouselRenderer, RemotionModules } from './mc-carousel-renderer';
 import { fakeModules, props, request } from './mc-carousel-renderer.fixture';
+import { MC_RENDER_DEATH_GRACE_MS } from './mc-render-watchdog';
 import { RemotionStillRenderer } from './mc-still-renderer';
 
 type Listener = () => void;
@@ -144,6 +145,82 @@ describe('RemotionCarouselRenderer — morte de processo vira falha do step (cor
     expect(media).toBe(p);
     expect(select.music).toEqual({ src: MC_NO_MUSIC_SRC, volume: 0 });
     expect(fake.modules.core.parseOfferCarouselProps).toHaveBeenCalledWith(p);
+  });
+});
+
+describe('RemotionCarouselRenderer — Chromium morre no meio do render e o Remotion não retoma (vigia)', () => {
+  const env = { MC_RENDER_BROWSER: '/usr/bin/chromium-browser' };
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  /** renderMedia fica pendurado até o cancelamento (`cancel()`), como o render medido na stack qa-wc. */
+  function hangingRender() {
+    const fake = fakeModules();
+    const browser = listeningBrowser();
+    fake.modules.renderer.openBrowser.mockResolvedValue(browser);
+    let progress: ((p: { progress: number }) => void) | undefined;
+    let finish: () => void = () => undefined;
+    fake.modules.renderer.renderMedia.mockImplementationOnce(
+      (opts: { onProgress?: (p: { progress: number }) => void }) =>
+        new Promise((resolve, reject) => {
+          progress = opts.onProgress;
+          finish = () => resolve(undefined);
+          fake.cancel.mockImplementation(() => reject(new Error('renderMedia() got cancelled')));
+        }),
+    );
+    const renderer = new RemotionCarouselRenderer(env, async () => fake.modules as RemotionModules);
+    return { fake, browser, renderer, progress: () => progress, finish: () => finish() };
+  }
+
+  it('navegador morre e os quadros não voltam em 60 s: cancela e falha como render_interrupted (não espera o prazo total)', async () => {
+    const { fake, browser, renderer } = hangingRender();
+    const result = renderer.render(request()).catch((e) => e);
+    await jest.advanceTimersByTimeAsync(1_000);
+    browser.emit('closed-silent'); // o Remotion fecha o navegador morto
+    await jest.advanceTimersByTimeAsync(MC_RENDER_DEATH_GRACE_MS + 6_000);
+    const err = await result;
+    expect(fake.cancel).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(McRenderInterruptedError);
+    expect(err.phase).toBe('render_media');
+    expect(err.message).toContain('Chromium morreu durante o render');
+  });
+
+  it('o Remotion retoma sozinho (quadros voltam a andar): a vigia não cancela e o render termina', async () => {
+    const { fake, browser, renderer, progress, finish } = hangingRender();
+    const result = renderer.render(request());
+    await jest.advanceTimersByTimeAsync(1_000);
+    browser.emit('closed-silent');
+    for (let i = 0; i < 20; i++) {
+      await jest.advanceTimersByTimeAsync(10_000); // 200 s no total, com quadros andando
+      progress()?.({ progress: i / 20 });
+    }
+    expect(fake.cancel).not.toHaveBeenCalled();
+    finish();
+    await expect(result).resolves.toMatchObject({ renderer: 'remotion' });
+  });
+
+  it('onProgress repetido com o mesmo valor (render parado) não conta como retomada', async () => {
+    const { fake, browser, renderer, progress } = hangingRender();
+    const result = renderer.render(request()).catch((e) => e);
+    await jest.advanceTimersByTimeAsync(1_000);
+    progress()?.({ progress: 0.14 });
+    browser.emit('closed-silent');
+    for (let i = 0; i < 14; i++) {
+      await jest.advanceTimersByTimeAsync(5_000);
+      progress()?.({ progress: 0.14 }); // mesmo valor: o render segue parado
+    }
+    const err = await result;
+    expect(fake.cancel).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(McRenderInterruptedError);
+  });
+
+  it('sem morte do navegador a vigia não interfere (render lento não é cancelado)', async () => {
+    const { fake, renderer, finish } = hangingRender();
+    const result = renderer.render(request());
+    await jest.advanceTimersByTimeAsync(MC_RENDER_DEATH_GRACE_MS * 3);
+    expect(fake.cancel).not.toHaveBeenCalled();
+    finish();
+    await expect(result).resolves.toBeDefined();
   });
 });
 

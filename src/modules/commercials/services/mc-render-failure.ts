@@ -32,11 +32,15 @@ export function isProcessDeath(err: unknown): boolean {
 /**
  * Converte a falha do render em `McRenderInterruptedError` (código `render_interrupted`) quando o processo
  * morreu ou o Chromium não subiu; o resto (mídia 404, delayRender, cancelamento por prazo, bundle) segue como
- * veio, para não esconder causa de conteúdo. Erro tipado terminal (`RENDER_UNAVAILABLE` etc.) passa intacto.
+ * veio, para não esconder causa de conteúdo. `forceInterrupted`: a vigia do render já sabe que o Chromium morreu. Erro tipado terminal (`RENDER_UNAVAILABLE` etc.) passa intacto.
  */
-export function toRenderFailure(err: unknown, phase: McRenderPhase): unknown {
+export function toRenderFailure(
+  err: unknown,
+  phase: McRenderPhase,
+  forceInterrupted = false,
+): unknown {
   if (err instanceof McRenderInterruptedError || err instanceof TerminalProviderError) return err;
-  if (phase !== 'open_browser' && !isProcessDeath(err)) return err;
+  if (!forceInterrupted && phase !== 'open_browser' && !isProcessDeath(err)) return err;
   const message = err instanceof Error ? err.message : String(err);
   return new McRenderInterruptedError(phase, message, { cause: err });
 }
