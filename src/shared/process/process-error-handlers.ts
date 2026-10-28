@@ -53,6 +53,35 @@ function describeError(reason: unknown): { message: string; stack?: string } {
   return { message: String(reason) };
 }
 
+function logRecognizedPipeError(logger: ProcessErrorLogger, message: string, stack?: string): void {
+  logger.error(
+    `Erro de pipe de processo filho durante o render (reconhecido; o step falha pela promessa): ${message}`,
+    stack,
+  );
+}
+
+/** Encerramento controlado: `shutdown()` limitado a `graceMs` e depois `exit(1)`; falha do shutdown é registrada. */
+async function terminateWorker(
+  proc: ProcessLike,
+  options: ProcessErrorHandlerOptions,
+  graceMs: number,
+): Promise<void> {
+  proc.exitCode = 1;
+  let timer: NodeJS.Timeout | undefined;
+  const limit = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, graceMs);
+  });
+  try {
+    await Promise.race([(async () => options.shutdown())(), limit]);
+  } catch (err) {
+    const { message, stack } = describeError(err);
+    options.logger.error(`Falha no encerramento do worker: ${message}`, stack);
+  } finally {
+    if (timer) clearTimeout(timer);
+    options.exit(1);
+  }
+}
+
 /**
  * Política do worker para erro que escapou de qualquer `try` (design D1c). Todo erro é registrado em nível
  * `error` com mensagem e pilha ANTES de qualquer decisão; nenhum é engolido.
@@ -66,27 +95,13 @@ export function installProcessErrorHandlers(
   proc: ProcessLike,
   options: ProcessErrorHandlerOptions,
 ): void {
-  const { logger, shutdown, exit } = options;
+  const { logger } = options;
   const graceMs = options.graceMs ?? WORKER_FATAL_GRACE_MS;
   const hasChildWork = options.hasChildWork ?? hasChildWorkInFlight;
   let shuttingDown = false;
-
-  const terminate = async (): Promise<void> => {
-    if (shuttingDown) return;
+  const terminate = () => {
     shuttingDown = true;
-    proc.exitCode = 1;
-    let timer: NodeJS.Timeout | undefined;
-    const limit = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, graceMs);
-    });
-    try {
-      await Promise.race([(async () => shutdown())(), limit]);
-    } catch (err) {
-      logger.error(`Falha no encerramento do worker: ${describeError(err).message}`);
-    } finally {
-      if (timer) clearTimeout(timer);
-      exit(1);
-    }
+    return terminateWorker(proc, options, graceMs);
   };
 
   proc.on('uncaughtException', (err) => {
@@ -94,10 +109,7 @@ export function installProcessErrorHandlers(
     if (shuttingDown) {
       logger.error(`uncaughtException durante o encerramento: ${message}`, stack);
     } else if (isChildPipeError(err) && hasChildWork()) {
-      logger.error(
-        `Erro de pipe de processo filho durante o render (reconhecido; o step falha pela promessa): ${message}`,
-        stack,
-      );
+      logRecognizedPipeError(logger, message, stack);
     } else {
       logger.error(`uncaughtException fatal: encerrando o worker: ${message}`, stack);
       void terminate();
@@ -107,10 +119,7 @@ export function installProcessErrorHandlers(
   proc.on('unhandledRejection', (reason) => {
     const { message, stack } = describeError(reason);
     if (isChildPipeError(reason) && hasChildWork()) {
-      logger.error(
-        `Erro de pipe de processo filho durante o render (reconhecido; o step falha pela promessa): ${message}`,
-        stack,
-      );
+      logRecognizedPipeError(logger, message, stack);
     } else {
       logger.error(`unhandledRejection não reconhecida (worker segue): ${message}`, stack);
     }
