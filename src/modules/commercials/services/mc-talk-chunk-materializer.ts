@@ -171,35 +171,54 @@ export async function planProjectChunks(
     const leader = scenes[0];
     const inScope = !args.scope || (firstTarget >= 0 && plan.index >= firstTarget);
     const isTarget = !!args.scope && plan.sceneIds.some((id) => targets.has(id));
-    const attempt =
-      isTarget && args.scope?.forceNewAttempt
-        ? await mat.nextAttemptFor(manager, leader, McStepType.TALK)
-        : await mat.currentOrFirstAttemptFor(manager, leader, McStepType.TALK);
+    const rerollTarget = isTarget && args.scope?.forceNewAttempt === true;
     const prev = planned[plan.index - 1];
     const join = prev
       ? { fromStepHash: await previousHash(manager, prev), fromSceneRowId: prev.leader.id }
       : null;
     const scriptScene = script.scenes.find((s) => s.sceneId === leader.scriptSceneId);
     const prompts = scriptScene ? effectiveScenePrompts(scriptScene) : null;
-    const output = buildChunkTalkStep({
-      ctx,
-      chunk: plan,
-      speeches: scenes.map((s) => ({
-        sceneRowId: s.id,
-        sceneId: s.scriptSceneId as string,
-        audioAssetId: s.audioAssetId as string,
-      })),
-      join,
-      motion: (prompts?.motion ?? scriptScene?.actionPrompt ?? '').trim(),
-      lang: prompts?.lang ?? 'pt',
-      sceneType: scriptScene?.sceneType,
-      attempt,
-      count: chunks.length,
-    });
-    const rerollTarget = isTarget && args.scope?.forceNewAttempt === true;
-    const cached = rerollTarget
+    const build = (attempt: number) =>
+      buildChunkTalkStep({
+        ctx,
+        chunk: plan,
+        speeches: scenes.map((s) => ({
+          sceneRowId: s.id,
+          sceneId: s.scriptSceneId as string,
+          audioAssetId: s.audioAssetId as string,
+        })),
+        join,
+        motion: (prompts?.motion ?? scriptScene?.actionPrompt ?? '').trim(),
+        lang: prompts?.lang ?? 'pt',
+        sceneType: scriptScene?.sceneType,
+        attempt,
+        count: chunks.length,
+      });
+    let attempt = rerollTarget
+      ? await mat.nextAttemptFor(manager, leader, McStepType.TALK)
+      : await mat.currentOrFirstAttemptFor(manager, leader, McStepType.TALK);
+    let output = build(attempt);
+    let cached = rerollTarget
       ? null
       : await mat.findCachedOutput(manager, project.userId, McStepType.TALK, output.inputHash);
+    // Trecho regravado só pela junção (cascata) ou por fala editada: o hash mudou, mas a tentativa corrente
+    // continua sendo a do step antigo. Dois `talk` da mesma líder com a mesma tentativa deixam o agendador
+    // escolher um deles pela ordem física das linhas — às vezes o antigo, já concluído, e o novo nunca sai
+    // de `pending` (projeto preso em `generating`). Um step novo sempre abre tentativa nova.
+    if (
+      inScope &&
+      !cached &&
+      (await mat.talkAttemptHeldByOtherHash(manager, leader, attempt, output.inputHash))
+    ) {
+      attempt += 1;
+      output = build(attempt);
+      cached = await mat.findCachedOutput(
+        manager,
+        project.userId,
+        McStepType.TALK,
+        output.inputHash,
+      );
+    }
     const draft: ChunkDraft = {
       plan,
       scenes,

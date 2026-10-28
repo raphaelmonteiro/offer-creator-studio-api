@@ -983,6 +983,22 @@ export class McMaterializerService {
     return this.currentOrFirstAttempt(manager, scene, type);
   }
 
+  /**
+   * A líder já tem um step `talk` nesta tentativa com OUTRO hash (um step novo na mesma tentativa deixaria
+   * dois candidatos empatados para o agendador).
+   */
+  async talkAttemptHeldByOtherHash(
+    manager: EntityManager,
+    scene: McScene,
+    attempt: number,
+    inputHash: string,
+  ): Promise<boolean> {
+    const rows = await manager.find(McStep, {
+      where: { sceneId: scene.id, type: McStepType.TALK },
+    });
+    return rows.some((r) => (r.attempt ?? 1) === attempt && r.inputHash !== inputHash);
+  }
+
   /** Contexto do `talk` para a cotação; `null` (e log, se não for pré-condição) quando não monta. */
   private async quoteContext(
     manager: EntityManager,

@@ -242,6 +242,46 @@ describe('reroll por trecho e cotação (D13)', () => {
     expect(manager.steps().filter((s) => s.sceneId === scenes[0].id)).toHaveLength(1);
   });
 
+  it('a cascata nunca repete a tentativa do trecho: dois steps `talk` da mesma líder com a mesma tentativa deixavam o novo invisível ao agendador', async () => {
+    const { manager, service, script, project, scenes } = await delivered();
+    const leaderOf = (row: (typeof scenes)[number]) =>
+      manager
+        .steps()
+        .filter((s) => s.sceneId === row.id && s.type === McStepType.TALK)
+        .map((s) => s.attempt);
+    for (const round of [1, 2]) {
+      const { steps } = await service.materializeProductionV2(
+        manager,
+        project,
+        script,
+        [scenes[2]],
+        { forceNewAttempt: true },
+      );
+      // conclui o que foi criado, como o worker faria, antes do reroll seguinte
+      for (const step of steps) {
+        await manager.update(McStep, { id: step.id }, { status: McStepStatus.SUCCEEDED });
+      }
+      for (const leader of [scenes[2], scenes[4]]) {
+        const attempts = leaderOf(leader);
+        expect(new Set(attempts).size).toBe(attempts.length); // sem empate de tentativa
+      }
+      // o step novo da cascata é o de maior tentativa da líder do trecho 3
+      const cascade = steps.find((s) => s.sceneId === scenes[4].id)!;
+      expect(cascade.attempt).toBe(Math.max(...(leaderOf(scenes[4]) as number[])));
+      expect(cascade.attempt).toBe(round + 1);
+    }
+  });
+
+  it('repetir a materialização sem mudança (mesmo hash) não abre tentativa nova', async () => {
+    const { manager, service, script, project, scenes } = await delivered();
+    await service.materializeProductionV2(manager, project, script, scenes);
+    const attempts = manager
+      .steps()
+      .filter((s) => s.type === McStepType.TALK)
+      .map((s) => s.attempt);
+    expect(Math.max(...(attempts as number[]))).toBe(1);
+  });
+
   it('a cotação lista os trechos e, depois de editar a fala 1, marca o 1º como edited e os seguintes como cascade', async () => {
     const { manager, service, script, project, scenes } = await delivered();
     const AnimationAsset = (await import('../../../shared/media-assets/animation-asset.entity'))
