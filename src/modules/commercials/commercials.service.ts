@@ -38,8 +38,14 @@ import {
   assertFormatEnabled,
   assertPipelineV2ForFormat,
   isPipelineV2RequiredSatisfied,
+  mcTalkEngines,
   parseMcFormats,
 } from './domain/mc-pipeline.config';
+import {
+  effectiveChunkMaxS,
+  isTalkContinuousEnabled,
+  talkModeForNewProject,
+} from './domain/mc-talk-continuous.config';
 import {
   MC_OFFER_CAROUSEL_MAX_OFFERS,
   MC_OFFER_CAROUSEL_MAX_SPEECH_S,
@@ -86,6 +92,21 @@ import { McProject } from './entities/mc-project.entity';
 import { McScene } from './entities/mc-scene.entity';
 import { McStep } from './entities/mc-step.entity';
 
+/** `talkContinuous` do `GET config`: a flag e o teto efetivo do trecho por motor (D2). */
+export function talkContinuousConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): McCommercialsConfig['talkContinuous'] {
+  const engines = mcTalkEngines(env);
+  return {
+    enabled: isTalkContinuousEnabled(env),
+    chunkMaxS: {
+      economico: effectiveChunkMaxS(engines.economico.maxChunkS, env),
+      premium: effectiveChunkMaxS(engines.premium.maxChunkS, env),
+      logo: effectiveChunkMaxS(engines.logo.maxChunkS, env),
+    },
+  };
+}
+
 /** Jobs de LLM são curtos — expiração de 120s por publish (plano §6.4: expireInSeconds POR FILA). */
 const MC_LLM_EXPIRE_S = 120;
 
@@ -129,6 +150,14 @@ export interface McCommercialsConfig {
   render: Record<RenderFormat, RenderFormatAvailability> | null;
   /** Recorte do personagem (video-mascote-transparente): `MC_CHARACTER_CUTOUT` ligado. */
   characterCutout: { enabled: boolean };
+  /**
+   * Fala contínua (video-fala-continua, D2): `enabled` = `MC_TALK_CONTINUOUS`; `chunkMaxS` = teto efetivo
+   * do trecho (s) por motor (`min(maxChunkS, MC_TALK_CHUNK_MAX_S)`).
+   */
+  talkContinuous: {
+    enabled: boolean;
+    chunkMaxS: { economico: number; premium: number; logo: number };
+  };
 }
 
 /**
@@ -284,6 +313,7 @@ export class CommercialsService {
       },
       render: heartbeat?.render?.formats ?? null,
       characterCutout: { enabled: isCharacterCutoutEnabled(env) },
+      talkContinuous: talkContinuousConfig(env),
     };
   }
 
@@ -401,6 +431,8 @@ export class CommercialsService {
         lowerThirdBlur: dto.lowerThirdBlur,
         cutout: cutoutOptions?.cutout,
         framing: cutoutOptions?.framing,
+        // fala contínua: decidida pela flag AQUI e congelada (o worker copia para o roteiro)
+        talkMode: talkModeForNewProject(format),
         // v2: chave estável por produto desde a criação (snapshot do roteiro)
         products:
           pipelineVersion === MC_PIPELINE_V2

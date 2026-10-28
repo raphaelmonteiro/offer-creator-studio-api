@@ -38,6 +38,7 @@ import {
   McSceneStatus,
   McStepStatus,
 } from '../domain/mc-state-machines';
+import { readChunkSnapshot } from '../domain/mc-talk-chunk-step';
 import { McScript, McStepType } from '../domain/mc-types';
 
 /** Submits assíncronos caros (video/lipsync/talk): consomem no SUBMIT, verificável pelo providerJobId. */
@@ -763,6 +764,14 @@ export class McPipelineService {
           }
         }
       }
+      // fala contínua: a falha do trecho derruba TODAS as falas dele com o mesmo código (D6)
+      if (step.type === McStepType.TALK) {
+        await this.failChunkFollowers(manager, project, fresh, {
+          code,
+          failureMessage,
+          errorClass,
+        });
+      }
       // v2: a fase em que a falha ocorreu fica persistida para a retomada
       // (preparação volta à preparação; produção à produção — ADR §4.1).
       const fromStatus =
@@ -800,6 +809,62 @@ export class McPipelineService {
     if (adminAlertLine) this.logger.error(adminAlertLine);
     if (wonNeedsAttention) {
       await this.sendCompletionEmail(step.projectId, McProjectStatus.NEEDS_ATTENTION);
+    }
+  }
+
+  /**
+   * Fala contínua (D6): o `talk` de um trecho falha UMA vez e todas as cenas dele vão a `failed` com o
+   * mesmo `errorCode` — nenhuma meia-gravação é aproveitada. A líder já foi tratada pelo chamador.
+   * Trechos seguintes ficam `pending` (sem erro próprio) até o reroll.
+   */
+  private async failChunkFollowers(
+    manager: EntityManager,
+    project: McProject,
+    step: McStep,
+    failure: { code: string; failureMessage: string; errorClass: McErrorClass },
+  ): Promise<void> {
+    const chunk = readChunkSnapshot(step.inputSnapshot);
+    if (!chunk) return;
+    for (const rowId of chunk.sceneRowIds.slice(1)) {
+      const scene = await manager.findOneBy(McScene, { id: rowId });
+      if (!scene || scene.generation !== step.sceneGeneration) continue;
+      await this.transitions.casTransition(
+        manager,
+        McScene,
+        scene.id,
+        McSceneStatus.PENDING,
+        McSceneStatus.RUNNING,
+      );
+      const won = await this.transitions.casTransition(
+        manager,
+        McScene,
+        scene.id,
+        McSceneStatus.RUNNING,
+        McSceneStatus.FAILED,
+        { errorCode: failure.code, errorMessage: failure.failureMessage },
+      );
+      if (!won) continue;
+      await this.commercials.appendEvent(manager, {
+        userId: project.userId,
+        refKind: 'scene',
+        refId: scene.id,
+        kind: 'transition',
+        fromStatus: McSceneStatus.RUNNING,
+        toStatus: McSceneStatus.FAILED,
+        detail: { stepId: step.id, errorClass: failure.errorClass, errorCode: failure.code },
+      });
+      await this.transitions.notify(
+        manager,
+        project.userId,
+        {
+          kind: 'mc_scene',
+          projectId: project.id,
+          sceneId: scene.id,
+          status: McSceneStatus.FAILED,
+          errorCode: failure.code,
+        },
+        MC_EVENTS_CHANNEL,
+      );
     }
   }
 
@@ -887,6 +952,19 @@ export class McPipelineService {
     if (Object.keys(patch).length > 0) {
       await manager.update(McScene, { id: scene.id }, patch);
     }
+  }
+
+  /**
+   * Fala contínua (video-fala-continua, D6): cena SEGUIDORA de um trecho (sem step próprio) fica `ready`
+   * com a fatia dela na mesma transação em que o `talk` do trecho conclui.
+   */
+  async markChunkSceneReady(
+    manager: EntityManager,
+    userId: string,
+    scene: McScene,
+    finalAssetId: string,
+  ): Promise<void> {
+    await this.markSceneReady(manager, userId, scene, finalAssetId);
   }
 
   /** Cena ganhou o final: (pending→)running→ready com finalAssetId (plano §6.2). */

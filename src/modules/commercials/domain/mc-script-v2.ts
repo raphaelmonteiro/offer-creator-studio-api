@@ -1038,6 +1038,7 @@ export function scriptContentHash(script: McScript): string {
     ...(script.cutout === true ? { cutout: true } : {}),
     ...(script.framing ? { framing: script.framing } : {}),
     ...(script.cutoutKeyColor ? { cutoutKeyColor: script.cutoutKeyColor } : {}),
+    ...(script.talkMode === 'continuous' ? { talkMode: 'continuous' } : {}),
   });
 }
 

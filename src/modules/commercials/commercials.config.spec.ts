@@ -61,6 +61,7 @@ describe('CommercialsService.getConfig — formatos habilitados + render do hear
       formats: { scenes: true, talking_art: true, offer_carousel: false, offer_piece: false },
       render: null,
       characterCutout: { enabled: false },
+      talkContinuous: { enabled: false, chunkMaxS: { economico: 10, premium: 10, logo: 10 } },
     });
     expect(settings.getFresh).toHaveBeenCalledWith(WORKER_HEARTBEAT_KEY);
   });
@@ -70,6 +71,19 @@ describe('CommercialsService.getConfig — formatos habilitados + render do hear
     expect((await service.getConfig({ MC_CHARACTER_CUTOUT: 'true' })).characterCutout).toEqual({
       enabled: true,
     });
+  });
+
+  it('MC_TALK_CONTINUOUS informa a flag (padrão desligada) e o teto efetivo do trecho por motor', async () => {
+    expect((await service.getConfig({})).talkContinuous.enabled).toBe(false);
+    const on = await service.getConfig({ MC_TALK_CONTINUOUS: 'true' });
+    expect(on.talkContinuous).toEqual({
+      enabled: true,
+      chunkMaxS: { economico: 10, premium: 10, logo: 10 },
+    });
+    const wide = await service.getConfig({ MC_TALK_CONTINUOUS: 'true', MC_TALK_CHUNK_MAX_S: '' });
+    expect(wide.talkContinuous.chunkMaxS).toEqual({ economico: 15, premium: 15, logo: 15 });
+    const low = await service.getConfig({ MC_TALK_CHUNK_MAX_S: '8' });
+    expect(low.talkContinuous.chunkMaxS.economico).toBe(8);
   });
 
   it('MC_FORMATS vazio → só scenes (o F3 nunca é gated por MC_FORMATS)', async () => {

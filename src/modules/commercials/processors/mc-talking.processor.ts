@@ -42,6 +42,8 @@ import {
   talkFallbackEngine,
 } from '../domain/mc-talk-engines';
 import { buildTalkPrompt } from '../domain/mc-talk-prompts';
+import { ChunkSnapshot, chunkNeedsSplice, readChunkSnapshot } from '../domain/mc-talk-chunk-step';
+import { spliceChunkAudio } from './mc-talk-chunk-audio';
 import { McStepType, sceneActionPromptEn } from '../domain/mc-types';
 import { McKitIdentityMode } from '../domain/mc-kit-identity';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -493,8 +495,12 @@ export class McTalkingProcessor {
     // nada enviado), silêncio do submit e os limites DOCUMENTADOS por chamada
     // (7.1: OmniHuman ≤ 30 s a 1080p; H3 ≥ 5 s — validação terminal, sem custo;
     // abaixo do mínimo o áudio enviado já é o completado, nunca audio_too_short).
+    const chunk = readChunkSnapshot(step.inputSnapshot);
     const prepareAudio = async (model: string) => {
-      const sent = await this.talkAudioForEngine(model, audio, await speechMsFor(model));
+      const sent =
+        chunk && chunkNeedsSplice(chunk)
+          ? await this.chunkAudioForEngine(model, chunk)
+          : await this.talkAudioForEngine(model, audio, await speechMsFor(model));
       assertTalkAudioWithinEngineLimit(model, sent.submittedMs);
       return sent;
     };
@@ -605,6 +611,25 @@ export class McTalkingProcessor {
     }
   }
 
+  /**
+   * Áudio de um TRECHO (video-fala-continua, D5): a emenda dos TTS das falas com os silêncios da
+   * timeline, a cauda de junção e o enchimento único do motor (H3), calculado para o motor que
+   * realmente recebe (o fallback de logo → tier muda o mínimo). Os TTS originais não são tocados.
+   */
+  private async chunkAudioForEngine(model: string, chunk: ChunkSnapshot): Promise<McTalkSentAudio> {
+    const tts = await Promise.all(
+      chunk.speeches.map(async (s) => (await this.loadAsset(s.audioAssetId, 'áudio')).buffer),
+    );
+    const spliced = await spliceChunkAudio(this.ffmpeg, {
+      model,
+      chunk,
+      tts,
+      format: 'mp3',
+      withPad: true,
+    });
+    return { buffer: spliced.buffer, submittedMs: spliced.durationMs, padding: spliced.padding };
+  }
+
   /** Duração (ms) de um áudio em memória via ffprobe; falha ou desconhecida → null. */
   private async measureAudioMs(audio: Buffer): Promise<number | null> {
     const dir = await this.ffmpeg.createTempDir('mc-talk-probe-');
@@ -701,7 +726,11 @@ export class McTalkingProcessor {
             tier: (snapshot?.tier ?? project.tier ?? 'economico') as McProject['tier'],
             identityMode: (snapshot?.identityMode ?? null) as McKitIdentityMode | null,
           }).model;
-          const sent = await this.talkAudioForEngine(model, audio, probe?.durationMs ?? null);
+          const chunk = readChunkSnapshot(step.inputSnapshot);
+          const sent =
+            chunk && chunkNeedsSplice(chunk)
+              ? await this.chunkAudioForEngine(model, chunk)
+              : await this.talkAudioForEngine(model, audio, probe?.durationMs ?? null);
           audioPadding = sent.padding;
           if (sent.padding) {
             // o "fornecedor" mock recebe (e devolve muxado) o áudio completado

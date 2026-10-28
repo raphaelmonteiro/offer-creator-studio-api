@@ -367,6 +367,12 @@ export interface McScript {
   framing?: 'busto' | 'corpo';
   cutoutKeyColor?: '#00B140' | '#0047BB';
   /**
+   * video-fala-continua (D2): modo de gravação congelado na criação do projeto. `continuous` = as
+   * falas consecutivas viram trechos (uma chamada do motor por trecho). Ausente = uma fala, um clipe,
+   * para sempre (hashes e `scriptContentHash` de tudo que existe não mudam).
+   */
+  talkMode?: 'continuous';
+  /**
    * F2 (tarefa 6.6): ofertas CONGELADAS na ordem do vídeo (3 a 6, cada uma com
    * foto) — nome, preço, preço anterior, unidade, badge, foto e `catalogId`.
    * `products[]` é sempre o ESPELHO desta lista (mesmos ids e ordem) para que
@@ -407,6 +413,11 @@ export interface McProjectOptions {
    */
   cutout?: boolean;
   framing?: 'busto' | 'corpo';
+  /**
+   * video-fala-continua (D2): modo contínuo pedido pela flag `MC_TALK_CONTINUOUS` na criação (só
+   * `talking_art` e `offer_piece`); o worker o copia para `script.talkMode` ao montar o roteiro.
+   */
+  talkMode?: 'continuous';
 }
 
 export const MC_DEFAULT_PROJECT_OPTIONS: McProjectOptions = {
@@ -438,6 +449,7 @@ export function resolveProjectOptions(options: Partial<McProjectOptions> | null)
     products: (options?.products ?? []).slice(0, MC_MAX_SEAL_PRODUCTS),
     ...(options?.cutout ? { cutout: true } : {}),
     ...(options?.framing ? { framing: options.framing } : {}),
+    ...(options?.talkMode === 'continuous' ? { talkMode: 'continuous' as const } : {}),
   };
 }
 

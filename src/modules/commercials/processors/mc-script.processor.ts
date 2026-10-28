@@ -113,7 +113,7 @@ export class McScriptProcessor {
     if (!project) return;
 
     try {
-      const script = await this.generateScript(project);
+      const script = this.freezeTalkMode(project, await this.generateScript(project));
       await this.dataSource.transaction(async (manager) => {
         assertStepTransition(McStepStatus.RUNNING, McStepStatus.SUCCEEDED);
         await this.transitions.casTransition(
@@ -336,6 +336,16 @@ export class McScriptProcessor {
       ...(options.cutout ? { cutout: true, cutoutKeyColor: await this.cutoutKeyOf(kit) } : {}),
       ...(options.cutout || framing === 'corpo' ? { framing: framing ?? 'corpo' } : {}),
     };
+  }
+
+  /**
+   * Fala contínua (video-fala-continua, D2): o modo decidido pela API na criação (`options.talkMode`) é
+   * congelado no roteiro; o worker nunca lê a flag. Só `talking_art` e `offer_piece`.
+   */
+  private freezeTalkMode(project: McProject, script: McScript): McScript {
+    const continuous = resolveProjectOptions(project.options).talkMode === 'continuous';
+    const supported = project.format === 'talking_art' || project.format === 'offer_piece';
+    return continuous && supported ? { ...script, talkMode: 'continuous' } : script;
   }
 
   /**

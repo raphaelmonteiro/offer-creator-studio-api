@@ -307,6 +307,28 @@ export interface TalkHashInputV2 {
    * de hoje (Card, Círculo e busto: hash igual).
    */
   cutout?: { keyColor: string; framing: string; keyRuleVersion: number } | null;
+  /**
+   * Fala contínua (video-fala-continua, D10): o trecho que o `talk` grava. Entra no payload SÓ quando
+   * o trecho tem mais de uma fala, ou cauda, ou junção; trecho de uma fala sem cauda nem junção
+   * mantém o payload legado (cache reaproveitado, inclusive entre projetos).
+   */
+  chunk?: TalkChunkHashInput | null;
+}
+
+export interface TalkChunkHashInput {
+  version: number;
+  speeches: Array<{ audioAssetId: string; durationMs: number }>;
+  gapMs: number;
+  tailMs: number;
+  /** `inputHash` do `talk` do trecho anterior (cascata); `null` no primeiro trecho. */
+  joinFromStepHash: string | null;
+  engineAudioMs: number;
+}
+
+/** O trecho precisa entrar no hash? (D10) */
+export function chunkNeedsHash(chunk: TalkChunkHashInput | null | undefined): boolean {
+  if (!chunk) return false;
+  return chunk.speeches.length > 1 || chunk.tailMs > 0 || chunk.joinFromStepHash != null;
 }
 
 /**
@@ -323,6 +345,7 @@ export function computeTalkHashV2(input: TalkHashInputV2): string {
     backgroundColor: input.backgroundColor.trim().toUpperCase(),
     attempt: input.attempt,
     ...(input.cutout ? { cutout: input.cutout } : {}),
+    ...(chunkNeedsHash(input.chunk) ? { chunk: input.chunk } : {}),
   });
 }
 
@@ -388,6 +411,12 @@ export interface ComposeFfmpegHashInput {
    * do recorte (`composeCutoutHashInput`). Ausente ⇒ hash idêntico ao de hoje.
    */
   cutout?: Record<string, string | number> | null;
+  /**
+   * Fala contínua (video-fala-continua, D9/D10): presente só em projeto `talkMode = 'continuous'`
+   * (trechos encaixados sem fade nem quadro seguro). Ausente ⇒ hash idêntico ao de hoje;
+   * `MC_COMPOSE_GRAPH_VERSION` não sobe.
+   */
+  continuous?: { version: number } | null;
 }
 
 /**
@@ -411,6 +440,7 @@ export function computeComposeFfmpegHash(input: ComposeFfmpegHashInput): string 
     endcard: input.endcard,
     graphVersion: input.graphVersion,
     ...(input.cutout ? { cutout: input.cutout } : {}),
+    ...(input.continuous ? { continuous: input.continuous } : {}),
   });
 }
 

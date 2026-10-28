@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { kitTileIdForFraming } from '../domain/mc-cutout-request';
 import { McTalkPreconditionError } from '../domain/mc-talk-precondition.error';
+import {
+  isContinuousProject,
+  materializeTalkChunks,
+  quoteTalkChunks,
+} from './mc-talk-chunk-materializer';
 import { EntityManager, In } from 'typeorm';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { CommercialsService } from '../commercials.service';
@@ -647,6 +652,19 @@ export class McMaterializerService {
     scenes: McScene[],
     opts: { onlySceneIds?: string[]; forceNewAttempt?: boolean } = {},
   ): Promise<{ steps: McStep[]; items: McQuoteItem[] }> {
+    // fala contínua (video-fala-continua): o `talk` é por TRECHO, não por cena
+    if (isContinuousProject(project, script)) {
+      const all = (await manager.find(McScene, { where: { projectId: project.id } })).filter(
+        (s) => s.status !== McSceneStatus.CANCELED,
+      );
+      const rerollIds = opts.forceNewAttempt ? scenes.map((s) => s.id) : null;
+      return materializeTalkChunks(this, manager, {
+        project,
+        script,
+        scenes: all,
+        scope: rerollIds ? { targetRowIds: rerollIds, forceNewAttempt: true } : null,
+      });
+    }
     const steps: McStep[] = [];
     const items: McQuoteItem[] = [];
     // talk_tile (D1/D2): o kit entra na produção (tile, cor de fundo e modo
@@ -847,6 +865,9 @@ export class McMaterializerService {
     if (project.format !== 'talking_art' && project.format !== 'offer_piece') return null;
     const ctx = await this.quoteContext(manager, project, script);
     if (!ctx) return null;
+    if (isContinuousProject(project, script)) {
+      return this.quoteChunks(manager, project, script, scenes, ctx);
+    }
     const audioIds = scenes.map((s) => s.audioAssetId).filter((id): id is string => !!id);
     const audios = audioIds.length
       ? await manager.find(AnimationAsset, { where: { id: In(audioIds) } })
@@ -864,11 +885,83 @@ export class McMaterializerService {
         cutout: script.cutout === true,
         framing: script.framing ?? 'busto',
         keyColor: ctx.cutout?.keyColor ?? null,
+        continuous: false,
       },
+      chunks: null,
       scenes: quoted,
       rewriteCount: quoted.filter((q) => q.rewrite).length,
       estimatedUsd: Number(quoted.reduce((sum, q) => sum + q.estimatedUsd, 0).toFixed(4)),
     };
+  }
+
+  /** Cotação por trecho (fala contínua, D13); plano que não fecha (fala acima do motor) → `null`. */
+  private async quoteChunks(
+    manager: EntityManager,
+    project: McProject,
+    script: McScript,
+    scenes: McScene[],
+    ctx: Awaited<ReturnType<McMaterializerService['talkProductionContext']>>,
+  ): Promise<McTalkQuote | null> {
+    try {
+      return await quoteTalkChunks(this, manager, {
+        project,
+        script,
+        scenes: scenes.filter((s) => s.status !== McSceneStatus.CANCELED),
+        mode: {
+          cutout: script.cutout === true,
+          framing: script.framing ?? 'busto',
+          keyColor: ctx.cutout?.keyColor ?? null,
+          continuous: true,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Cotação por trecho do projeto ${project.id} sem plano: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /** Step `talk` de um trecho, ancorado na cena líder; o custo em créditos é decidido pelo plano (Q2). */
+  async createChunkStep(
+    manager: EntityManager,
+    project: McProject,
+    leader: McScene,
+    input: {
+      inputHash: string;
+      snapshot: Record<string, unknown>;
+      attempt: number;
+      /** Clipe concluído com o MESMO hash, já consultado pelo plano (nasce `skipped_cached`). */
+      cachedAssetId: string | null;
+      costCredits: number;
+    },
+  ): Promise<McStep> {
+    const step = await this.createStep(manager, project, leader, McStepType.TALK, input.inputHash, {
+      forceSkipped: input.cachedAssetId != null,
+      skippedAssetId: input.cachedAssetId,
+      skippedReason: 'cache_hit',
+      phase: 'production',
+      attempt: input.attempt,
+      projectRevision: project.revision,
+      inputSnapshot: input.snapshot,
+    });
+    if (step.costCredits !== input.costCredits) {
+      await manager.update(McStep, { id: step.id }, { costCredits: input.costCredits });
+      step.costCredits = input.costCredits;
+    }
+    return step;
+  }
+
+  nextAttemptFor(manager: EntityManager, scene: McScene, type: McStepType): Promise<number> {
+    return this.nextAttempt(manager, scene, type);
+  }
+
+  currentOrFirstAttemptFor(
+    manager: EntityManager,
+    scene: McScene,
+    type: McStepType,
+  ): Promise<number> {
+    return this.currentOrFirstAttempt(manager, scene, type);
   }
 
   /** Contexto do `talk` para a cotação; `null` (e log, se não for pré-condição) quando não monta. */
@@ -1115,6 +1208,7 @@ export class McMaterializerService {
       endcard: script.endcard?.storeName ?? null,
       graphVersion: MC_COMPOSE_GRAPH_VERSION,
       cutout: this.composeCutoutOf(script),
+      continuous: script.talkMode === 'continuous' ? { version: 1 } : null,
     });
     const finalizeHash = computeFinalizeHash({
       composeHash,
@@ -1242,6 +1336,7 @@ export class McMaterializerService {
       endcard: script.endcard?.storeName ?? null,
       graphVersion: MC_COMPOSE_GRAPH_VERSION,
       cutout: this.composeCutoutOf(script),
+      continuous: script.talkMode === 'continuous' ? { version: 1 } : null,
     });
     const finalizeHash = computeFinalizeHash({
       composeHash,

@@ -61,10 +61,20 @@ export interface McQuoteItem {
  * custo estimado de fornecedor (informativo; o custo real vem de `providerCostUsd` do step).
  */
 export interface McTalkQuote {
-  mode: { cutout: boolean; framing: 'busto' | 'corpo'; keyColor: string | null };
+  mode: {
+    cutout: boolean;
+    framing: 'busto' | 'corpo';
+    keyColor: string | null;
+    /** Fala contínua (video-fala-continua, D13): o projeto grava por trecho. */
+    continuous: boolean;
+  };
+  /** Trechos a gravar (D13); `null` fora do modo contínuo. */
+  chunks: McTalkQuoteChunk[] | null;
   scenes: Array<{
     sceneId: string;
     idx: number;
+    /** Trecho a que a fala pertence (modo contínuo); ausente no modo de hoje. */
+    chunkIndex?: number;
     /** false = já existe `talk` concluído com o MESMO hash (reaproveitado, custo 0). */
     rewrite: boolean;
     billedSeconds: number;
@@ -74,6 +84,25 @@ export interface McTalkQuote {
   }>;
   rewriteCount: number;
   estimatedUsd: number;
+}
+
+/** Motivo de um trecho entrar (ou não) na cotação/regravação (video-fala-continua, D13). */
+export type McTalkChunkReason = 'new' | 'edited' | 'cascade' | 'reroll' | 'cached';
+
+export interface McTalkQuoteChunk {
+  index: number;
+  /** `sceneId` do roteiro das falas do trecho, na ordem. */
+  sceneIds: string[];
+  speechSeconds: number;
+  billedSeconds: number;
+  /** false = existe `talk` concluído com o MESMO hash (reaproveitado, custo de API 0). */
+  rewrite: boolean;
+  reason: McTalkChunkReason;
+  estimatedUsd: number;
+  engineModel: string;
+  usdPerSecond: number;
+  /** Trecho cujo último quadro alimenta este; `null` no primeiro. */
+  joinFromIndex: number | null;
 }
 
 export interface McPhaseQuote {

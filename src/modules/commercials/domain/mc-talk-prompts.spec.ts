@@ -34,3 +34,33 @@ describe('buildTalkPrompt — modo sem fundo (video-mascote-transparente, D13)',
     expect(prompt).not.toBe(TALK_PROMPT_SUFFIX);
   });
 });
+
+describe('buildTalkPrompt — variante contínua (change video-fala-continua, D7)', () => {
+  it('troca a pose neutra no início/fim pela tomada contínua e mantém as proibições de texto e logo', () => {
+    const prompt = buildTalkPrompt('Waves.', null, { continuous: true });
+    expect(prompt).not.toContain('Start and end in a neutral');
+    expect(prompt).toContain('speaks several sentences in one continuous take');
+    expect(prompt).toContain('never reset or change pose between sentences');
+    expect(prompt).toContain('Absolutely no text anywhere in the frame');
+    expect(prompt.startsWith('Waves. ')).toBe(true);
+  });
+
+  it('sem `continuous` o texto é o de hoje, byte a byte (com e sem recorte)', () => {
+    expect(buildTalkPrompt('Waves.', null, {})).toBe(buildTalkPrompt('Waves.'));
+    const cutout = { keyColor: '#00B140', framing: 'corpo' as const };
+    expect(buildTalkPrompt(null, cutout, { continuous: false })).toBe(
+      buildTalkPrompt(null, cutout),
+    );
+  });
+
+  it('a variante contínua preserva o modo sem fundo (cor-chave e plano de corpo)', () => {
+    const prompt = buildTalkPrompt(
+      null,
+      { keyColor: '#00B140', framing: 'corpo' },
+      { continuous: true },
+    );
+    expect(prompt).toContain('plain solid green background');
+    expect(prompt).toContain('whole figure in frame');
+    expect(prompt).toContain('one continuous take');
+  });
+});

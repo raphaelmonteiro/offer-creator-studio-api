@@ -12,6 +12,7 @@ import { CommercialsInsightsController } from './commercials-insights.controller
 import { CommercialsService } from './commercials.service';
 import { mcModelPrices } from './domain/mc-kit-costs';
 import { MC_QUEUE_CONCURRENCY, mcTalkEngines, parseMcFormats } from './domain/mc-pipeline.config';
+import { assertTalkContinuousEnv } from './domain/mc-talk-continuous.config';
 import { McCharacterKit } from './entities/mc-character-kit.entity';
 import { McEvent } from './entities/mc-event.entity';
 import { McKitCandidate } from './entities/mc-kit-candidate.entity';
@@ -200,6 +201,7 @@ export class CommercialsModule implements OnModuleInit {
     // vale para API e worker — tarifa/limite errados nunca chegam à telemetria.
     parseMcFormats();
     mcTalkEngines();
+    assertTalkContinuousEnv();
     // Tabela de tarifas do kit (MC_KIT_PRICES, tarefa 2.6): mal escrita derruba o boot.
     mcModelPrices();
     if (process.env.WORKER_ONLY === 'true') {

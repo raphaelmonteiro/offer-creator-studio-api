@@ -35,6 +35,11 @@ import {
   relayoutPieceForAspect,
 } from '../domain/mc-piece-relayout';
 import { assertFormatEnabled, assertPipelineV2ForFormat } from '../domain/mc-pipeline.config';
+import {
+  applyTalkModeToOptions,
+  applyTalkModeToScript,
+  talkModeForNewProject,
+} from '../domain/mc-talk-continuous.config';
 import { isPipelineV2, MC_EMPTY_QUALITY, MC_PIPELINE_V2 } from '../domain/mc-quality';
 import {
   MC_DEFAULT_PROJECT_FORMAT,
@@ -338,6 +343,8 @@ export class McProjectActionsService {
     const kit = await this.getKit(source.kitId);
     const title = await this.nextCopyTitle(userId, source.title);
     const newFormat = format !== MC_DEFAULT_PROJECT_FORMAT;
+    // fala contínua (Q5): o clone é um projeto novo e RELÊ a flag; o original não muda
+    const talkMode = talkModeForNewProject(format);
     const pipelineVersion = newFormat ? MC_PIPELINE_V2 : (source.pipelineVersion ?? 1);
     const v2 = newFormat || isPipelineV2(source);
 
@@ -382,10 +389,13 @@ export class McProjectActionsService {
         quality: v2 ? { ...MC_EMPTY_QUALITY } : null,
         // Deep copy: editar o roteiro da cópia NUNCA pode tocar no original
         // (os dois jsonb têm que ser independentes).
-        script: JSON.parse(JSON.stringify(source.script)) as McScript,
+        script: applyTalkModeToScript(
+          JSON.parse(JSON.stringify(source.script)) as McScript,
+          talkMode,
+        ),
         aspectRatio,
         targetDurationS: source.targetDurationS,
-        options: resolveProjectOptions(source.options),
+        options: applyTalkModeToOptions(resolveProjectOptions(source.options), talkMode),
         status: McProjectStatus.STORYBOARD_REVIEW,
         reservedCredits: 0,
         consumedCredits: 0,

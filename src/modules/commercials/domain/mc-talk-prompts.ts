@@ -42,12 +42,28 @@ function cutoutSuffix(cutout: TalkPromptCutout): string {
   return suffix;
 }
 
+/** Versão do texto da variante contínua (video-fala-continua, D7); mudar o texto = subir aqui. */
+export const MC_TALK_PROMPT_CONTINUOUS_VERSION = 1;
+
+const REST_POSE_SENTENCE = 'Start and end in a neutral, front-facing resting pose.';
+const CONTINUOUS_SENTENCE =
+  'The character speaks several sentences in one continuous take: keep the same pose, body ' +
+  'position and framing from the first to the last frame, with small natural gestures; never ' +
+  'reset or change pose between sentences.';
+
 /**
  * Gesto opcional da fala (EN efetivo ou pt) + sufixo fixo; sem gesto, só o sufixo. Sem `cutout`
- * o texto é o de sempre, byte a byte (hash de todo `talk` existente intacto).
+ * e sem `continuous` o texto é o de sempre, byte a byte (hash de todo `talk` existente intacto).
+ * `continuous` (modo de fala contínua, D7) troca a frase da pose neutra no início/fim — que CAUSA o
+ * salto entre trechos — pela da tomada contínua, mantendo as proibições de texto e logo.
  */
-export function buildTalkPrompt(motion?: string | null, cutout?: TalkPromptCutout | null): string {
-  const suffix = cutout ? cutoutSuffix(cutout) : TALK_PROMPT_SUFFIX;
+export function buildTalkPrompt(
+  motion?: string | null,
+  cutout?: TalkPromptCutout | null,
+  opts: { continuous?: boolean } = {},
+): string {
+  const base = cutout ? cutoutSuffix(cutout) : TALK_PROMPT_SUFFIX;
+  const suffix = opts.continuous ? base.replace(REST_POSE_SENTENCE, CONTINUOUS_SENTENCE) : base;
   const action = (motion ?? '').trim().replace(/\s+/g, ' ');
   if (!action) return suffix;
   const withStop = /[.!?]$/.test(action) ? action : `${action}.`;

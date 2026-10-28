@@ -340,6 +340,8 @@ export class McQualityService {
         { cutout: dto.cutout, framing: requested?.framing ?? dto.framing },
         cutoutKey,
       ),
+      // fala contínua: congelada na criação, nunca muda por edição do roteiro
+      ...(previous?.talkMode ? { talkMode: previous.talkMode } : {}),
       // F2 (6.6): ofertas = produtos mesclados (ordem acompanha as falas na
       // normalização), preset e legendas do DTO ou preservados; falas derivadas.
       ...(carousel

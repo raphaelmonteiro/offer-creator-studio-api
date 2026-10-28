@@ -5,6 +5,7 @@ import {
   scenePlan,
 } from './mc-execution-plan';
 import { isPipelineV2 } from './mc-quality';
+import { readChunkSnapshot } from './mc-talk-chunk-step';
 import {
   DONE_STEP_STATUSES,
   McProjectStatus,
@@ -52,6 +53,8 @@ export interface SchedulerProject {
   revision?: number | null;
   /** Formato (D6): escolhe a cadeia de steps de projeto da fase assembly; ausente = `scenes`. */
   format?: McProjectFormat | null;
+  /** Roteiro (só `talkMode` importa): em fala contínua a cena seguidora de um trecho só conta `ready` (D6). */
+  script?: { talkMode?: string } | null;
 }
 
 export interface SchedulerScene {
@@ -71,6 +74,8 @@ export interface SchedulerStep {
   status: McStepStatus;
   projectRevision?: number | null;
   attempt?: number | null;
+  /** Fala contínua: o `talk` de um trecho carrega `chunk` (cenas do trecho e junção) — D6. */
+  inputSnapshot?: unknown;
 }
 
 export interface StepRef {
@@ -246,7 +251,9 @@ function readyStepsV2(
         continue;
       }
       const deps = plan.deps[type] ?? [];
-      if (deps.every((dep) => isDone(depsByType[dep]))) ready.push(toRef(step));
+      if (!deps.every((dep) => isDone(depsByType[dep]))) continue;
+      if (type === McStepType.TALK && !chunkDepsDone(step, scenes, steps, revision)) continue;
+      ready.push(toRef(step));
     }
   }
 
@@ -274,6 +281,8 @@ function readyStepsV2(
       liveScenes.length > 0 &&
       liveScenes.every((scene) => {
         if (scene.status === McSceneStatus.READY) return true;
+        // fala contínua: a cena seguidora de um trecho não tem step; só `ready` conta (D6)
+        if (project.script?.talkMode === 'continuous') return false;
         const plan = scenePlan(sceneTypeOf(scene));
         return isDone(currentGenerationSteps(scene, steps, revision)[plan.final]);
       });
@@ -307,6 +316,31 @@ function readyStepsV2(
     }
   }
   return ready;
+}
+
+/**
+ * Fala contínua (D6): o `talk` de um trecho espera o TTS de TODAS as falas dele e, nos trechos seguintes,
+ * o trecho anterior concluído (o último quadro dele é a imagem deste). Step sem trecho: sempre liberado.
+ */
+function chunkDepsDone(
+  step: SchedulerStep,
+  scenes: SchedulerScene[],
+  steps: SchedulerStep[],
+  revision: number | null,
+): boolean {
+  const chunk = readChunkSnapshot(step.inputSnapshot);
+  if (!chunk) return true;
+  const byId = new Map(scenes.map((s) => [s.id, s]));
+  for (const rowId of chunk.sceneRowIds) {
+    const scene = byId.get(rowId);
+    if (!scene) return false;
+    if (!isDone(currentGenerationSteps(scene, steps)[McStepType.TTS])) return false;
+  }
+  const from = chunk.join ? byId.get(chunk.join.fromSceneRowId) : null;
+  if (chunk.join && !from) return false;
+  if (!from) return true;
+  // só o step da revisão corrente vale: `ready` herdado de uma revisão anterior não prova o quadro novo
+  return isDone(currentGenerationSteps(from, steps, revision)[McStepType.TALK]);
 }
 
 /**

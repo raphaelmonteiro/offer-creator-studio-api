@@ -23,7 +23,6 @@ import { McStepStatus } from '../domain/mc-state-machines';
 import {
   buildTalkConformArgs,
   conformedOutputIssue,
-  planTalkConform,
   TalkConformPlan,
 } from '../domain/mc-talk-conform-graph';
 import {
@@ -38,6 +37,9 @@ import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
+import { planConformWithGate } from './mc-talk-conform-gate';
+import { McTalkChunkIngest } from './mc-talk-chunk-ingest';
+import { readChunkSnapshot } from '../domain/mc-talk-chunk-step';
 import { McPipelineService } from '../services/mc-pipeline.service';
 import { McStorageService } from '../services/mc-storage.service';
 import {
@@ -50,7 +52,6 @@ import {
   MC_CLIP_LOW_RESOLUTION_FINAL_ERROR_CODE,
   MC_CLIP_TOO_SHORT_ERROR_CODE,
   mcShouldRegenerateQuality,
-  mcShouldRetry,
 } from '../domain/mc-error-classes';
 
 /** Snapshot do step `talk` que o ingest lê (gravado pelo materializer e completado no submit). */
@@ -145,7 +146,12 @@ export class McIngestProcessor {
     private readonly ffmpeg: FfmpegRunner,
     private readonly storage: McStorageService,
     private readonly inspector: McClipInspectorService,
-  ) {}
+  ) {
+    this.chunkIngest = new McTalkChunkIngest(dataSource, ffmpeg, storage, pipeline, this.logger);
+  }
+
+  /** Ingest do `talk` de um trecho (fala contínua). */
+  private readonly chunkIngest: McTalkChunkIngest;
 
   async process({ stepId, responseUrl }: { stepId: string; responseUrl?: string }): Promise<void> {
     const step = await this.dataSource.getRepository(McStep).findOneBy({ id: stepId });
@@ -186,6 +192,20 @@ export class McIngestProcessor {
         throw new TerminalProviderError('Download sem stream de vídeo', 'invalid_video');
       }
 
+      // fala contínua: o `talk` de um trecho conforma, fatia, inspeciona e publica por conta própria
+      const chunk = step.type === McStepType.TALK ? readChunkSnapshot(step.inputSnapshot) : null;
+      if (chunk) {
+        await this.chunkIngest.run(
+          { step, project, chunk, tempDir, videoPath, probe },
+          {
+            checkResolution: (s, p, m) => this.checkTalkResolution(s, p, m),
+            inspect: (s, p, clip) => this.inspectClip(s, p, clip),
+            billing: (s, p, ms, talk) => this.billing(s, p, ms, talk),
+          },
+        );
+        return;
+      }
+
       // talk (D7): conformar ao áudio ANTES de inspecionar/publicar — a
       // inspeção e o asset final olham o clipe que a composição vai usar.
       const talk = step.type === McStepType.TALK;
@@ -205,46 +225,15 @@ export class McIngestProcessor {
         resolution = await this.checkTalkResolution(step, project, measured);
       }
 
-      // Inspeção de qualidade (opção B, 24/09; D11): texto inventado,
-      // deformação e boca parada nas janelas de fala → reprova (classe
-      // `quality` = nova geração) até o teto; depois aceita e registra.
-      // Indisponível → aceito como "não inspecionado" (sinalizado no asset).
-      // Só clipes reais do pipeline v2 (steps com fase).
-      let inspection: ClipInspection | null = null;
-      if (step.provider !== 'mock' && step.phase != null) {
-        const kit = await this.dataSource
-          .getRepository(McCharacterKit)
-          .findOneBy({ id: project.kitId });
-        const ctx: ClipInspectionContext = {
-          source: kit?.source ?? 'mascot',
-          style: kit?.style ?? null,
-          backgroundKind: talk ? 'plain' : 'scene',
-          speechWindows,
-          // modo sem fundo: o clipe cru ainda tem o fundo-chave, que NÃO é defeito (D13)
-          cutoutKey: talk
-            ? ((step.inputSnapshot as { cutout?: { keyColor?: string } } | null)?.cutout
-                ?.keyColor ?? null)
-            : null,
-        };
-        inspection = await this.inspector.inspect(
-          finalVideoPath,
-          measured.durationMs ?? 0,
-          tempDir,
-          ctx,
-        );
-        const decision = McClipInspectorService.decision(inspection, step.attempts);
-        if (decision === 'retry') {
-          throw new TerminalProviderError(
-            `Clipe reprovado na inspeção (${inspection.reasons.join(', ')}${inspection.where ? `, ${inspection.where}` : ''}): ${inspection.description}`,
-            McClipInspectorService.errorCodeFor(inspection),
-          );
-        }
-        if (decision === 'accept') {
-          this.logger.warn(
-            `Ingest ${stepId}: clipe reprovado (${inspection.reasons.join(', ')}) após ${step.attempts} gerações — aceito: ${inspection.description}`,
-          );
-        }
-      }
+      // Inspeção de qualidade (opção B, 24/09; D11): texto inventado, deformação e boca parada nas
+      // janelas de fala → reprova (classe `quality` = nova geração) até o teto; depois aceita e registra.
+      const inspection = await this.inspectClip(step, project, {
+        path: finalVideoPath,
+        durationMs: measured.durationMs ?? 0,
+        tempDir,
+        talk,
+        speechWindows,
+      });
       this.logger.log(`Ingest ${stepId}: probe ok, poster`);
       const posterPath = path.join(tempDir, 'poster.jpg');
       await this.ffmpeg.run(buildPosterArgs(finalVideoPath, posterPath), {
@@ -282,48 +271,7 @@ export class McIngestProcessor {
       );
       const fileSize = (await fs.stat(target.finalPath)).size;
 
-      // Custo real por SEGUNDO de saída do MOTOR que gerou o clipe (D2:
-      // tarifa por modelo; cai na tarifa por tipo de step quando o modelo não
-      // é reconhecido). Segundos do clipe CRU do provider, antes da conformação;
-      // no talk com silêncio do submit, nunca abaixo dos segundos ENVIADOS (o
-      // fornecedor cobra max(fala, mínimo) — decisão de 13/10/2026).
-      const snapshot = (step.inputSnapshot ?? null) as TalkIngestSnapshot | null;
-      const audioPadding = talk ? readTalkAudioPadding(snapshot?.audioPadding) : null;
-      const billedDurationMs = talk
-        ? talkBilledDurationMs(probe.durationMs, audioPadding)
-        : probe.durationMs;
-      // Tarifa: config corrente pelo modelo; senão a do motor EFETIVO gravado
-      // no submit (env trocado entre o submit e o ingest não zera nem
-      // subestima o custo de um modelo fora da config, ex.: OmniHuman); senão
-      // a tarifa por tipo de step.
-      const snapshotRate =
-        talk && snapshot?.effectiveEngine?.model === step.provider
-          ? snapshot.effectiveEngine.usdPerSecond
-          : undefined;
-      const usdPerSecond =
-        mcUsdPerSecondForModel(step.provider) ??
-        (typeof snapshotRate === 'number' && snapshotRate >= 0 ? snapshotRate : null) ??
-        mcUsdPerSecond(step.type);
-      const providerCostUsd =
-        step.provider === 'mock' || billedDurationMs == null
-          ? 0
-          : (billedDurationMs / 1000) * usdPerSecond;
-      const engineRecord = talk
-        ? {
-            engine: {
-              key: snapshot?.effectiveEngine?.key ?? snapshot?.engine?.key ?? null,
-              model: step.provider,
-              usdPerSecond,
-              ...(snapshot?.effectiveEngine?.fallbackFrom
-                ? { fallbackFrom: snapshot.effectiveEngine.fallbackFrom }
-                : {}),
-            },
-            tier: snapshot?.tier ?? project.tier ?? 'economico',
-            // segundos cobrados (base do providerCostUsd e do relatório de custo)
-            billedDurationMs,
-            ...(audioPadding ? { audioPadding } : {}),
-          }
-        : {};
+      const { providerCostUsd, engineRecord } = this.billing(step, project, probe.durationMs, talk);
 
       this.logger.log(`Ingest ${stepId}: arquivos gravados, transação`);
       await this.dataSource.transaction(async (manager) => {
@@ -421,6 +369,110 @@ export class McIngestProcessor {
     }
   }
 
+  /**
+   * Inspeção de qualidade do clipe (opção B, 24/09; D11): só clipes reais do pipeline v2 (steps com
+   * fase); indisponível → aceito como "não inspecionado" (sinalizado no asset). Reprovado abaixo do
+   * teto da classe `quality` → erro terminal que regera; esgotado, aceito e registrado.
+   */
+  async inspectClip(
+    step: McStep,
+    project: McProject,
+    clip: {
+      path: string;
+      durationMs: number;
+      tempDir: string;
+      talk: boolean;
+      speechWindows: SpeechWindow[];
+      /** Trecho com junção: a inspeção também confere a identidade contra o tile (D7). */
+      identityReference?: boolean;
+    },
+  ): Promise<ClipInspection | null> {
+    if (step.provider === 'mock' || step.phase == null) return null;
+    const kit = await this.dataSource
+      .getRepository(McCharacterKit)
+      .findOneBy({ id: project.kitId });
+    const ctx: ClipInspectionContext = {
+      source: kit?.source ?? 'mascot',
+      style: kit?.style ?? null,
+      backgroundKind: clip.talk ? 'plain' : 'scene',
+      speechWindows: clip.speechWindows,
+      // modo sem fundo: o clipe cru ainda tem o fundo-chave, que NÃO é defeito (D13)
+      cutoutKey: clip.talk
+        ? ((step.inputSnapshot as { cutout?: { keyColor?: string } } | null)?.cutout?.keyColor ??
+          null)
+        : null,
+    };
+    const inspection = await this.inspector.inspect(clip.path, clip.durationMs, clip.tempDir, ctx);
+    const decision = McClipInspectorService.decision(inspection, step.attempts);
+    if (decision === 'retry') {
+      throw new TerminalProviderError(
+        `Clipe reprovado na inspeção (${inspection.reasons.join(', ')}${inspection.where ? `, ${inspection.where}` : ''}): ${inspection.description}`,
+        McClipInspectorService.errorCodeFor(inspection),
+      );
+    }
+    if (decision === 'accept') {
+      this.logger.warn(
+        `Ingest ${step.id}: clipe reprovado (${inspection.reasons.join(', ')}) após ${step.attempts} gerações — aceito: ${inspection.description}`,
+      );
+    }
+    return inspection;
+  }
+
+  /**
+   * Custo real por SEGUNDO de saída do MOTOR que gerou o clipe (D2: tarifa por modelo; cai na tarifa
+   * por tipo de step quando o modelo não é reconhecido). Segundos do clipe CRU do provider, antes da
+   * conformação; no talk com silêncio do submit, nunca abaixo dos segundos ENVIADOS (o fornecedor
+   * cobra max(fala, mínimo) — decisão de 13/10/2026). Vale para a fala e para o trecho.
+   */
+  billing(
+    step: McStep,
+    project: McProject,
+    rawDurationMs: number | null,
+    talk: boolean,
+  ): {
+    providerCostUsd: number;
+    billedDurationMs: number | null;
+    engineRecord: Record<string, unknown>;
+  } {
+    const snapshot = (step.inputSnapshot ?? null) as TalkIngestSnapshot | null;
+    const audioPadding = talk ? readTalkAudioPadding(snapshot?.audioPadding) : null;
+    const billedDurationMs = talk
+      ? talkBilledDurationMs(rawDurationMs, audioPadding)
+      : rawDurationMs;
+    // Tarifa: config corrente pelo modelo; senão a do motor EFETIVO gravado no submit (env trocado
+    // entre o submit e o ingest não zera nem subestima o custo de um modelo fora da config, ex.:
+    // OmniHuman); senão a tarifa por tipo de step.
+    const snapshotRate =
+      talk && snapshot?.effectiveEngine?.model === step.provider
+        ? snapshot.effectiveEngine.usdPerSecond
+        : undefined;
+    const usdPerSecond =
+      mcUsdPerSecondForModel(step.provider) ??
+      (typeof snapshotRate === 'number' && snapshotRate >= 0 ? snapshotRate : null) ??
+      mcUsdPerSecond(step.type);
+    const providerCostUsd =
+      step.provider === 'mock' || billedDurationMs == null
+        ? 0
+        : (billedDurationMs / 1000) * usdPerSecond;
+    const engineRecord = talk
+      ? {
+          engine: {
+            key: snapshot?.effectiveEngine?.key ?? snapshot?.engine?.key ?? null,
+            model: step.provider,
+            usdPerSecond,
+            ...(snapshot?.effectiveEngine?.fallbackFrom
+              ? { fallbackFrom: snapshot.effectiveEngine.fallbackFrom }
+              : {}),
+          },
+          tier: snapshot?.tier ?? project.tier ?? 'economico',
+          // segundos cobrados (base do providerCostUsd e do relatório de custo)
+          billedDurationMs,
+          ...(audioPadding ? { audioPadding } : {}),
+        }
+      : {};
+    return { providerCostUsd, billedDurationMs, engineRecord };
+  }
+
   // ─────────────────────────────── interno ───────────────────────────────
 
   /**
@@ -488,27 +540,7 @@ export class McIngestProcessor {
       tileWidth,
       tileHeight,
     };
-    let plan = planTalkConform(conformInput);
-    const verdict = plan.durationAction;
-    let accepted: TalkConformRecord['accepted'] = null;
-    if (plan.durationAction === 'too_short') {
-      // Classe `quality` (boca parada): nova geração até o teto — a MESMA
-      // regra de McClipInspectorService.decision. Esgotado o teto, não vira
-      // terminal: o último clipe é aceito com o último quadro clonado até o
-      // áudio e a cena fica sinalizada para revisão humana.
-      if (mcShouldRetry('quality', step.attempts)) {
-        throw new TerminalProviderError(
-          `Clipe ${plan.deltaMs} ms mais curto que o áudio (boca parada) — regerar`,
-          MC_CLIP_TOO_SHORT_ERROR_CODE,
-        );
-      }
-      this.logger.warn(
-        `Ingest ${step.id}: clipe ${plan.deltaMs} ms mais curto que o áudio após ` +
-          `${step.attempts} gerações — aceito com o último quadro clonado (revisão humana)`,
-      );
-      plan = planTalkConform({ ...conformInput, padMaxMs: Infinity });
-      accepted = { reason: MC_CLIP_TOO_SHORT_ERROR_CODE, executions: step.attempts };
-    }
+    const { plan, verdict, accepted } = planConformWithGate(conformInput, step, this.logger);
     const output = path.join(tempDir, 'conformed.mp4');
     this.logger.log(
       `Ingest ${step.id}: conformando clipe ao áudio (${plan.durationAction}, Δ=${plan.deltaMs}ms` +

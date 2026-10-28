@@ -56,6 +56,13 @@ function makeManagerFactory(store: Store) {
       const row = pick(store, entity).find((r) => r.id === where.id);
       return row ? Promise.resolve(row) : Promise.reject(new Error('not found'));
     }),
+    findOneBy: jest.fn((entity: unknown, where: { id: string }) =>
+      Promise.resolve(
+        entity === McScene
+          ? { id: where.id, generation: 1, status: McSceneStatus.PENDING }
+          : (pick(store, entity).find((r) => r.id === where.id) ?? null),
+      ),
+    ),
     findOne: jest.fn(async (entity: unknown, opts: { where: { id: string }; lock?: unknown }) => {
       if (opts.lock) {
         const previous = projectLocks.get(opts.where.id) ?? Promise.resolve();
