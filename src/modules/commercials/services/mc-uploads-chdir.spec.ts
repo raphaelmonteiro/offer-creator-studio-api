@@ -80,6 +80,21 @@ describe('uploads imunes à troca de diretório do bundle (B4)', () => {
     expect(process.cwd()).toBe(chdirTmp);
   }
 
+  function fakeDataSource(scene: object, project: object, transaction: jest.Mock) {
+    return {
+      getRepository: jest.fn((entity: unknown) => ({
+        findOneBy: jest.fn((where: { id: string }) => {
+          if (entity === McScene) return Promise.resolve(scene);
+          if (entity === McProject) return Promise.resolve(project);
+          if (entity === AnimationAsset)
+            return Promise.resolve({ id: where.id, fileUrl: '/uploads/audio/voice.mp3' });
+          return Promise.resolve(null);
+        }),
+      })),
+      transaction,
+    };
+  }
+
   function buildTalking(failStep: jest.Mock, transaction: jest.Mock): McTalkingProcessor {
     const step = {
       id: 'st-1',
@@ -95,18 +110,7 @@ describe('uploads imunes à troca de diretório do bundle (B4)', () => {
     };
     const scene = { id: 'sc1', projectId: 'p1', idx: 0, generation: 1, durationS: 6 };
     const project = { id: 'p1', userId: 'u1', kitId: 'k1', title: 'T', tier: 'economico' };
-    const dataSource = {
-      getRepository: jest.fn((entity: unknown) => ({
-        findOneBy: jest.fn((where: { id: string }) => {
-          if (entity === McScene) return Promise.resolve(scene);
-          if (entity === McProject) return Promise.resolve(project);
-          if (entity === AnimationAsset)
-            return Promise.resolve({ id: where.id, fileUrl: '/uploads/audio/voice.mp3' });
-          return Promise.resolve(null);
-        }),
-      })),
-      transaction,
-    };
+    const dataSource = fakeDataSource(scene, project, transaction);
     const ffmpeg = {
       createTempDir: jest.fn(() => fs.mkdtemp(path.join(os.tmpdir(), 'ff-chdir-'))),
       removeTempDir: jest.fn().mockResolvedValue(undefined),
