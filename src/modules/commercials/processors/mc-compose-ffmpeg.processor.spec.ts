@@ -302,9 +302,10 @@ describe('McComposeFfmpegProcessor — step de projeto compose_ffmpeg (tarefas 4
       expect(pipeline.failStep).not.toHaveBeenCalled();
       const compose = runWith(ffmpeg, 'composed.mp4') as string[];
       const graph = compose[compose.indexOf('-filter_complex') + 1];
-      expect(graph).toContain("enable='gte(t,0)*lt(t,2.368)'");
-      expect(graph).toContain("enable='gte(t,2.368)*lt(t,4.475)'");
-      expect(graph).toContain("enable='between(t,4.475,8.785)'");
+      // fronteiras NA GRADE DE QUADROS (2,368 s = quadro 71; 4,475 s = quadro 134), a última fatia até o fim
+      expect(graph).toContain("enable='gte(t,(0-0.5)/30)*lt(t,(71-0.5)/30)'");
+      expect(graph).toContain("enable='gte(t,(71-0.5)/30)*lt(t,(134-0.5)/30)'");
+      expect(graph).toContain("enable='gte(t,(134-0.5)/30)'");
       expect(graph).not.toContain('fade=');
       expect(graph).toContain('adelay=delays=113664S:all=1'); // 2,368 s: mesmo instante do modo de hoje
       expect(saved[0].metadata).toMatchObject({

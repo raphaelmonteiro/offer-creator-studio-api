@@ -62,11 +62,30 @@ export function buildChunkSpliceArgs(opts: {
   return args;
 }
 
+/** fps da conformação e da montagem: o vídeo é CFR e as fronteiras de vídeo caem na grade de quadros. */
+export const MC_CHUNK_FPS = 30;
+
+/**
+ * Quadros a mais no fim de cada fatia de vídeo (além da fronteira): a cadeia de recorte do `compose_ffmpeg`
+ * (chromakey + alphamerge) perde o ÚLTIMO quadro de um clipe, e a fatia seguinte assume na fronteira — o
+ * excedente garante que o quadro perdido nunca é um que a janela precisa mostrar (a janela `enable` esconde
+ * o resto).
+ */
+export const MC_CHUNK_TAIL_FRAMES = 3;
+
 export interface ChunkSliceSpan {
   sceneRowId: string;
-  /** Relativos ao início do trecho. */
+  /** Relativos ao início do trecho (áudio: exatos). */
   startMs: number;
   endMs: number;
+  /**
+   * Fronteiras do VÍDEO da fatia em QUADROS (grade de 30 fps): as de áudio arredondadas ao quadro. Cortar o
+   * vídeo fora da grade faz um quadro congelar e o seguinte pular (dois quadros de movimento de uma vez);
+   * alinhado, a fala seguinte continua exatamente do quadro em que a anterior parou. O áudio segue
+   * sample-accurate. A última fatia termina no último quadro que cobre o áudio.
+   */
+  videoStartFrame: number;
+  videoEndFrame: number;
   /** Duração só da fala (a que entra em `buildSpeechTimeline`). */
   speechMs: number;
   /** A fatia segue para a fala seguinte DO MESMO trecho (inclui o silêncio `gapMs`). */
@@ -80,10 +99,15 @@ export interface ChunkSliceSpan {
 export function planChunkSlices(chunk: ChunkSnapshot): ChunkSliceSpan[] {
   return chunk.speeches.map((speech, i) => {
     const next = chunk.speeches[i + 1];
+    const endMs = next ? next.startMs : chunk.audioMs;
     return {
       sceneRowId: speech.sceneRowId,
       startMs: speech.startMs,
-      endMs: next ? next.startMs : chunk.audioMs,
+      endMs,
+      videoStartFrame: Math.round((speech.startMs / 1000) * MC_CHUNK_FPS),
+      videoEndFrame: next
+        ? Math.round((endMs / 1000) * MC_CHUNK_FPS)
+        : Math.ceil((endMs / 1000) * MC_CHUNK_FPS),
       speechMs: speech.durationMs,
       joinedToNext: !!next,
     };
@@ -127,6 +151,11 @@ export function buildChunkConformSliceArgs(opts: ChunkConformSlicesInput): strin
   if (opts.plan.durationAction === 'pad' && opts.plan.padS > 0) {
     base.push(`tpad=stop_mode=clone:stop_duration=${opts.plan.padS.toFixed(3)}`);
   }
+  // quadros de folga depois do fim do vídeo do motor (cópias do último): a última fatia de um trecho precisa
+  // de `MC_CHUNK_TAIL_FRAMES` além da fronteira mesmo quando o motor entrega o clipe com a duração exata do áudio
+  base.push(
+    `tpad=stop_mode=clone:stop_duration=${((MC_CHUNK_TAIL_FRAMES + 3) / MC_CHUNK_FPS).toFixed(3)}`,
+  );
   const withFull = opts.fullOutput != null && opts.slices.length > 1;
   const outputs = opts.slices.length + (withFull ? 1 : 0);
   const graph: string[] = [`[0:v]${base.join(',')},split=${outputs}${labels('v', outputs)}`];
@@ -135,7 +164,7 @@ export function buildChunkConformSliceArgs(opts: ChunkConformSlicesInput): strin
   );
   opts.slices.forEach((slice, i) => {
     graph.push(
-      `[v${i}]trim=start=${sec(slice.startMs)}:end=${sec(slice.endMs)},setpts=PTS-STARTPTS[ov${i}]`,
+      `[v${i}]trim=${videoTrim(slice)},setpts=PTS-STARTPTS[ov${i}]`,
       `[a${i}]atrim=start=${sec(slice.startMs)}:end=${sec(slice.endMs)},asetpts=PTS-STARTPTS[oa${i}]`,
     );
   });
@@ -181,6 +210,18 @@ export function buildChunkConformSliceArgs(opts: ChunkConformSlicesInput): strin
     );
   }
   return args;
+}
+
+/**
+ * `trim` do vídeo de uma fatia em quadros INTEIROS: o `start` guarda o quadro com `pts ≥ start` e o `end` só
+ * os quadros que TERMINAM antes dele, então ambos ficam meio quadro além da fronteira (`start` meio quadro
+ * antes do 1º quadro; `end` meio quadro depois do último, mais `MC_CHUNK_TAIL_FRAMES`) — imune ao ruído de
+ * ponto flutuante.
+ */
+function videoTrim(slice: ChunkSliceSpan): string {
+  const start = (slice.videoStartFrame - 0.5) / MC_CHUNK_FPS;
+  const end = (slice.videoEndFrame + MC_CHUNK_TAIL_FRAMES + 0.5) / MC_CHUNK_FPS;
+  return `start=${start.toFixed(5)}:end=${end.toFixed(5)}`;
 }
 
 function labels(prefix: string, n: number): string {

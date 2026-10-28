@@ -88,7 +88,6 @@ describe('planChunkSlices + buildChunkConformSliceArgs (D8)', () => {
       audioMs: chunk.audioMs,
       sentMs: chunk.sentMs,
       offsetMs: 0,
-      ownHash: 'h',
       join: null,
     };
   };
@@ -99,6 +98,12 @@ describe('planChunkSlices + buildChunkConformSliceArgs (D8)', () => {
       [0, 2368, 2168, true],
       [2368, 4475, 1907, true],
       [4475, 8785, 4310, false],
+    ]);
+    // o vídeo na grade de 30 fps: 2,368 s → quadro 71; 4,475 s → 134; a última cobre o áudio (264 quadros)
+    expect(slices.map((s) => [s.videoStartFrame, s.videoEndFrame])).toEqual([
+      [0, 71],
+      [71, 134],
+      [134, 264],
     ]);
   });
 
@@ -123,7 +128,8 @@ describe('planChunkSlices + buildChunkConformSliceArgs (D8)', () => {
     });
     const joined = args.join(' ');
     expect(joined).toContain('split=4');
-    expect(joined).toContain('trim=start=2.368:end=4.475');
+    expect(joined).toContain('trim=start=2.35000:end=4.58333'); // quadros 71..133 + 3 de folga no fim
+    expect(joined).toContain('trim=start=-0.01667:end=2.48333'); // o 1º quadro entra com folga antes de zero
     expect(joined).toContain('atrim=start=4.475:end=8.785');
     expect(args.filter((a) => a.endsWith('.mp4'))).toEqual([
       'raw.mp4',

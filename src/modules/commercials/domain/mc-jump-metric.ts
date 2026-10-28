@@ -86,22 +86,31 @@ export interface JumpVerdict {
   passed: boolean;
 }
 
+/** fps do vídeo montado (CFR). */
+export const MC_JUMP_FPS = 30;
+
 /**
- * Veredito de uma sequência de quadros. `boundaryFrames` são os índices `n` do PRIMEIRO quadro depois de
- * cada fronteira (o par medido é `n − 1` → `n`); a linha de base exclui ±3 quadros de cada fronteira.
+ * Veredito de uma sequência de quadros. `boundaryTimesS` são os instantes (s) em que cada fala seguinte começa
+ * (ou o trecho seguinte entra). O salto de uma fronteira é o MAIOR entre os pares de quadros vizinhos que a
+ * cobrem (`n0 − 1 → n0`, `n0 → n0 + 1` e `n0 + 1 → n0 + 2`, com `n0 = ⌊t × 30⌋`): a fronteira cai entre
+ * dois quadros da grade, e um corte fora dela congela um quadro e pula o seguinte (dois quadros de movimento
+ * de uma vez), o que o par único esconderia ou mostraria conforme o arredondamento. A linha de base exclui
+ * ±3 quadros de cada fronteira.
  */
 export function judgeJumps(
   frames: Uint8Array[],
   width: number,
   height: number,
-  boundaryFrames: number[],
+  boundaryTimesS: number[],
+  fps: number = MC_JUMP_FPS,
 ): JumpVerdict {
   const jumps = frames.slice(1).map((frame, i) => jumpBetween(frames[i], frame, width, height));
+  const firsts = boundaryTimesS.map((t) => Math.floor(t * fps));
   const guarded = new Set<number>();
-  for (const n of boundaryFrames) {
+  for (const n of firsts) {
     for (
       let k = n - MC_JUMP_BASELINE_GUARD_FRAMES;
-      k <= n + MC_JUMP_BASELINE_GUARD_FRAMES;
+      k <= n + MC_JUMP_BASELINE_GUARD_FRAMES + 1;
       k += 1
     ) {
       guarded.add(k - 1); // jumps[k - 1] é o par (k − 1 → k)
@@ -110,7 +119,10 @@ export function judgeJumps(
   const baseline = jumps.filter((_j, i) => !guarded.has(i));
   const baselineP95 = percentile(baseline, 0.95);
   const limit = Math.max(MC_JUMP_FACTOR * baselineP95, MC_JUMP_FLOOR);
-  const boundaries = boundaryFrames.map((n) => jumps[n - 1] ?? 0);
+  // jumps[i] é o par (i → i + 1): os três pares que cobrem a fronteira são os de índice n0 − 1, n0 e n0 + 1
+  const boundaries = firsts.map((n) =>
+    Math.max(jumps[n - 1] ?? 0, jumps[n] ?? 0, jumps[n + 1] ?? 0),
+  );
   const worst = boundaries.length > 0 ? Math.max(...boundaries) : 0;
   return { baselineP95, limit, boundaries, worst, passed: boundaries.every((j) => j <= limit) };
 }

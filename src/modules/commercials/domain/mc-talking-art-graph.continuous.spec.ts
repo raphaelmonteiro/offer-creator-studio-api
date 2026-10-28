@@ -60,17 +60,19 @@ describe('continuousClipTimes — fatias encostadas (D9)', () => {
 });
 
 describe('buildComposeGraph em modo contínuo', () => {
-  it('Card/Círculo: nenhuma segura de quadro, nenhuma entrada atrasada, nenhum fade; fronteiras exclusivas', () => {
+  it('Card/Círculo: nenhuma segura de quadro, nenhuma entrada atrasada, nenhum fade; fronteiras exclusivas NA GRADE DE QUADROS', () => {
     const graph = graphOf(args());
     expect(graph).not.toMatch(/start_mode=clone/);
     expect(graph).not.toMatch(/stop_duration=(?!0\.1\b)/); // só o clone de 100 ms contra o arredondamento
     expect(graph).not.toContain('fade=');
-    expect(graph).toContain("enable='gte(t,0)*lt(t,2.368)'");
-    expect(graph).toContain("enable='gte(t,2.368)*lt(t,4.475)'");
-    expect(graph).toContain("enable='between(t,4.475,8.785)'"); // a última fatia fecha o vídeo
-    expect(graph).toContain('setpts=PTS-STARTPTS+2.368/TB');
-    // a fatia ganha um quadro inteiro a mais antes do trim (o trim só guarda quadros inteiros: sem isso cai um quadro na fronteira)
-    expect(graph).toContain('trim=duration=2.401'); // 2,368 s + 1/30 s
+    // 2,368 s = quadro 71 (71/30 = 2,3667 s), 4,475 s = quadro 134; meio quadro de folga contra ruído de ponto flutuante
+    expect(graph).toContain("enable='gte(t,(0-0.5)/30)*lt(t,(71-0.5)/30)'");
+    expect(graph).toContain("enable='gte(t,(71-0.5)/30)*lt(t,(134-0.5)/30)'");
+    expect(graph).toContain("enable='gte(t,(134-0.5)/30)'"); // a última fatia vai até o fim do vídeo
+    expect(graph).toContain('setpts=PTS-STARTPTS+(71/30)/TB');
+    expect(graph).toContain('setpts=PTS-STARTPTS+(134/30)/TB');
+    // cada fatia ganha um quadro inteiro a mais antes do trim (o trim só guarda quadros inteiros)
+    expect(graph).toContain('trim=duration=2.4'); // (71 − 0 + 1,5) / 30
   });
 
   it('o áudio é cada TTS no instante da fala (adelay) com a duração da fatia; legendas e áudio nos mesmos instantes de hoje', () => {
@@ -121,7 +123,7 @@ describe('buildComposeGraph em modo contínuo', () => {
       logoFace: true,
       logoBox: { x: 0.1, y: 0.05, w: 0.3, h: 0.2 },
     });
-    expect(graphOf(logo)).toContain("enable='gte(t,0)*lt(t,2.368)'");
+    expect(graphOf(logo)).toContain("enable='gte(t,(0-0.5)/30)*lt(t,(71-0.5)/30)'");
     expect(graphOf(logo)).not.toContain('fade=');
     expect(logo).toMatchSnapshot();
   });

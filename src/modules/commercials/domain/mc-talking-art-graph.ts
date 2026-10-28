@@ -289,8 +289,13 @@ interface ClipSlot {
   tailHoldS: number;
   /** Fade de alfa (s) no começo do head hold; 0 na primeira fala. */
   fadeInS: number;
-  /** Fala contínua: o clipe vale em `[start, end)` — a fatia seguinte assume na fronteira, sem dois quadros juntos. */
-  exclusiveEnd?: boolean;
+  /**
+   * Fala contínua: o VÍDEO da fatia na grade de quadros (o áudio segue em `startS`, exato) — a fatia seguinte
+   * assume do mesmo quadro em que a anterior parou. `videoEndFrame` nulo = a última fatia (sem fim). Ausentes
+   * no modo de hoje.
+   */
+  videoStartFrame?: number;
+  videoEndFrame?: number | null;
 }
 
 function planSlots(input: ComposeGraphInput): ClipSlot[] {
@@ -323,6 +328,8 @@ function planSlots(input: ComposeGraphInput): ClipSlot[] {
  * fundo segue por fatia (o chromakey é por pixel).
  */
 function planContinuousSlots(input: ComposeGraphInput): ClipSlot[] {
+  const grid = (s: number) => Math.round(s * ASSEMBLY_FPS);
+  const last = input.clips.length - 1;
   return input.clips.map((clip, index) => ({
     index,
     durationS: Math.max(0, clip.endS - clip.startS),
@@ -331,7 +338,9 @@ function planContinuousSlots(input: ComposeGraphInput): ClipSlot[] {
     headHoldS: 0,
     tailHoldS: 0,
     fadeInS: 0,
-    exclusiveEnd: index < input.clips.length - 1,
+    // vídeo na grade de quadros: sem quadro congelado nem pulo na fronteira (o áudio segue exato)
+    videoStartFrame: grid(clip.startS),
+    videoEndFrame: index < last ? grid(clip.endS) : null,
   }));
 }
 
@@ -341,6 +350,20 @@ function planContinuousSlots(input: ComposeGraphInput): ClipSlot[] {
  * excedente vertical na cor), seguras de quadro no silêncio, deslocamento
  * para o instante da timeline e fade de alfa na entrada.
  */
+/**
+ * Duração do `trim` do clipe (s). Modo de hoje: a da fala. Fala contínua: o `trim` só mantém quadros INTEIROS
+ * dentro da duração, então a fatia ganha um quadro inteiro a mais (a janela `enable` esconde o excedente) —
+ * sem isso o último quadro cai e a arte pisca na fronteira; na grade de quadros, `(n + 1) / fps` + meio
+ * quadro de folga.
+ */
+function trimDurationS(input: ComposeGraphInput, slot: ClipSlot): number {
+  if (!input.continuous) return slot.durationS;
+  if (slot.videoStartFrame != null && slot.videoEndFrame != null) {
+    return (slot.videoEndFrame - slot.videoStartFrame + 1.5) / ASSEMBLY_FPS;
+  }
+  return slot.durationS + 1 / ASSEMBLY_FPS;
+}
+
 export function buildClipWindowChain(
   input: ComposeGraphInput,
   slot: ClipSlot,
@@ -360,7 +383,7 @@ export function buildClipWindowChain(
     'setpts=PTS-STARTPTS',
     `fps=${ASSEMBLY_FPS}`,
     'tpad=stop_mode=clone:stop_duration=0.1',
-    `trim=duration=${fmt(slot.durationS + (input.continuous ? 1 / ASSEMBLY_FPS : 0))}`,
+    `trim=duration=${fmt(trimDurationS(input, slot))}`,
     'setpts=PTS-STARTPTS',
   ];
   const cutout = input.cutout ?? null;
@@ -374,7 +397,12 @@ export function buildClipWindowChain(
     filters.push(`tpad=${parts.join(':')}`);
   }
   const appearS = slot.startS - slot.headHoldS;
-  filters.push(`setpts=PTS-STARTPTS+${fmt(appearS)}/TB`);
+  // fala contínua: o 1º quadro da fatia entra EXATO na grade de quadros (fração, sem arredondar a 3 casas)
+  filters.push(
+    slot.videoStartFrame != null
+      ? `setpts=PTS-STARTPTS+(${slot.videoStartFrame}/${ASSEMBLY_FPS})/TB`
+      : `setpts=PTS-STARTPTS+${fmt(appearS)}/TB`,
+  );
   if (slot.fadeInS > 0) {
     filters.push(`fade=t=in:st=${fmt(appearS)}:d=${fmt(slot.fadeInS)}:alpha=1`);
   }
@@ -396,10 +424,15 @@ export function buildWindowOverlay(
 ): string {
   const a = slot.startS - slot.headHoldS;
   const b = slot.endS + slot.tailHoldS;
-  // fala contínua: o fim é exclusivo — na fronteira só a fatia seguinte é desenhada
-  const enable = slot.exclusiveEnd
-    ? `gte(t,${fmt(a)})*lt(t,${fmt(b)})`
-    : `between(t,${fmt(a)},${fmt(b)})`;
+  // fala contínua: a janela na grade de quadros, com meio quadro de folga contra ruído de ponto flutuante;
+  // o fim é exclusivo — na fronteira só a fatia seguinte é desenhada
+  const half = (frame: number) => `(${frame}-0.5)/${ASSEMBLY_FPS}`;
+  const enable =
+    slot.videoStartFrame != null
+      ? slot.videoEndFrame != null
+        ? `gte(t,${half(slot.videoStartFrame)})*lt(t,${half(slot.videoEndFrame)})`
+        : `gte(t,${half(slot.videoStartFrame)})`
+      : `between(t,${fmt(a)},${fmt(b)})`;
   return (
     `[${inLabel}][c${slot.index}]overlay=x=${windowPx.x}:y=${windowPx.y}:eof_action=pass:` +
     `enable='${enable}'[${outLabel}]`

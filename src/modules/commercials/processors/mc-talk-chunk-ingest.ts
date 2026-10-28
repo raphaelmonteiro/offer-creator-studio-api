@@ -17,7 +17,11 @@ import {
   planChunkSlices,
 } from '../domain/mc-talk-chunk-ffmpeg';
 import { ChunkSnapshot } from '../domain/mc-talk-chunk-step';
-import { conformedOutputIssue, TalkConformPlan } from '../domain/mc-talk-conform-graph';
+import {
+  conformedOutputIssue,
+  MC_TALK_CONFORM_TOLERANCE_MS,
+  TalkConformPlan,
+} from '../domain/mc-talk-conform-graph';
 import { McProject } from '../entities/mc-project.entity';
 import { McScene } from '../entities/mc-scene.entity';
 import { McStep } from '../entities/mc-step.entity';
@@ -219,10 +223,7 @@ export class McTalkChunkIngest {
     }
     const fullPath = fullOutput ?? sliceOutputs[0];
     const measured = fullOutput ? await this.probeOrFail(fullOutput) : slices[0].measured;
-    const issue = conformedOutputIssue(
-      { hasVideo: true, hasAudio: true, durationMs: measured.durationMs },
-      chunk.audioMs,
-    );
+    const issue = this.durationIssue(chunk, fullOutput ? measured : null, slices);
     if (issue) {
       throw new TerminalProviderError(`Clipe conformado inválido: ${issue}`, 'talk_conform_failed');
     }
@@ -237,6 +238,28 @@ export class McTalkChunkIngest {
       rawHeight: probe.height,
       leaderAudioAssetId: chunk.speeches[0].audioAssetId,
     };
+  }
+
+  /**
+   * Duração do conformado: o trecho inteiro (`-t audioMs`) bate com o áudio; sem ele (uma fatia só), a fatia
+   * não pode ser MAIS CURTA que o áudio — ela leva alguns quadros de folga depois do fim (D8), então mais
+   * longa é o esperado.
+   */
+  private durationIssue(
+    chunk: ChunkSnapshot,
+    full: { durationMs: number | null } | null,
+    slices: SliceFile[],
+  ): string | null {
+    if (full) {
+      return conformedOutputIssue(
+        { hasVideo: true, hasAudio: true, durationMs: full.durationMs },
+        chunk.audioMs,
+      );
+    }
+    const ms = slices[0].measured.durationMs;
+    return ms != null && ms < chunk.audioMs - MC_TALK_CONFORM_TOLERANCE_MS
+      ? 'conformed_duration_mismatch'
+      : null;
   }
 
   private async probeOrFail(file: string) {

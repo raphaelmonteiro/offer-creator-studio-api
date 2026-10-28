@@ -133,7 +133,7 @@ describeIf('continuidade da personagem entre falas (D14, ffmpeg real)', () => {
     for (let o = 0; o + FRAME * FRAME <= raw.length; o += FRAME * FRAME) {
       frames.push(raw.subarray(o, o + FRAME * FRAME));
     }
-    const boundaries = timeline.clips.slice(1).map((c) => Math.round(c.startS * 30));
+    const boundaries = timeline.clips.slice(1).map((c) => c.startS);
     return judgeJumps(frames, FRAME, FRAME, boundaries);
   }
 
