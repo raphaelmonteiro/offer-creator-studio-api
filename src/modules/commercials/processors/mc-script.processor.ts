@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { kitTileIdForFraming } from '../domain/mc-cutout-request';
+import { isTalkContinuousFormat } from '../domain/mc-talk-continuous.config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CreditsService } from '../../../shared/credits/credits.service';
@@ -344,8 +345,9 @@ export class McScriptProcessor {
    */
   private freezeTalkMode(project: McProject, script: McScript): McScript {
     const continuous = resolveProjectOptions(project.options).talkMode === 'continuous';
-    const supported = project.format === 'talking_art' || project.format === 'offer_piece';
-    return continuous && supported ? { ...script, talkMode: 'continuous' } : script;
+    return continuous && isTalkContinuousFormat(project.format)
+      ? { ...script, talkMode: 'continuous' }
+      : script;
   }
 
   /**

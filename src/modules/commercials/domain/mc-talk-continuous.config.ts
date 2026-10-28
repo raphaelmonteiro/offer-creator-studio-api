@@ -22,6 +22,10 @@ export const MC_TALK_POLL_MAX_MS = 40 * 60 * 1000;
 /** Formatos que têm o modo contínuo (D2): peça de ofertas e arte que fala. */
 export const MC_TALK_CONTINUOUS_FORMATS = ['talking_art', 'offer_piece'] as const;
 
+export function isTalkContinuousFormat(format: string | null | undefined): boolean {
+  return (MC_TALK_CONTINUOUS_FORMATS as readonly string[]).includes(format ?? '');
+}
+
 export function isTalkContinuousEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.MC_TALK_CONTINUOUS ?? '').trim().toLowerCase() === 'true';
 }
@@ -90,9 +94,7 @@ export function talkModeForNewProject(
   env: NodeJS.ProcessEnv = process.env,
 ): 'continuous' | undefined {
   if (!isTalkContinuousEnabled(env)) return undefined;
-  return (MC_TALK_CONTINUOUS_FORMATS as readonly string[]).includes(format ?? '')
-    ? 'continuous'
-    : undefined;
+  return isTalkContinuousFormat(format) ? 'continuous' : undefined;
 }
 
 /** Roteiro com o modo da duplicação (Q5): grava `talkMode` quando contínuo, remove quando não. */
