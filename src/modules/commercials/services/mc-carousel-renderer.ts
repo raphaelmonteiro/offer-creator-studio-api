@@ -3,6 +3,7 @@ import { createRequire } from 'module';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
+import { trackChildWork } from '../../../shared/process/in-flight-child-work';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { buildMockCarouselPlan } from '../domain/mc-carousel-mock-graph';
 import { carouselPropsIssues, OfferCarouselProps } from '../domain/mc-offer-carousel-props';
@@ -14,6 +15,7 @@ import {
   MC_OFFER_CAROUSEL_COMPOSITION_ID,
 } from '../domain/mc-render.config';
 import { bootCwd, resolveAppPath } from '../../../common/config/uploads-dir';
+import { McRenderPhase, toRenderFailure } from './mc-render-failure';
 
 /**
  * Renderização da composição `OfferCarousel` do F2 (change
@@ -73,12 +75,18 @@ interface RemotionBundlerModule {
   }): Promise<string>;
 }
 
+/** Navegador do Remotion; `on` (opcional) recebe `closed`/`closed-silent` quando o Chromium morre. */
+export interface RemotionBrowser {
+  close: (opts?: unknown) => Promise<void>;
+  on?: (event: string, listener: () => void) => unknown;
+}
+
 /** Superfície usada do `@remotion/renderer`. */
 interface RemotionRendererModule {
   openBrowser(
     browser: 'chrome',
     options?: { browserExecutable?: string | null; chromiumOptions?: Record<string, unknown> },
-  ): Promise<{ close: (opts?: unknown) => Promise<void> }>;
+  ): Promise<RemotionBrowser>;
   selectComposition(options: Record<string, unknown>): Promise<Record<string, unknown>>;
   renderMedia(options: Record<string, unknown>): Promise<unknown>;
   /** Um quadro (PNG/JPEG) — o quadro parado da peça de ofertas (6.2). */
@@ -162,7 +170,7 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
   private readonly logger = new Logger(RemotionCarouselRenderer.name);
   private modules: Promise<RemotionModules> | null = null;
   private serveUrl: Promise<string> | null = null;
-  private browser: Promise<{ close: (opts?: unknown) => Promise<void> }> | null = null;
+  private browser: Promise<RemotionBrowser> | null = null;
 
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
@@ -193,12 +201,35 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
   async runtime(): Promise<{
     modules: RemotionModules;
     serveUrl: string;
-    browser: { close: (opts?: unknown) => Promise<void> };
+    browser: RemotionBrowser;
   }> {
     const modules = await this.load();
+    const phase: { current: McRenderPhase } = { current: 'bundle' };
+    try {
+      const { serveUrl, browser } = await this.openRuntime(modules, phase);
+      return { modules, serveUrl, browser };
+    } catch (err) {
+      await this.discardUnlessUnavailable(err);
+      throw toRenderFailure(err, phase.current);
+    }
+  }
+
+  /** Bundle e navegador, marcando a fase em `phase` para quem converte a falha. */
+  private async openRuntime(
+    modules: RemotionModules,
+    phase: { current: McRenderPhase },
+  ): Promise<{ serveUrl: string; browser: RemotionBrowser }> {
+    phase.current = 'bundle';
     const serveUrl = await this.bundle(modules);
+    phase.current = 'open_browser';
     const browser = await this.openBrowser(modules);
-    return { modules, serveUrl, browser };
+    return { serveUrl, browser };
+  }
+
+  /** `RENDER_UNAVAILABLE` (navegador não configurado) não tem navegador a descartar. */
+  private async discardUnlessUnavailable(err: unknown): Promise<void> {
+    if (err instanceof TerminalProviderError && err.code === RENDER_UNAVAILABLE) return;
+    await this.discardBrowser();
   }
 
   /** Navegador possivelmente morto depois de um erro: o próximo job abre outro. */
@@ -236,12 +267,22 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
       );
     }
     if (!this.browser) {
-      this.browser = modules.renderer
+      const opening: Promise<RemotionBrowser> = modules.renderer
         .openBrowser('chrome', { browserExecutable: executable })
+        .then((browser) => {
+          // Chromium morto em cache faria o render seguinte pendurar: zera só se ainda for ESTA instância.
+          const forget = () => {
+            if (this.browser === opening) this.browser = null;
+          };
+          browser.on?.('closed', forget);
+          browser.on?.('closed-silent', forget);
+          return browser;
+        })
         .catch((err) => {
-          this.browser = null;
+          if (this.browser === opening) this.browser = null;
           throw err;
         });
+      this.browser = opening;
     }
     return this.browser;
   }
@@ -291,33 +332,41 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
           `(${mcCompositionVersion(this.env)}) — o hash do render usa a do pacote.`,
       );
     }
-    const serveUrl = await this.bundle(modules);
-    const browser = await this.openBrowser(modules);
+    return trackChildWork(() => this.renderGuarded(modules, request, compositionVersion));
+  }
+
+  /** Bundle, navegador, seleção e render dentro do tratamento: morte de processo vira `render_interrupted`. */
+  private async renderGuarded(
+    modules: RemotionModules,
+    request: McCarouselRenderRequest,
+    compositionVersion: string,
+  ): Promise<McCarouselRenderResult> {
+    const phase: { current: McRenderPhase } = { current: 'bundle' };
     const { delayRenderTimeoutMs, totalTimeoutMs } = mcRenderTimeouts();
-    const id = modules.core.OFFER_CAROUSEL_COMPOSITION_ID ?? MC_OFFER_CAROUSEL_COMPOSITION_ID;
     const { cancelSignal, cancel } = modules.renderer.makeCancelSignal();
-    const timer = setTimeout(cancel, totalTimeoutMs);
-    timer.unref?.();
+    let timer: NodeJS.Timeout | undefined;
     try {
-      const composition = await modules.renderer.selectComposition({
+      const { serveUrl, browser } = await this.openRuntime(modules, phase);
+      timer = setTimeout(cancel, totalTimeoutMs); // o prazo total conta do render, não do bundle
+      timer.unref?.();
+      const id = modules.core.OFFER_CAROUSEL_COMPOSITION_ID ?? MC_OFFER_CAROUSEL_COMPOSITION_ID;
+      const common = {
         serveUrl,
-        id,
         inputProps: request.props,
         puppeteerInstance: browser,
         browserExecutable: this.env.MC_RENDER_BROWSER,
         timeoutInMilliseconds: delayRenderTimeoutMs,
-      });
+      };
+      phase.current = 'select_composition';
+      const composition = await modules.renderer.selectComposition({ ...common, id });
+      phase.current = 'render_media';
       let lastPct = -1;
       await modules.renderer.renderMedia({
+        ...common,
         composition,
-        serveUrl,
         codec: 'h264',
         outputLocation: request.outputPath,
-        inputProps: request.props,
         concurrency: 1,
-        puppeteerInstance: browser,
-        browserExecutable: this.env.MC_RENDER_BROWSER,
-        timeoutInMilliseconds: delayRenderTimeoutMs,
         cancelSignal,
         onProgress: ({ progress }: { progress: number }) => {
           const pct = Math.round(progress * 100);
@@ -328,10 +377,10 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
         },
       });
     } catch (err) {
-      await this.discardBrowser();
-      throw err;
+      await this.discardUnlessUnavailable(err);
+      throw toRenderFailure(err, phase.current);
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
     }
     return { outputPath: request.outputPath, renderer: this.kind, compositionVersion };
   }

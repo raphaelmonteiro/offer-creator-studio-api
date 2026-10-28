@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as sharp from 'sharp';
+import { trackChildWork } from '../../../shared/process/in-flight-child-work';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { buildMockStillPlan, OfferPieceStillProps } from '../domain/mc-piece-still-props';
 import {
@@ -15,6 +16,7 @@ import {
   RemotionCarouselRenderer,
   VideoTemplatesCoreModule,
 } from './mc-carousel-renderer';
+import { toRenderFailure } from './mc-render-failure';
 
 /**
  * Quadro PARADO da peça de ofertas (change video-peca-configuravel, 6.2) atrás
@@ -79,7 +81,12 @@ export class RemotionStillRenderer implements McStillRenderer {
     }
   }
 
-  async renderStill(request: McStillRenderRequest): Promise<McStillRenderResult> {
+  renderStill(request: McStillRenderRequest): Promise<McStillRenderResult> {
+    return trackChildWork(() => this.renderStillTracked(request));
+  }
+
+  private async renderStillTracked(request: McStillRenderRequest): Promise<McStillRenderResult> {
+    // bundle e navegador: `runtime()` já converte a morte de processo em render_interrupted
     const { modules, serveUrl, browser } = await this.carousel.runtime();
     this.validateWithPackage(modules.core, request.props);
     const compositionVersion = modules.core.COMPOSITION_VERSION ?? mcCompositionVersion(this.env);
@@ -115,7 +122,7 @@ export class RemotionStillRenderer implements McStillRenderer {
           RENDER_UNAVAILABLE,
         );
       }
-      throw err;
+      throw toRenderFailure(err, 'render_still');
     }
     this.logger.log(`Quadro da peça renderizado (${id}, composição ${compositionVersion})`);
     return { outputPath: request.outputPath, renderer: this.kind, compositionVersion };
