@@ -70,7 +70,16 @@ export interface ComposeClipInput {
   path: string;
   /** Instantes na timeline composta (s), derivados de `buildSpeechTimeline`. */
   startS: number;
+  /**
+   * Fim do clipe na timeline (s). Modo de hoje: o fim da fala. Fala contínua: o INÍCIO da fala seguinte
+   * (a fatia cobre fala + silêncio), então as fatias se encostam sem seguras nem fade.
+   */
   endS: number;
+}
+
+/** Fala contínua no grafo (video-fala-continua, D9): ausente = grafo de hoje, byte a byte. */
+export interface ComposeContinuousInput {
+  version: number;
 }
 
 /** Snapshot de entrada do compose (gravado no step e no asset composto). */
@@ -102,6 +111,12 @@ export interface ComposeGraphInput {
    * com alfa (encaixe inteiro, colado embaixo, sem crossfade). Ausente = Card/Círculo/logo, como hoje.
    */
   cutout?: ComposeCutoutInput | null;
+  /**
+   * Fala contínua (video-fala-continua, D9): os clipes são fatias de trechos contínuos que se encostam —
+   * sem último quadro seguro, sem entrada atrasada e sem fade de alfa em nenhuma fronteira (nem entre
+   * trechos). Ausente = o grafo de hoje.
+   */
+  continuous?: ComposeContinuousInput | null;
 }
 
 export interface ComposePass {
@@ -152,6 +167,31 @@ export function composeTimeline(
     })),
     totalS: Number((totalMs / 1000).toFixed(3)),
   };
+}
+
+/**
+ * Fala contínua (D9): o fim de cada fatia é o INÍCIO da fala seguinte (a fatia leva fala + silêncio e as
+ * fatias se encostam); a última termina onde a fala termina.
+ */
+export function continuousClipTimes(
+  clips: Array<{ sceneId: string; startS: number; endS: number }>,
+): Array<{ sceneId: string; startS: number; endS: number }> {
+  return clips.map((clip, i) => ({
+    ...clip,
+    endS: i < clips.length - 1 ? clips[i + 1].startS : clip.endS,
+  }));
+}
+
+/**
+ * Duração da FALA de uma fatia de trecho (`metadata.speechMs`, gravada pelo ingest); sem ela (clipe de
+ * uma fala vindo do cache do modo de hoje) vale a duração do arquivo.
+ */
+export function sliceSpeechMs(
+  metadata: Record<string, unknown> | null | undefined,
+  fileMs: number,
+): number {
+  const value = metadata?.speechMs;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fileMs;
 }
 
 const fmt = (n: number) => Number(n.toFixed(3)).toString();
@@ -249,9 +289,12 @@ interface ClipSlot {
   tailHoldS: number;
   /** Fade de alfa (s) no começo do head hold; 0 na primeira fala. */
   fadeInS: number;
+  /** Fala contínua: o clipe vale em `[start, end)` — a fatia seguinte assume na fronteira, sem dois quadros juntos. */
+  exclusiveEnd?: boolean;
 }
 
 function planSlots(input: ComposeGraphInput): ClipSlot[] {
+  if (input.continuous) return planContinuousSlots(input);
   const gapS = Math.max(0, input.gapMs / 1000);
   // sem fundo não há crossfade: duas versões semitransparentes da personagem apareceriam juntas
   const crossfadeS = input.cutout ? 0 : Math.min(MC_COMPOSE_CROSSFADE_MAX_S, gapS);
@@ -275,6 +318,24 @@ function planSlots(input: ComposeGraphInput): ClipSlot[] {
 }
 
 /**
+ * Fala contínua (D9): cada fatia ocupa `[start, end)` encostada na seguinte — sem `headHold`, sem
+ * `tailHold`, sem `fadeIn`. Vale em Card, Círculo, sem fundo e rosto do logo; o recorte do modo sem
+ * fundo segue por fatia (o chromakey é por pixel).
+ */
+function planContinuousSlots(input: ComposeGraphInput): ClipSlot[] {
+  return input.clips.map((clip, index) => ({
+    index,
+    durationS: Math.max(0, clip.endS - clip.startS),
+    startS: clip.startS,
+    endS: clip.endS,
+    headHoldS: 0,
+    tailHoldS: 0,
+    fadeInS: 0,
+    exclusiveEnd: index < input.clips.length - 1,
+  }));
+}
+
+/**
  * Cadeia de um clipe na janela → `[c{k}]`: duração exata da fala, encaixe na
  * janela (contain-fit + pad; no modo rosto do logo, ajuste por largura com o
  * excedente vertical na cor), seguras de quadro no silêncio, deslocamento
@@ -293,11 +354,13 @@ export function buildClipWindowChain(
       `pad=${ww}:${wh}:(ow-iw)/2:(oh-ih)/2:color=${color}`;
   // 30 fps CFR desde t=0; 100 ms de último quadro clonado ANTES do trim cobrem
   // um vídeo conformado um quadro mais curto que o áudio (a janela nunca pisca a arte).
+  // Fala contínua: o `trim` só mantém quadros INTEIROS dentro da duração, então a fatia ganha um quadro
+  // a mais (a janela `enable` esconde o excedente); sem isso um quadro cai na fronteira e a arte pisca.
   const timing: string[] = [
     'setpts=PTS-STARTPTS',
     `fps=${ASSEMBLY_FPS}`,
     'tpad=stop_mode=clone:stop_duration=0.1',
-    `trim=duration=${fmt(slot.durationS)}`,
+    `trim=duration=${fmt(slot.durationS + (input.continuous ? 1 / ASSEMBLY_FPS : 0))}`,
     'setpts=PTS-STARTPTS',
   ];
   const cutout = input.cutout ?? null;
@@ -333,9 +396,13 @@ export function buildWindowOverlay(
 ): string {
   const a = slot.startS - slot.headHoldS;
   const b = slot.endS + slot.tailHoldS;
+  // fala contínua: o fim é exclusivo — na fronteira só a fatia seguinte é desenhada
+  const enable = slot.exclusiveEnd
+    ? `gte(t,${fmt(a)})*lt(t,${fmt(b)})`
+    : `between(t,${fmt(a)},${fmt(b)})`;
   return (
     `[${inLabel}][c${slot.index}]overlay=x=${windowPx.x}:y=${windowPx.y}:eof_action=pass:` +
-    `enable='between(t,${fmt(a)},${fmt(b)})'[${outLabel}]`
+    `enable='${enable}'[${outLabel}]`
   );
 }
 

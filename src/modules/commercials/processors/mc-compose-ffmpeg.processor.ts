@@ -21,7 +21,9 @@ import {
   composedOutputIssue,
   composeHashWindow,
   composeTimeline,
+  continuousClipTimes,
   MC_COMPOSE_GRAPH_VERSION,
+  sliceSpeechMs,
 } from '../domain/mc-talking-art-graph';
 import { defaultCharacterWindow, isWindowWellFormed } from '../domain/mc-talking-art-window';
 import { McScript, McStepType, resolveProjectOptions } from '../domain/mc-types';
@@ -112,12 +114,16 @@ export class McComposeFfmpegProcessor {
       });
 
       // 1) clipes conformados (vídeo + TTS) na ordem de cena, com duração MEDIDA
+      const continuous = script?.talkMode === 'continuous';
       const measured: Array<{
         sceneId: string;
         finalAssetId: string;
         path: string;
         fileUrl: string;
+        /** Duração do ARQUIVO (o que o recorte verifica). */
         durationMs: number;
+        /** Duração da FALA: a do arquivo no modo de hoje; na fatia de trecho, a gravada no ingest (D9). */
+        speechMs: number;
       }> = [];
       for (const scene of scenes) {
         const asset = assets.find((a) => a.id === scene.finalAssetId);
@@ -135,15 +141,21 @@ export class McComposeFfmpegProcessor {
             'invalid_scene_clip',
           );
         }
+        const fileMs = probe.durationMs ?? asset.durationMs ?? scene.durationS * 1000;
         measured.push({
           sceneId: scene.scriptSceneId ?? scene.id,
           finalAssetId: asset.id,
           path: absolute,
           fileUrl: asset.fileUrl as string,
-          durationMs: probe.durationMs ?? asset.durationMs ?? scene.durationS * 1000,
+          durationMs: fileMs,
+          speechMs: continuous ? sliceSpeechMs(asset.metadata, fileMs) : fileMs,
         });
       }
-      const timeline = composeTimeline(measured, MC_TALK_GAP_MS);
+      const timeline = composeTimeline(
+        measured.map((m) => ({ sceneId: m.sceneId, durationMs: m.speechMs })),
+        MC_TALK_GAP_MS,
+      );
+      const clipTimes = continuous ? continuousClipTimes(timeline.clips) : timeline.clips;
 
       // 2) arte de fundo, janela e cor (D1/D6/D9). Na peça de ofertas (6.4) a
       // arte É o quadro parado desta cadeia (`render_still`, mesmo attempt):
@@ -228,8 +240,8 @@ export class McComposeFfmpegProcessor {
         clips: measured.map((clip, i) => ({
           sceneId: clip.sceneId,
           path: clip.path,
-          startS: timeline.clips[i].startS,
-          endS: timeline.clips[i].endS,
+          startS: clipTimes[i].startS,
+          endS: clipTimes[i].endS,
         })),
         gapMs: MC_TALK_GAP_MS,
         captionsEnabled: options.captionsEnabled,
@@ -237,6 +249,7 @@ export class McComposeFfmpegProcessor {
           ? { storeName: script.endcard.storeName.trim() }
           : null,
         ...(cutout ? { cutout } : {}),
+        ...(continuous ? { continuous: { version: 1 } } : {}),
       };
 
       const resolvedWindow = composeHashWindow({
@@ -340,6 +353,7 @@ export class McComposeFfmpegProcessor {
             ...(piece ? { stillAssetId, pieceHash } : {}),
             gapMs: MC_TALK_GAP_MS,
             ...(cutout ? { cutout } : {}),
+            ...(continuous ? { continuous: { version: 1 } } : {}),
             endcard: !!input.endcard,
             timeline: {
               totalS: timeline.totalS,

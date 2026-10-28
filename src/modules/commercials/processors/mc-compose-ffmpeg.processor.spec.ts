@@ -280,6 +280,74 @@ describe('McComposeFfmpegProcessor — step de projeto compose_ffmpeg (tarefas 4
     ).toBe(true);
   });
 
+  describe('fala contínua (change video-fala-continua, 1.6, D9)', () => {
+    beforeEach(() => {
+      (project.script as Record<string, unknown>).talkMode = 'continuous';
+      // fatias de um trecho: fala + silêncio seguinte (a última, só a fala); speechMs gravado no ingest
+      assets[0] = { id: 'clip-0', fileUrl: '/uploads/c0.mp4', metadata: { speechMs: 2168 } };
+      assets[1] = { id: 'clip-1', fileUrl: '/uploads/c1.mp4', metadata: { speechMs: 1907 } };
+      assets[2] = { id: 'clip-2', fileUrl: '/uploads/c2.mp4', metadata: { speechMs: 4310 } };
+      const files: Record<string, number> = { 'c0.mp4': 2368, 'c1.mp4': 2107, 'c2.mp4': 4310 };
+      ffmpeg.probe.mockImplementation(async (file: string) => {
+        const base = path.basename(file);
+        if (base === 'composed.mp4') {
+          return { hasVideo: true, hasAudio: true, width: 1080, height: 1920, durationMs: 8785 };
+        }
+        return { hasVideo: true, hasAudio: true, width: 720, height: 960, durationMs: files[base] };
+      });
+    });
+
+    it('a timeline usa a duração da FALA (speechMs), não a da fatia: instantes iguais aos do modo de hoje; o grafo encosta as fatias sem fade nem segura', async () => {
+      await processor.process({ stepId: 'cmp-1' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      const compose = runWith(ffmpeg, 'composed.mp4') as string[];
+      const graph = compose[compose.indexOf('-filter_complex') + 1];
+      expect(graph).toContain("enable='gte(t,0)*lt(t,2.368)'");
+      expect(graph).toContain("enable='gte(t,2.368)*lt(t,4.475)'");
+      expect(graph).toContain("enable='between(t,4.475,8.785)'");
+      expect(graph).not.toContain('fade=');
+      expect(graph).toContain('adelay=delays=113664S:all=1'); // 2,368 s: mesmo instante do modo de hoje
+      expect(saved[0].metadata).toMatchObject({
+        continuous: { version: 1 },
+        timeline: {
+          totalS: 8.785,
+          scenes: [
+            expect.objectContaining({ startS: 0, endS: 2.168 }),
+            expect.objectContaining({ startS: 2.368, endS: 4.275 }),
+            expect.objectContaining({ startS: 4.475, endS: 8.785 }),
+          ],
+        },
+      });
+      expect(stepUpdates[0]).toMatchObject({
+        inputSnapshot: expect.objectContaining({ continuous: { version: 1 } }),
+      });
+    });
+
+    it('sem `speechMs` (clipe de uma fala vindo do cache do modo de hoje) vale a duração do arquivo', async () => {
+      assets[2] = { id: 'clip-2', fileUrl: '/uploads/c2.mp4' };
+      await processor.process({ stepId: 'cmp-1' });
+      expect(saved[0].metadata).toMatchObject({
+        timeline: { scenes: expect.arrayContaining([expect.objectContaining({ endS: 8.785 })]) },
+      });
+    });
+
+    it('sem talkMode no roteiro o grafo é o de hoje (fade e segura; flag desligada não muda nada)', async () => {
+      delete (project.script as Record<string, unknown>).talkMode;
+      const probe = ffmpeg.probe.getMockImplementation() as (f: string) => Promise<unknown>;
+      ffmpeg.probe.mockImplementation(async (file: string) =>
+        path.basename(file) === 'composed.mp4'
+          ? { hasVideo: true, hasAudio: true, width: 1080, height: 1920, durationMs: 9185 } // 3 arquivos + 2 silêncios
+          : probe(file),
+      );
+      await processor.process({ stepId: 'cmp-1' });
+      const compose = runWith(ffmpeg, 'composed.mp4') as string[];
+      const graph = compose[compose.indexOf('-filter_complex') + 1];
+      expect(graph).toContain('fade=t=in');
+      expect(graph).not.toContain('gte(t,');
+      expect(saved[0].metadata).not.toHaveProperty('continuous');
+    });
+  });
+
   it('cartela do roteiro: compose + cartela + concat, duração esperada com os 2 s', async () => {
     (project.script as Record<string, unknown>).endcard = { storeName: 'Mercado do Zé' };
     ffmpeg.probe.mockImplementation(async (file: string) =>

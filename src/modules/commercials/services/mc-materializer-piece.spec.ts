@@ -268,6 +268,22 @@ describe('McMaterializerService — cadeia da peça de ofertas (render_still →
     expect(await hashes({ ...card })).toEqual(base);
   });
 
+  it('fala contínua: `talkMode` entra no hash do compose (e no finalize); o quadro não muda; sem ele, hash idêntico ao de hoje', async () => {
+    const hashes = async (script: McScript) => {
+      const manager = fakeManager();
+      manager.seed(McCharacterKit, [{ ...kit }]);
+      await service.ensureAssemblyStepV2(manager, pieceProject(), script, readyScenes(script));
+      const chain = chainOf(manager);
+      return { still: chain[0].hash, compose: chain[1].hash, finalize: chain[2].hash };
+    };
+    const today = await hashes(pieceScript());
+    const continuous = await hashes({ ...pieceScript(), talkMode: 'continuous' });
+    expect(continuous.compose).not.toBe(today.compose);
+    expect(continuous.finalize).not.toBe(today.finalize);
+    expect(continuous.still).toBe(today.still);
+    expect(await hashes({ ...pieceScript() })).toEqual(today);
+  });
+
   it('repetir só atualiza os hashes dos pendentes; cadeia entregue ⇒ a próxima nasce com attempt 2', async () => {
     const manager = fakeManager();
     manager.seed(McCharacterKit, [{ ...kit }]);

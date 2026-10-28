@@ -405,7 +405,7 @@ describe('McTalkingProcessor — submit de trecho (fala contínua)', () => {
       expect(args[args.indexOf('lavfi') + 2]).toBe('color=c=0x2E5E9E:s=720x960:r=30:d=8.885');
       const vf = args[args.indexOf('-vf') + 1];
       expect(vf).toContain('drawbox');
-      expect(vf).toContain("rotate=a='0.35*sin(2*PI*(t+0)/4)'");
+      expect(vf).toContain("rotate=a='0.4*asin(sin(2*PI*(t+0)/8))*2/PI'");
       expect(args).not.toContain('-shortest');
       expect(args[args.indexOf('-map', args.indexOf('-map') + 1) + 1]).toBe('1:a');
     });
