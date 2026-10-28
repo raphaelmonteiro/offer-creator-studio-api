@@ -278,6 +278,28 @@ export class McClipInspectorService {
     return MC_CLIP_TEXT_ERROR_CODE;
   }
 
+  /**
+   * Fixture de QA do provider MOCK (`MC_CLIP_INSPECTION_MOCK`, só no worker): o clipe mock não passa pelo Gemini,
+   * então este veredito inventado exercita a reprovação por trecho sem chamada paga. `text` reprova toda
+   * execução (esgota o teto da classe `quality` e o trecho é aceito sinalizado); `text_once` reprova só a 1ª
+   * (o trecho é regravado inteiro e a 2ª passa). Outro valor ou ausente → `null` (mock não inspecionado).
+   */
+  static mockVerdict(mode: string | undefined, executions: number): ClipInspection | null {
+    if (mode !== 'text' && !(mode === 'text_once' && executions <= 1)) return null;
+    return {
+      flagged: true,
+      reasons: ['text'],
+      where: 'middle',
+      description: 'texto inventado no corpo do personagem (fixture de QA do mock)',
+      frames: 0,
+      pairs: 0,
+      mouthCheck: 'skipped',
+      model: 'mock',
+      available: true,
+      verdict: 'reprovado',
+    };
+  }
+
   /** Veredito "não inspecionado": clipe aceito, sinalizado na revisão (D11). */
   static unavailable(reason: string): ClipInspection {
     return {

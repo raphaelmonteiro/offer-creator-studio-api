@@ -793,24 +793,27 @@ export class McTalkingProcessor {
         });
       const size = talk ? (premium ? '1080x1440' : '720x960') : '720x1280';
       let cutoutGraph: string | null = null;
-      // pose do clipe (1.9): a fase continua da do trecho anterior quando há junção; senão recomeça em 0
+      // pose do clipe (1.9): a fase continua da do trecho anterior quando há junção; senão recomeça em 0.
+      // Só em trecho de fala contínua ou com MC_MOCK_POSE=on (a medição do modo de hoje): os demais e2e
+      // (peça sem fundo, F1, F2) medem o tile PARADO e seguem iguais.
       if (chunk?.join) await this.loadJoinFrame(step, chunk); // a imagem da junção precisa existir
       const phaseS = chunk?.join ? chunk.offsetMs / 1000 : 0;
+      const pose = chunk != null || process.env.MC_MOCK_POSE === 'on';
       let poseFilters: string[] = [];
       if (talk && snapshot?.cutout && audioDir) {
         // modo sem fundo (video-mascote-transparente, 1.12): o "motor" mock devolve o tile ESCOLHIDO
         // achatado sobre a cor-chave RECEBIDA; MC_CUTOUT_MOCK=unstable muda o tom do fundo no meio
         const inputs = await this.writeCutoutMockFrames(snapshot, audioDir);
         const keyHex = snapshot.backgroundColor ?? snapshot.cutout.keyColor;
-        const pose = mockTilePoseFilter(phaseS, keyHex);
-        cutoutGraph = inputs.length === 2 ? buildUnstableCutoutGraph(durationS, pose) : null;
-        if (!cutoutGraph) poseFilters = [pose];
+        const tilePose = pose ? mockTilePoseFilter(phaseS, keyHex) : undefined;
+        cutoutGraph = inputs.length === 2 ? buildUnstableCutoutGraph(durationS, tilePose) : null;
+        if (!cutoutGraph && tilePose) poseFilters = [tilePose];
         for (const input of inputs) {
           args.push('-loop', '1', '-framerate', '30', '-t', String(durationS), '-i', input);
         }
       } else {
         args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`);
-        if (talk) poseFilters = mockPlainPoseFilters(phaseS, '#2E5E9E');
+        if (talk && pose) poseFilters = mockPlainPoseFilters(phaseS, '#2E5E9E');
       }
       const audioIndex = cutoutGraph ? 2 : 1;
       if (cutoutGraph) {

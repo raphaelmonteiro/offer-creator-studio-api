@@ -410,6 +410,25 @@ describe('McTalkingProcessor — submit de trecho (fala contínua)', () => {
       expect(args[args.indexOf('-map', args.indexOf('-map') + 1) + 1]).toBe('1:a');
     });
 
+    it('modo de hoje (talk sem trecho): o clipe mock é o de sempre, SEM pose, a menos que MC_MOCK_POSE=on (a medição do salto)', async () => {
+      (step.inputSnapshot as Record<string, unknown>) = {
+        audioAssetId: 'a-tts-0',
+        tileAssetId: 'a-tile',
+      };
+      delete process.env.MC_MOCK_POSE;
+      await processor.process({ stepId: 'st-chunk' });
+      expect(clipRun()).not.toContain('-vf');
+      ffmpegRuns.length = 0;
+      process.env.MC_MOCK_POSE = 'on';
+      try {
+        await processor.process({ stepId: 'st-chunk' });
+        const vf = clipRun()[clipRun().indexOf('-vf') + 1];
+        expect(vf).toContain("rotate=a='0.4*asin(sin(2*PI*(t+0)/8))*2/PI'"); // recomeça em 0 a cada clipe
+      } finally {
+        delete process.env.MC_MOCK_POSE;
+      }
+    });
+
     it('trecho com junção continua a pose da fase absoluta (instante do trecho no vídeo) e exige o quadro anterior', async () => {
       const chunks = planTalkChunks({
         speeches: [4300, 4300, 4300, 4300].map((durationMs, i) => ({

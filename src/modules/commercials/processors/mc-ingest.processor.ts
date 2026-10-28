@@ -387,7 +387,15 @@ export class McIngestProcessor {
       identityReference?: boolean;
     },
   ): Promise<ClipInspection | null> {
-    if (step.provider === 'mock' || step.phase == null) return null;
+    if (step.phase == null) return null;
+    if (step.provider === 'mock') {
+      // clipe mock não passa pelo Gemini: só a fixture de QA (MC_CLIP_INSPECTION_MOCK) inventa um veredito
+      const mocked = McClipInspectorService.mockVerdict(
+        process.env.MC_CLIP_INSPECTION_MOCK,
+        step.attempts,
+      );
+      return this.applyInspectionDecision(step, mocked);
+    }
     const kit = await this.dataSource
       .getRepository(McCharacterKit)
       .findOneBy({ id: project.kitId });
@@ -403,7 +411,18 @@ export class McIngestProcessor {
         : null,
     };
     if (clip.identityReference) ctx.identityReference = await this.identityReferenceOf(step);
-    const inspection = await this.inspector.inspect(clip.path, clip.durationMs, clip.tempDir, ctx);
+    return this.applyInspectionDecision(
+      step,
+      await this.inspector.inspect(clip.path, clip.durationMs, clip.tempDir, ctx),
+    );
+  }
+
+  /** Decisão do ingest sobre o veredito: reprovado abaixo do teto → regera (erro `quality`); no teto → aceito e registrado. */
+  private applyInspectionDecision(
+    step: McStep,
+    inspection: ClipInspection | null,
+  ): ClipInspection | null {
+    if (!inspection) return null;
     const decision = McClipInspectorService.decision(inspection, step.attempts);
     if (decision === 'retry') {
       throw new TerminalProviderError(
