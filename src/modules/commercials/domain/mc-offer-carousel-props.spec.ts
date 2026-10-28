@@ -15,6 +15,7 @@ import {
   computeRenderRemotionInputsHash,
   computeRenderRemotionPropsHash,
   McCarouselPropsError,
+  MC_NO_MUSIC_SRC,
   OfferCarouselPropsInput,
 } from './mc-offer-carousel-props';
 import { McAspectRatio, McCarouselLayoutPreset, McScript } from './mc-types';
@@ -203,6 +204,32 @@ describe('props da composição OfferCarousel (tarefa 6.5)', () => {
     expect(carouselLayoutPresetOf(null, { layoutPreset: 'lower_right' })).toBe('character_left');
     expect(carouselCaptionsOf({ captions: false }, { captionsEnabled: true })).toBe(false);
     expect(carouselCaptionsOf({}, { captionsEnabled: true })).toBe(true);
+  });
+
+  it('sem música própria no render: music explícito mudo (volume 0), cópia nova por chamada, sobrevive ao JSON', () => {
+    const first = buildOfferCarouselProps(input(script)).props;
+    const second = buildOfferCarouselProps(input(script)).props;
+    expect(first.music).toEqual({ src: MC_NO_MUSIC_SRC, volume: 0 });
+    expect(first.music).not.toBe(second.music);
+    expect(JSON.parse(JSON.stringify(first)).music).toEqual({ src: MC_NO_MUSIC_SRC, volume: 0 });
+    // WAV PCM de 48 bytes, vazio de amostras audíveis (4 bytes de dados, zerados)
+    const wav = Buffer.from(MC_NO_MUSIC_SRC.split(',')[1], 'base64');
+    expect(wav.subarray(0, 4).toString()).toBe('RIFF');
+    expect(wav.length).toBe(48);
+    expect(wav.subarray(44).every((b) => b === 0)).toBe(true);
+  });
+
+  it('o hash do render muda com o music e é determinístico; as entradas (materialização) não carregam props', () => {
+    const { props } = buildOfferCarouselProps(input(script));
+    const { music: _music, ...semMusic } = props;
+    const hash = (p: typeof props) =>
+      computeRenderRemotionPropsHash({
+        props: p,
+        compositionVersion: '0.1.0',
+        renderer: 'remotion',
+      });
+    expect(hash(semMusic as typeof props)).not.toBe(hash(props));
+    expect(hash(buildOfferCarouselProps(input(script)).props)).toBe(hash(props));
   });
 
   it('render determinístico: mesmas props ⇒ mesmo hash; foto, ordem, versão da composição e renderizador mudam o hash', () => {

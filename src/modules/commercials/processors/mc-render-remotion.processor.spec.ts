@@ -9,7 +9,7 @@ import { Mascot } from '../../mascots/entities/mascot.entity';
 import { Client } from '../../clients/entities/client.entity';
 import { fixtureCarouselScript } from '../domain/__fixtures__/mc-offer-carousel.fixtures';
 import { syntheticAlignment } from '../domain/mc-captions';
-import { OfferCarouselProps } from '../domain/mc-offer-carousel-props';
+import { MC_NO_MUSIC_SRC, OfferCarouselProps } from '../domain/mc-offer-carousel-props';
 import { McSceneStatus, McStepStatus } from '../domain/mc-state-machines';
 import { McScript, McStepType } from '../domain/mc-types';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -263,6 +263,20 @@ describe('McRenderRemotionProcessor — render da composição do F2 (tarefa 6.5
       step,
       expect.objectContaining({ outputAssetId: 'rendered-asset', provider: 'mock' }),
     );
+  });
+
+  it('o render nunca leva música própria: music explícito mudo com musicEnabled true ou false (a trilha entra só no finalize)', async () => {
+    const hashes: string[] = [];
+    for (const musicEnabled of [true, false]) {
+      renderer.render.mockClear();
+      saved.length = 0;
+      project.options = { musicEnabled, captionsEnabled: true, products: [] };
+      await processor.process({ stepId: 'rr-1' });
+      const { props } = renderer.render.mock.calls[0][0] as { props: OfferCarouselProps };
+      expect(props.music).toEqual({ src: MC_NO_MUSIC_SRC, volume: 0 });
+      hashes.push((saved[0].metadata as { propsHash: string }).propsHash);
+    }
+    expect(hashes[0]).toBe(hashes[1]);
   });
 
   it('mesmo hash de um render anterior com arquivo presente → reaproveita sem renderizar de novo', async () => {

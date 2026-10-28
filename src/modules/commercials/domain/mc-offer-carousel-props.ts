@@ -102,6 +102,16 @@ export interface OfferCarouselMusicProps {
   duck?: boolean;
 }
 
+/**
+ * "Sem música" no render do Remotion (change corrigir-render-remotion-epipe, D2): o `defaultProps` do pacote
+ * traz uma trilha de exemplo e o Remotion mescla as `inputProps` por chave de primeiro nível; `music` ausente
+ * (ou `undefined`, que some no JSON) devolve a trilha de exemplo, e `null` o schema recusa. A forma aceita pelas
+ * versões 0.2.0 e 0.3.0 do pacote é uma trilha MUDA (WAV de 48 bytes em data URI, sem depender de `public/`) com
+ * volume 0. A trilha escolhida pelo cliente entra só no `finalize`.
+ */
+export const MC_NO_MUSIC_SRC =
+  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQQAAAAAAAAA';
+
 /** Props da composição — `type` (não interface): o Remotion exige Record<string, unknown>. */
 export type OfferCarouselProps = {
   width: number;
@@ -574,6 +584,7 @@ export function buildOfferCarouselProps(input: OfferCarouselPropsInput): {
     },
     layoutPreset: input.layoutPreset,
     captions: input.captions,
+    music: { src: MC_NO_MUSIC_SRC, volume: 0 },
     ...(input.cardBox ? { cardBox: { ...input.cardBox } } : {}),
   };
   const speechEndS = seconds(totalMs / 1000);
