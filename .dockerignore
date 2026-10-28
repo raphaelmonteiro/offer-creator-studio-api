@@ -14,3 +14,8 @@ uploads
 .git
 .gitignore
 .DS_Store
+
+# Segredos nunca entram na imagem: o compose injeta por `env_file` e o código chega por bind mount.
+.env
+.env.*
+!.env.example
