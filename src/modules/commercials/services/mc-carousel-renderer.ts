@@ -166,6 +166,22 @@ export async function loadRemotionModules(
   }
 }
 
+/** Alimenta a vigia com o progresso do Remotion e repassa só as mudanças de porcentagem inteira. */
+function renderProgressHandler(
+  watch: RenderDeathWatch,
+  onProgress: McCarouselRenderRequest['onProgress'],
+): (info: { progress: number }) => void {
+  let lastPct = -1;
+  return ({ progress }) => {
+    watch.progressed(progress);
+    const pct = Math.round(progress * 100);
+    if (pct !== lastPct) {
+      lastPct = pct;
+      void onProgress?.(pct);
+    }
+  };
+}
+
 export class RemotionCarouselRenderer implements McCarouselRenderer {
   readonly kind = 'remotion' as const;
   private readonly logger = new Logger(RemotionCarouselRenderer.name);
@@ -368,7 +384,6 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
       phase.current = 'select_composition';
       const composition = await modules.renderer.selectComposition({ ...common, id });
       phase.current = 'render_media';
-      let lastPct = -1;
       await modules.renderer.renderMedia({
         ...common,
         composition,
@@ -376,14 +391,7 @@ export class RemotionCarouselRenderer implements McCarouselRenderer {
         outputLocation: request.outputPath,
         concurrency: 1,
         cancelSignal,
-        onProgress: ({ progress }: { progress: number }) => {
-          watch.progressed(progress);
-          const pct = Math.round(progress * 100);
-          if (pct !== lastPct) {
-            lastPct = pct;
-            void request.onProgress?.(pct);
-          }
-        },
+        onProgress: renderProgressHandler(watch, request.onProgress),
       });
     } catch (err) {
       await this.discardUnlessUnavailable(err);
