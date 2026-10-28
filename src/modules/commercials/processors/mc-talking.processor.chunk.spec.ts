@@ -36,9 +36,12 @@ describe('McTalkingProcessor — submit de trecho (fala contínua)', () => {
   let transitions: { casTransition: jest.Mock };
   let ffmpegRuns: string[][];
   let ffmpegInputs: Buffer[];
-  let storage: { readUploadsFile: jest.Mock };
+  let storage: { readUploadsFile: jest.Mock; mockJobsAbsDir: jest.Mock; mockJobAbsPath: jest.Mock };
   let processor: McTalkingProcessor;
   let kit: Record<string, unknown>;
+  /** Steps `talk` já gravados do projeto (o trecho anterior da junção). */
+  let previousSteps: Array<Record<string, unknown>>;
+  let joinFramePng: Buffer;
 
   const durations = [2168, 1907, 4310];
 
@@ -76,6 +79,11 @@ describe('McTalkingProcessor — submit de trecho (fala contínua)', () => {
   }
 
   beforeAll(async () => {
+    joinFramePng = await sharp({
+      create: { width: 16, height: 16, channels: 3, background: '#00b140' },
+    })
+      .png()
+      .toBuffer();
     tilePng = await sharp({
       create: { width: 16, height: 16, channels: 4, background: '#0000ffff' },
     })
@@ -110,6 +118,7 @@ describe('McTalkingProcessor — submit de trecho (fala contínua)', () => {
     };
     ffmpegRuns = [];
     ffmpegInputs = [];
+    previousSteps = [];
     pipeline = {
       claimStep: jest.fn(() => Promise.resolve({ ...step })),
       failStep: jest.fn().mockResolvedValue(undefined),
@@ -126,17 +135,31 @@ describe('McTalkingProcessor — submit de trecho (fala contínua)', () => {
       }),
     };
     storage = {
+      mockJobsAbsDir: jest.fn(() => path.join(os.tmpdir(), 'mc-chunk-mock-jobs')),
+      mockJobAbsPath: jest.fn((id: string) =>
+        path.join(os.tmpdir(), 'mc-chunk-mock-jobs', `${id}.mp4`),
+      ),
       readUploadsFile: jest.fn((url: string) =>
-        Promise.resolve(url.includes('a-tile') ? tilePng : Buffer.from(`mp3:${url}`)),
+        Promise.resolve(
+          url.includes('a-tile')
+            ? tilePng
+            : url.includes('a-join')
+              ? joinFramePng
+              : Buffer.from(`mp3:${url}`),
+        ),
       ),
     };
     const ffmpeg = {
       createTempDir: jest.fn(() => fs.mkdtemp(path.join(os.tmpdir(), 'mc-chunk-spec-'))),
       removeTempDir: jest.fn((dir: string) => fs.rm(dir, { recursive: true, force: true })),
+      finalizeOutput: jest.fn().mockResolvedValue(undefined),
       run: jest.fn(async (args: string[]) => {
         ffmpegRuns.push(args);
         for (let i = 0; i < args.length; i += 1) {
-          if (args[i] === '-i') ffmpegInputs.push(await fs.readFile(args[i + 1]));
+          if (args[i] === '-i') {
+            const bytes = await fs.readFile(args[i + 1]).catch(() => null); // lavfi não é arquivo
+            if (bytes) ffmpegInputs.push(bytes);
+          }
         }
         await fs.writeFile(args[args.length - 1], Buffer.from('mp3-emendado'));
       }),
@@ -163,9 +186,11 @@ describe('McTalkingProcessor — submit de trecho (fala contínua)', () => {
               id: where.id,
               fileUrl: `/uploads/${where.id}.bin`,
               durationMs: 2000,
+              metadata: where.id === 'a-prev-slice' ? { joinFrameAssetId: 'a-join' } : {},
             });
           return Promise.resolve(null);
         }),
+        find: jest.fn(() => Promise.resolve(entity === McStep ? previousSteps : [])),
       })),
       transaction: jest.fn((cb: (m: unknown) => Promise<unknown>) =>
         cb({ findOneByOrFail: jest.fn().mockResolvedValue({ id: 'p1', userId: 'u1' }) }),
@@ -270,5 +295,177 @@ describe('McTalkingProcessor — submit de trecho (fala contínua)', () => {
     await processor.process({ stepId: 'st-chunk' });
     expect(fal.submit).not.toHaveBeenCalled();
     expect(pipeline.failStep).toHaveBeenCalledTimes(1);
+  });
+
+  describe('junção entre trechos (D7): o último quadro do trecho anterior é a imagem do seguinte', () => {
+    const second = () => {
+      const chunks = planTalkChunks({
+        speeches: [4300, 4300, 4300, 4300].map((durationMs, i) => ({
+          sceneId: `row-${i}`,
+          durationMs,
+        })),
+        engineModel: KLING_AVATAR_MODEL,
+        engineMaxChunkS: 15,
+        chunkMaxS: 10,
+      }).chunks;
+      return buildChunkTalkStep({
+        ctx: {
+          tileAssetId: 'a-tile',
+          tileWidth: 16,
+          tileHeight: 16,
+          backgroundColor: '#00B140',
+          cutout: null,
+          tier: 'economico',
+          identityMode: 'generated',
+          engine: {
+            key: 'economico',
+            model: KLING_AVATAR_MODEL,
+            usdPerSecond: 0.0562,
+            maxChunkS: 15,
+          },
+        },
+        chunk: chunks[1],
+        speeches: [2, 3].map((i) => ({
+          sceneRowId: `row-${i}`,
+          sceneId: `s${i}`,
+          audioAssetId: `a-tts-${i}`,
+        })),
+        join: { fromStepHash: 'hash-do-trecho-1', fromSceneRowId: 'row-0' },
+        motion: '',
+        lang: 'pt',
+        sceneType: 'talk_tile',
+        attempt: 1,
+        count: 2,
+      });
+    };
+
+    beforeEach(() => {
+      (step.inputSnapshot as Record<string, unknown>) = second().snapshot;
+      step.sceneId = 'row-0';
+      previousSteps = [
+        {
+          inputHash: 'hash-do-trecho-1',
+          status: McStepStatus.SUCCEEDED,
+          outputAssetId: 'a-prev-slice',
+        },
+      ];
+    });
+
+    it('envia o quadro de junção no lugar do tile (sem recolorir) e NADA além do personagem', async () => {
+      await processor.process({ stepId: 'st-chunk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      const [, input] = fal.submit.mock.calls[0] as [string, Record<string, string>];
+      expect(Object.keys(input).sort()).toEqual(['audio_url', 'image_url', 'prompt']);
+      const image = Buffer.from(input.image_url.split(',')[1], 'base64');
+      const { data } = await sharp(image).raw().toBuffer({ resolveWithObject: true });
+      expect([data[0], data[1], data[2]]).toEqual([0x00, 0xb1, 0x40]); // o quadro, não o tile azul
+      const read = storage.readUploadsFile.mock.calls.map((c) => String(c[0]));
+      expect(read.some((u) => u.includes('a-tile'))).toBe(false);
+      expect(read.every((u) => u.includes('a-join') || u.includes('a-tts-'))).toBe(true);
+    });
+
+    it('trecho anterior sem o último quadro (ou não concluído) → chunk_join_frame_missing, sem chamada ao motor', async () => {
+      previousSteps = [];
+      await processor.process({ stepId: 'st-chunk' });
+      expect(fal.submit).not.toHaveBeenCalled();
+      expect(pipeline.failStep).toHaveBeenCalledWith(
+        expect.anything(),
+        McStepStatus.RUNNING,
+        expect.objectContaining({ code: 'chunk_join_frame_missing' }),
+        expect.anything(),
+      );
+      expect(pipeline.consumeStepCredits).not.toHaveBeenCalled();
+    });
+
+    it('trecho anterior que falhou não serve de junção (só succeeded/skipped_cached)', async () => {
+      previousSteps = [
+        {
+          inputHash: 'hash-do-trecho-1',
+          status: McStepStatus.FAILED,
+          outputAssetId: 'a-prev-slice',
+        },
+      ];
+      await processor.process({ stepId: 'st-chunk' });
+      expect(fal.submit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('provider mock: clipe do trecho com pose que muda com o tempo (1.9)', () => {
+    beforeEach(() => {
+      process.env.MC_PIPELINE_PROVIDER = 'mock';
+    });
+
+    const clipRun = () => ffmpegRuns[ffmpegRuns.length - 1];
+
+    it('uma chamada para o trecho: duração = áudio ENVIADO + margem, áudio muxado = a emenda, pose recomeçando em 0 no 1º trecho', async () => {
+      await processor.process({ stepId: 'st-chunk' });
+      expect(fal.submit).not.toHaveBeenCalled();
+      expect(ffmpegRuns).toHaveLength(2); // emenda + clipe
+      const args = clipRun();
+      expect(args[args.indexOf('lavfi') + 2]).toBe('color=c=0x2E5E9E:s=720x960:r=30:d=8.885');
+      const vf = args[args.indexOf('-vf') + 1];
+      expect(vf).toContain('drawbox');
+      expect(vf).toContain("rotate=a='0.35*sin(2*PI*(t+0)/4)'");
+      expect(args).not.toContain('-shortest');
+      expect(args[args.indexOf('-map', args.indexOf('-map') + 1) + 1]).toBe('1:a');
+    });
+
+    it('trecho com junção continua a pose da fase absoluta (instante do trecho no vídeo) e exige o quadro anterior', async () => {
+      const chunks = planTalkChunks({
+        speeches: [4300, 4300, 4300, 4300].map((durationMs, i) => ({
+          sceneId: `row-${i}`,
+          durationMs,
+        })),
+        engineModel: KLING_AVATAR_MODEL,
+        engineMaxChunkS: 15,
+        chunkMaxS: 10,
+      }).chunks;
+      const built = buildChunkTalkStep({
+        ctx: {
+          tileAssetId: 'a-tile',
+          tileWidth: 16,
+          tileHeight: 16,
+          backgroundColor: '#FFFFFF',
+          cutout: null,
+          tier: 'economico',
+          identityMode: 'generated',
+          engine: {
+            key: 'economico',
+            model: KLING_AVATAR_MODEL,
+            usdPerSecond: 0.0562,
+            maxChunkS: 15,
+          },
+        },
+        chunk: chunks[1],
+        speeches: [2, 3].map((i) => ({
+          sceneRowId: `row-${i}`,
+          sceneId: `s${i}`,
+          audioAssetId: `a-tts-${i}`,
+        })),
+        join: { fromStepHash: 'h-1', fromSceneRowId: 'row-0' },
+        motion: '',
+        lang: 'pt',
+        sceneType: 'talk_tile',
+        attempt: 1,
+        count: 2,
+      });
+      (step.inputSnapshot as Record<string, unknown>) = built.snapshot;
+      await processor.process({ stepId: 'st-chunk' });
+      expect(pipeline.failStep).toHaveBeenCalledWith(
+        expect.anything(),
+        McStepStatus.RUNNING,
+        expect.objectContaining({ code: 'chunk_join_frame_missing' }),
+        expect.anything(),
+      );
+      pipeline.failStep.mockClear();
+      previousSteps = [
+        { inputHash: 'h-1', status: McStepStatus.SUCCEEDED, outputAssetId: 'a-prev-slice' },
+      ];
+      ffmpegRuns.length = 0;
+      await processor.process({ stepId: 'st-chunk' });
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+      const vf = clipRun()[clipRun().indexOf('-vf') + 1];
+      expect(vf).toContain('(t+9)'); // 9,0 s = onde este trecho começa no vídeo
+    });
   });
 });

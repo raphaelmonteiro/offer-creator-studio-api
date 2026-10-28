@@ -1,7 +1,9 @@
 import { computeTalkHashV2, TalkChunkHashInput } from './mc-step-hashes';
 import { MC_CUTOUT_KEY_RULE_VERSION } from './mc-cutout-key';
 import { TalkChunkPlan } from './mc-talk-chunks';
-import { talkAudioPadTargetMs } from './mc-talk-engines';
+import { MC_POLL_TIMEOUT_MS } from './mc-pipeline.config';
+import { readTalkAudioPadding, talkAudioPadTargetMs } from './mc-talk-engines';
+import { talkPollTimeoutMs } from './mc-talk-continuous.config';
 import { buildTalkPrompt, TalkPromptCutout } from './mc-talk-prompts';
 
 /**
@@ -193,4 +195,15 @@ export function chunkPlanFromSnapshot(chunk: ChunkSnapshot, model: string): Talk
 /** Trecho com mais de uma fala ou com cauda de junção precisa da emenda; uma fala solta vai como está (D5.4). */
 export function chunkNeedsSplice(chunk: Pick<ChunkSnapshot, 'speeches' | 'tailMs'>): boolean {
   return chunk.speeches.length > 1 || chunk.tailMs > 0;
+}
+
+/**
+ * Timeout do `provider_wait` de um `talk` (D15): o de hoje (15 min) para a fala solta; para o TRECHO,
+ * proporcional aos segundos enviados (`MC_TALK_POLL_PER_AUDIO_S`, piso 15 min, teto 40 min).
+ */
+export function talkStepPollTimeoutMs(snapshot: unknown): number {
+  const chunk = readChunkSnapshot(snapshot);
+  if (!chunk) return MC_POLL_TIMEOUT_MS;
+  const padding = readTalkAudioPadding((snapshot as { audioPadding?: unknown }).audioPadding);
+  return talkPollTimeoutMs(padding?.submittedMs ?? chunk.sentMs);
 }

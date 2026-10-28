@@ -34,7 +34,7 @@ describe('McPollProcessor — polling com backoff e timeout duro (plano §6.4)',
   let transitions: { casTransition: jest.Mock };
   let commercials: { appendEvent: jest.Mock };
   let queue: { publish: jest.Mock };
-  let fal: { status: jest.Mock };
+  let fal: { status: jest.Mock; cancel: jest.Mock };
   let processor: McPollProcessor;
 
   beforeEach(() => {
@@ -46,7 +46,10 @@ describe('McPollProcessor — polling com backoff e timeout duro (plano §6.4)',
     transitions = { casTransition: jest.fn().mockResolvedValue(true) };
     commercials = { appendEvent: jest.fn().mockResolvedValue(undefined) };
     queue = { publish: jest.fn().mockResolvedValue(undefined) };
-    fal = { status: jest.fn().mockResolvedValue({ status: 'IN_PROGRESS' }) };
+    fal = {
+      status: jest.fn().mockResolvedValue({ status: 'IN_PROGRESS' }),
+      cancel: jest.fn().mockResolvedValue(true),
+    };
     const dataSource = {
       getRepository: jest.fn(() => ({
         findOneBy: jest.fn().mockResolvedValue(stepRow),
@@ -136,6 +139,60 @@ describe('McPollProcessor — polling com backoff e timeout duro (plano §6.4)',
       expect.any(Error),
       expect.objectContaining({ errorClass: 'provider_timeout' }),
     );
+  });
+
+  describe('talk de trecho (fala contínua, D15): timeout proporcional ao áudio e cancelamento', () => {
+    const chunkSnapshot = (sentMs: number) => ({
+      chunk: { speeches: [{ sceneRowId: 'a' }], sentMs, audioMs: sentMs },
+    });
+    const talkStep = (sentMs: number, minutes: number) => ({
+      ...baseStep,
+      type: McStepType.TALK,
+      inputSnapshot: chunkSnapshot(sentMs),
+      startedAt: new Date(Date.now() - minutes * 60 * 1000),
+    });
+
+    it('trecho de 10 s espera até 25 min: aos 20 min ainda consulta o provider', async () => {
+      stepRow = talkStep(10_000, 20);
+      await processor.process({ stepId: 'st-1', attempt: 9 });
+      expect(fal.status).toHaveBeenCalled();
+      expect(pipeline.failStep).not.toHaveBeenCalled();
+    });
+
+    it('trecho de 10 s aos 26 min → provider_timeout e pede o cancelamento do job (melhor esforço)', async () => {
+      stepRow = talkStep(10_000, 26);
+      await processor.process({
+        stepId: 'st-1',
+        attempt: 9,
+        responseUrl: 'https://q/x/requests/1',
+      });
+      expect(fal.status).not.toHaveBeenCalled();
+      expect(pipeline.failStep).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'st-1' }),
+        McStepStatus.PROVIDER_WAIT,
+        expect.objectContaining({ message: expect.stringContaining('25 min') }),
+        expect.objectContaining({ errorClass: 'provider_timeout' }),
+      );
+      expect(fal.cancel).toHaveBeenCalledWith('https://q/x/requests/1');
+    });
+
+    it('trecho curto (4,3 s) mantém o piso de 15 min; talk de uma fala (sem trecho) também', async () => {
+      stepRow = talkStep(4300, 16);
+      await processor.process({ stepId: 'st-1', attempt: 5 });
+      expect(pipeline.failStep).toHaveBeenCalledTimes(1);
+      pipeline.failStep.mockClear();
+      stepRow = { ...talkStep(10_000, 16), inputSnapshot: { audioAssetId: 'a' } };
+      await processor.process({ stepId: 'st-1', attempt: 5 });
+      expect(pipeline.failStep).toHaveBeenCalledTimes(1);
+      expect(fal.cancel).toHaveBeenCalledTimes(2); // todo talk abandonado por tempo é cancelado
+    });
+
+    it('lipsync/video estourando o tempo não pedem cancelamento (comportamento de sempre)', async () => {
+      stepRow = { ...baseStep, startedAt: new Date(Date.now() - 16 * 60 * 1000) };
+      await processor.process({ stepId: 'st-1', attempt: 5 });
+      expect(pipeline.failStep).toHaveBeenCalledTimes(1);
+      expect(fal.cancel).not.toHaveBeenCalled();
+    });
   });
 
   it('erro TERMINAL do provider → failStep terminal (sem reagendar)', async () => {

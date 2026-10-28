@@ -78,6 +78,16 @@ const CATALOG: Readonly<Record<string, CatalogEntry>> = {
       'O estúdio não aceitou o pedido desta cena. Tente de novo; se continuar, fale com o suporte.',
     action: 'refazer',
   },
+  // fala contínua (video-fala-continua, D6): pré-condições do trecho, sem nome de fornecedor
+  chunk_join_frame_missing: {
+    message:
+      'A imagem de ligação entre os trechos do vídeo não foi encontrada. Use "Refazer" para gravar de novo.',
+    action: 'refazer',
+  },
+  audio_too_large: {
+    message: 'A fala desta gravação ficou longa demais. Encurte o texto e tente de novo.',
+    action: 'ajustar_cena',
+  },
   invalid_provider_output: {
     message: 'O estúdio devolveu um resultado inválido. Tente de novo.',
     action: 'refazer',

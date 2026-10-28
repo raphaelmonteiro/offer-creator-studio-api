@@ -9,6 +9,7 @@ import {
 import { SpeechWindow } from '../domain/mc-captions';
 import {
   MC_CLIP_DEFORMED_ERROR_CODE,
+  MC_CLIP_IDENTITY_DRIFT_ERROR_CODE,
   MC_CLIP_MOUTH_STILL_ERROR_CODE,
   MC_CLIP_TEXT_ERROR_CODE,
   mcShouldRetry,
@@ -30,7 +31,7 @@ import { McKitSource, McKitStyle } from '../domain/mc-kit-identity';
  * veredito "não inspecionado" (`available: false`), que o ingest grava no
  * asset para a revisão sinalizar.
  */
-export type McInspectionReason = 'text' | 'deformation' | 'mouth_still';
+export type McInspectionReason = 'text' | 'deformation' | 'mouth_still' | 'identity_drift';
 
 export type McMouthCheck = 'checked' | 'skipped' | 'still';
 
@@ -47,6 +48,12 @@ export interface ClipInspectionContext {
    * Ausente = o prompt de sempre, byte a byte.
    */
   cutoutKey?: string | null;
+  /**
+   * Fala contínua (video-fala-continua, D7): imagem do personagem (tile do kit) para comparar com o clipe
+   * de um trecho que parte do último quadro do anterior. Presente ⇒ vai como PRIMEIRA imagem e a checagem
+   * `identity_drift` entra no prompt. Ausente = o prompt de sempre, byte a byte.
+   */
+  identityReference?: Buffer | null;
 }
 
 export interface ClipInspection {
@@ -128,9 +135,18 @@ export function buildClipInspectionPrompt(ctx: ClipInspectionContext, pairs: num
   } else {
     lines.push('There are no speech-window frame pairs: answer mouth_moving=null.');
   }
+  if (ctx.identityReference) {
+    lines.push(
+      'The FIRST image is NOT part of the clip: it is the reference design of the character.',
+      'Check 4 (identity_drift): answer identity_drift=true ONLY if the character in the clip frames',
+      'is clearly a different character from the reference (different face, colors, outfit or',
+      'proportions); small pose, lighting or compression differences do NOT count.',
+    );
+  }
+  const drift = ctx.identityReference ? ', "identity_drift": true|false' : '';
   lines.push(
     'Answer ONLY with compact JSON: {"unwanted_text": true|false, "where": "top|middle|bottom|null",',
-    '"deformed": true|false, "mouth_moving": true|false|null, "description": "<max 20 words>"}.',
+    `"deformed": true|false, "mouth_moving": true|false|null${drift}, "description": "<max 20 words>"}.`,
   );
   return lines.join(' ');
 }
@@ -231,6 +247,7 @@ export class McClipInspectorService {
         where?: unknown;
         deformed?: unknown;
         mouth_moving?: unknown;
+        identity_drift?: unknown;
         description?: unknown;
       };
       if (typeof parsed.unwanted_text !== 'boolean') return null;
@@ -239,6 +256,7 @@ export class McClipInspectorService {
       if (parsed.deformed === true) reasons.push('deformation');
       const mouthMoving = typeof parsed.mouth_moving === 'boolean' ? parsed.mouth_moving : null;
       if (mouthMoving === false) reasons.push('mouth_still');
+      if (parsed.identity_drift === true) reasons.push('identity_drift');
       return {
         flagged: reasons.length > 0,
         reasons,
@@ -256,6 +274,7 @@ export class McClipInspectorService {
     const first = inspection.reasons[0];
     if (first === 'mouth_still') return MC_CLIP_MOUTH_STILL_ERROR_CODE;
     if (first === 'deformation') return MC_CLIP_DEFORMED_ERROR_CODE;
+    if (first === 'identity_drift') return MC_CLIP_IDENTITY_DRIFT_ERROR_CODE;
     return MC_CLIP_TEXT_ERROR_CODE;
   }
 
@@ -329,7 +348,7 @@ export class McClipInspectorService {
       }
       const text = await this.gemini.describeImages({
         prompt: buildClipInspectionPrompt(ctx, pairStarts.length),
-        images: frames,
+        images: ctx.identityReference ? [ctx.identityReference, ...frames] : frames,
       });
       const verdict = McClipInspectorService.parseVerdict(text);
       if (!verdict) {

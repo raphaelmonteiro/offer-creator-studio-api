@@ -402,6 +402,7 @@ export class McIngestProcessor {
           null)
         : null,
     };
+    if (clip.identityReference) ctx.identityReference = await this.identityReferenceOf(step);
     const inspection = await this.inspector.inspect(clip.path, clip.durationMs, clip.tempDir, ctx);
     const decision = McClipInspectorService.decision(inspection, step.attempts);
     if (decision === 'retry') {
@@ -416,6 +417,26 @@ export class McIngestProcessor {
       );
     }
     return inspection;
+  }
+
+  /**
+   * Tile do kit (achatado sobre a cor enviada ao motor) como referência de identidade da inspeção de um
+   * trecho com junção (D7); sem o tile, a checagem de identidade é pulada.
+   */
+  private async identityReferenceOf(step: McStep): Promise<Buffer | null> {
+    const snapshot = (step.inputSnapshot ?? {}) as TalkIngestSnapshot & {
+      backgroundColor?: string | null;
+    };
+    const asset = snapshot.tileAssetId
+      ? await this.dataSource.getRepository(AnimationAsset).findOneBy({ id: snapshot.tileAssetId })
+      : null;
+    const bytes = asset?.fileUrl ? await this.storage.readUploadsFile(asset.fileUrl) : null;
+    if (!bytes) return null;
+    return sharp(bytes)
+      .flatten({ background: snapshot.backgroundColor ?? '#FFFFFF' })
+      .jpeg({ quality: 85 })
+      .toBuffer()
+      .catch(() => null);
   }
 
   /**

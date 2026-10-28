@@ -32,6 +32,7 @@ describe('McTalkChunkIngest', () => {
   let chunk: ChunkSnapshot;
   let step: McStep;
   let probeMs: Record<string, number>;
+  let emptyPng = false;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mc-chunk-ingest-'));
@@ -86,6 +87,7 @@ describe('McTalkChunkIngest', () => {
     ffmpegRuns = [];
     saved = [];
     probeMs = {};
+    emptyPng = false;
     const ffmpeg = {
       createTempDir: jest.fn(() => fs.mkdtemp(path.join(os.tmpdir(), 'mc-chunk-ingest-aux-'))),
       removeTempDir: jest.fn((dir: string) => fs.rm(dir, { recursive: true, force: true })),
@@ -93,16 +95,18 @@ describe('McTalkChunkIngest', () => {
         ffmpegRuns.push(args);
         // cada saída .mp4/.wav/.jpg do comando é criada (o ffmpeg real escreveria)
         for (const arg of args) {
-          if (/\.(mp4|wav|mp3|jpg)$/.test(arg) && !arg.includes('raw')) {
+          if (/\.(mp4|wav|mp3|jpg|png)$/.test(arg) && !arg.includes('raw')) {
             await fs.writeFile(
               arg,
-              arg.endsWith('.jpg')
-                ? await sharp({
-                    create: { width: 8, height: 8, channels: 3, background: '#336699' },
-                  })
-                    .jpeg()
-                    .toBuffer()
-                : Buffer.from('x'),
+              arg.endsWith('.png') && emptyPng
+                ? Buffer.alloc(0)
+                : arg.endsWith('.jpg')
+                  ? await sharp({
+                      create: { width: 8, height: 8, channels: 3, background: '#336699' },
+                    })
+                      .jpeg()
+                      .toBuffer()
+                  : Buffer.from('x'),
             );
           }
         }
@@ -283,5 +287,46 @@ describe('McTalkChunkIngest', () => {
     ).rejects.toMatchObject({ code: 'clip_too_short' });
     expect(ffmpegRuns.filter((a) => a.join(' ').includes('split='))).toHaveLength(0);
     expect(pipeline.completeStepAndAdvance).not.toHaveBeenCalled();
+  });
+
+  describe('junção entre trechos (D7)', () => {
+    const asJoined = (over: Partial<ChunkSnapshot>) => {
+      chunk = { ...chunk, ...over };
+    };
+
+    it('trecho com sucessor: guarda o ÚLTIMO quadro da última fatia como asset talk_join_frame e o aponta na líder', async () => {
+      asJoined({ index: 0, count: 2 });
+      await run();
+      const frame = saved.find((a) => a.kind === 'talk_join_frame')!;
+      expect(frame).toMatchObject({ mimeType: 'image/png', userId: 'u1' });
+      expect(frame.metadata).toMatchObject({ chunkIndex: 0, sourceStepId: 'st-chunk' });
+      const leader = saved.find((a) => a.kind === 'scene_synced')!;
+      expect((leader.metadata as { joinFrameAssetId: string }).joinFrameAssetId).toBe(frame.id);
+      const lastFrameRun = ffmpegRuns.find((a) => a.includes('-sseof'))!;
+      expect(lastFrameRun[lastFrameRun.indexOf('-i') + 1]).toMatch(/slice-2\.mp4$/);
+      const clip = helpers.inspect.mock.calls[0][2] as { identityReference: boolean };
+      expect(clip.identityReference).toBe(false); // o 1º trecho parte do tile
+    });
+
+    it('último trecho não guarda quadro; o que parte de uma junção é inspecionado contra o tile (identity_drift)', async () => {
+      asJoined({
+        index: 1,
+        count: 2,
+        join: { fromChunkIndex: 0, fromStepHash: 'h', fromSceneRowId: 'row-0' },
+      });
+      await run();
+      expect(saved.some((a) => a.kind === 'talk_join_frame')).toBe(false);
+      expect(ffmpegRuns.some((a) => a.includes('-sseof'))).toBe(false);
+      const clip = helpers.inspect.mock.calls[0][2] as { identityReference: boolean };
+      expect(clip.identityReference).toBe(true);
+    });
+
+    it('quadro vazio → chunk_join_frame_missing (terminal, nada publicado como pronto)', async () => {
+      asJoined({ index: 0, count: 2 });
+      emptyPng = true;
+      await expect(run()).rejects.toMatchObject({ code: 'chunk_join_frame_missing' });
+      expect(pipeline.completeStepAndAdvance).not.toHaveBeenCalled();
+      expect(saved).toHaveLength(0);
+    });
   });
 });

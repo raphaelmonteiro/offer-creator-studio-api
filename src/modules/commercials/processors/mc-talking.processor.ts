@@ -43,6 +43,7 @@ import {
 } from '../domain/mc-talk-engines';
 import { buildTalkPrompt } from '../domain/mc-talk-prompts';
 import { ChunkSnapshot, chunkNeedsSplice, readChunkSnapshot } from '../domain/mc-talk-chunk-step';
+import { mockPlainPoseFilters, mockTilePoseFilter } from '../domain/mc-mock-pose';
 import { spliceChunkAudio } from './mc-talk-chunk-audio';
 import { McStepType, sceneActionPromptEn } from '../domain/mc-types';
 import { McKitIdentityMode } from '../domain/mc-kit-identity';
@@ -130,12 +131,13 @@ export function mockTalkClipDurationS(audioDurationMs: number): number {
  * Fixture de fundo instável do mock (`MC_CUTOUT_MOCK=unstable`): a 1ª metade do clipe sobre a cor-chave
  * e a 2ª sobre um tom deslocado (o motor "repintando o fundo"); a verificação do recorte tem de reprovar.
  */
-export function buildUnstableCutoutGraph(durationS: number): string {
+export function buildUnstableCutoutGraph(durationS: number, poseFilter?: string): string {
   const half = Number((durationS / 2).toFixed(3));
   return (
     `[0:v]trim=duration=${half},setpts=PTS-STARTPTS[a];` +
     `[1:v]trim=duration=${Number((durationS - half).toFixed(3))},setpts=PTS-STARTPTS[b];` +
-    '[a][b]concat=n=2:v=1:a=0,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[v]'
+    '[a][b]concat=n=2:v=1:a=0,scale=trunc(iw/2)*2:trunc(ih/2)*2,' +
+    `${poseFilter ? `${poseFilter},` : ''}format=yuv420p[v]`
   );
 }
 
@@ -449,7 +451,12 @@ export class McTalkingProcessor {
       .getRepository(McCharacterKit)
       .findOneBy({ id: project.kitId });
     const tileAssetId = snapshot.tileAssetId ?? kit?.tileAssetId ?? null;
-    const tile = await this.loadAssetBuffer(tileAssetId, 'tile de fala');
+    // trecho que parte do último quadro do anterior (D7): a imagem do personagem É esse quadro
+    const chunk = readChunkSnapshot(step.inputSnapshot);
+    const joinFrame = chunk?.join ? await this.loadJoinFrame(step, chunk) : null;
+    const tile = joinFrame
+      ? Buffer.alloc(0)
+      : await this.loadAssetBuffer(tileAssetId, 'tile de fala');
     const { buffer: audio, asset: audioAsset } = await this.loadAsset(
       snapshot.audioAssetId ?? scene.audioAssetId,
       'áudio',
@@ -464,8 +471,9 @@ export class McTalkingProcessor {
       normalizeHexColor(snapshot.backgroundColor) ??
       normalizeHexColor(kit?.tileBackgroundColor) ??
       MC_TALK_DEFAULT_BACKGROUND;
+    // o quadro de junção já traz o fundo (cor do painel ou cor-chave): vai como está, sem recolorir
     const speakingTile = await ensureImageUnderCap(
-      await recolorTileBackground(tile, backgroundColor),
+      joinFrame ?? (await recolorTileBackground(tile, backgroundColor)),
     );
     const prompt = snapshot.prompt?.trim() || buildTalkPrompt(snapshot.motion, snapshot.cutout);
     const tier = (snapshot.tier ?? project.tier ?? 'economico') as 'economico' | 'premium';
@@ -495,7 +503,6 @@ export class McTalkingProcessor {
     // nada enviado), silêncio do submit e os limites DOCUMENTADOS por chamada
     // (7.1: OmniHuman ≤ 30 s a 1080p; H3 ≥ 5 s — validação terminal, sem custo;
     // abaixo do mínimo o áudio enviado já é o completado, nunca audio_too_short).
-    const chunk = readChunkSnapshot(step.inputSnapshot);
     const prepareAudio = async (model: string) => {
       const sent =
         chunk && chunkNeedsSplice(chunk)
@@ -612,6 +619,35 @@ export class McTalkingProcessor {
   }
 
   /**
+   * Quadro de junção (D7): o último quadro do `talk` do trecho anterior (hash `join.fromStepHash`),
+   * guardado no asset da fatia líder dele. Faltar é pré-condição terminal (`chunk_join_frame_missing`),
+   * sem chamada paga — nunca cai em silêncio para o tile.
+   */
+  private async loadJoinFrame(step: McStep, chunk: ChunkSnapshot): Promise<Buffer> {
+    const join = chunk.join;
+    const missing = (why: string) =>
+      new TerminalProviderError(`Quadro de junção ausente: ${why}`, 'chunk_join_frame_missing');
+    if (!join) throw missing('trecho sem junção');
+    const previous = (
+      await this.dataSource.getRepository(McStep).find({
+        where: { projectId: step.projectId, type: McStepType.TALK, inputHash: join.fromStepHash },
+      })
+    ).find(
+      (s) =>
+        (s.status === McStepStatus.SUCCEEDED || s.status === McStepStatus.SKIPPED_CACHED) &&
+        s.outputAssetId,
+    );
+    if (!previous?.outputAssetId) throw missing('o trecho anterior não concluiu');
+    const leaderSlice = await this.dataSource
+      .getRepository(AnimationAsset)
+      .findOneBy({ id: previous.outputAssetId });
+    const frameId = (leaderSlice?.metadata as { joinFrameAssetId?: string } | null)
+      ?.joinFrameAssetId;
+    if (!frameId) throw missing('o trecho anterior não guardou o último quadro');
+    return (await this.loadAsset(frameId, 'quadro de junção')).buffer;
+  }
+
+  /**
    * Áudio de um TRECHO (video-fala-continua, D5): a emenda dos TTS das falas com os silêncios da
    * timeline, a cauda de junção e o enchimento único do motor (H3), calculado para o motor que
    * realmente recebe (o fallback de logo → tier muda o mínimo). Os TTS originais não são tocados.
@@ -703,6 +739,7 @@ export class McTalkingProcessor {
       backgroundColor?: string | null;
       cutout?: { keyColor: string; framing: 'busto' | 'corpo' } | null;
     } | null;
+    const chunk = talk ? readChunkSnapshot(step.inputSnapshot) : null;
     let audioPath: string | null = null;
     let audioDir: string | null = null;
     let audioPadding: McTalkAudioPadding | null = null;
@@ -726,14 +763,13 @@ export class McTalkingProcessor {
             tier: (snapshot?.tier ?? project.tier ?? 'economico') as McProject['tier'],
             identityMode: (snapshot?.identityMode ?? null) as McKitIdentityMode | null,
           }).model;
-          const chunk = readChunkSnapshot(step.inputSnapshot);
           const sent =
             chunk && chunkNeedsSplice(chunk)
               ? await this.chunkAudioForEngine(model, chunk)
               : await this.talkAudioForEngine(model, audio, probe?.durationMs ?? null);
           audioPadding = sent.padding;
-          if (sent.padding) {
-            // o "fornecedor" mock recebe (e devolve muxado) o áudio completado
+          if (sent.padding || (chunk && chunkNeedsSplice(chunk))) {
+            // o "fornecedor" mock recebe (e devolve muxado) o áudio completado / a emenda do trecho
             audioPath = path.join(audioDir, 'voice-submitted.mp3');
             await fs.writeFile(audioPath, sent.buffer);
           }
@@ -757,16 +793,24 @@ export class McTalkingProcessor {
         });
       const size = talk ? (premium ? '1080x1440' : '720x960') : '720x1280';
       let cutoutGraph: string | null = null;
+      // pose do clipe (1.9): a fase continua da do trecho anterior quando há junção; senão recomeça em 0
+      if (chunk?.join) await this.loadJoinFrame(step, chunk); // a imagem da junção precisa existir
+      const phaseS = chunk?.join ? chunk.offsetMs / 1000 : 0;
+      let poseFilters: string[] = [];
       if (talk && snapshot?.cutout && audioDir) {
         // modo sem fundo (video-mascote-transparente, 1.12): o "motor" mock devolve o tile ESCOLHIDO
         // achatado sobre a cor-chave RECEBIDA; MC_CUTOUT_MOCK=unstable muda o tom do fundo no meio
         const inputs = await this.writeCutoutMockFrames(snapshot, audioDir);
-        cutoutGraph = inputs.length === 2 ? buildUnstableCutoutGraph(durationS) : null;
+        const keyHex = snapshot.backgroundColor ?? snapshot.cutout.keyColor;
+        const pose = mockTilePoseFilter(phaseS, keyHex);
+        cutoutGraph = inputs.length === 2 ? buildUnstableCutoutGraph(durationS, pose) : null;
+        if (!cutoutGraph) poseFilters = [pose];
         for (const input of inputs) {
           args.push('-loop', '1', '-framerate', '30', '-t', String(durationS), '-i', input);
         }
       } else {
         args.push('-f', 'lavfi', '-i', `color=c=0x2E5E9E:s=${size}:r=30:d=${durationS}`);
+        if (talk) poseFilters = mockPlainPoseFilters(phaseS, '#2E5E9E');
       }
       const audioIndex = cutoutGraph ? 2 : 1;
       if (cutoutGraph) {
@@ -789,7 +833,11 @@ export class McTalkingProcessor {
       }
       if (talk && snapshot?.cutout) {
         // dimensões pares (yuv420p) sem alterar o aspecto do tile
-        if (!cutoutGraph) args.push('-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2');
+        if (!cutoutGraph) {
+          args.push('-vf', ['scale=trunc(iw/2)*2:trunc(ih/2)*2', ...poseFilters].join(','));
+        }
+      } else if (poseFilters.length > 0) {
+        args.push('-vf', poseFilters.join(','));
       }
       // -f mp4 explícito: o sufixo .part (escrita atômica) impede o ffmpeg de
       // inferir o muxer pela extensão.

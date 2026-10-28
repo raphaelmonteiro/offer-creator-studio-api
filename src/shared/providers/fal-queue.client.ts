@@ -107,6 +107,24 @@ export class FalQueueClient extends HttpProviderBase {
     return { status: res.status, queuePosition: res.queue_position };
   }
 
+  /**
+   * Pede o cancelamento de um request (`PUT {response_url}/cancel`) — melhor esforço: para o job caro que
+   * o poll abandonou por timeout. Nunca lança (já concluído, 4xx e falha de rede são esperados).
+   * @returns true se o fal aceitou o pedido.
+   */
+  async cancel(responseUrl: string): Promise<boolean> {
+    try {
+      await this.request(`${responseUrl.replace(/\/$/, '')}/cancel`, {
+        method: 'PUT',
+        headers: this.headers(),
+      });
+      return true;
+    } catch (err) {
+      this.logger.warn(`Cancelamento do request fal não aceito: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
   /** Resultado cru (JSON) — para modelos cujo output não é vídeo. */
   async result<T = Record<string, unknown>>(responseUrl: string): Promise<T> {
     return this.request<T>(responseUrl, { headers: this.headers() });

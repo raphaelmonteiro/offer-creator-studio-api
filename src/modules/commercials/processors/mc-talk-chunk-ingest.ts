@@ -12,6 +12,7 @@ import { speechWindowsFromAlignment, SpeechWindow } from '../domain/mc-captions'
 import { McStepStatus } from '../domain/mc-state-machines';
 import {
   buildChunkConformSliceArgs,
+  buildLastFrameArgs,
   ChunkSliceSpan,
   planChunkSlices,
 } from '../domain/mc-talk-chunk-ffmpeg';
@@ -61,6 +62,7 @@ export interface ChunkIngestHelpers {
       tempDir: string;
       talk: boolean;
       speechWindows: SpeechWindow[];
+      identityReference?: boolean;
     },
   ): Promise<ClipInspection | null>;
   billing(
@@ -109,10 +111,13 @@ export class McTalkChunkIngest {
       tempDir,
       talk: true,
       speechWindows: conformed.speechWindows,
+      // trecho que parte do último quadro do anterior: confere a identidade contra o tile (D7)
+      identityReference: chunk.join != null,
     });
     const scenes = await this.chunkScenes(chunk);
     const published = await this.publishSlices(project, scenes, conformed);
     const chunkAsset = await this.publishFull(project, scenes[0], conformed, tempDir);
+    const joinFrame = await this.publishJoinFrame({ project, scenes, conformed, chunk, tempDir });
     const billing = helpers.billing(step, project, args.probe.durationMs, true);
     await this.dataSource.transaction(async (manager) => {
       const leaderAssetId = await this.saveAssets(manager, {
@@ -123,6 +128,7 @@ export class McTalkChunkIngest {
         conformed,
         published,
         chunkAsset,
+        joinFrame,
         resolution,
         inspection,
         billing,
@@ -338,6 +344,48 @@ export class McTalkChunkIngest {
     };
   }
 
+  /**
+   * Último quadro do trecho (PNG sem perdas, tirado da última fatia: boca fechada na cauda) para o
+   * trecho seguinte (D7). Só existe quando há trecho sucessor.
+   */
+  private async publishJoinFrame(input: {
+    project: McProject;
+    scenes: McScene[];
+    conformed: ConformedChunk;
+    chunk: ChunkSnapshot;
+    tempDir: string;
+  }) {
+    const { project, scenes, conformed, chunk } = input;
+    if (chunk.index >= chunk.count - 1) return null;
+    const output = path.join(input.tempDir, 'join-frame.png');
+    const last = conformed.slices[conformed.slices.length - 1];
+    await this.ffmpeg.run(buildLastFrameArgs({ video: last.path, output }), {
+      durationMs: 1000,
+      timeoutMs: 60_000,
+    });
+    const png = await fs.readFile(output).catch(() => null);
+    if (!png || png.length === 0) {
+      throw new TerminalProviderError(
+        'Não foi possível extrair o último quadro do trecho',
+        'chunk_join_frame_missing',
+      );
+    }
+    const leader = scenes[0];
+    const relDir = this.storage.sceneRelDir(
+      project.userId,
+      project.id,
+      leader.idx,
+      leader.generation,
+    );
+    return {
+      assetId: randomUUID(),
+      fileUrl: await this.storage.saveFile(relDir, `join-${Date.now()}.png`, png),
+      width: last.measured.width,
+      height: last.measured.height,
+      size: png.length,
+    };
+  }
+
   private async publishFile(relDir: string, base: string, file: string) {
     const posterPath = `${file}.poster.jpg`;
     await this.ffmpeg.run(buildPosterArgs(file, posterPath), {
@@ -367,12 +415,13 @@ export class McTalkChunkIngest {
       conformed: ConformedChunk;
       published: Awaited<ReturnType<McTalkChunkIngest['publishSlices']>>;
       chunkAsset: Awaited<ReturnType<McTalkChunkIngest['publishFull']>>;
+      joinFrame: Awaited<ReturnType<McTalkChunkIngest['publishJoinFrame']>>;
       resolution: TalkResolutionRecord;
       inspection: ClipInspection | null;
       billing: ReturnType<ChunkIngestHelpers['billing']>;
     },
   ): Promise<string> {
-    const { step, project, chunk, scenes, conformed, published, chunkAsset } = input;
+    const { step, project, chunk, scenes, conformed, published, chunkAsset, joinFrame } = input;
     const repo = manager.getRepository(AnimationAsset);
     const slicesMeta = conformed.slices.map((slice, i) => ({
       sceneRowId: scenes[i].id,
@@ -408,7 +457,31 @@ export class McTalkChunkIngest {
           chunkAssetId: chunkAsset?.assetId ?? null,
           speechMs: slice.speechMs,
           joinedToNext: slice.joinedToNext,
+          // a inspeção é do trecho: toda fatia mostra o veredito na revisão; custo e motor só a líder
+          ...this.inspectionMetadata(input),
           ...(leader ? this.leaderMetadata(input, slicesMeta) : {}),
+          ...(leader && joinFrame ? { joinFrameAssetId: joinFrame.assetId } : {}),
+        },
+      });
+    }
+    if (joinFrame) {
+      await repo.save({
+        id: joinFrame.assetId,
+        userId: project.userId,
+        kind: 'talk_join_frame' as const,
+        status: 'ready' as const,
+        name: `Quadro de junção ${chunk.index + 1} — ${project.title.slice(0, 40)}`,
+        origin: 'ai_generated' as const,
+        fileUrl: joinFrame.fileUrl,
+        mimeType: 'image/png',
+        width: joinFrame.width,
+        height: joinFrame.height,
+        fileSize: String(joinFrame.size),
+        metadata: {
+          projectId: project.id,
+          chunkIndex: chunk.index,
+          sourceStepId: step.id,
+          sourceAssetId: published[0].assetId,
         },
       });
     }
@@ -451,7 +524,7 @@ export class McTalkChunkIngest {
     },
     slices: Array<{ sceneRowId: string; assetId: string; speechMs: number }>,
   ): Record<string, unknown> {
-    const { conformed, billing, resolution, inspection, step, chunk } = input;
+    const { conformed, billing, resolution, chunk } = input;
     const { plan, verdict, accepted } = conformed.gate;
     return {
       providerCostUsd: Number(billing.providerCostUsd.toFixed(4)),
@@ -462,12 +535,18 @@ export class McTalkChunkIngest {
         : {}),
       chunkSlices: slices,
       conform: conformMetadata(plan, verdict, accepted, conformed, chunk),
-      ...(inspection
-        ? {
-            inspected: inspection.available,
-            inspection: { ...inspection, accepted: inspection.flagged, executions: step.attempts },
-          }
-        : {}),
+    };
+  }
+
+  private inspectionMetadata(input: {
+    inspection: ClipInspection | null;
+    step: McStep;
+  }): Record<string, unknown> {
+    const { inspection, step } = input;
+    if (!inspection) return {};
+    return {
+      inspected: inspection.available,
+      inspection: { ...inspection, accepted: inspection.flagged, executions: step.attempts },
     };
   }
 

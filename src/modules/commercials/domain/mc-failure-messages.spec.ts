@@ -83,6 +83,24 @@ describe('mc-failure-messages — catálogo pt-BR por código (design B2)', () =
     }
   });
 
+  it('códigos da fala contínua têm entrada própria em pt-BR (D6): junção, áudio grande e deriva de identidade', () => {
+    expect(mcFailurePresentation('chunk_join_frame_missing')).toMatchObject({
+      action: 'refazer',
+      message: expect.stringContaining('ligação entre os trechos'),
+    });
+    expect(mcFailurePresentation('audio_too_large')).toMatchObject({ action: 'ajustar_cena' });
+    expect(MC_FAILURE_CATALOG_CODES).toEqual(
+      expect.arrayContaining([
+        'chunk_join_frame_missing',
+        'audio_too_large',
+        'clip_identity_drift',
+      ]),
+    );
+    expect(mcFailurePresentation('clip_identity_drift')?.message).not.toBe(
+      MC_FAILURE_GENERIC_MESSAGE,
+    );
+  });
+
   it('character_cutout_failed é passthrough: o texto pt-BR do domínio do recorte não é trocado', () => {
     expect(mcFailurePresentation(CHARACTER_CUTOUT_FAILED)?.passthrough).toBe(true);
     expect(storedFailureMessage(CHARACTER_CUTOUT_FAILED, 'O recorte falhou em 2 fala(s).')).toBe(

@@ -131,4 +131,18 @@ describe('FalQueueClient — cliente genérico da fila fal (plano §5.2)', () =>
     fetchSpy.mockResolvedValue(jsonResponse(400, { error: 'bad input' }));
     await expect(client.status('https://u')).rejects.toBeInstanceOf(TerminalProviderError);
   });
+
+  it('cancel pede PUT {response_url}/cancel com a chave e devolve true; falha (já concluído, rede) nunca lança', async () => {
+    fetchSpy.mockResolvedValue(jsonResponse(202, { status: 'CANCELLATION_REQUESTED' }));
+    await expect(client.cancel('https://queue.fal.run/x/requests/1/')).resolves.toBe(true);
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://queue.fal.run/x/requests/1/cancel');
+    expect(init.method).toBe('PUT');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Key fal-test-key');
+
+    fetchSpy.mockResolvedValue(jsonResponse(400, { detail: 'already completed' }));
+    await expect(client.cancel('https://queue.fal.run/x/requests/1')).resolves.toBe(false);
+    fetchSpy.mockRejectedValue(new Error('rede'));
+    await expect(client.cancel('https://queue.fal.run/x/requests/1')).resolves.toBe(false);
+  });
 });

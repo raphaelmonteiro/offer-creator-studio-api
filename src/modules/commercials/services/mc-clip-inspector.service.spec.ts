@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import { FfmpegRunner } from '../../../shared/ffmpeg/ffmpeg-runner';
 import { GeminiImageProvider } from '../../../shared/providers/gemini-image.provider';
 import {
+  MC_CLIP_IDENTITY_DRIFT_ERROR_CODE,
   MC_CLIP_MOUTH_STILL_ERROR_CODE,
   MC_CLIP_TEXT_ERROR_CODE,
 } from '../domain/mc-error-classes';
@@ -221,6 +222,38 @@ describe('McClipInspectorService — inspeção por contexto e janelas de fala (
       });
       expect(McClipInspectorService.decision(result, 1)).toBe('retry');
       expect(McClipInspectorService.errorCodeFor(result)).toBe(MC_CLIP_MOUTH_STILL_ERROR_CODE);
+    });
+
+    it('trecho com junção (D7): o tile vai como PRIMEIRA imagem, o prompt pede identity_drift e a deriva reprova com o código próprio', async () => {
+      const reference = Buffer.from('tile-referencia');
+      gemini.describeImages.mockResolvedValue(
+        '{"unwanted_text": false, "where": null, "deformed": false, "mouth_moving": true, "identity_drift": true, "description": "outro personagem"}',
+      );
+      const result = await service.inspect('/tmp/v.mp4', 6000, '/tmp', {
+        ...PLAIN_CTX,
+        identityReference: reference,
+      });
+      const call = gemini.describeImages.mock.calls[0][0] as { prompt: string; images: Buffer[] };
+      expect(call.images[0]).toBe(reference);
+      expect(call.images).toHaveLength(1 + 10);
+      expect(call.prompt).toContain('identity_drift');
+      expect(call.prompt).toContain('The FIRST image is NOT part of the clip');
+      expect(result).toMatchObject({ flagged: true, reasons: ['identity_drift'] });
+      expect(McClipInspectorService.errorCodeFor(result)).toBe(MC_CLIP_IDENTITY_DRIFT_ERROR_CODE);
+      expect(McClipInspectorService.decision(result, 1)).toBe('retry');
+      expect(McClipInspectorService.decision(result, 3)).toBe('accept'); // teto da classe quality
+    });
+
+    it('sem junção o prompt e as imagens são os de sempre (sem identity_drift)', async () => {
+      gemini.describeImages.mockResolvedValue(
+        '{"unwanted_text": false, "where": null, "deformed": false, "mouth_moving": true, "identity_drift": true, "description": "x"}',
+      );
+      const result = await service.inspect('/tmp/v.mp4', 6000, '/tmp', PLAIN_CTX);
+      const call = gemini.describeImages.mock.calls[0][0] as { prompt: string; images: Buffer[] };
+      expect(call.prompt).not.toContain('identity_drift');
+      expect(call.images).toHaveLength(10);
+      expect(buildClipInspectionPrompt(PLAIN_CTX, 3)).toBe(call.prompt);
+      expect(result.flagged).toBe(true); // o campo é lido sempre, mas só o prompt de junção o pede
     });
 
     it('modo sem fundo: o prompt enviado informa o fundo intencional; texto no peito reprova pela mesma regra e fundo liso sozinho não reprova', async () => {

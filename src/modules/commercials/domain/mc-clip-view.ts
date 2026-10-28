@@ -118,7 +118,7 @@ export function stepClipView(
  */
 export type McClipInspectionVerdict = 'ok' | 'reprovado' | 'não inspecionado';
 export type McClipInspectionMouthCheck = 'checked' | 'skipped' | 'still';
-export type McClipInspectionReason = 'text' | 'deformation' | 'mouth_still';
+export type McClipInspectionReason = 'text' | 'deformation' | 'mouth_still' | 'identity_drift';
 
 export interface McClipInspectionView {
   verdict: McClipInspectionVerdict;
@@ -134,7 +134,12 @@ export interface McClipInspectionView {
 }
 
 const INSPECTION_MOUTH_CHECKS: readonly string[] = ['checked', 'skipped', 'still'];
-const INSPECTION_REASONS: readonly string[] = ['text', 'deformation', 'mouth_still'];
+const INSPECTION_REASONS: readonly string[] = [
+  'text',
+  'deformation',
+  'mouth_still',
+  'identity_drift',
+];
 
 export function clipInspectionView(
   asset: McClipAssetLike | null | undefined,

@@ -13,6 +13,8 @@ import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-q
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
 import { CommercialsService } from '../commercials.service';
 import { MC_POLL_TIMEOUT_MS, mcExpireForQueue, mcPollBackoffS } from '../domain/mc-pipeline.config';
+import { talkStepPollTimeoutMs } from '../domain/mc-talk-chunk-step';
+import { McStepType } from '../domain/mc-types';
 import { assertStepTransition, McStepStatus } from '../domain/mc-state-machines';
 import { McProject } from '../entities/mc-project.entity';
 import { McStep } from '../entities/mc-step.entity';
@@ -35,7 +37,7 @@ export interface McPollPayload {
  * provider.
  *
  * - IN_QUEUE/IN_PROGRESS → reagenda com backoff 15/30/60s (cap) e timeout
- *   DURO de 15 min desde o início do step: estourou → failed classe
+ *   DURO de 15 min (trecho de fala contínua: proporcional ao áudio, 15 a 40 min) desde o início do step: estourou → failed classe
  *   `provider_timeout` + estorno do step + cena failed + projeto
  *   needs_attention (tudo via McPipelineService.failStep).
  * - COMPLETED → CAS provider_wait→ingesting + job mc.ingest (o download
@@ -68,15 +70,24 @@ export class McPollProcessor {
     // Fora de provider_wait = outro caminho já resolveu (ingest/falha/cancel) — no-op.
     if (!step || step.status !== McStepStatus.PROVIDER_WAIT) return;
 
-    // Timeout DURO por step (plano §6.4: teto de vídeo/lipsync 15 min).
+    // Timeout DURO por step (plano §6.4: teto de vídeo/lipsync 15 min). O `talk` de um TRECHO espera
+    // proporcional ao áudio enviado (15 a 40 min, D15) e pede o cancelamento do job ao estourar.
     const startedAt = step.startedAt ? new Date(step.startedAt).getTime() : Date.now();
-    if (Date.now() - startedAt > MC_POLL_TIMEOUT_MS) {
+    const timeoutMs =
+      step.type === McStepType.TALK
+        ? talkStepPollTimeoutMs(step.inputSnapshot)
+        : MC_POLL_TIMEOUT_MS;
+    if (Date.now() - startedAt > timeoutMs) {
       await this.pipeline.failStep(
         step,
         McStepStatus.PROVIDER_WAIT,
-        new Error(`Provider excedeu o teto de ${MC_POLL_TIMEOUT_MS / 60000} min`),
+        new Error(`Provider excedeu o teto de ${timeoutMs / 60000} min`),
         { errorClass: 'provider_timeout', fallbackCode: 'provider_timeout' },
       );
+      if (step.type === McStepType.TALK && step.provider !== 'mock') {
+        // melhor esforço: não deixa um job caro rodando depois de abandonado
+        await this.fal.cancel(payload.responseUrl ?? this.defaultResponseUrl(step));
+      }
       return;
     }
 
