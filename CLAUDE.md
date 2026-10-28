@@ -711,6 +711,28 @@ cena (a mensagem crua fica só em `mc_steps.errorMessage` e no evento), e `GET p
 steps (linhas antigas com texto cru em inglês saem em pt-BR; `character_cutout_failed` mantém o texto gravado). Código
 novo de falha precisa de entrada no catálogo (`mc-failure-messages.spec.ts`).
 
+**Render do F2 e do quadro da peça sem derrubar o worker** (change `corrigir-render-remotion-epipe`; contrato no `design.md`):
+a morte do compositor ou do Chromium do Remotion durante o bundle, `openBrowser`, `selectComposition` ou `renderMedia`
+(F2) e `renderStill` (quadro da peça) vira falha do step com o código `render_interrupted` (`McRenderInterruptedError` em
+`domain/mc-error-classes.ts`; conversão em `services/mc-render-failure.ts`: `isProcessDeath`/`toRenderFailure`; falha de
+conteúdo, `delayRender`, bundle e `RENDER_UNAVAILABLE` NÃO são remapeados). Classe `internal`: 2 execuções (espera 15 s),
+depois `needs_attention` com o texto do catálogo ("A montagem do vídeo foi interrompida...", ação `refazer`) e,
+esgotado o teto, **um `admin_alert` por projeto** e a linha `ADMIN_ALERT internal projeto=...` no log (`mcAlertsAdmin(classe,
+código)`; só o render interrompido alerta entre os `internal`). O renderizador descarta o navegador em toda queda, zera o
+cache no evento `closed`/`closed-silent` (o próximo render abre um novo) e tem uma vigia (`services/mc-render-watchdog.ts`):
+se o Chromium morre e os quadros não avançam por 60 s o render é cancelado e interrompido (medido: o Remotion às vezes não
+retoma e o render pendurava até `totalTimeoutMs`, ~14 min, com a fila `mc.render` presa). `src/worker.ts` instala
+`installProcessErrorHandlers` (`src/shared/process/`): erro de pipe de processo filho (`EPIPE`, `ECONNRESET`, `spawn` que
+falhou) COM render em andamento (`trackChildWork`) só é registrado e o worker segue; `unhandledRejection` comum é
+registrada e o worker segue; `uncaughtException` desconhecida faz encerramento controlado (`app.close()` até
+`WORKER_FATAL_GRACE_MS` = 10 s, depois `exit(1)`; o PM2 reinicia). Todo erro sai em log `error` com mensagem e pilha.
+**F2 sem música própria no render**: `buildOfferCarouselProps` passa `music: { src: MC_NO_MUSIC_SRC, volume: 0 }` (WAV mudo em
+data URI) em toda montagem; sem a chave, o merge raso do Remotion herdava a trilha de exemplo do `defaultProps` do pacote
+(`fixtures/music-loop.wav`) e `null` o schema recusa. A trilha escolhida (`musicEnabled`) entra só no `finalize`. O hash
+exato do `render_remotion` muda (props novas); o hash das entradas, não. Ambiente local: o `chroma_worker` e a stack `qa-wc`
+precisam de `gcompat` (ou do link do loader `/lib/ld-linux-aarch64.so.1`) e de `NODE_OPTIONS=--dns-result-order=ipv4first`
+para o Remotion rodar no Alpine (sem isso: `EPIPE` por compositor que não executa e `ECONNREFUSED ::1` no bundle).
+
 **Convenção de erros**: forma de DTO → 400 pelo pipe global; regra de negócio → 422 `{code, message, details?}`
 (ex.: `SPEECH_SENTENCE_TOO_LONG`, `SPEECH_DURATION_OUT_OF_RANGE`, `SPEECH_OVER_LENGTH`,
 `SPEECH_ALIGNMENT_MISSING`, `RENDER_UNAVAILABLE`, `LOGO_BOX_REQUIRED`, `KIT_TILE_MISSING`); `details.actions`
