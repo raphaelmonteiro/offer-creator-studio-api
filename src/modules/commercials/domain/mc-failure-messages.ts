@@ -3,6 +3,7 @@ import {
   MC_CLIP_LOW_RESOLUTION_ERROR_CODE,
   MC_CLIP_LOW_RESOLUTION_FINAL_ERROR_CODE,
   MC_QUALITY_ERROR_CODES,
+  MC_RENDER_INTERRUPTED_ERROR_CODE,
 } from './mc-error-classes';
 
 /**
@@ -93,6 +94,12 @@ const CATALOG: Readonly<Record<string, CatalogEntry>> = {
     action: 'refazer',
   },
   [MC_CLIP_LOW_RESOLUTION_FINAL_ERROR_CODE]: { message: LOW_RESOLUTION_MESSAGE, action: 'refazer' },
+  // render do F2/peça interrompido (corrigir-render-remotion-epipe): sem Remotion, Chromium nem pilha
+  [MC_RENDER_INTERRUPTED_ERROR_CODE]: {
+    message:
+      'A montagem do vídeo foi interrompida antes de terminar. Use "Refazer" para montar de novo; se continuar, fale com o suporte.',
+    action: 'refazer',
+  },
   script_failed: {
     message: 'Não foi possível criar o roteiro do vídeo. Crie o vídeo de novo.',
     action: null,

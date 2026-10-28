@@ -2,6 +2,7 @@ import { CHARACTER_CUTOUT_FAILED } from './mc-cutout-issue';
 import {
   MC_CLIP_LOW_RESOLUTION_FINAL_ERROR_CODE,
   MC_QUALITY_ERROR_CODES,
+  MC_RENDER_INTERRUPTED_ERROR_CODE,
 } from './mc-error-classes';
 import {
   MC_FAILURE_CATALOG_CODES,
@@ -72,6 +73,16 @@ describe('mc-failure-messages — catálogo pt-BR por código (design B2)', () =
       expect(MC_FAILURE_CATALOG_CODES).toContain(code);
       expect(mcFailurePresentation(code)?.message).not.toBe(MC_FAILURE_GENERIC_MESSAGE);
     }
+  });
+
+  it('render_interrupted tem entrada própria, ação refazer e texto sem detalhe técnico', () => {
+    expect(MC_FAILURE_CATALOG_CODES).toContain(MC_RENDER_INTERRUPTED_ERROR_CODE);
+    const presentation = mcFailurePresentation(MC_RENDER_INTERRUPTED_ERROR_CODE);
+    expect(presentation?.action).toBe('refazer');
+    expect(presentation?.message).toBe(
+      'A montagem do vídeo foi interrompida antes de terminar. Use "Refazer" para montar de novo; se continuar, fale com o suporte.',
+    );
+    expect(presentation?.message).not.toMatch(/remotion|chromium|epipe|compositor|pilha/i);
   });
 
   it('nenhum texto cita fornecedor, saldo, status HTTP ou corpo', () => {

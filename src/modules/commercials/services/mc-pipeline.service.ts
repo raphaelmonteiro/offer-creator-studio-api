@@ -699,7 +699,7 @@ export class McPipelineService {
         }
       }
 
-      if (mcAlertsAdmin(errorClass)) {
+      if (mcAlertsAdmin(errorClass, code)) {
         // Plano §6.4: quota/chave inválida NÃO ligam mc_paused sozinhos — só alertam o admin (1 por projeto).
         adminAlertLine = await recordAdminAlertOnce({
           manager,

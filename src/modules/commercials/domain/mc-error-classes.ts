@@ -20,6 +20,9 @@ import {
  * | config            | chave do fornecedor inválida (401/403 sem saldo): como quota —      |
  * |                   | 1 execução, estorno, admin_alert, sem mc_paused                     |
  * | internal          | retry 1×; depois terminal SEM estorno automático (reconciliação)    |
+ * | internal           | + `render_interrupted` (compositor/Chromium do render morreu): 2     |
+ * |                   | execuções; esgotado, admin_alert 1 por projeto (D-3 da change      |
+ * |                   | corrigir-render-remotion-epipe)                                    |
  * | quality           | clipe reprovado na inspeção (texto inventado): NOVA geração no      |
  * |                   | provider até 3 execuções; esgotou → o ingest ACEITA o clipe (nunca  |
  * |                   | vira terminal — é qualidade, não falha)                             |
@@ -110,6 +113,24 @@ export function mcShouldRegenerateQuality(code: string, executionsSoFar: number)
   return executionsSoFar < cap;
 }
 
+/** Render do F2/peça interrompido (compositor ou Chromium morreu): classe `internal`, "Refazer". */
+export const MC_RENDER_INTERRUPTED_ERROR_CODE = 'render_interrupted';
+
+/** Erro técnico do render interrompido; a mensagem crua fica só no step/evento/log (nunca na UI). */
+export class McRenderInterruptedError extends Error {
+  readonly code = MC_RENDER_INTERRUPTED_ERROR_CODE;
+
+  constructor(
+    readonly phase: string,
+    readonly originalMessage: string,
+    options?: { cause?: unknown },
+  ) {
+    super(`render interrompido na fase ${phase}: ${originalMessage.slice(0, 300)}`);
+    this.name = 'McRenderInterruptedError';
+    if (options?.cause !== undefined) (this as { cause?: unknown }).cause = options.cause;
+  }
+}
+
 /** Backoff dos retries via fila (startAfterSeconds), indexado por nº de execuções já feitas. */
 export const MC_RETRY_BACKOFF_S = [15, 30, 60] as const;
 
@@ -148,14 +169,19 @@ export function mcRefundsOnTerminal(errorClass: McErrorClass): boolean {
   return errorClass !== 'internal';
 }
 
-/** Classes que exigem aviso ao administrador (`admin_alert` + log `ADMIN_ALERT`): falta de crédito e chave inválida. */
-export function mcAlertsAdmin(errorClass: McErrorClass): boolean {
-  return errorClass === 'quota' || errorClass === 'config';
+/**
+ * Classes que exigem aviso ao administrador (`admin_alert` + log `ADMIN_ALERT`): falta de crédito e chave
+ * inválida; e, com o código, o render interrompido esgotado (D-3 de corrigir-render-remotion-epipe).
+ */
+export function mcAlertsAdmin(errorClass: McErrorClass, errorCode?: string): boolean {
+  if (errorClass === 'quota' || errorClass === 'config') return true;
+  return errorClass === 'internal' && errorCode === MC_RENDER_INTERRUPTED_ERROR_CODE;
 }
 
 /** Código curto e estável do erro para errorCode/UI (cap de 40 chars da coluna). */
 export function mcErrorCode(err: unknown, fallback: string): string {
   if (err instanceof TerminalProviderError) return err.code.slice(0, 40);
   if (err instanceof TransientProviderError) return 'provider_transient';
+  if (err instanceof McRenderInterruptedError) return MC_RENDER_INTERRUPTED_ERROR_CODE;
   return fallback.slice(0, 40);
 }

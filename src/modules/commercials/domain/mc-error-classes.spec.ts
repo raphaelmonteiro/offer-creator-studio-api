@@ -4,6 +4,8 @@ import {
 } from '../../../shared/providers/provider-errors';
 import {
   classifyMcError,
+  McRenderInterruptedError,
+  MC_RENDER_INTERRUPTED_ERROR_CODE,
   MC_MAX_EXECUTIONS,
   mcAlertsAdmin,
   mcErrorCode,
@@ -46,6 +48,21 @@ describe('mc-error-classes — classificação e política por classe (plano §6
     for (const cls of ['transient', 'validation', 'content_policy', 'internal'] as const) {
       expect(mcAlertsAdmin(cls)).toBe(false);
     }
+  });
+
+  it('render interrompido: classe internal, 2 execuções, código próprio e admin_alert só com o código', () => {
+    const err = new McRenderInterruptedError('render_media', 'Compositor quit with signal SIGKILL');
+    expect(err.message).toBe(
+      'render interrompido na fase render_media: Compositor quit with signal SIGKILL',
+    );
+    expect(classifyMcError(err)).toBe('internal');
+    expect(mcErrorCode(err, 'render_remotion_failed')).toBe('render_interrupted');
+    expect(MC_RENDER_INTERRUPTED_ERROR_CODE.length).toBeLessThanOrEqual(40);
+    expect(mcShouldRetry('internal', 1)).toBe(true);
+    expect(mcShouldRetry('internal', 2)).toBe(false);
+    expect(mcAlertsAdmin('internal', MC_RENDER_INTERRUPTED_ERROR_CODE)).toBe(true);
+    expect(mcAlertsAdmin('internal', 'render_failed')).toBe(false);
+    expect(mcAlertsAdmin('internal')).toBe(false);
   });
 
   it('TerminalProviderError com qualquer outro code → validation', () => {

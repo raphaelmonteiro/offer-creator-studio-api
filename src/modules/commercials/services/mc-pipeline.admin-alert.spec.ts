@@ -2,6 +2,7 @@ import {
   TerminalProviderError,
   TransientProviderError,
 } from '../../../shared/providers/provider-errors';
+import { McRenderInterruptedError } from '../domain/mc-error-classes';
 import { McProjectStatus, McStepStatus } from '../domain/mc-state-machines';
 import { McProject } from '../entities/mc-project.entity';
 import { McStep } from '../entities/mc-step.entity';
@@ -171,5 +172,48 @@ describe('McPipelineService.failStep — admin_alert de quota e chave inválida'
       expect.objectContaining({ errorCode: 'provider_transient' }),
     );
     expect(alerts()).toHaveLength(0);
+  });
+
+  describe('render_interrupted (D-3 de corrigir-render-remotion-epipe)', () => {
+    const interrupted = () =>
+      new McRenderInterruptedError('render_media', 'Compositor quit with signal SIGKILL');
+
+    it('1ª execução: nova execução pela fila, sem alerta', async () => {
+      steps.push(talk('t1', 'p1', { attempts: 1 }));
+      await fail(steps[0], interrupted());
+      expect(queue.publish).toHaveBeenCalledTimes(1);
+      expect(alerts()).toHaveLength(0);
+      expect(alertLines()).toHaveLength(0);
+    });
+
+    it('teto esgotado (2 execuções): needs_attention, um admin_alert e uma linha ADMIN_ALERT, sem estorno', async () => {
+      steps.push(talk('t1', 'p1', { attempts: 2 }), talk('t2', 'p1', { attempts: 2 }));
+      await fail(steps[0], interrupted());
+      await fail(steps[1], interrupted());
+      expect(queue.publish).not.toHaveBeenCalled();
+      expect(credits.refundUnconsumed).not.toHaveBeenCalled();
+      expect(alerts('p1')).toHaveLength(1);
+      expect(alerts()[0].detail).toMatchObject({
+        errorClass: 'internal',
+        errorCode: 'render_interrupted',
+      });
+      expect(alertLines()).toHaveLength(1);
+      expect(alertLines()[0]).toContain('ADMIN_ALERT internal projeto=p1');
+      expect(state.manager.upsert).not.toHaveBeenCalled();
+    });
+
+    it('outro projeto esgotado: outro alerta', async () => {
+      steps.push(talk('t1', 'p1', { attempts: 2 }), talk('t2', 'p2', { attempts: 2 }));
+      await fail(steps[0], interrupted());
+      await fail(steps[1], interrupted());
+      expect(alerts('p1')).toHaveLength(1);
+      expect(alerts('p2')).toHaveLength(1);
+    });
+
+    it('erro interno comum esgotado não alerta', async () => {
+      steps.push(talk('t1', 'p1', { attempts: 2 }));
+      await fail(steps[0], new Error('bug qualquer'));
+      expect(alerts()).toHaveLength(0);
+    });
   });
 });
