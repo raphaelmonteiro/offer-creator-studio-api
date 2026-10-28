@@ -93,6 +93,11 @@ export interface McTalkQuoteChunk {
   index: number;
   /** `sceneId` do roteiro das falas do trecho, na ordem. */
   sceneIds: string[];
+  /**
+   * Falas do trecho que cobram crédito do cliente (Q2): as editadas/novas, ou as pedidas no reroll. Vazio na
+   * cascata (regravada só pela junção) e no trecho reaproveitado.
+   */
+  chargedSceneIds: string[];
   speechSeconds: number;
   billedSeconds: number;
   /** false = existe `talk` concluído com o MESMO hash (reaproveitado, custo de API 0). */

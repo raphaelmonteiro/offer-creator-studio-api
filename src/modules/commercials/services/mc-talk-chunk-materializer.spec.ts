@@ -133,8 +133,6 @@ describe('materializeProductionV2 em modo contínuo — um talk por trecho', () 
       true,
       true,
     ]);
-    const ownHashes = again.steps.map((s) => readChunkSnapshot(s.inputSnapshot)!.ownHash);
-    expect(ownHashes[2]).toBe(chunks[2].ownHash);
   });
 
   it('trecho de UMA fala sem cauda nem junção mantém o hash legado (cache reaproveitado entre modos)', async () => {
@@ -309,6 +307,50 @@ describe('reroll por trecho e cotação (D13)', () => {
         scenes[0],
       ]),
     ).toBeNull();
+  });
+
+  it('editar uma fala que muda o agrupamento: os trechos seguintes (mesmas falas, trechos novos) são cascata e não cobram', async () => {
+    const { manager, service, script, project, scenes } = await delivered();
+    const AnimationAsset = (await import('../../../shared/media-assets/animation-asset.entity'))
+      .AnimationAsset;
+    // a fala 1 passa de 4,3 s para 7,8 s: o trecho 1 fica só com ela e as demais se reagrupam
+    (manager.rows.get(AnimationAsset) as Array<Record<string, unknown>>).push({
+      id: 'au-longa',
+      durationMs: 7800,
+    });
+    Object.assign(scenes[0], { audioAssetId: 'au-longa' });
+    const quote = await quoteTalkChunks(service, manager, {
+      project,
+      script,
+      scenes,
+      mode: { cutout: false, framing: 'busto', keyColor: null, continuous: true },
+    });
+    expect(quote.chunks!.map((c) => c.reason)).toEqual(['edited', 'cascade', 'cascade', 'cascade']);
+    expect(quote.chunks![0].chargedSceneIds).toEqual(['fx-1']); // só a fala editada cobra
+    expect(quote.chunks!.slice(1).every((c) => c.chargedSceneIds.length === 0)).toBe(true);
+  });
+
+  it('o trecho editado cobra só as falas editadas (as irmãs regravadas junto não)', async () => {
+    const { manager, service, script, project, scenes } = await delivered();
+    const AnimationAsset = (await import('../../../shared/media-assets/animation-asset.entity'))
+      .AnimationAsset;
+    (manager.rows.get(AnimationAsset) as Array<Record<string, unknown>>).push({
+      id: 'au-edit',
+      durationMs: 4100,
+    });
+    Object.assign(scenes[2], { audioAssetId: 'au-edit' }); // 1ª fala do 2º trecho
+    const { items, steps } = await service.materializeProductionV2(
+      manager,
+      project,
+      script,
+      scenes,
+    );
+    const talkItems = items.filter((i) => !i.cached);
+    expect(talkItems.map((i) => i.sceneId)).toEqual(['fx-3']);
+    expect(steps.find((s) => s.sceneId === scenes[2].id)!.costCredits).toBe(TALK_CREDITS);
+    // o trecho seguinte regravado pela junção: crédito 0
+    expect(steps.find((s) => s.sceneId === scenes[4].id)!.costCredits).toBe(0);
+    expect(items.some((i) => i.sceneId === 'fx-5')).toBe(false);
   });
 
   it('cotação inicial (sem step anterior): todos os trechos new', async () => {

@@ -994,18 +994,20 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
         expect(order[1]).toBeGreaterThan(order[0]);
       });
 
-      it('cotação de produção: o trecho em cascata NÃO entra nos itens nem no total; o reaproveitado custa 0; o `talk` vem inteiro', async () => {
+      it('cotação de produção: só as falas editadas cobram; a irmã não editada e a cascata ficam fora dos itens e do total; o reaproveitado custa 0; o `talk` vem inteiro', async () => {
         project.status = McProjectStatus.VISUAL_REVIEW;
         const script = project.script as McScript;
-        script.scenes = [...script.scenes, { ...script.scenes[1], idx: 2, sceneId: 's3' }].map(
-          (sc) => ({ ...sc, sceneType: 'talk_tile' as const }),
-        );
+        script.scenes = [
+          ...script.scenes,
+          { ...script.scenes[1], idx: 2, sceneId: 's3' },
+          { ...script.scenes[1], idx: 3, sceneId: 's4' },
+        ].map((sc) => ({ ...sc, sceneType: 'talk_tile' as const }));
         const talk = {
           mode: { cutout: false, framing: 'busto', keyColor: null, continuous: true },
           chunks: [
-            { index: 0, sceneIds: [S1], reason: 'edited' },
-            { index: 1, sceneIds: [S2], reason: 'cascade' },
-            { index: 2, sceneIds: ['s3'], reason: 'cached' },
+            { index: 0, sceneIds: [S1, S2], chargedSceneIds: [S1], reason: 'edited' },
+            { index: 1, sceneIds: ['s3'], chargedSceneIds: [], reason: 'cascade' },
+            { index: 2, sceneIds: ['s4'], chargedSceneIds: [], reason: 'cached' },
           ],
           scenes: [],
           rewriteCount: 2,
@@ -1015,7 +1017,7 @@ describe('McQualityService — orquestração do pipeline v2 (ADR §3.3/§4)', (
         const quote = await service.quote(userId, 'p1', 'production');
         expect(quote.talk).toBe(talk);
         const talkItems = quote.items.filter((i) => i.stepType === McStepType.TALK);
-        expect(talkItems.map((i) => i.sceneId)).toEqual([S1, 's3']);
+        expect(talkItems.map((i) => i.sceneId)).toEqual([S1, 's4']); // a irmã não editada (S2) e a cascata (s3) ficam de fora
         expect(talkItems.map((i) => [i.credits, i.cached])).toEqual([
           [56, false],
           [0, true],

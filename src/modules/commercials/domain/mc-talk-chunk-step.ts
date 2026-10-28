@@ -47,8 +47,6 @@ export interface ChunkStepInput {
 
 export interface ChunkStepOutput {
   inputHash: string;
-  /** Hash sem a junção: igual ⇒ o conteúdo do trecho não mudou (a regravação é só cascata). */
-  ownHash: string;
   snapshot: Record<string, unknown>;
 }
 
@@ -91,7 +89,6 @@ export function buildChunkTalkStep(input: ChunkStepInput): ChunkStepOutput {
   const prompt = buildTalkPrompt(input.motion, ctx.cutout, { continuous: multi });
   const joinHash = input.join?.fromStepHash ?? null;
   const inputHash = talkHash(input, prompt, joinHash);
-  const ownHash = talkHash(input, prompt, null);
   const snapshot = {
     tileAssetId: ctx.tileAssetId,
     tileWidth: ctx.tileWidth,
@@ -125,7 +122,6 @@ export function buildChunkTalkStep(input: ChunkStepInput): ChunkStepOutput {
       audioMs: chunk.audioMs,
       sentMs: chunk.sentMs,
       offsetMs: chunk.offsetMs,
-      ownHash,
       join: input.join
         ? {
             fromChunkIndex: chunk.index - 1,
@@ -135,7 +131,7 @@ export function buildChunkTalkStep(input: ChunkStepInput): ChunkStepOutput {
         : null,
     },
   };
-  return { inputHash, ownHash, snapshot };
+  return { inputHash, snapshot };
 }
 
 /** Bloco `chunk` do snapshot de um step `talk` (forma desconhecida → `null`). */
@@ -158,7 +154,6 @@ export interface ChunkSnapshot {
   audioMs: number;
   sentMs: number;
   offsetMs: number;
-  ownHash: string;
   join: { fromChunkIndex: number; fromStepHash: string; fromSceneRowId: string } | null;
 }
 

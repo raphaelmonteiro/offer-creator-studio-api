@@ -90,24 +90,45 @@ async function latestTalkStep(manager: EntityManager, sceneId: string): Promise<
   return rows[0] ?? null;
 }
 
-async function classifyReason(
+/**
+ * Áudio (TTS) com que cada fala já foi gravada em algum `talk` concluído do projeto: `sceneRowId` → ids.
+ * Fala cujo TTS atual não está aqui foi EDITADA (ou é nova); fala que está aqui só entra no trecho
+ * regravado por cascata (junção ou reagrupamento), sem crédito (Q2).
+ */
+async function recordedAudioHistory(
   manager: EntityManager,
-  args: { planned: Omit<PlannedChunk, 'reason'>; rerollTarget: boolean },
-): Promise<McTalkChunkReason> {
-  const { planned } = args;
-  if (args.rerollTarget) return 'reroll';
-  if (planned.cached) return 'cached';
-  const prior = await manager.find(McStep, {
-    where: { sceneId: planned.leader.id, type: McStepType.TALK },
-  });
-  if (prior.length === 0) return 'new';
-  // mesmo conteúdo do trecho, hash diferente só pela junção ⇒ regravado por cascata (Q2)
-  const sameContent = prior.some(
-    (s) =>
-      DONE.includes(s.status) &&
-      readChunkSnapshot(s.inputSnapshot)?.ownHash === planned.output.ownHash,
-  );
-  return sameContent ? 'cascade' : 'edited';
+  projectId: string,
+): Promise<Map<string, Set<string>>> {
+  const steps = await manager.find(McStep, { where: { projectId, type: McStepType.TALK } });
+  const history = new Map<string, Set<string>>();
+  for (const step of steps) {
+    if (!DONE.includes(step.status)) continue;
+    for (const speech of readChunkSnapshot(step.inputSnapshot)?.speeches ?? []) {
+      const ids = history.get(speech.sceneRowId) ?? new Set<string>();
+      ids.add(speech.audioAssetId);
+      history.set(speech.sceneRowId, ids);
+    }
+  }
+  return history;
+}
+
+type ChunkDraft = Omit<PlannedChunk, 'reason' | 'chargedScenes'> & { chargedScenes?: McScene[] };
+
+/** Motivo do trecho e as falas que cobram crédito (D13, Q2): reroll → as pedidas; edited → as editadas; cascade/cached → nenhuma. */
+function classifyChunk(args: {
+  draft: ChunkDraft;
+  history: Map<string, Set<string>>;
+  rerollTarget: boolean;
+  targetScenes: McScene[];
+}): { reason: McTalkChunkReason; chargedScenes: McScene[] } {
+  const { draft, history } = args;
+  if (args.rerollTarget) return { reason: 'reroll', chargedScenes: args.targetScenes };
+  if (draft.cached) return { reason: 'cached', chargedScenes: [] };
+  if (history.size === 0) return { reason: 'new', chargedScenes: draft.scenes };
+  const edited = draft.scenes.filter((s) => !history.get(s.id)?.has(s.audioAssetId as string));
+  return edited.length > 0
+    ? { reason: 'edited', chargedScenes: edited }
+    : { reason: 'cascade', chargedScenes: [] };
 }
 
 /**
@@ -139,6 +160,7 @@ export async function planProjectChunks(
     throw new Error(`Fala acima do limite do motor: ${blocked.map((b) => b.sceneId).join(', ')}`);
   }
   const byId = new Map(rows.map((r) => [r.id, r]));
+  const history = await recordedAudioHistory(manager, project.id);
   const targets = new Set(args.scope?.targetRowIds ?? []);
   const firstTarget = args.scope
     ? chunks.findIndex((c) => c.sceneIds.some((id) => targets.has(id)))
@@ -178,8 +200,7 @@ export async function planProjectChunks(
     const cached = rerollTarget
       ? null
       : await mat.findCachedOutput(manager, project.userId, McStepType.TALK, output.inputHash);
-    const charged = isTarget && args.scope ? scenes.filter((s) => targets.has(s.id)) : scenes;
-    const base = {
+    const draft: ChunkDraft = {
       plan,
       scenes,
       leader,
@@ -187,13 +208,15 @@ export async function planProjectChunks(
       attempt,
       cached,
       inScope,
-      chargedScenes: charged,
       billedSeconds: Number((plan.sentMs / 1000).toFixed(3)),
     };
-    planned.push({
-      ...base,
-      reason: await classifyReason(manager, { planned: base, rerollTarget }),
+    const { reason, chargedScenes } = classifyChunk({
+      draft,
+      history,
+      rerollTarget,
+      targetScenes: scenes.filter((s) => targets.has(s.id)),
     });
+    planned.push({ ...draft, reason, chargedScenes });
   }
   return planned;
 }
@@ -211,11 +234,17 @@ export function chunkCredits(chunk: PlannedChunk): number {
   return chunk.chargedScenes.length * MC_STEP_CREDITS[McStepType.TALK];
 }
 
-/** Itens de cotação por fala; cascata fica de fora (Q2). */
+/** `sceneId` do roteiro das falas que cobram crédito neste trecho (D13, Q2). */
+function chunkCharged(chunk: PlannedChunk): string[] {
+  if (chunk.reason === 'cascade' || chunk.reason === 'cached') return [];
+  return chunk.chargedScenes.map((s) => s.scriptSceneId as string);
+}
+
+/** Itens de cotação por fala: só as que cobram; a cascata fica de fora (Q2); o reaproveitado entra a custo 0. */
 export function chunkQuoteItems(chunk: PlannedChunk): McQuoteItem[] {
   if (chunk.reason === 'cascade') return [];
   const cached = chunk.reason === 'cached';
-  return chunk.chargedScenes.map((scene) => ({
+  return (cached ? chunk.scenes : chunk.chargedScenes).map((scene) => ({
     sceneId: scene.scriptSceneId as string,
     stepType: McStepType.TALK,
     attempt: chunk.attempt,
@@ -292,6 +321,7 @@ export async function quoteTalkChunks(
     return {
       index: c.plan.index,
       sceneIds: c.scenes.map((s) => s.scriptSceneId as string),
+      chargedSceneIds: chunkCharged(c),
       speechSeconds: Number(
         (c.plan.speeches.reduce((t, s) => t + s.durationMs, 0) / 1000).toFixed(3),
       ),

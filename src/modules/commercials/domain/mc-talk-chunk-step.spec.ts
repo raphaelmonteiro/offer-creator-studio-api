@@ -87,11 +87,10 @@ describe('buildChunkTalkStep (D6/D10)', () => {
     expect(other.inputHash).not.toBe(a.inputHash);
   });
 
-  it('a junção encadeia: trocar o hash do trecho anterior muda o deste, mas não o ownHash', () => {
+  it('a junção encadeia: trocar o hash do trecho anterior muda o deste', () => {
     const j1 = base(1, [4300, 4300, 4300, 4300], { fromStepHash: 'h1', fromSceneRowId: 'row-0' });
     const j2 = base(1, [4300, 4300, 4300, 4300], { fromStepHash: 'h2', fromSceneRowId: 'row-0' });
     expect(j1.inputHash).not.toBe(j2.inputHash);
-    expect(j1.ownHash).toBe(j2.ownHash);
     const chunk = readChunkSnapshot(j1.snapshot)!;
     expect(chunk.join).toEqual({ fromChunkIndex: 0, fromStepHash: 'h1', fromSceneRowId: 'row-0' });
     expect(chunk).toMatchObject({ index: 1, count: 2, tailMs: 0, gapMs: 200 });

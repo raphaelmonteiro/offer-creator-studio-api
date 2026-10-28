@@ -557,14 +557,17 @@ export class McQualityService {
       phase === 'production'
         ? await this.materializer.quoteTalk(this.dataSource.manager, project, script, scenes)
         : null;
-    // Fala contínua (D13, Q2): trecho regravado só pela cascata NÃO entra nos itens nem no total de
-    // créditos; trecho com clipe concluído de mesmo hash conta como reaproveitado.
-    const byReason = (reason: string) =>
-      new Set((talk?.chunks ?? []).filter((c) => c.reason === reason).flatMap((c) => c.sceneIds));
-    const cascade = byReason('cascade');
-    const reused = byReason('cached');
+    // Fala contínua (D13, Q2): só as falas que cobram entram nos itens e no total; a cascata e as irmãs não
+    // editadas ficam de fora; o trecho com clipe concluído de mesmo hash conta como reaproveitado (custo 0).
+    const chunks = talk?.chunks ?? [];
+    const reused = new Set(chunks.filter((c) => c.reason === 'cached').flatMap((c) => c.sceneIds));
+    const notCharged = new Set(
+      chunks
+        .filter((c) => c.reason !== 'cached')
+        .flatMap((c) => c.sceneIds.filter((id) => !c.chargedSceneIds.includes(id))),
+    );
     const inputs = script.scenes
-      .filter((s) => !cascade.has(s.sceneId as string))
+      .filter((s) => !notCharged.has(s.sceneId as string))
       .map((s) => {
         const row = scenes.find((r) => r.scriptSceneId === s.sceneId);
         const cached: McStepType[] = [];
