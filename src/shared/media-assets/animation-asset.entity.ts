@@ -48,7 +48,14 @@ export type AnimationAssetKind =
    */
   | 'piece_still'
   /** Imagem de fundo enviada para uma peça de ofertas (referenciada por `mc_pieces.document`). */
-  | 'piece_background';
+  | 'piece_background'
+  /**
+   * Clipe conformado de um TRECHO de fala contínua (change video-fala-continua, D6/D8): guarda
+   * `metadata.slices` para religar as fatias por cache. O GC de comerciais não o recolhe.
+   */
+  | 'talk_chunk_clip'
+  /** Último quadro (PNG) de um trecho, imagem do trecho seguinte (D7). O GC de comerciais não o recolhe. */
+  | 'talk_join_frame';
 
 export type AnimationAssetStatus =
   | 'draft'

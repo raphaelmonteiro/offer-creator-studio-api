@@ -401,3 +401,19 @@ describe('selectCommercialsGarbage — peça de ofertas (change video-peca-confi
     expect(PIECE_BACKGROUND_RETENTION_MS).toBe(30 * DAY_MS);
   });
 });
+
+describe('selectCommercialsGarbage — assets do trecho de fala contínua (video-fala-continua D6)', () => {
+  it('talk_chunk_clip e talk_join_frame antigos e sem referência nunca são recolhidos (kind fora da lista do GC)', () => {
+    expect(COMMERCIALS_GC_KINDS).not.toContain('talk_chunk_clip');
+    expect(COMMERCIALS_GC_KINDS).not.toContain('talk_join_frame');
+    const result = selectCommercialsGarbage(
+      [
+        asset({ id: 'c1', kind: 'talk_chunk_clip', createdAt: daysAgo(400) }),
+        asset({ id: 'j1', kind: 'talk_join_frame', createdAt: daysAgo(400) }),
+      ],
+      ctx(),
+      NOW,
+    );
+    expect(result).toEqual([]);
+  });
+});
