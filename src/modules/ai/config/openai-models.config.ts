@@ -4,7 +4,6 @@ export interface OpenAiModelConfig {
   textModel: string;
   fastTextModel: string;
   imageModel: string;
-  imageFallbackModel: string;
   imagePreviewModel: string;
   imagePreviewQuality: 'low' | 'medium' | 'high' | 'auto';
   imageInputFidelity: 'low' | 'high';
@@ -18,9 +17,11 @@ export function getOpenAiModelConfig(configService: ConfigService): OpenAiModelC
   return {
     textModel: configService.get<string>('OPENAI_TEXT_MODEL', 'gpt-4o'),
     fastTextModel: configService.get<string>('OPENAI_FAST_TEXT_MODEL', 'gpt-4o-mini'),
-    imageModel: configService.get<string>('OPENAI_IMAGE_MODEL', 'gpt-image-1'),
-    imageFallbackModel: configService.get<string>('OPENAI_IMAGE_FALLBACK_MODEL', 'gpt-image-1'),
-    imagePreviewModel: configService.get<string>('OPENAI_IMAGE_PREVIEW_MODEL', 'gpt-image-1-mini'),
+    imageModel: configService.get<string>('OPENAI_IMAGE_MODEL', 'gpt-image-2.5-sunburst'),
+    imagePreviewModel: configService.get<string>(
+      'OPENAI_IMAGE_PREVIEW_MODEL',
+      'gpt-image-2.5-flare',
+    ),
     imagePreviewQuality: configService.get<'low' | 'medium' | 'high' | 'auto'>(
       'OPENAI_IMAGE_PREVIEW_QUALITY',
       'medium',
