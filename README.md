@@ -76,9 +76,8 @@ MAIL_FROM="Encartes" <no-reply@encartes.local>
 OPENAI_API_KEY=sk-...
 OPENAI_TEXT_MODEL=gpt-4o
 OPENAI_FAST_TEXT_MODEL=gpt-4o-mini
-OPENAI_IMAGE_MODEL=gpt-image-1.5
-OPENAI_IMAGE_FALLBACK_MODEL=gpt-image-1
-OPENAI_IMAGE_PREVIEW_MODEL=gpt-image-1-mini
+OPENAI_IMAGE_MODEL=gpt-image-2.5-sunburst
+OPENAI_IMAGE_PREVIEW_MODEL=gpt-image-2.5-flare
 OPENAI_IMAGE_QUALITY=high
 OPENAI_IMAGE_PREVIEW_QUALITY=medium
 OPENAI_IMAGE_DEFAULT_MODE=final
@@ -108,9 +107,8 @@ Resumo da decisao inicial:
 
 - `OPENAI_TEXT_MODEL`: modelo textual principal para templates, composicao, visao e prompts.
 - `OPENAI_FAST_TEXT_MODEL`: modelo textual rapido para tarefas curtas, como traducao de termos.
-- `OPENAI_IMAGE_MODEL`: modelo principal de imagem, recomendado inicialmente como `gpt-image-1.5`.
-- `OPENAI_IMAGE_FALLBACK_MODEL`: fallback operacional, inicialmente `gpt-image-1`.
-- `OPENAI_IMAGE_PREVIEW_MODEL`: modelo para previews/baixo custo, inicialmente `gpt-image-1-mini`.
+- `OPENAI_IMAGE_MODEL`: modelo principal de imagem, default `gpt-image-2.5-sunburst`.
+- `OPENAI_IMAGE_PREVIEW_MODEL`: modelo para previews/baixo custo, default `gpt-image-2.5-flare`.
 - `OPENAI_IMAGE_QUALITY`, `OPENAI_IMAGE_PREVIEW_QUALITY`, `OPENAI_IMAGE_DEFAULT_MODE`, `OPENAI_IMAGE_BACKGROUND`, `OPENAI_IMAGE_OUTPUT_FORMAT` e `OPENAI_IMAGE_OUTPUT_COMPRESSION`: defaults de saida usados pelo service de imagem.
 - `OPENAI_IMAGE_INPUT_FIDELITY`: fidelidade usada em edicoes e geracao com referencias visuais, inicialmente `high`.
 - `OPENAI_ENABLE_DALLE_FALLBACK`: deve ficar `false` por padrao; DALL-E 3 sai do caminho principal.
@@ -316,9 +314,8 @@ MAIL_FROM="Encartes" <no-reply@encartes.local>
 OPENAI_API_KEY=sk-...
 OPENAI_TEXT_MODEL=gpt-4o
 OPENAI_FAST_TEXT_MODEL=gpt-4o-mini
-OPENAI_IMAGE_MODEL=gpt-image-1.5
-OPENAI_IMAGE_FALLBACK_MODEL=gpt-image-1
-OPENAI_IMAGE_PREVIEW_MODEL=gpt-image-1-mini
+OPENAI_IMAGE_MODEL=gpt-image-2.5-sunburst
+OPENAI_IMAGE_PREVIEW_MODEL=gpt-image-2.5-flare
 OPENAI_IMAGE_QUALITY=high
 OPENAI_IMAGE_PREVIEW_QUALITY=medium
 OPENAI_IMAGE_DEFAULT_MODE=final

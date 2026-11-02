@@ -10,11 +10,16 @@ import {
 import { withAiLogging } from './utils/ai-telemetry.util';
 
 type ImageAssetKind = 'template' | 'background' | 'transparent' | 'legacy';
-type OpenAiImageQuality = 'low' | 'medium' | 'high' | 'standard' | 'auto';
+type OpenAiImageQuality = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'standard' | 'auto';
 type OpenAiImageBackground = 'transparent' | 'opaque' | 'auto';
 type OpenAiImageOutputFormat = 'png' | 'jpeg' | 'webp';
 type OpenAiImageInputFidelity = 'low' | 'high';
 type OpenAiImageMode = 'final' | 'preview';
+
+/** input_fidelity so existe em gpt-image-1.5 e gpt-image-1-mini; gpt-image-2*, 2.5* e chatgpt-image-latest nao o aceitam. */
+export function supportsConfigurableInputFidelity(model: string): boolean {
+  return model.startsWith('gpt-image-1.5') || model.startsWith('gpt-image-1-mini');
+}
 
 interface ImagePreset {
   quality: OpenAiImageQuality;
@@ -362,7 +367,7 @@ export class OpenAiImageService {
   }
 
   private supportsConfigurableInputFidelity(model: string): boolean {
-    return model !== 'gpt-image-2';
+    return supportsConfigurableInputFidelity(model);
   }
 
   private async runImageOperation<T>(

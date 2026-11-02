@@ -1,7 +1,8 @@
 import { UploadsService } from '../../uploads/uploads.service';
 import { fetchWithTimeout } from './fetch-with-timeout.util';
 
-export type OpenAiImageSize = '1024x1024' | '1024x1536' | '1536x1024';
+/** Presets classicos; modelos gpt-image-2/2.5 aceitam tambem `WIDTHxHEIGHT` (lados multiplos de 16). */
+export type OpenAiImageSize = '1024x1024' | '1024x1536' | '1536x1024' | `${number}x${number}`;
 
 export interface GeneratedImageData {
   b64_json?: string;
