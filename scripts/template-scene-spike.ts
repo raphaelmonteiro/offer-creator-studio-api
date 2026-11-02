@@ -6,6 +6,7 @@
 import { StopError } from './template-scene-spike/budget';
 import { Drill } from './template-scene-spike/drill-util';
 import { runBudgetDrills } from './template-scene-spike/drills-budget';
+import { runClientDrills } from './template-scene-spike/drills-client';
 
 interface Args {
   command: string;
@@ -31,6 +32,7 @@ async function selftest(topic: string | undefined): Promise<void> {
   const drill = new Drill();
   const all = !topic;
   if (all || topic === 'budget') await runBudgetDrills(drill);
+  if (all || topic === 'client') await runClientDrills(drill);
   process.stdout.write(`\n${drill.total - drill.failures}/${drill.total} verificações ok\n`);
   if (drill.failures > 0) process.exitCode = 1;
 }
