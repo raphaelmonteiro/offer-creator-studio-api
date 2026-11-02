@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { runEditStep } from './edit-core';
+import { insetOnScene } from './edit-core';
 import { specOf } from './edit-jobs';
 import type { EditJob } from './edit-jobs';
 import type { Services } from './calls';
@@ -9,7 +10,7 @@ import { areaDiffRatio } from './metrics-extra';
 import { cropRaster, intersect, resizeRaster, subtract } from './morph';
 import type { Raster } from './morph';
 import { editPrompt } from './prompts';
-import { marginPx, authorizedRegion, rasterizeRegion } from './shapes';
+import { authorizedRegion, marginPx, rasterizeRegion, zoneRect } from './shapes';
 import type { SceneCtx } from './scene-store';
 import type { Rect } from './types';
 
@@ -34,6 +35,8 @@ export interface EditResult {
   grown: boolean;
   downscaled: boolean;
   belowMinArea: boolean;
+  stretchFactor: number;
+  insetScenePx: number;
   sizeMismatch: boolean;
   metrics: Awaited<ReturnType<typeof runEditStep>>['metrics'];
   outsideHistogram: number[];
@@ -113,13 +116,15 @@ export async function runEditJob(
     variant: job.variant,
     prompt: editPrompt(e.prompt, job.arm),
     request: e.prompt,
-    region: e.region ?? zoneAsRect(scene, e.zone),
+    region: e.region ?? zoneRect(e.zone ?? 'header', scene.format),
     mask: job.variant === 'rect' ? undefined : e.mask,
     marginFraction: job.marginFraction,
     marginPx: margin,
     grown: out.plan.grown,
     downscaled: out.plan.downscaled,
     belowMinArea: out.plan.belowMinArea,
+    stretchFactor: out.plan.stretchFactor,
+    insetScenePx: insetOnScene(out.plan.scale),
     sizeMismatch: out.sizeMismatch,
     metrics: out.metrics,
     outsideHistogram: out.outsideHistogram,
@@ -132,10 +137,4 @@ export async function runEditJob(
     files: out.files,
     dryRun: svc.session.dryRun,
   };
-}
-
-function zoneAsRect(scene: SceneCtx, zone?: 'header' | 'footer'): Rect {
-  const h =
-    (zone === 'footer' ? scene.format.footerCm : scene.format.headerCm) / scene.format.artHeightCm;
-  return { x: 0, y: zone === 'footer' ? 1 - h : 0, w: 1, h };
 }

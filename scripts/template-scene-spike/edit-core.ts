@@ -15,8 +15,15 @@ import type { Raster } from './morph';
 import { DEFAULT_FEATHER, featherSweep, recompose, verifyOutside } from './recompose';
 import { renderEditMask, renderMarkup, shapeAreaRatio } from './shapes';
 
-/** Recuo (px) da região de recomposição em relação à região autorizada (decisão do dono, 2026-11-02). */
+/**
+ * Recuo da região de recomposição em relação a A, em px da SAÍDA do modelo (decisão do dono, 2026-11-02):
+ * a faixa preta do modelo (~27 px) é medida na saída. Na cena, o recuo é dividido pelo fator de redução
+ * do recorte (PV-17).
+ */
 export const RECOMPOSE_INSET_PX = 40;
+
+export const insetOnScene = (scale: number): number =>
+  Math.round(RECOMPOSE_INSET_PX / Math.min(1, scale));
 
 export interface EditStepArgs {
   svc: Services;
@@ -109,6 +116,7 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
           downscaled: false,
           belowMinArea: false,
           stretched: false,
+          stretchFactor: 1,
         }
       : computeCrop(scene.width, scene.height, bboxOf(a.authorized)!);
     const { box } = plan;
@@ -150,7 +158,7 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
   const sizeMismatch = decoded.width !== size.w || decoded.height !== size.h;
   const rawSent = sizeMismatch ? await resizeImg(decoded, size.w, size.h) : decoded;
   // Região de recomposição: A recuada em 40 px, sempre com S inteira (o preto do modelo na borda de A não entra).
-  const region = union(erode(a.authorized, RECOMPOSE_INSET_PX), a.shape);
+  const region = union(erode(a.authorized, insetOnScene(prep.plan.scale)), a.shape);
   const rec = await timed(latencyMs, 'recompose', async () => {
     const rawCrop = await resizeImg(rawSent, prep.box.w, prep.box.h);
     const out = await recompose(scene, rawCrop, prep.box, region, feather);

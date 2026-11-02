@@ -28,6 +28,7 @@ export interface StepSummary {
   metrics: EditOutcome['metrics'];
   grown: boolean;
   downscaled: boolean;
+  stretchFactor: number;
   sizeMismatch: boolean;
   files: Record<string, string>;
 }
@@ -71,6 +72,7 @@ const summarize = (o: EditOutcome): StepSummary => ({
   metrics: o.metrics,
   grown: o.plan.grown,
   downscaled: o.plan.downscaled,
+  stretchFactor: o.plan.stretchFactor,
   sizeMismatch: o.sizeMismatch,
   files: o.files,
 });

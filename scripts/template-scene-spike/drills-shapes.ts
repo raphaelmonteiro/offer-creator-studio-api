@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
-import { computeCrop } from './crop';
+import { computeCrop, MAX_STRETCH } from './crop';
 import { Drill, drillDir } from './drill-util';
 import { syntheticScene } from './fake-openai';
 import { FORMATS, MIN_AREA } from './formats';
@@ -104,6 +104,36 @@ async function cropCases(d: Drill): Promise<void> {
   d.check(
     'imagem baixa: tamanho enviado esticado até 655.360 px',
     rug.plan.stretched && rug.plan.sendW * rug.plan.sendH >= MIN_AREA && !rug.plan.belowMinArea,
+  );
+  const tall = await runCase(d, dir, 'tapete-retrato', 2128, 3840, {
+    x: 0.715,
+    y: 0.06,
+    w: 0.16,
+    h: 0.91,
+  });
+  d.check(
+    'retrato alto: estica a LARGURA (lado menor), com fator ≤ teto',
+    tall.plan.stretched &&
+      tall.plan.sendW < tall.plan.sendH &&
+      tall.plan.stretchFactor <= MAX_STRETCH,
+    String(tall.plan.stretchFactor.toFixed(3)),
+  );
+  const low = await runCase(d, dir, 'paisagem-baixa', 3840, 2128, {
+    x: 0.06,
+    y: 0.715,
+    w: 0.91,
+    h: 0.16,
+  });
+  d.check(
+    'paisagem baixa: estica a ALTURA (lado menor), com fator ≤ teto',
+    low.plan.stretched && low.plan.sendH < low.plan.sendW && low.plan.stretchFactor <= MAX_STRETCH,
+    String(low.plan.stretchFactor.toFixed(3)),
+  );
+  const thin = computeCrop(3840, 1200, { x: 0, y: 400, w: 3840, h: 120 });
+  d.check(
+    'acima do teto de distorção: não estica, fica belowMinArea',
+    !thin.stretched && thin.belowMinArea && thin.stretchFactor === 1,
+    `${thin.sendW}x${thin.sendH}`,
   );
   const normal = await runCase(d, dir, 'normal', 1920, 3840, { x: 0.3, y: 0.3, w: 0.4, h: 0.2 });
   d.check('região média: sem crescer nem reduzir', !normal.plan.grown && !normal.plan.downscaled);

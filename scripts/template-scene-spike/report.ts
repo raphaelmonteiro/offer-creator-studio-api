@@ -56,7 +56,12 @@ function editRows(dir: string, edits: EditResult[], labels: Labels): string[][] 
       .map((k) => (e.files[k] ? `![](${rel(dir, e.files[k])})` : ''))
       .join(' ');
     const flags =
-      [e.grown && 'grown', e.downscaled && 'downscaled', e.sizeMismatch && 'size_mismatch']
+      [
+        e.grown && 'grown',
+        e.downscaled && 'downscaled',
+        e.stretchFactor > 1 && `stretched×${e.stretchFactor.toFixed(2)}`,
+        e.sizeMismatch && 'size_mismatch',
+      ]
         .filter(Boolean)
         .join(' ') || '—';
     return [

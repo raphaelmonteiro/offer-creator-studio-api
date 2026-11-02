@@ -2,6 +2,8 @@ import { MIN_AREA } from './formats';
 import type { Box } from './morph';
 
 export const CROP_EDGE = 1024;
+/** Teto da distorção ao esticar o lado menor do tamanho enviado (PV-20). */
+export const MAX_STRETCH = 1.1;
 const STEP = 16;
 
 export interface CropPlan {
@@ -19,6 +21,8 @@ export interface CropPlan {
   belowMinArea: boolean;
   /** O tamanho enviado foi esticado no lado menor para atingir a área mínima. */
   stretched: boolean;
+  /** Fator de esticamento do lado menor (1 = sem distorção). */
+  stretchFactor: number;
 }
 
 const ceil16 = (n: number): number => Math.ceil(n / STEP) * STEP;
@@ -61,16 +65,20 @@ export function computeCrop(W: number, H: number, region: Box): CropPlan {
     h = Math.min(capH, h + STEP);
   }
   const center = { cx: region.x + region.w / 2, cy: region.y + region.h / 2 };
-  const [sendW, initialH] = sent(w, h);
-  let sendH = initialH;
-  // Imagem baixa demais para crescer o recorte (ex.: tapete largo em 3840x2128): estica o lado menor
-  // do tamanho enviado até a área mínima (distorção de poucos %), em vez de o modelo recusar o tamanho.
-  let stretched = false;
+  let [sendW, sendH] = sent(w, h);
+  // Imagem baixa ou estreita demais para o recorte crescer (o tamanho enviado fica abaixo de 655.360 px):
+  // estica o LADO MENOR do tamanho enviado até a área mínima, com teto de distorção (PV-20). Acima do teto
+  // o recorte já cresceu até o limite da imagem, então o caso fica `belowMinArea` em vez de distorcer demais.
+  let stretchFactor = 1;
   if (sendW * sendH < MIN_AREA) {
-    const need = Math.min(CROP_EDGE, ceil16(MIN_AREA / sendW));
-    if (need > sendH && sendW * need >= MIN_AREA) {
-      sendH = need;
-      stretched = true;
+    const small = Math.min(sendW, sendH);
+    const large = Math.max(sendW, sendH);
+    const need = Math.min(CROP_EDGE, ceil16(MIN_AREA / large));
+    const factor = need / small;
+    if (need > small && factor <= MAX_STRETCH && large * need >= MIN_AREA) {
+      if (sendW <= sendH) sendW = need;
+      else sendH = need;
+      stretchFactor = factor;
     }
   }
   return {
@@ -81,6 +89,7 @@ export function computeCrop(W: number, H: number, region: Box): CropPlan {
     grown: w > startW || h > startH,
     downscaled: scale < 1,
     belowMinArea: sendW * sendH < MIN_AREA,
-    stretched,
+    stretched: stretchFactor > 1,
+    stretchFactor,
   };
 }

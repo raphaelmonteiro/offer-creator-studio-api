@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { darkRatio } from './compare';
 import { computeCrop } from './crop';
-import { RECOMPOSE_INSET_PX } from './edit-core';
+import { insetOnScene, RECOMPOSE_INSET_PX } from './edit-core';
 import { editJobs, specOf } from './edit-jobs';
 import { loadCases } from './plan';
 import { SceneStore } from './scene-store';
@@ -185,6 +185,10 @@ async function inset(d: Drill, f: Fixture): Promise<void> {
   d.check(
     'com recuo de 40 px a faixa preta some',
     darkRatio(f.original, cut.final, f.authorized) === 0,
+  );
+  d.check(
+    'recuo proporcional à redução: 40 px na saída = 75 px na cena com escala 0,53 e 40 sem redução',
+    insetOnScene(0.53) === 75 && insetOnScene(1) === RECOMPOSE_INSET_PX,
   );
   const sHit = f.shape.data.every((v, i) => !v || region.data[i]);
   d.check('S continua inteira dentro da região de recomposição', sHit);
