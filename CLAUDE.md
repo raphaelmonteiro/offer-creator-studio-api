@@ -43,7 +43,7 @@ BASE_URL         # Backend base URL used in email verification links
 OPENAI_API_KEY                # OpenAI (text/vision/image/embeddings)
 OPENAI_TEXT_MODEL             # default gpt-4o
 OPENAI_FAST_TEXT_MODEL        # default gpt-4o-mini
-OPENAI_IMAGE_MODEL            # default gpt-image-1.5 (+ *_FALLBACK_/*_PREVIEW_ variants)
+OPENAI_IMAGE_MODEL            # default gpt-image-2.5-sunburst (+ OPENAI_IMAGE_PREVIEW_MODEL, default gpt-image-2.5-flare)
 OPENAI_IMAGE_*                # quality, format, concurrency, retry, cost knobs
 OPENAI_ENABLE_DALLE_FALLBACK  # opt-in DALL-E 3 fallback
 PIXABAY_API_KEY               # product image search
@@ -788,7 +788,7 @@ frontend resends the full conversation history on every call.
 | `product-categorization.service` | Product categorization in batches |
 | `flyer-assembly-plan.service` | Builds the flyer assembly plan |
 | `pixabay.service` | Pixabay search + EN translation + download/save |
-| `openai-image.service` | Image generate/edit wrapper — model fallback chain (`gpt-image-1.5` → `gpt-image-1` → preview; optional DALL-E 3), concurrency limit, retry/backoff, cost metrics |
+| `openai-image.service` | Image generate/edit wrapper — picks one model per call (`mode=final` -> `OPENAI_IMAGE_MODEL`, `mode=preview` -> `OPENAI_IMAGE_PREVIEW_MODEL`; DALL-E 3 only if `OPENAI_ENABLE_DALLE_FALLBACK=true`), no chained model fallback; `input_fidelity` only sent for `gpt-image-1.5`/`gpt-image-1-mini`; concurrency limit, retry/backoff, cost metrics |
 | `template-generate.service` | Chat template generation; resolves `GENERATE: <prompt>` placeholders into generated images saved to the bucket |
 | `template-element-assistant.service` | Per-element template assistant |
 | `template-image-generator.service` / `template-layers-generator.service` | Template-from-image / layered template generation |
