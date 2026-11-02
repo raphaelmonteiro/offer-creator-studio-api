@@ -53,7 +53,10 @@ export interface PromotionCase {
   sceneId: string;
   target: string;
   atmospheric: boolean;
+  kind: string;
   prompt: string;
+  /** Direção do destino (design D-3); o `Rect` exato é marcado na 1.8. */
+  moveTo: 'esquerda' | 'direita' | 'centro';
   source?: { region: Rect; mask?: MaskShape };
   destination?: Rect;
 }

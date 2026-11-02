@@ -1,0 +1,298 @@
+{
+  "version": 1,
+  "_comment": "Cenas e pedidos de design.md (D-3). Regiões (region/mask/neighbor/destination/source) são marcadas na task 1.8, olhando as cenas geradas. Coordenadas normalizadas 0..1, canto superior esquerdo.",
+  "scenes": [
+    {
+      "id": "C1",
+      "formatId": "folheto-27x54",
+      "prompt": "Campo verde com colinas suaves, céu azul com nuvens brancas, um sol amarelo com halo luminoso à direita, encostado numa nuvem"
+    },
+    {
+      "id": "C2",
+      "formatId": "folheto-55x36",
+      "prompt": "Gramado de Páscoa com flores, um coelho branco sentado à esquerda e uma cesta de vime com ovos coloridos ao lado"
+    },
+    {
+      "id": "C3",
+      "formatId": "revista-20x26.5",
+      "prompt": "Mesa de madeira rústica com um caixote de maçãs e folhas verdes, fundo de hortifrúti desfocado"
+    },
+    {
+      "id": "C4",
+      "formatId": "folheto-27x40",
+      "prompt": "Churrasqueira com brasas acesas e fumaça subindo, tábua de madeira ao lado, fundo escuro aconchegante"
+    },
+    {
+      "id": "C5",
+      "formatId": "folheto-54x30",
+      "prompt": "Sala de Natal com árvore decorada à esquerda, presentes embrulhados embaixo dela, janela com neve caindo e tapete vermelho"
+    }
+  ],
+  "edits": [
+    {
+      "id": "A01",
+      "block": "A",
+      "sceneId": "C1",
+      "target": "sol",
+      "prompt": "deixe o sol mais alaranjado, como fim de tarde",
+      "kind": "item pequeno",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A02",
+      "block": "A",
+      "sceneId": "C1",
+      "target": "nuvem distante",
+      "prompt": "troque esta nuvem por um balão de ar quente colorido",
+      "kind": "substituição",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A03",
+      "block": "A",
+      "sceneId": "C1",
+      "target": "colina",
+      "prompt": "deixe a grama desta colina um pouco mais clara",
+      "kind": "sutil",
+      "shapeKind": "lasso"
+    },
+    {
+      "id": "A04",
+      "block": "A",
+      "sceneId": "C1",
+      "target": "zona cabeçalho",
+      "prompt": "deixe o céu do cabeçalho mais limpo, sem nuvens",
+      "kind": "zona",
+      "shapeKind": "zone",
+      "zone": "header"
+    },
+    {
+      "id": "A05",
+      "block": "A",
+      "sceneId": "C2",
+      "target": "coelho",
+      "prompt": "coloque um laço vermelho no pescoço do coelho",
+      "kind": "item",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A06",
+      "block": "A",
+      "sceneId": "C2",
+      "target": "cesta",
+      "prompt": "troque a cesta por uma cesta de vime com ovos dourados",
+      "kind": "substituição",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A07",
+      "block": "A",
+      "sceneId": "C2",
+      "target": "flores",
+      "prompt": "deixe estas flores levemente mais rosadas",
+      "kind": "sutil",
+      "shapeKind": "brush"
+    },
+    {
+      "id": "A08",
+      "block": "A",
+      "sceneId": "C2",
+      "target": "zona rodapé",
+      "prompt": "deixe o gramado do rodapé mais escuro e uniforme",
+      "kind": "zona",
+      "shapeKind": "zone",
+      "zone": "footer"
+    },
+    {
+      "id": "A09",
+      "block": "A",
+      "sceneId": "C3",
+      "target": "caixote",
+      "prompt": "coloque laranjas no lugar das maçãs deste caixote",
+      "kind": "substituição",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A10",
+      "block": "A",
+      "sceneId": "C3",
+      "target": "folhas",
+      "prompt": "acrescente gotas de água nestas folhas",
+      "kind": "item",
+      "shapeKind": "brush"
+    },
+    {
+      "id": "A11",
+      "block": "A",
+      "sceneId": "C3",
+      "target": "mesa",
+      "prompt": "deixe a madeira da mesa um pouco mais quente",
+      "kind": "sutil",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A12",
+      "block": "A",
+      "sceneId": "C3",
+      "target": "zona cabeçalho",
+      "prompt": "troque o fundo desfocado por uma feira ao ar livre",
+      "kind": "zona",
+      "shapeKind": "zone",
+      "zone": "header"
+    },
+    {
+      "id": "A13",
+      "block": "A",
+      "sceneId": "C4",
+      "target": "fumaça",
+      "prompt": "deixe a fumaça mais suave e transparente",
+      "kind": "atmosférico",
+      "shapeKind": "lasso"
+    },
+    {
+      "id": "A14",
+      "block": "A",
+      "sceneId": "C4",
+      "target": "brasas",
+      "prompt": "deixe as brasas mais vivas e vermelhas",
+      "kind": "item",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A15",
+      "block": "A",
+      "sceneId": "C4",
+      "target": "tábua",
+      "prompt": "coloque um ramo de alecrim sobre a tábua",
+      "kind": "acréscimo",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A16",
+      "block": "A",
+      "sceneId": "C4",
+      "target": "zona cabeçalho",
+      "prompt": "escureça o cabeçalho para destacar o logo",
+      "kind": "zona",
+      "shapeKind": "zone",
+      "zone": "header"
+    },
+    {
+      "id": "A17",
+      "block": "A",
+      "sceneId": "C5",
+      "target": "árvore",
+      "prompt": "coloque luzes douradas na árvore",
+      "kind": "item",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A18",
+      "block": "A",
+      "sceneId": "C5",
+      "target": "presente",
+      "prompt": "troque o laço do presente por um laço azul",
+      "kind": "item pequeno",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A19",
+      "block": "A",
+      "sceneId": "C5",
+      "target": "janela",
+      "prompt": "faça a neve da janela cair mais forte",
+      "kind": "atmosférico",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "A20",
+      "block": "A",
+      "sceneId": "C5",
+      "target": "tapete",
+      "prompt": "deixe o tapete levemente mais vermelho",
+      "kind": "sutil",
+      "shapeKind": "rect"
+    },
+    {
+      "id": "O1",
+      "block": "C",
+      "sceneId": "C1",
+      "target": "sol encostado na nuvem",
+      "prompt": "deixe o sol mais brilhante",
+      "kind": "sobreposição",
+      "shapeKind": "lasso"
+    },
+    {
+      "id": "O2",
+      "block": "C",
+      "sceneId": "C1",
+      "target": "sol encostado na nuvem",
+      "prompt": "coloque raios saindo do sol",
+      "kind": "sobreposição",
+      "shapeKind": "lasso"
+    },
+    {
+      "id": "O3",
+      "block": "C",
+      "sceneId": "C1",
+      "target": "sol encostado na nuvem",
+      "prompt": "mude a cor do sol para amarelo-claro",
+      "kind": "sobreposição",
+      "shapeKind": "lasso"
+    }
+  ],
+  "marginSubset": [
+    "A01",
+    "A05",
+    "A09",
+    "A14",
+    "A18"
+  ],
+  "promotions": [
+    {
+      "id": "P1",
+      "sceneId": "C1",
+      "target": "sol",
+      "prompt": "mova sol para a esquerda",
+      "moveTo": "esquerda",
+      "kind": "atmosférico",
+      "atmospheric": true
+    },
+    {
+      "id": "P2",
+      "sceneId": "C2",
+      "target": "coelho",
+      "prompt": "mova coelho para a direita",
+      "moveTo": "direita",
+      "kind": "destacável",
+      "atmospheric": false
+    },
+    {
+      "id": "P3",
+      "sceneId": "C2",
+      "target": "cesta",
+      "prompt": "mova cesta para o centro",
+      "moveTo": "centro",
+      "kind": "destacável",
+      "atmospheric": false
+    },
+    {
+      "id": "P4",
+      "sceneId": "C3",
+      "target": "caixote",
+      "prompt": "mova caixote para a esquerda",
+      "moveTo": "esquerda",
+      "kind": "destacável",
+      "atmospheric": false
+    },
+    {
+      "id": "P5",
+      "sceneId": "C5",
+      "target": "presente",
+      "prompt": "mova presente para a direita",
+      "moveTo": "direita",
+      "kind": "destacável",
+      "atmospheric": false
+    }
+  ]
+}
