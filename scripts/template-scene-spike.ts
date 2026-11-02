@@ -8,10 +8,14 @@ import { Drill } from './template-scene-spike/drill-util';
 import { runBudgetDrills } from './template-scene-spike/drills-budget';
 import { runClientDrills } from './template-scene-spike/drills-client';
 import { runPlanDrills } from './template-scene-spike/drills-plan';
+import { runGenerateDrills } from './template-scene-spike/drills-generate';
 import { runMetricDrills } from './template-scene-spike/drills-metrics';
 import { runShapeDrills } from './template-scene-spike/drills-shapes';
 import { loadConfig } from './template-scene-spike/config';
+import { runGenerate } from './template-scene-spike/generate';
 import { runPlan } from './template-scene-spike/plan';
+import { withSession } from './template-scene-spike/runner';
+import type { CliOptions } from './template-scene-spike/runner';
 
 interface Args {
   command: string;
@@ -33,6 +37,15 @@ function parseArgs(argv: string[]): Args {
   return { command, flags, values };
 }
 
+function cliOptions(args: Args): CliOptions {
+  return {
+    confirmSpend: args.flags.has('confirm-spend'),
+    only: args.values.only,
+    block: args.values.block,
+    fresh: args.flags.has('fresh'),
+  };
+}
+
 async function selftest(topic: string | undefined): Promise<void> {
   const drill = new Drill();
   const all = !topic;
@@ -41,6 +54,7 @@ async function selftest(topic: string | undefined): Promise<void> {
   if (all || topic === 'plan') runPlanDrills(drill);
   if (all || topic === 'shapes') await runShapeDrills(drill);
   if (all || topic === 'metrics') await runMetricDrills(drill);
+  if (all || topic === 'generate') await runGenerateDrills(drill);
   process.stdout.write(`\n${drill.total - drill.failures}/${drill.total} verificações ok\n`);
   if (drill.failures > 0) process.exitCode = 1;
 }
@@ -50,6 +64,10 @@ async function main(): Promise<void> {
   switch (args.command) {
     case 'plan':
       return runPlan(loadConfig(), args.flags.has('strict'));
+    case 'generate':
+      return withSession(cliOptions(args), (svc, cases) =>
+        runGenerate(svc, cases, args.values.only),
+      );
     case 'selftest':
       return selftest(args.values.topic);
     default:
