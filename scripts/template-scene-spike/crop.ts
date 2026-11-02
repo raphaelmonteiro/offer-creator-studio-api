@@ -61,7 +61,8 @@ export function computeCrop(W: number, H: number, region: Box): CropPlan {
     h = Math.min(capH, h + STEP);
   }
   const center = { cx: region.x + region.w / 2, cy: region.y + region.h / 2 };
-  let [sendW, sendH] = sent(w, h);
+  const [sendW, initialH] = sent(w, h);
+  let sendH = initialH;
   // Imagem baixa demais para crescer o recorte (ex.: tapete largo em 3840x2128): estica o lado menor
   // do tamanho enviado até a área mínima (distorção de poucos %), em vez de o modelo recusar o tamanho.
   let stretched = false;
