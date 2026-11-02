@@ -11,10 +11,16 @@ import { runPlanDrills } from './template-scene-spike/drills-plan';
 import { runEditDrills } from './template-scene-spike/drills-edit';
 import { runGenerateDrills } from './template-scene-spike/drills-generate';
 import { runMetricDrills } from './template-scene-spike/drills-metrics';
+import { runReportDrills } from './template-scene-spike/drills-report';
 import { runShapeDrills } from './template-scene-spike/drills-shapes';
 import { loadConfig } from './template-scene-spike/config';
 import { editCommand } from './template-scene-spike/edit-command';
 import { runGenerate } from './template-scene-spike/generate';
+import { writeFixtures } from './template-scene-spike/fixtures';
+import { writeReport } from './template-scene-spike/report';
+import { loadPrices } from './template-scene-spike/config';
+import { loadCases } from './template-scene-spike/plan';
+import { resolveOutDir } from './template-scene-spike/runner';
 import { runPlan } from './template-scene-spike/plan';
 import { withSession } from './template-scene-spike/runner';
 import type { CliOptions } from './template-scene-spike/runner';
@@ -58,6 +64,7 @@ async function selftest(topic: string | undefined): Promise<void> {
   if (all || topic === 'metrics') await runMetricDrills(drill);
   if (all || topic === 'generate') await runGenerateDrills(drill);
   if (all || topic === 'edit') await runEditDrills(drill);
+  if (all || topic === 'report') await runReportDrills(drill);
   process.stdout.write(`\n${drill.total - drill.failures}/${drill.total} verificações ok\n`);
   if (drill.failures > 0) process.exitCode = 1;
 }
@@ -75,6 +82,23 @@ async function main(): Promise<void> {
       return withSession(cliOptions(args), (svc, cases) =>
         editCommand(svc, cases, { only: args.values.only, block: args.values.block }),
       );
+    case 'report': {
+      const dir = resolveOutDir(!args.flags.has('dry-run'));
+      const file = writeReport(
+        dir,
+        loadCases(),
+        loadConfig(),
+        loadPrices(),
+        args.flags.has('dry-run'),
+      );
+      process.stdout.write(`Relatório: ${file}\n`);
+      return;
+    }
+    case 'fixtures': {
+      const dir = resolveOutDir(!args.flags.has('dry-run'));
+      process.stdout.write(`Fixtures: ${await writeFixtures(dir, loadCases())}\n`);
+      return;
+    }
     case 'selftest':
       return selftest(args.values.topic);
     default:

@@ -6,6 +6,7 @@ import type { Services } from './calls';
 import { createClient } from './client-factory';
 import { loadConfig, loadPrices, OUT_ROOT, replicatePrice } from './config';
 import { loadCases, validateCases } from './plan';
+import { writeReport } from './report';
 import { installInterruptHandler, openSession } from './session';
 import type { CasesFile } from './types';
 
@@ -68,6 +69,11 @@ export async function withSession(
     say(
       `Gasto acumulado US$ ${session.budget.spentUsd().toFixed(4)} de US$ ${config.budgetUsd.toFixed(2)}. Estado gravado; a próxima execução retoma.`,
     );
+    try {
+      say(`Relatório parcial: ${writeReport(dir, cases, config, prices, dryRun)}`);
+    } catch (reportErr) {
+      say(`Relatório parcial não gerado: ${(reportErr as Error).message}`);
+    }
     process.exitCode = 1;
   } finally {
     session.lock.release();

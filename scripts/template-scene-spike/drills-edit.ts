@@ -16,15 +16,18 @@ import type { CasesFile } from './types';
 import type { EditResult } from './edit-cases';
 import type { PromoResult } from './promote';
 
-interface Rig {
+export interface Rig {
   svc: Services;
   cases: CasesFile;
   run: (opts?: EditOptions, remover?: Remover | null) => Promise<void>;
 }
 
-const subset = (cases: CasesFile, keep: Partial<CasesFile>): CasesFile => ({ ...cases, ...keep });
+export const subset = (cases: CasesFile, keep: Partial<CasesFile>): CasesFile => ({
+  ...cases,
+  ...keep,
+});
 
-async function rig(
+export async function rig(
   name: string,
   cases: CasesFile,
   fake: FakeOptions = {},
