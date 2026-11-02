@@ -83,7 +83,11 @@ async function main(): Promise<void> {
       );
     case 'edit':
       return withSession(cliOptions(args), (svc, cases) =>
-        editCommand(svc, cases, { only: args.values.only, block: args.values.block }),
+        editCommand(svc, cases, {
+          only: args.values.only,
+          block: args.values.block,
+          markup: process.env.SPIKE_MARKUP === 'on',
+        }),
       );
     case 'report': {
       const dir = resolveOutDir(!args.flags.has('dry-run'));

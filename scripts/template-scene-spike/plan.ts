@@ -74,9 +74,10 @@ export function missingRegions(cases: CasesFile): string[] {
   return missing;
 }
 
-/** Faixa por edição de recorte de ~1024 px com entrada (brief M2: US$ 0,2 a 0,35). */
-const EDIT_USD: [number, number] = [0.2, 0.35];
-const VISION_USD = 0.03;
+/** Faixa por edição de recorte medida na comparação de 2026-11-02 (US$ 0,034 a 0,052; o brief previa 0,2 a 0,35). */
+const EDIT_USD: [number, number] = [0.034, 0.052];
+/** gpt-6-luna a US$ 0,10/0,50 por 1 M de tokens, cerca de mil tokens por chamada. */
+const VISION_USD = 0.001;
 const RETRY_FACTOR = 1.3;
 /**
  * Tokens de saída por pixel observados na fase 1 real (2026-11-02, `high`): 2700 a 4523 tokens para
@@ -96,6 +97,7 @@ export function estimatePlan(
   sizes: Record<string, NativeSize>,
   config: SpikeConfig,
   prices: Prices,
+  markup = false,
 ): PlanLine[] {
   const price = imagePrice(prices, config.imageModel, config.quality);
   const generate = cases.scenes.reduce((sum, s) => {
@@ -119,13 +121,17 @@ export function estimatePlan(
   });
   const lines: PlanLine[] = [
     { item: 'Fase 1 (cenas)', calls: cases.scenes.length, lowUsd: generate, highUsd: generate },
-    line('A (pedidos x 2 mecanismos)', a * 2, EDIT_USD),
+    line(
+      markup ? 'A (pedidos x 2 mecanismos)' : 'A (pedidos, só mask; markup não medido)',
+      markup ? a * 2 : a,
+      EDIT_USD,
+    ),
     line('Margem 8%', cases.marginSubset.length, EDIT_USD),
     line('C (retângulo e pincel/laço)', c * 2, EDIT_USD),
     line('B promoção (preenchimento + 3 retoques)', b * 4, EDIT_USD),
     line('B fallback (origem e destino)', b * 2, EDIT_USD),
     line('B remoção de fundo (Replicate)', b, [0.00051, 0.00051]),
-    line('E visão', a * 2 + 5, [VISION_USD, VISION_USD]),
+    line('E visão', (markup ? a * 2 : a) + 5, [VISION_USD, VISION_USD]),
   ];
   const subtotalLow = lines.reduce((s, l) => s + l.lowUsd, 0);
   const subtotalHigh = lines.reduce((s, l) => s + l.highUsd, 0);
@@ -163,7 +169,13 @@ export function runPlan(
     result.errors.forEach((e) => out(`  - ${e}`));
     throw new Error(`${result.errors.length} erro(s) no plano; nenhuma chamada foi feita`);
   }
-  const lines = estimatePlan(cases, result.sizes, config, prices);
+  const lines = estimatePlan(
+    cases,
+    result.sizes,
+    config,
+    prices,
+    process.env.SPIKE_MARKUP === 'on',
+  );
   out('\nEstimativa de custo (ordem de grandeza; o ledger traz o custo real):');
   for (const l of lines)
     out(

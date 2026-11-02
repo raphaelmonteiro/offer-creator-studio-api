@@ -8,11 +8,15 @@ import type { CropPlan } from './crop';
 import { cropImg, imgToPng, loadRgb, resizeImg } from './image';
 import type { Img } from './image';
 import { diffMetrics, FEATHER_SWEEP, tauSweep } from './metrics';
+import { areaDiffRatio } from './metrics-extra';
 import type { DiffMetrics } from './metrics';
-import { areaOf, bboxOf, cropRaster, resizeRaster } from './morph';
+import { areaOf, bboxOf, cropRaster, erode, resizeRaster, subtract, union } from './morph';
 import type { Raster } from './morph';
 import { DEFAULT_FEATHER, featherSweep, recompose, verifyOutside } from './recompose';
 import { renderEditMask, renderMarkup, shapeAreaRatio } from './shapes';
+
+/** Recuo (px) da região de recomposição em relação à região autorizada (decisão do dono, 2026-11-02). */
+export const RECOMPOSE_INSET_PX = 40;
 
 export interface EditStepArgs {
   svc: Services;
@@ -49,6 +53,8 @@ export interface EditOutcome {
   metrics: Omit<DiffMetrics, 'outsideHistogram'> & {
     maskAreaRatio: number;
     seamSsim: number | null;
+    /** Obediência na imagem recomposta: alterados na faixa de margem (região de recomposição fora de S). */
+    marginDiffRatio: number;
   };
   outsideHistogram: number[];
   featherSweep: Array<{ feather: number; seamSsim: number | null }>;
@@ -142,15 +148,17 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
   const decoded = await loadRgb(call.value.png);
   const sizeMismatch = decoded.width !== size.w || decoded.height !== size.h;
   const rawSent = sizeMismatch ? await resizeImg(decoded, size.w, size.h) : decoded;
+  // Região de recomposição: A recuada em 40 px, sempre com S inteira (o preto do modelo na borda de A não entra).
+  const region = union(erode(a.authorized, RECOMPOSE_INSET_PX), a.shape);
   const rec = await timed(latencyMs, 'recompose', async () => {
     const rawCrop = await resizeImg(rawSent, prep.box.w, prep.box.h);
-    const out = await recompose(scene, rawCrop, prep.box, a.authorized, feather);
-    verifyOutside(scene, out.final, a.authorized);
+    const out = await recompose(scene, rawCrop, prep.box, region, feather);
+    verifyOutside(scene, out.final, region);
     return { rawCrop, out };
   });
   const m = await timed(latencyMs, 'metrics', async () => {
     const d = diffMetrics(prep.sent, rawSent, sShape, sAuth);
-    const sweepF = await featherSweep(scene, rec.rawCrop, prep.box, a.authorized, FEATHER_SWEEP);
+    const sweepF = await featherSweep(scene, rec.rawCrop, prep.box, region, FEATHER_SWEEP);
     return { d, sweepF, sweepT: tauSweep(prep.sent, rawSent, sShape, sAuth) };
   });
   const finalCrop = cropImg(rec.out.final, prep.box.x, prep.box.y, prep.box.w, prep.box.h);
@@ -160,6 +168,12 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
     final: write(path.join(a.dir, 'final.png'), await imgToPng(finalCrop)),
     mask: write(path.join(a.dir, `${a.arm}.png`), maskPng),
   };
+  const origCrop = cropImg(scene, prep.box.x, prep.box.y, prep.box.w, prep.box.h);
+  const marginDiffRatio = areaDiffRatio(
+    origCrop,
+    finalCrop,
+    cropRaster(subtract(region, a.shape), prep.box),
+  );
   const { outsideHistogram, ...diff } = m.d;
   return {
     final: rec.out.final,
@@ -168,7 +182,12 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
     sentAuth: sAuth,
     finalDefault: rec.out.final,
     plan: prep.plan,
-    metrics: { ...diff, maskAreaRatio: shapeAreaRatio(a.shape), seamSsim: rec.out.seamSsim },
+    metrics: {
+      ...diff,
+      maskAreaRatio: shapeAreaRatio(a.shape),
+      seamSsim: rec.out.seamSsim,
+      marginDiffRatio,
+    },
     outsideHistogram,
     featherSweep: m.sweepF,
     tauSweep: m.sweepT,

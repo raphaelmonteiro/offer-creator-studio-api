@@ -16,7 +16,11 @@ import { runVisionFor } from './vision';
 export interface EditOptions {
   only?: string;
   block?: string;
+  /** `markup` desligado por padrão: a API recusa o parâmetro (400 Unknown parameter). `SPIKE_MARKUP=on` liga. */
+  markup?: boolean;
 }
+
+export const MARKUP_OFF_REASON = 'não medido (400 Unknown parameter: markup)';
 
 export interface EditDeps {
   svc: Services;
@@ -31,11 +35,12 @@ export const matchesOnly = (key: string, only?: string): boolean =>
   !only || key === only || key.startsWith(`${only}:`);
 
 /** Chaves de estado de todo o plano (para saber se o plano terminou). */
-export function allPlanKeys(cases: CasesFile): string[] {
+export function allPlanKeys(cases: CasesFile, markup = false): string[] {
   const jobs = editJobs(cases);
-  const edits = [...jobs.a, ...jobs.c, ...jobs.margin].map((j) => j.key);
+  const a = markup ? jobs.a : jobs.a.filter((j) => j.arm !== 'markup');
+  const edits = [...a, ...jobs.c, ...jobs.margin].map((j) => j.key);
   const promos = cases.promotions.flatMap((p) => [`${p.id}:promo`, `${p.id}:fallback`]);
-  const visions = [...jobs.a, ...jobs.margin].map((j) => `E:${j.key}`);
+  const visions = [...a, ...jobs.margin].map((j) => `E:${j.key}`);
   return [...edits, ...promos, ...visions];
 }
 
@@ -66,6 +71,10 @@ function shouldRun(deps: EditDeps, key: string): boolean {
 async function runJobs(deps: EditDeps, jobs: EditJob[]): Promise<void> {
   const { session } = deps.svc;
   for (const job of jobs) {
+    if (job.arm === 'markup' && !deps.opts.markup) {
+      if (shouldRun(deps, job.key)) session.state.set(job.key, 'skipped', MARKUP_OFF_REASON);
+      continue;
+    }
     if (!shouldRun(deps, job.key)) continue;
     if (job.arm === 'markup' && session.budget.isMarkupDisabled()) {
       session.state.set(job.key, 'skipped', 'markup recusado pela API (P3): braço desligado');
@@ -122,7 +131,7 @@ async function runVisionBlock(deps: EditDeps): Promise<void> {
 export async function runEdit(deps: EditDeps): Promise<void> {
   const { state } = deps.svc.session;
   const { only, block } = deps.opts;
-  const keys = allPlanKeys(deps.cases);
+  const keys = allPlanKeys(deps.cases, deps.opts.markup);
   if (!only && keys.every((k) => ['done', 'skipped'].includes(state.statusOf(k)))) {
     say('Plano concluído: todos os casos estão done ou skipped. Nenhuma chamada paga foi feita.');
     return;

@@ -11,6 +11,7 @@ import {
   recommendMargin,
   recommendThreshold,
   observeTau,
+  summarizeBy,
 } from './calibrate';
 import type { Recommendation } from './calibrate';
 import { decideA, decideB, decideC } from './decision';
@@ -63,6 +64,7 @@ function editRows(dir: string, edits: EditResult[], labels: Labels): string[][] 
       e.request.replace(/\|/g, '/'),
       fmt(e.metrics.insideMaskDiffRatio),
       fmt(e.metrics.outsideMaskDiffRatio),
+      fmt(e.metrics.marginDiffRatio),
       fmt(e.metrics.maskAreaRatio, 4),
       fmt(e.metrics.seamSsim),
       flags,
@@ -74,11 +76,35 @@ function editRows(dir: string, edits: EditResult[], labels: Labels): string[][] 
   });
 }
 
+const METRIC_NOTE =
+  '> **Mudança de métrica (decisão do dono, 2026-11-02):** o mecanismo do spike é o JSON com `mask` de alfa 255 = editar, e nele a saída bruta volta **preta** fora da região. Por isso `outsideMaskDiffRatio` da saída bruta (coluna "outside") vale cerca de 1 e **não mede obediência**; ela fica só como informação. A obediência passa a ser medida na imagem **recomposta**: `marginDiffRatio` é a fração de pixels alterados (τ = 16) na faixa de margem, isto é, dentro da região de recomposição (A recuada 40 px, com S inteira) e fora de S. Fora da região de recomposição o final é idêntico ao original, conferido byte a byte.';
+
+function obeyLine(c: Collected): string {
+  const a = c.edits.filter((e) => e.block === 'A' && e.variant === 'base');
+  return a.length
+    ? `\nObediência na recomposta (marginDiffRatio, mask): ${summarizeBy(a, (e) => e.metrics.marginDiffRatio)}.\n`
+    : '';
+}
+
+function markupNote(c: Collected): string {
+  const off = Object.entries(c.status).filter(
+    ([k, v]) => k.endsWith(':markup') && v.status === 'skipped',
+  );
+  return off.length
+    ? `\nBraço ` +
+        '`markup`' +
+        `: ${off[0][1].reason} em ${off.length} pedidos; o mecanismo padrão sai do ` +
+        '`mask`' +
+        ` por exclusão (A2).\n`
+    : '';
+}
+
 const EDIT_HEAD = [
   'caso',
   'pedido',
   'inside',
-  'outside (bruta)',
+  'outside (bruta, informativa)',
+  'margem (final)',
   'área',
   'seamSsim',
   'flags',
@@ -266,8 +292,8 @@ export function buildReport(
     `- Conferência do painel da OpenAI (D-9): pendente`,
     `- Preços e fontes:\n${priceLines.join('\n')}`,
     '\nLegenda dos rótulos em `labels.json` (`_legenda`). Só `aceitavel` conta como aceito nas notas globais do bloco B.\n',
-    `## Decisões por bloco\n\n### Bloco A, edição local (estágio 4)\n\n${decisionText(decA)}\n### Bloco B, promoção a elemento (estágio 6)\n\n${decisionText(decB)}\n### Bloco C, sobreposição\n\n${decisionText(decC)}`,
-    `## Bloco A: pedidos\n\n${table(
+    `## Decisões por bloco\n\n### Bloco A, edição local (estágio 4)\n\n${decisionText(decA)}${markupNote(c)}${obeyLine(c)}\n### Bloco B, promoção a elemento (estágio 6)\n\n${decisionText(decB)}\n### Bloco C, sobreposição\n\n${decisionText(decC)}`,
+    `${METRIC_NOTE}\n\n## Bloco A: pedidos\n\n${table(
       EDIT_HEAD,
       editRows(
         dir,

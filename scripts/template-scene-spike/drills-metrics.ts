@@ -1,9 +1,18 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import { darkRatio } from './compare';
+import { computeCrop } from './crop';
+import { RECOMPOSE_INSET_PX } from './edit-core';
+import { editJobs, specOf } from './edit-jobs';
+import { loadCases } from './plan';
+import { SceneStore } from './scene-store';
+import { marginPx } from './shapes';
 import { Drill } from './drill-util';
 import { syntheticScene } from './fake-openai';
-import { cropImg, loadRgb } from './image';
+import { cropImg, loadRgb, resizeImg } from './image';
 import type { Img } from './image';
 import { diffMetrics, FEATHER_SWEEP, tauSweep } from './metrics';
-import { cropRaster } from './morph';
+import { bboxOf, cropRaster, erode, union } from './morph';
 import type { Box, Raster } from './morph';
 import {
   featherAlpha,
@@ -150,10 +159,65 @@ async function sweeps(d: Drill, f: Fixture): Promise<void> {
   );
 }
 
+async function inset(d: Drill, f: Fixture): Promise<void> {
+  d.section('Recuo de 40 px da região de recomposição (preto do modelo na borda de A)');
+  // saída bruta: edição em A, com uma faixa preta de 27 px dentro da borda de A e preto fora de A
+  const raw = brighten(f.before);
+  const inner = erode(f.authorized, 27);
+  for (let y = 0; y < BOX.h; y += 1) {
+    for (let x = 0; x < BOX.w; x += 1) {
+      const sx = x + BOX.x;
+      const sy = y + BOX.y;
+      const i = sy * W + sx;
+      const band = f.authorized.data[i] && !inner.data[i];
+      if (!f.authorized.data[i] || band)
+        raw.data.fill(0, (y * BOX.w + x) * 3, (y * BOX.w + x) * 3 + 3);
+    }
+  }
+  const plain = await recompose(f.original, raw, BOX, f.authorized, 24);
+  const region = union(erode(f.authorized, RECOMPOSE_INSET_PX), f.shape);
+  const cut = await recompose(f.original, raw, BOX, region, 24);
+  verifyOutside(f.original, cut.final, region);
+  d.check(
+    'sem recuo a faixa preta aparece no final',
+    darkRatio(f.original, plain.final, f.authorized) > 0.02,
+  );
+  d.check(
+    'com recuo de 40 px a faixa preta some',
+    darkRatio(f.original, cut.final, f.authorized) === 0,
+  );
+  const sHit = f.shape.data.every((v, i) => !v || region.data[i]);
+  d.check('S continua inteira dentro da região de recomposição', sHit);
+  const real = path.resolve(__dirname, '../out/template-scene-spike/compare/A01/M3/raw.png');
+  d.check(
+    'saída bruta real do A01 (M3): recuo elimina a faixa (se o arquivo existir)',
+    await realA01(real),
+  );
+}
+
+async function realA01(file: string): Promise<boolean> {
+  if (!fs.existsSync(file)) return true;
+  const cases = loadCases();
+  const job = editJobs(cases).a.find((j) => j.edit.id === 'A01' && j.arm === 'mask')!;
+  const sc = await new SceneStore(
+    path.resolve(__dirname, '../out/template-scene-spike'),
+    cases,
+  ).get('C1');
+  const shape = await rasterizeRegion(specOf(job), sc.img.width, sc.img.height, sc.format);
+  const auth = authorizedRegion(shape, marginPx(0.04, sc.img.width, sc.img.height));
+  const box = computeCrop(sc.img.width, sc.img.height, bboxOf(auth) as Box).box;
+  const raw = await resizeImg(await loadRgb(fs.readFileSync(file)), box.w, box.h);
+  const before = darkRatio(sc.img, (await recompose(sc.img, raw, box, auth, 24)).final, auth);
+  const region = union(erode(auth, RECOMPOSE_INSET_PX), shape);
+  const after = darkRatio(sc.img, (await recompose(sc.img, raw, box, region, 24)).final, region);
+  return before > 0.02 && after === 0;
+}
+
 export async function runMetricDrills(d: Drill): Promise<void> {
   const f = await fixture();
   await identical(d, f);
   await exteriorChanged(d, f);
   await forcedError(d, f);
   await sweeps(d, f);
+  await inset(d, f);
 }

@@ -134,3 +134,9 @@ export function intersect(a: Raster, b: Raster): Raster {
   for (let i = 0; i < out.data.length; i += 1) out.data[i] = a.data[i] && b.data[i] ? 255 : 0;
   return out;
 }
+
+export function union(a: Raster, b: Raster): Raster {
+  const out = emptyRaster(a.width, a.height);
+  for (let i = 0; i < out.data.length; i += 1) out.data[i] = a.data[i] || b.data[i] ? 255 : 0;
+  return out;
+}

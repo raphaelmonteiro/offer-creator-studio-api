@@ -50,7 +50,7 @@ export async function rig(
     svc,
     cases,
     run: (opts = {}, remover = new FakeRemover(0.5)) =>
-      runEdit({ svc, cases, remover, scenes, opts }),
+      runEdit({ svc, cases, remover, scenes, opts: { markup: true, ...opts } }),
   };
 }
 
@@ -110,6 +110,10 @@ async function blocksAandC(d: Drill, base: CasesFile): Promise<void> {
       !!shape.neighbor &&
       rect.neighbor.areaPx === shape.neighbor.areaPx &&
       rect.neighbor.areaPx > 0,
+  );
+  d.check(
+    'marginDiffRatio (obediência na recomposta) entre 0 e 1',
+    a01.metrics.marginDiffRatio >= 0 && a01.metrics.marginDiffRatio <= 1,
   );
   d.check(
     'feather: varredura de 5 valores e τ gravadas por caso',
@@ -172,6 +176,32 @@ async function refusals(d: Drill, base: CasesFile): Promise<void> {
   );
   d.check('o estado fica gravado', m.svc.session.state.statusOf('A01:mask') === 'failed');
   m.svc.session.lock.release();
+}
+
+async function markupOff(d: Drill, base: CasesFile): Promise<void> {
+  d.section('Braço markup desligado (400 Unknown parameter)');
+  const one = subset(base, {
+    edits: base.edits.filter((e) => e.id === 'A01'),
+    marginSubset: [],
+    promotions: [],
+  });
+  const r = await rig('edit-markup-off', one);
+  await r.run({ block: 'A', markup: false });
+  const st = r.svc.session.state;
+  d.check(
+    'A01:mask feito e A01:markup skipped com "não medido (400 Unknown parameter: markup)"',
+    st.statusOf('A01:mask') === 'done' &&
+      st.statusOf('A01:markup') === 'skipped' &&
+      /não medido \(400 Unknown parameter: markup\)/.test(st.reasonOf('A01:markup') ?? ''),
+  );
+  const calls = r.svc.session.ledger.entries().filter((e) => e.step === 'edit').length;
+  d.check('nenhuma chamada de edição para o markup', calls === 1);
+  await r.run({ block: 'E', markup: false });
+  d.check(
+    'visão só para o mask; plano conta o markup como fora',
+    st.statusOf('E:A01:mask') === 'done' && st.statusOf('E:A01:markup') === 'pending',
+  );
+  r.svc.session.lock.release();
 }
 
 async function stops(d: Drill, base: CasesFile): Promise<void> {
@@ -289,6 +319,7 @@ export async function runEditDrills(d: Drill): Promise<void> {
   const base = loadCases();
   await blocksAandC(d, base);
   await refusals(d, base);
+  await markupOff(d, base);
   await stops(d, base);
   await promotions(d, base);
 }
