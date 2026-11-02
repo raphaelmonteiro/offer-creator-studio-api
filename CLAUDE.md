@@ -788,7 +788,7 @@ frontend resends the full conversation history on every call.
 | `product-categorization.service` | Product categorization in batches |
 | `flyer-assembly-plan.service` | Builds the flyer assembly plan |
 | `pixabay.service` | Pixabay search + EN translation + download/save |
-| `openai-image.service` | Image generate/edit wrapper — picks one model per call (`mode=final` -> `OPENAI_IMAGE_MODEL`, `mode=preview` -> `OPENAI_IMAGE_PREVIEW_MODEL`; DALL-E 3 only if `OPENAI_ENABLE_DALLE_FALLBACK=true`), no chained model fallback; `input_fidelity` only sent for `gpt-image-1.5`/`gpt-image-1-mini`; concurrency limit, retry/backoff, cost metrics |
+| `openai-image.service` | Image generate/edit wrapper — picks one model per call (`mode=final` -> `OPENAI_IMAGE_MODEL`, `mode=preview` -> `OPENAI_IMAGE_PREVIEW_MODEL`; `legacy` asset kind uses `OPENAI_DALLE_FALLBACK_MODEL`), no chained model fallback; `input_fidelity` only sent for `gpt-image-1.5`/`gpt-image-1-mini`; concurrency limit, retry/backoff, cost metrics |
 | `template-generate.service` | Chat template generation; resolves `GENERATE: <prompt>` placeholders into generated images saved to the bucket |
 | `template-element-assistant.service` | Per-element template assistant |
 | `template-image-generator.service` / `template-layers-generator.service` | Template-from-image / layered template generation |
