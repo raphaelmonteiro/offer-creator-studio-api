@@ -100,9 +100,9 @@ async function cropCases(d: Drill): Promise<void> {
   const corner = await runCase(d, dir, 'canto', 1920, 3840, { x: 0, y: 0, w: 0.02, h: 0.01 });
   d.check('região no canto: recorte preso à imagem', corner.box.x === 0 && corner.box.y === 0);
   d.check(
-    'máscara de edição: alfa 0 dentro de A e 255 fora',
-    (await alphaAt(small.maskPng, small.size.w / 2, small.size.h / 2)) === 0 &&
-      (await alphaAt(small.maskPng, 2, 2)) === 255,
+    'máscara de edição: alfa 255 (editar) dentro de A e 0 fora',
+    (await alphaAt(small.maskPng, small.size.w / 2, small.size.h / 2)) === 255 &&
+      (await alphaAt(small.maskPng, 2, 2)) === 0,
   );
   d.check(
     'markup: opaco no contorno, transparente fora',

@@ -76,14 +76,20 @@ export function authorizedRegion(shape: Raster, margin: number): Raster {
   return dilate(shape, margin);
 }
 
-/** Alfa 0 onde editar (A) e 255 onde preservar, RGBA do tamanho do recorte. */
+/**
+ * Alfa da máscara na área editável. A referência da OpenAI não diz em texto; a tentativa de 2026-11-02 com
+ * alfa 0 deixou a área marcada preta e editou o resto (A01), então a convenção do spike é alfa 255 = editar.
+ */
+export const MASK_EDIT_ALPHA = 255;
+
+/** Máscara RGBA do tamanho do recorte: `MASK_EDIT_ALPHA` onde editar (A) e o oposto onde preservar. */
 export async function renderEditMask(
   authorized: Raster,
   size?: { w: number; h: number },
 ): Promise<Buffer> {
   const rgba = Buffer.alloc(authorized.data.length * 4, 0);
   for (let i = 0; i < authorized.data.length; i += 1)
-    rgba[i * 4 + 3] = authorized.data[i] ? 0 : 255;
+    rgba[i * 4 + 3] = authorized.data[i] ? MASK_EDIT_ALPHA : 255 - MASK_EDIT_ALPHA;
   return toPng(rgba, authorized, size, 'nearest');
 }
 

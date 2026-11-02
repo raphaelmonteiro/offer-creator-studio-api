@@ -106,6 +106,7 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
       },
     }),
   );
+  write(path.join(a.dir, 'api.png'), call.value.png); // resposta como veio, com o alfa original
   const decoded = await loadRgb(call.value.png);
   const sizeMismatch = decoded.width !== size.w || decoded.height !== size.h;
   const rawSent = sizeMismatch ? await resizeImg(decoded, size.w, size.h) : decoded;

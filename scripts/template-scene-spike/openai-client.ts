@@ -116,6 +116,7 @@ export class RealOpenAi implements SpikeOpenAi {
         size: p.size,
         quality: p.quality,
         output_format: 'png',
+        background: 'opaque',
         n: 1,
       };
       if (p.mask) body.mask = { image_url: dataUrl(p.mask) };
