@@ -24,7 +24,8 @@ export function providerError(status: number, code: string, message: string): Er
   return Object.assign(new Error(message), { status, code });
 }
 
-const OUT_TOKENS_PER_PIXEL = 0.0039;
+/** Média observada na fase 1 real (2026-11-02); o brief previa 0,0039. */
+const OUT_TOKENS_PER_PIXEL = 0.00046;
 const IN_TOKENS_PER_PIXEL = 0.0015;
 
 function simulatedUsage(w: number, h: number, inputs: number, promptChars: number) {

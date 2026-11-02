@@ -78,8 +78,11 @@ export function missingRegions(cases: CasesFile): string[] {
 const EDIT_USD: [number, number] = [0.2, 0.35];
 const VISION_USD = 0.03;
 const RETRY_FACTOR = 1.3;
-/** Tokens de saída por pixel, de M2 (1920x3840 em `high` ≈ US$ 0,87 a US$ 30 por 1 M). */
-const OUT_TOKENS_PER_PIXEL = 0.0039;
+/**
+ * Tokens de saída por pixel observados na fase 1 real (2026-11-02, `high`): 2700 a 4523 tokens para
+ * 7,3 a 8,3 Mpx, média 0,00046. O brief (M2) previa 0,0039, cerca de 8x mais.
+ */
+const OUT_TOKENS_PER_PIXEL = 0.00046;
 
 export interface PlanLine {
   item: string;
