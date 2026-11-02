@@ -8,6 +8,7 @@ import { Drill } from './template-scene-spike/drill-util';
 import { runBudgetDrills } from './template-scene-spike/drills-budget';
 import { runClientDrills } from './template-scene-spike/drills-client';
 import { runPlanDrills } from './template-scene-spike/drills-plan';
+import { runShapeDrills } from './template-scene-spike/drills-shapes';
 import { loadConfig } from './template-scene-spike/config';
 import { runPlan } from './template-scene-spike/plan';
 
@@ -37,6 +38,7 @@ async function selftest(topic: string | undefined): Promise<void> {
   if (all || topic === 'budget') await runBudgetDrills(drill);
   if (all || topic === 'client') await runClientDrills(drill);
   if (all || topic === 'plan') runPlanDrills(drill);
+  if (all || topic === 'shapes') await runShapeDrills(drill);
   process.stdout.write(`\n${drill.total - drill.failures}/${drill.total} verificações ok\n`);
   if (drill.failures > 0) process.exitCode = 1;
 }
