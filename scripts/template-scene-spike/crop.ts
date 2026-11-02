@@ -17,6 +17,8 @@ export interface CropPlan {
   downscaled: boolean;
   /** Não foi possível chegar à área mínima (imagem pequena demais). */
   belowMinArea: boolean;
+  /** O tamanho enviado foi esticado no lado menor para atingir a área mínima. */
+  stretched: boolean;
 }
 
 const ceil16 = (n: number): number => Math.ceil(n / STEP) * STEP;
@@ -59,7 +61,17 @@ export function computeCrop(W: number, H: number, region: Box): CropPlan {
     h = Math.min(capH, h + STEP);
   }
   const center = { cx: region.x + region.w / 2, cy: region.y + region.h / 2 };
-  const [sendW, sendH] = sent(w, h);
+  let [sendW, sendH] = sent(w, h);
+  // Imagem baixa demais para crescer o recorte (ex.: tapete largo em 3840x2128): estica o lado menor
+  // do tamanho enviado até a área mínima (distorção de poucos %), em vez de o modelo recusar o tamanho.
+  let stretched = false;
+  if (sendW * sendH < MIN_AREA) {
+    const need = Math.min(CROP_EDGE, ceil16(MIN_AREA / sendW));
+    if (need > sendH && sendW * need >= MIN_AREA) {
+      sendH = need;
+      stretched = true;
+    }
+  }
   return {
     box: place(center, w, h, W, H, region),
     sendW,
@@ -68,5 +80,6 @@ export function computeCrop(W: number, H: number, region: Box): CropPlan {
     grown: w > startW || h > startH,
     downscaled: scale < 1,
     belowMinArea: sendW * sendH < MIN_AREA,
+    stretched,
   };
 }

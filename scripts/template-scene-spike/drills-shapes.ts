@@ -95,6 +95,16 @@ async function cropCases(d: Drill): Promise<void> {
   );
   const big = await runCase(d, dir, 'cabecalho-C2', 3520, 2336, 'header');
   d.check('região grande: downscaled=true', big.plan.downscaled);
+  const rug = await runCase(d, dir, 'tapete-C5', 3840, 2128, {
+    x: 0.06,
+    y: 0.715,
+    w: 0.91,
+    h: 0.16,
+  });
+  d.check(
+    'imagem baixa: tamanho enviado esticado até 655.360 px',
+    rug.plan.stretched && rug.plan.sendW * rug.plan.sendH >= MIN_AREA && !rug.plan.belowMinArea,
+  );
   const normal = await runCase(d, dir, 'normal', 1920, 3840, { x: 0.3, y: 0.3, w: 0.4, h: 0.2 });
   d.check('região média: sem crescer nem reduzir', !normal.plan.grown && !normal.plan.downscaled);
   const corner = await runCase(d, dir, 'canto', 1920, 3840, { x: 0, y: 0, w: 0.02, h: 0.01 });

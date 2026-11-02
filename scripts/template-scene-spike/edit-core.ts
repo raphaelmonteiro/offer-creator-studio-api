@@ -108,6 +108,7 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
           grown: false,
           downscaled: false,
           belowMinArea: false,
+          stretched: false,
         }
       : computeCrop(scene.width, scene.height, bboxOf(a.authorized)!);
     const { box } = plan;
