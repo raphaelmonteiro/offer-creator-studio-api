@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import * as sharp from 'sharp';
 import { OPENAI_NO_SDK_RETRY, withOpenAiRetry } from '../../src/shared/providers/openai-errors';
 import type { UsageRaw } from './types';
@@ -22,6 +22,8 @@ export interface EditParams {
   reference?: Buffer;
   mask?: Buffer;
   markup?: Buffer;
+  /** `json` (padrão) usa `client.post`; `multipart` usa o `images.edit` do SDK com arquivos (sem `markup`). */
+  transport?: 'json' | 'multipart';
 }
 
 export interface VisionParams {
@@ -106,7 +108,28 @@ export class RealOpenAi implements SpikeOpenAi {
 
   edit(p: EditParams): Promise<ImageResponse> {
     if (p.mask && p.markup) throw new Error('mask e markup não podem ir juntos');
+    if (p.transport === 'multipart' && p.markup) throw new Error('markup só vai em JSON');
     return withOpenAiRetry(async () => {
+      if (p.transport === 'multipart') {
+        const body: Record<string, unknown> = {
+          model: p.model,
+          image: await toFile(p.image, 'image.png', { type: 'image/png' }),
+          prompt: p.prompt,
+          size: p.size,
+          quality: p.quality,
+          output_format: 'png',
+          background: 'opaque',
+          n: 1,
+        };
+        if (p.mask) body.mask = await toFile(p.mask, 'mask.png', { type: 'image/png' });
+        const { data, response } = await this.client.images
+          .edit(untypedBody(body), OPENAI_NO_SDK_RETRY)
+          .withResponse();
+        return toImageResponse(
+          data as unknown as RawImageBody,
+          response.headers.get('x-request-id'),
+        );
+      }
       const images = [{ image_url: dataUrl(p.image) }];
       if (p.reference) images.push({ image_url: dataUrl(p.reference) });
       const body: Record<string, unknown> = {

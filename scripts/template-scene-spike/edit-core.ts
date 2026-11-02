@@ -30,6 +30,16 @@ export interface EditStepArgs {
   dir: string;
   feather?: number;
   reference?: Buffer;
+  /** Comparação de mecanismos (task extra): imagem inteira, polaridade da máscara, transporte e sem máscara. */
+  variant?: {
+    whole?: boolean;
+    maskEditAlpha?: number;
+    maskRgbFromImage?: boolean;
+    transport?: 'json' | 'multipart';
+    noMask?: boolean;
+    /** false = a chamada não alimenta os contadores de recusa (P3). */
+    track?: boolean;
+  };
 }
 
 export interface EditOutcome {
@@ -48,6 +58,11 @@ export interface EditOutcome {
   requestId: string | null;
   latencyMs: Record<string, number>;
   files: { before: string; raw: string; final: string; mask: string };
+  /** Para as métricas de preto da comparação. */
+  beforeSent: Img;
+  rawSent: Img;
+  sentAuth: Raster;
+  finalDefault: Img;
 }
 
 async function timed<T>(
@@ -78,7 +93,17 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
   const { scene } = a;
   const feather = a.feather ?? DEFAULT_FEATHER;
   const prep = await timed(latencyMs, 'crop', async () => {
-    const plan = computeCrop(scene.width, scene.height, bboxOf(a.authorized)!);
+    const plan: CropPlan = a.variant?.whole
+      ? {
+          box: { x: 0, y: 0, w: scene.width, h: scene.height },
+          sendW: scene.width,
+          sendH: scene.height,
+          scale: 1,
+          grown: false,
+          downscaled: false,
+          belowMinArea: false,
+        }
+      : computeCrop(scene.width, scene.height, bboxOf(a.authorized)!);
     const { box } = plan;
     const before = cropImg(scene, box.x, box.y, box.w, box.h);
     const sent = await resizeImg(before, plan.sendW, plan.sendH);
@@ -87,8 +112,14 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
   const size = { w: prep.plan.sendW, h: prep.plan.sendH };
   const sShape = resizeRaster(cropRaster(a.shape, prep.box), size.w, size.h);
   const sAuth = resizeRaster(cropRaster(a.authorized, prep.box), size.w, size.h);
+  const v = a.variant ?? {};
   const maskPng = await timed(latencyMs, 'mask', () =>
-    a.arm === 'mask' ? renderEditMask(sAuth) : renderMarkup(sShape),
+    a.arm === 'mask'
+      ? renderEditMask(sAuth, undefined, {
+          editAlpha: v.maskEditAlpha,
+          rgbFrom: v.maskRgbFromImage ? prep.sent : undefined,
+        })
+      : renderMarkup(sShape),
   );
   const imagePng = await imgToPng(prep.sent);
   const call = await timed(latencyMs, 'provider', () =>
@@ -96,13 +127,14 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
       caseId: a.caseId,
       block: a.block,
       step: a.step,
-      arm: a.arm,
+      arm: v.track === false ? undefined : a.arm,
       params: {
+        transport: v.transport,
         prompt: a.prompt,
         size: `${size.w}x${size.h}`,
         image: imagePng,
         reference: a.reference,
-        ...(a.arm === 'mask' ? { mask: maskPng } : { markup: maskPng }),
+        ...(v.noMask ? {} : a.arm === 'mask' ? { mask: maskPng } : { markup: maskPng }),
       },
     }),
   );
@@ -131,6 +163,10 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
   const { outsideHistogram, ...diff } = m.d;
   return {
     final: rec.out.final,
+    beforeSent: prep.sent,
+    rawSent,
+    sentAuth: sAuth,
+    finalDefault: rec.out.final,
     plan: prep.plan,
     metrics: { ...diff, maskAreaRatio: shapeAreaRatio(a.shape), seamSsim: rec.out.seamSsim },
     outsideHistogram,

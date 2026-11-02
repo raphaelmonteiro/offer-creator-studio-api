@@ -3,6 +3,8 @@
  * PATH="$HOME/.nvm/versions/node/v22.11.0/bin:$PATH" node -r ts-node/register -r tsconfig-paths/register \
  *   scripts/template-scene-spike.ts <comando> [--confirm-spend] [--only <id>] [--block A|B|C|E]
  */
+import * as fs from 'fs';
+import * as path from 'path';
 import { StopError } from './template-scene-spike/budget';
 import { Drill } from './template-scene-spike/drill-util';
 import { runBudgetDrills } from './template-scene-spike/drills-budget';
@@ -14,6 +16,7 @@ import { runMetricDrills } from './template-scene-spike/drills-metrics';
 import { runReportDrills } from './template-scene-spike/drills-report';
 import { runShapeDrills } from './template-scene-spike/drills-shapes';
 import { loadConfig } from './template-scene-spike/config';
+import { runCompare } from './template-scene-spike/compare';
 import { editCommand } from './template-scene-spike/edit-command';
 import { runGenerate } from './template-scene-spike/generate';
 import { writeFixtures } from './template-scene-spike/fixtures';
@@ -99,6 +102,12 @@ async function main(): Promise<void> {
       process.stdout.write(`Fixtures: ${await writeFixtures(dir, loadCases())}\n`);
       return;
     }
+    case 'compare':
+      return withSession(cliOptions(args), async (svc, cases) => {
+        if (svc.session.dryRun && !fs.existsSync(path.join(svc.session.dir, 'scenes')))
+          await runGenerate(svc, cases);
+        await runCompare(svc, cases, args.values.only);
+      });
     case 'selftest':
       return selftest(args.values.topic);
     default:

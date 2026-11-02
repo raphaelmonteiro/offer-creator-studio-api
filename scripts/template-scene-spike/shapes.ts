@@ -1,5 +1,6 @@
 import * as sharp from 'sharp';
 import type { FormatSpec } from './formats';
+import type { Img } from './image';
 import { areaOf, dilate, emptyRaster, erode } from './morph';
 import type { Box, Raster } from './morph';
 import type { MaskShape, Pt, Rect, RegionSpec, ZoneName } from './types';
@@ -86,10 +87,16 @@ export const MASK_EDIT_ALPHA = 255;
 export async function renderEditMask(
   authorized: Raster,
   size?: { w: number; h: number },
+  opts: { editAlpha?: number; rgbFrom?: Img } = {},
 ): Promise<Buffer> {
+  const editAlpha = opts.editAlpha ?? MASK_EDIT_ALPHA;
   const rgba = Buffer.alloc(authorized.data.length * 4, 0);
-  for (let i = 0; i < authorized.data.length; i += 1)
-    rgba[i * 4 + 3] = authorized.data[i] ? MASK_EDIT_ALPHA : 255 - MASK_EDIT_ALPHA;
+  for (let i = 0; i < authorized.data.length; i += 1) {
+    rgba[i * 4 + 3] = authorized.data[i] ? editAlpha : 255 - editAlpha;
+    if (opts.rgbFrom) {
+      for (let c = 0; c < 3; c += 1) rgba[i * 4 + c] = opts.rgbFrom.data[i * 3 + c];
+    }
+  }
   return toPng(rgba, authorized, size, 'nearest');
 }
 
