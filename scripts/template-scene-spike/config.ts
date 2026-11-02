@@ -37,7 +37,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SpikeConfig {
     maxCallUsd: num(env, 'SPIKE_MAX_CALL_USD', 3),
     imageModel: env.SPIKE_IMAGE_MODEL?.trim() || 'gpt-image-2.5-sunburst',
     quality: env.SPIKE_IMAGE_QUALITY?.trim() || 'high',
-    visionModel: env.SPIKE_VISION_MODEL?.trim() || 'gpt-4o',
+    visionModel: env.SPIKE_VISION_MODEL?.trim() || 'gpt-6-luna',
     openaiKey: env.OPENAI_API_KEY?.trim() || '',
     replicateToken: env.REPLICATE_API_TOKEN?.trim() || '',
   };

@@ -14,7 +14,7 @@ export interface FakeOptions {
   /** `identical` devolve o recorte enviado (caso "não fez nada"); `tweak` clareia o recorte todo. */
   behavior?: FakeBehavior;
   /** Erro simulado para a chamada de número `n` (1 = primeira); null = segue normal. */
-  inject?: (n: number, op: 'generate' | 'edit' | 'vision') => Error | null;
+  inject?: (n: number, op: 'generate' | 'edit' | 'vision', arm?: 'mask' | 'markup') => Error | null;
   /** Remove o `usage` da resposta (cenário "resposta sem usage"). */
   omitUsage?: boolean;
 }
@@ -63,9 +63,9 @@ export class FakeOpenAi implements SpikeOpenAi {
 
   constructor(private readonly options: FakeOptions = {}) {}
 
-  private next(op: 'generate' | 'edit' | 'vision'): void {
+  private next(op: 'generate' | 'edit' | 'vision', arm?: 'mask' | 'markup'): void {
     this.calls += 1;
-    const error = this.options.inject?.(this.calls, op);
+    const error = this.options.inject?.(this.calls, op, arm);
     if (error) throw error;
   }
 
@@ -81,7 +81,7 @@ export class FakeOpenAi implements SpikeOpenAi {
   }
 
   async edit(p: EditParams): Promise<ImageResponse> {
-    this.next('edit');
+    this.next('edit', p.markup ? 'markup' : 'mask');
     const { w, h } = parseSize(p.size);
     const inputs = 1 + (p.reference ? 1 : 0) + (p.mask || p.markup ? 1 : 0);
     const png =

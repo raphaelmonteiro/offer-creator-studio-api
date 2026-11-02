@@ -6,6 +6,8 @@ interface StateFile {
   cases: Record<string, CaseState>;
 }
 
+const fileSafe = (id: string): string => id.replace(/[^A-Za-z0-9_.-]/g, '_');
+
 /** Estado por caso (`state.json`) e resultados por caso (`results/<id>.json`). */
 export class StateStore {
   private data: StateFile = { cases: {} };
@@ -41,14 +43,14 @@ export class StateStore {
   writeResult(id: string, result: unknown): void {
     fs.mkdirSync(this.resultsDir, { recursive: true });
     fs.writeFileSync(
-      path.join(this.resultsDir, `${id}.json`),
+      path.join(this.resultsDir, `${fileSafe(id)}.json`),
       JSON.stringify(result, null, 2),
       'utf8',
     );
   }
 
   readResult<T>(id: string): T | null {
-    const file = path.join(this.resultsDir, `${id}.json`);
+    const file = path.join(this.resultsDir, `${fileSafe(id)}.json`);
     return fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as T) : null;
   }
 

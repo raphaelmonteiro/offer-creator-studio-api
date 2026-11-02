@@ -44,6 +44,21 @@
       ],
       "consultedAt": "2026-11-02",
       "notes": "A página diz: custa aproximadamente US$ 0,00051 por execução, cerca de 1960 execuções por US$ 1."
+    },
+    "gpt-6-luna": {
+      "tier": "standard",
+      "perMillionTokens": {
+        "textInput": 0.1,
+        "textInputCached": 0.01,
+        "textOutput": 0.5
+      },
+      "formula": "costUsd = (usage.prompt_tokens * 0.10 + usage.completion_tokens * 0.50) / 1e6. Imagens de entrada entram em prompt_tokens (a página lista imagem só como entrada); tokens de raciocínio contam em completion_tokens. Cache não se aplica.",
+      "sources": [
+        "https://developers.openai.com/api/docs/models/gpt-6-luna",
+        "https://developers.openai.com/api/docs/deprecations"
+      ],
+      "consultedAt": "2026-11-02",
+      "notes": "Substituto recomendado do gpt-4o (desligamento em 2027-01-14). Página: Input US$ 0,10, Cached input US$ 0,01, Output US$ 0,50 por 1 M de tokens; entrada texto e imagem, saída texto; v1/chat/completions."
     }
   }
 }

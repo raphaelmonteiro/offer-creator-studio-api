@@ -138,6 +138,7 @@ export class RealOpenAi implements SpikeOpenAi {
         model: p.model,
         messages: [{ role: 'user', content }],
         response_format: { type: 'json_object' },
+        ...(p.model.startsWith('gpt-6') ? { reasoning_effort: 'low' } : {}),
       });
       const { data, response } = await this.client.chat.completions
         .create(body, OPENAI_NO_SDK_RETRY)

@@ -2,7 +2,7 @@ import * as sharp from 'sharp';
 import { cropImg, pasteImg } from './image';
 import type { Img } from './image';
 import { seamSsim } from './metrics';
-import { cropRaster, erode } from './morph';
+import { cropRaster, emptyRaster, erode } from './morph';
 import type { Box, Raster } from './morph';
 
 export class RecomposeMismatchError extends Error {
@@ -22,7 +22,21 @@ export async function featherAlpha(
   box: Box,
   feather: number,
 ): Promise<Uint8Array> {
-  const eroded = cropRaster(erode(authorizedScene, Math.round(feather / 2)), box);
+  // Erosão só na janela do recorte, com a borda da imagem contando como preenchida (equivale à cena inteira).
+  const r = Math.round(feather / 2);
+  const padded = emptyRaster(box.w + 2 * r, box.h + 2 * r);
+  for (let y = 0; y < padded.height; y += 1) {
+    const sy = box.y - r + y;
+    for (let x = 0; x < padded.width; x += 1) {
+      const sx = box.x - r + x;
+      const outside =
+        sx < 0 || sy < 0 || sx >= authorizedScene.width || sy >= authorizedScene.height;
+      padded.data[y * padded.width + x] = outside
+        ? 255
+        : authorizedScene.data[sy * authorizedScene.width + sx];
+    }
+  }
+  const eroded = cropRaster(erode(padded, r), { x: r, y: r, w: box.w, h: box.h });
   const sigma = Math.max(0.3, feather / 4);
   const blurred = await sharp(Buffer.from(eroded.data), {
     raw: { width: box.w, height: box.h, channels: 1 },
