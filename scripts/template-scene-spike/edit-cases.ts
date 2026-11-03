@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { runEditStep } from './edit-core';
+import type { EditStepArgs } from './edit-core';
 import { insetOnScene } from './edit-core';
 import { specOf } from './edit-jobs';
 import type { EditJob } from './edit-jobs';
@@ -88,6 +89,7 @@ export async function runEditJob(
   svc: Services,
   scene: SceneCtx,
   job: EditJob,
+  offline?: EditStepArgs['offline'],
 ): Promise<EditResult> {
   const { img } = scene;
   const e = job.edit;
@@ -106,6 +108,7 @@ export async function runEditJob(
     prompt: editPrompt(e.prompt, job.arm),
     arm: job.arm,
     dir,
+    offline,
   });
   const neighbor = job.block === 'C' ? await leakage(job, scene, shape, out) : undefined;
   return {

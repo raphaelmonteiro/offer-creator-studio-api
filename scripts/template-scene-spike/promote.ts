@@ -3,7 +3,7 @@ import * as path from 'path';
 import type { Services } from './calls';
 import { replicatePrice } from './config';
 import { runEditStep } from './edit-core';
-import type { EditOutcome } from './edit-core';
+import type { EditOutcome, EditStepArgs } from './edit-core';
 import { cropImg, imgToPng } from './image';
 import type { Img } from './image';
 import { dilate, subtract } from './morph';
@@ -29,6 +29,7 @@ export interface StepSummary {
   grown: boolean;
   downscaled: boolean;
   stretchFactor: number;
+  insetScenePx: number;
   sizeMismatch: boolean;
   files: Record<string, string>;
 }
@@ -73,6 +74,7 @@ const summarize = (o: EditOutcome): StepSummary => ({
   grown: o.plan.grown,
   downscaled: o.plan.downscaled,
   stretchFactor: o.plan.stretchFactor,
+  insetScenePx: o.insetScenePx,
   sizeMismatch: o.sizeMismatch,
   files: o.files,
 });
@@ -223,6 +225,7 @@ export async function runFallback(
   svc: Services,
   scene: SceneCtx,
   promo: PromotionCase,
+  offline?: { source: EditStepArgs['offline']; destination: EditStepArgs['offline'] },
 ): Promise<FallbackResult> {
   const { img } = scene;
   const key = `${promo.id}:fallback`;
@@ -245,6 +248,7 @@ export async function runFallback(
     prompt: removePrompt(promo.target),
     arm: 'mask',
     dir: path.join(dir, 'source'),
+    offline: offline?.source,
   });
   const second = await runEditStep({
     svc,
@@ -258,6 +262,7 @@ export async function runFallback(
     arm: 'mask',
     dir: path.join(dir, 'destination'),
     reference,
+    offline: offline?.destination,
   });
   const view = expand(
     rectBox(dst, img.width, img.height),

@@ -8,7 +8,9 @@ import { FakeOpenAi, providerError } from './fake-openai';
 import type { FakeOptions } from './fake-openai';
 import { runGenerate } from './generate';
 import { loadCases } from './plan';
+import { runRecompose } from './offline';
 import { FakeRemover } from './remover';
+import { StateStore } from './state';
 import type { Remover } from './remover';
 import { SceneStore } from './scene-store';
 import { openSession } from './session';
@@ -124,6 +126,24 @@ async function blocksAandC(d: Drill, base: CasesFile): Promise<void> {
     'ledger só com linhas dry_run',
     ledger.entries().every((e) => e.status === 'dry_run') && paid.length === 9,
   );
+  const spentBefore = ledger.entries().reduce((s, e) => s + e.costUsd, 0);
+  const lines = ledger.entries().length;
+  r.svc.session.lock.release();
+  const n = await runRecompose(undefined, r.svc.session.dir, cases);
+  const again = new StateStore(r.svc.session.dir).readResult<EditResult>('A08:markup')!;
+  d.check(
+    'recompose offline: refaz os resultados sem tocar no ledger (mesmo gasto)',
+    n >= 7 &&
+      ledger.entries().length === lines &&
+      ledger.entries().reduce((s, e) => s + e.costUsd, 0) === spentBefore,
+  );
+  d.check(
+    'recompose offline: grava insetScenePx proporcional à escala e mantém custo e request id',
+    again.insetScenePx > 40 &&
+      again.costUsd === state.readResult<EditResult>('A08:markup')!.costUsd &&
+      !!again.requestId,
+  );
+  r.svc.session.lock.acquire();
   const before = ledger.entries().length;
   await r.run({});
   d.check(

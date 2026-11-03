@@ -41,6 +41,8 @@ export interface EditStepArgs {
   dir: string;
   feather?: number;
   reference?: Buffer;
+  /** Recomposição offline: usa a saída bruta salva e não chama o modelo (regra do spike, PV-21). */
+  offline?: { png: Buffer; costUsd: number; requestId: string | null; providerMs: number };
   /** Comparação de mecanismos (task extra): imagem inteira, polaridade da máscara, transporte e sem máscara. */
   variant?: {
     whole?: boolean;
@@ -67,6 +69,7 @@ export interface EditOutcome {
   featherSweep: Array<{ feather: number; seamSsim: number | null }>;
   tauSweep: ReturnType<typeof tauSweep>;
   sizeMismatch: boolean;
+  insetScenePx: number;
   costUsd: number;
   requestId: string | null;
   latencyMs: Record<string, number>;
@@ -137,23 +140,26 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
       : renderMarkup(sShape),
   );
   const imagePng = await imgToPng(prep.sent);
-  const call = await timed(latencyMs, 'provider', () =>
-    paidEdit(a.svc, {
-      caseId: a.caseId,
-      block: a.block,
-      step: a.step,
-      arm: v.track === false ? undefined : a.arm,
-      params: {
-        transport: v.transport,
-        prompt: a.prompt,
-        size: `${size.w}x${size.h}`,
-        image: imagePng,
-        reference: a.reference,
-        ...(v.noMask ? {} : a.arm === 'mask' ? { mask: maskPng } : { markup: maskPng }),
-      },
-    }),
-  );
-  write(path.join(a.dir, 'api.png'), call.value.png); // resposta como veio, com o alfa original
+  const call = a.offline
+    ? { value: { png: a.offline.png }, costUsd: a.offline.costUsd, requestId: a.offline.requestId }
+    : await timed(latencyMs, 'provider', () =>
+        paidEdit(a.svc, {
+          caseId: a.caseId,
+          block: a.block,
+          step: a.step,
+          arm: v.track === false ? undefined : a.arm,
+          params: {
+            transport: v.transport,
+            prompt: a.prompt,
+            size: `${size.w}x${size.h}`,
+            image: imagePng,
+            reference: a.reference,
+            ...(v.noMask ? {} : a.arm === 'mask' ? { mask: maskPng } : { markup: maskPng }),
+          },
+        }),
+      );
+  if (!a.offline) write(path.join(a.dir, 'api.png'), call.value.png); // resposta como veio, com o alfa original
+  if (a.offline) latencyMs.provider = a.offline.providerMs;
   const decoded = await loadRgb(call.value.png);
   const sizeMismatch = decoded.width !== size.w || decoded.height !== size.h;
   const rawSent = sizeMismatch ? await resizeImg(decoded, size.w, size.h) : decoded;
@@ -201,6 +207,7 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
     featherSweep: m.sweepF,
     tauSweep: m.sweepT,
     sizeMismatch,
+    insetScenePx: insetOnScene(prep.plan.scale),
     costUsd: call.costUsd,
     requestId: call.requestId,
     latencyMs,

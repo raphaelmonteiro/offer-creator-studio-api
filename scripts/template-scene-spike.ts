@@ -17,6 +17,7 @@ import { runReportDrills } from './template-scene-spike/drills-report';
 import { runShapeDrills } from './template-scene-spike/drills-shapes';
 import { loadConfig } from './template-scene-spike/config';
 import { runCompare } from './template-scene-spike/compare';
+import { runRecompose } from './template-scene-spike/offline';
 import { editCommand } from './template-scene-spike/edit-command';
 import { runGenerate } from './template-scene-spike/generate';
 import { writeFixtures } from './template-scene-spike/fixtures';
@@ -112,6 +113,9 @@ async function main(): Promise<void> {
           await runGenerate(svc, cases);
         await runCompare(svc, cases, args.values.only);
       });
+    case 'recompose':
+      await runRecompose(args.values.only);
+      return;
     case 'selftest':
       return selftest(args.values.topic);
     default:
