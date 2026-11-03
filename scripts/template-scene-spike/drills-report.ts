@@ -9,7 +9,7 @@ import { ensureLabels, readLabels } from './labels';
 import type { Labels } from './labels';
 import { loadConfig, loadPrices } from './config';
 import { loadCases } from './plan';
-import { assertNoKeys, buildReport, writeReport } from './report';
+import { assertNoKeys, buildReport, seamFieldFor, writeReport } from './report';
 import { collect } from './collect';
 
 const ids = (p: string, n: number): string[] =>
@@ -75,6 +75,23 @@ function decisionRules(d: Drill): void {
   d.check(
     'A: markup sem rótulos = pendente com a lista',
     pend.verdict === 'pendente' && pend.pending.length === 20,
+  );
+  const seam = { ...aLabels('mask', 20, 20) };
+  A_IDS.forEach((id) => (seam[`${id}:mask`] = { ...seam[`${id}:mask`], costura_f48: 'invisivel' }));
+  d.check(
+    'A: costura lê o campo do feather vencedor (48 px)',
+    decideA(seam, A_IDS, ['mask'], seamFieldFor('48 px')).verdict === 'aprovado',
+  );
+  d.check(
+    'A: vencedor 24 lê costura e 48 lê costura_f48',
+    seamFieldFor('24 px') === 'costura' && seamFieldFor('48 px') === 'costura_f48',
+  );
+  const w32 = decideA(aLabels('mask', 20, 20), A_IDS, ['mask'], seamFieldFor('32 px'));
+  d.check(
+    'A: vencedor 32 sem rótulo de costura = pendente',
+    seamFieldFor('32 px') === null &&
+      w32.verdict === 'pendente' &&
+      /feather vencedor/.test(w32.text),
   );
   const b2 = decideB(
     bLabels(

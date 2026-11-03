@@ -49,8 +49,16 @@ export function decideA(
   labels: Labels,
   ids: string[],
   mechanisms: string[],
-  seamField = 'costura',
+  seamField: string | null = 'costura',
 ): BlockDecision {
+  if (seamField === null) {
+    return {
+      verdict: 'pendente',
+      text: 'pendente: falta o rótulo de costura no feather vencedor da varredura',
+      pending: ['costura no feather vencedor (só há rótulos de 24 e 48 px)'],
+      detail: 'o feather vencedor não é 24 nem 48 px',
+    };
+  }
   const counts = mechanisms.map((m) => countMech(labels, ids, m, seamField));
   const detail = counts
     .map(

@@ -266,8 +266,16 @@ const STAGE2 = [
   "`markup` **não entra**: a API recusa o parâmetro (`400 Unknown parameter: 'markup'`, 8 de 8 tentativas) apesar de documentá-lo (PV-19); revisitar só se a OpenAI o habilitar. O transporte é JSON (`client.post`), porque o multipart com alfa 0 deixou a região preta em 2 de 4 casos da comparação.",
   'Devolver o `usage` e o `x-request-id` de `generateImage` e `editImage` (hoje descartados) para gravar o custo real por chamada.',
   'Tamanhos customizados `WxH` (múltiplos de 16, 1:3 a 3:1, 655.360 a 8.294.400 px) e `quality` `xhigh|max` no modelo 2.5; o tamanho enviado pode precisar de esticamento do lado menor até 1,10 para atingir a área mínima (PV-20).',
-  'Recorte com área mínima de 655.360 px e redução acima de 1024x1024, recomposição com feather 24 sobre A recuada (40 px na saída do modelo, convertidos para a cena, PV-17) e conferência byte a byte fora da região (funções puras de `scripts/template-scene-spike/`).',
+  'Recorte com área mínima de 655.360 px e redução acima de 1024x1024, recomposição com o feather vencedor (48 px) sobre A recuada (40 px na saída do modelo, convertidos para a cena, PV-17) e conferência byte a byte fora da região (funções puras de `scripts/template-scene-spike/`).',
 ];
+
+/** Campo de costura rotulado no feather vencedor; null se esse feather não tem rótulo (só 24 e 48 px têm). */
+export function seamFieldFor(recommended: string): string | null {
+  const winner = Number.parseInt(recommended, 10);
+  if (winner === 24) return 'costura';
+  if (winner === 48) return 'costura_f48';
+  return null;
+}
 
 export function buildReport(
   c: Collected,
@@ -281,7 +289,7 @@ export function buildReport(
   const promoRefs = cases.promotions.map((p) => ({ id: p.id, atmospheric: p.atmospheric }));
   const feather = recommendFeather(c.edits);
   // A1 pede costura invisível "com o feather escolhido": o rótulo vale no feather vencedor da varredura (PV-22).
-  const seamField = feather.recommended.startsWith('48') ? 'costura_f48' : 'costura';
+  const seamField = seamFieldFor(feather.recommended);
   const decA = decideA(labels, aIds, c.mechanisms, seamField);
   const decB = decideB(labels, promoRefs);
   const decC = decideC(labels, cIds);
