@@ -167,7 +167,7 @@ export function decideC(labels: Labels, ids: string[]): BlockDecision {
   if (ok.length >= 2)
     return {
       verdict: 'aprovado',
-      text: 'aprovado: pincel ou laço confirmado para itens sobrepostos (PV-14)',
+      text: 'aprovado: pincel ou laço confirmado para itens sobrepostos (PV-14 de docs/designs/template-pro.md)',
       pending: [],
       detail,
     };

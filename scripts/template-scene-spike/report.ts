@@ -70,6 +70,7 @@ function editRows(dir: string, edits: EditResult[], labels: Labels): string[][] 
       fmt(e.metrics.insideMaskDiffRatio),
       fmt(e.metrics.outsideMaskDiffRatio),
       fmt(e.metrics.marginDiffRatio),
+      `${e.insetScenePx ?? '—'} px`,
       fmt(e.metrics.maskAreaRatio, 4),
       fmt(e.metrics.seamSsim),
       flags,
@@ -82,7 +83,7 @@ function editRows(dir: string, edits: EditResult[], labels: Labels): string[][] 
 }
 
 const METRIC_NOTE =
-  '> **Mudança de métrica (decisão do dono, 2026-11-02):** o mecanismo do spike é o JSON com `mask` de alfa 255 = editar, e nele a saída bruta volta **preta** fora da região. Por isso `outsideMaskDiffRatio` da saída bruta (coluna "outside") vale cerca de 1 e **não mede obediência**; ela fica só como informação. A obediência passa a ser medida na imagem **recomposta**: `marginDiffRatio` é a fração de pixels alterados (τ = 16) na faixa de margem, isto é, dentro da região de recomposição (A recuada 40 px, com S inteira) e fora de S. Fora da região de recomposição o final é idêntico ao original, conferido byte a byte.';
+  '> **Mudança de métrica (decisão do dono, 2026-11-02):** o mecanismo do spike é o JSON com `mask` de alfa 255 = editar, e nele a saída bruta volta **preta** fora da região. Por isso `outsideMaskDiffRatio` da saída bruta (coluna "outside") vale cerca de 1 e **não mede obediência**; ela fica só como informação. A obediência passa a ser medida na imagem **recomposta**: `marginDiffRatio` é a fração de pixels alterados (τ = 16) na faixa de margem, isto é, dentro da região de recomposição (A recuada, com S inteira; o recuo é de 40 px medidos na saída do modelo e convertidos para a cena pela escala do recorte, ver a coluna "recuo (cena)" de cada caso) e fora de S. Fora da região de recomposição o final é idêntico ao original, conferido byte a byte.';
 
 function obeyLine(c: Collected): string {
   const a = c.edits.filter((e) => e.block === 'A' && e.variant === 'base');
@@ -110,6 +111,7 @@ const EDIT_HEAD = [
   'inside',
   'outside (bruta, informativa)',
   'margem (final)',
+  'recuo (cena)',
   'área',
   'seamSsim',
   'flags',
@@ -214,6 +216,7 @@ function promoBlock(dir: string, c: Collected, labels: Labels): string {
     f.promoId,
     f.target,
     `US$ ${fmt(f.costUsd, 4)}`,
+    `${f.source.insetScenePx ?? '—'} / ${f.destination.insetScenePx ?? '—'} px`,
     labels[`${f.promoId}:fallback`]?.global ?? 'pendente',
     ['before', 'raw', 'final'].map((k) => `![](${rel(dir, f.files[k])})`).join(' '),
   ]);
@@ -236,7 +239,17 @@ function promoBlock(dir: string, c: Collected, labels: Labels): string {
       rows,
     ) +
     `\nFallback (repintura de origem e destino):\n\n` +
-    table(['caso', 'item', 'custo', 'rótulo global', 'antes, bruta, final'], fb) +
+    table(
+      [
+        'caso',
+        'item',
+        'custo',
+        'recuo origem / destino (cena)',
+        'rótulo global',
+        'antes, bruta, final',
+      ],
+      fb,
+    ) +
     (skipped.length ? `\nNão concluídos: ${skipped.join('; ')}\n` : '')
   );
 }
@@ -249,11 +262,11 @@ function recTable(recs: Recommendation[]): string {
 }
 
 const STAGE2 = [
-  'Aceitar `mask` (alfa 0 = editar, mesmo tamanho e formato do recorte) e `markup` (PNG transparente do tamanho da primeira imagem) em `buildEditRequest`, hoje fechado em `model`, `image`, `prompt`, `size`, `quality`, `n`, `background`, `output_format`, `output_compression` e `input_fidelity`.',
-  'Enviar a edição em JSON (`images: [{image_url}]`, `mask`/`markup` como `{image_url}`) ou confirmar o multipart para `markup`; o SDK 6.33.0 só tipa multipart.',
+  'Aceitar `mask` por JSON no mecanismo M3 (decisão do dono, 2026-11-02): imagem e máscara em data URL, **alfa 255 = editar** e alfa 0 = preservar, mesmo tamanho e formato do recorte, em `buildEditRequest`, hoje fechado em `model`, `image`, `prompt`, `size`, `quality`, `n`, `background`, `output_format`, `output_compression` e `input_fidelity`. O modelo devolve preto fora da região, então só a região de recomposição (A recuada) entra no final.',
+  "`markup` **não entra**: a API recusa o parâmetro (`400 Unknown parameter: 'markup'`, 8 de 8 tentativas) apesar de documentá-lo (PV-19); revisitar só se a OpenAI o habilitar. O transporte é JSON (`client.post`), porque o multipart com alfa 0 deixou a região preta em 2 de 4 casos da comparação.",
   'Devolver o `usage` e o `x-request-id` de `generateImage` e `editImage` (hoje descartados) para gravar o custo real por chamada.',
-  'Tamanhos customizados `WxH` (múltiplos de 16, 1:3 a 3:1, 655.360 a 8.294.400 px) e `quality` `xhigh|max` no modelo 2.5.',
-  'Recorte com área mínima de 655.360 px e redução acima de 1024x1024, recomposição com feather e conferência byte a byte fora da região autorizada (funções puras de `scripts/template-scene-spike/`).',
+  'Tamanhos customizados `WxH` (múltiplos de 16, 1:3 a 3:1, 655.360 a 8.294.400 px) e `quality` `xhigh|max` no modelo 2.5; o tamanho enviado pode precisar de esticamento do lado menor até 1,10 para atingir a área mínima (PV-20).',
+  'Recorte com área mínima de 655.360 px e redução acima de 1024x1024, recomposição com feather 24 sobre A recuada (40 px na saída do modelo, convertidos para a cena, PV-17) e conferência byte a byte fora da região (funções puras de `scripts/template-scene-spike/`).',
 ];
 
 export function buildReport(
