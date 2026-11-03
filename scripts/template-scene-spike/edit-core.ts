@@ -11,7 +11,7 @@ import { diffMetrics, FEATHER_SWEEP, tauSweep } from './metrics';
 import { areaDiffRatio } from './metrics-extra';
 import type { DiffMetrics } from './metrics';
 import { areaOf, bboxOf, cropRaster, erode, resizeRaster, subtract, union } from './morph';
-import type { Raster } from './morph';
+import type { Box, Raster } from './morph';
 import { DEFAULT_FEATHER, featherSweep, recompose, verifyOutside } from './recompose';
 import { renderEditMask, renderMarkup, shapeAreaRatio } from './shapes';
 
@@ -73,12 +73,17 @@ export interface EditOutcome {
   costUsd: number;
   requestId: string | null;
   latencyMs: Record<string, number>;
-  files: { before: string; raw: string; final: string; mask: string };
+  files: { before: string; raw: string; final: string; mask: string; final48: string };
   /** Para as métricas de preto da comparação. */
   beforeSent: Img;
   rawSent: Img;
   sentAuth: Raster;
   finalDefault: Img;
+}
+
+async function final48Png(scene: Img, rawCrop: Img, box: Box, region: Raster): Promise<Buffer> {
+  const r = await recompose(scene, rawCrop, box, region, 48);
+  return imgToPng(cropImg(r.final, box.x, box.y, box.w, box.h));
 }
 
 async function timed<T>(
@@ -182,6 +187,11 @@ export async function runEditStep(a: EditStepArgs): Promise<EditOutcome> {
     raw: write(path.join(a.dir, 'raw.png'), await imgToPng(rawSent)),
     final: write(path.join(a.dir, 'final.png'), await imgToPng(finalCrop)),
     mask: write(path.join(a.dir, `${a.arm}.png`), maskPng),
+    // costura com feather 48, para o dono comparar com o 24 (varredura offline recomendou 48)
+    final48: write(
+      path.join(a.dir, 'final_f48.png'),
+      await final48Png(scene, rec.rawCrop, prep.box, region),
+    ),
   };
   const origCrop = cropImg(scene, prep.box.x, prep.box.y, prep.box.w, prep.box.h);
   const marginDiffRatio = areaDiffRatio(

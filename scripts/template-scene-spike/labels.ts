@@ -7,7 +7,8 @@ export type Labels = Record<string, LabelEntry>;
 
 export const LABEL_LEGEND = {
   edicao: 'atendeu | parcial | nao_fez_nada | errado',
-  costura: 'invisivel | visivel',
+  costura: 'invisivel | visivel (com o feather 24 do final)',
+  costura_f48: 'invisivel | visivel (com o feather 48, para comparar com o 24)',
   nuvem: '(bloco C) intacta | alterada',
   recorte: '(bloco B) limpo | borda_dura | vazio',
   buraco: '(bloco B) sem_fantasma | fantasma',
@@ -16,8 +17,8 @@ export const LABEL_LEGEND = {
     '(bloco B, promoção e fallback) aceitavel | sim | nao. Só `aceitavel` conta como aceito nos critérios',
 };
 
-const EMPTY_EDIT: LabelEntry = { edicao: null, costura: null };
-const EMPTY_OVERLAP: LabelEntry = { edicao: null, costura: null, nuvem: null };
+const EMPTY_EDIT: LabelEntry = { edicao: null, costura: null, costura_f48: null };
+const EMPTY_OVERLAP: LabelEntry = { edicao: null, costura: null, nuvem: null, costura_f48: null };
 const EMPTY_PROMO: LabelEntry = {
   recorte: null,
   buraco: null,

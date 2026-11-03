@@ -13,11 +13,13 @@ import { runPlanDrills } from './template-scene-spike/drills-plan';
 import { runEditDrills } from './template-scene-spike/drills-edit';
 import { runGenerateDrills } from './template-scene-spike/drills-generate';
 import { runMetricDrills } from './template-scene-spike/drills-metrics';
+import { runLabelDrills } from './template-scene-spike/drills-label';
 import { runReportDrills } from './template-scene-spike/drills-report';
 import { runShapeDrills } from './template-scene-spike/drills-shapes';
 import { loadConfig } from './template-scene-spike/config';
 import { runCompare } from './template-scene-spike/compare';
 import { runRecompose } from './template-scene-spike/offline';
+import { createLabelServer, listen } from './template-scene-spike/label-server';
 import { editCommand } from './template-scene-spike/edit-command';
 import { runGenerate } from './template-scene-spike/generate';
 import { writeFixtures } from './template-scene-spike/fixtures';
@@ -43,7 +45,8 @@ function parseArgs(argv: string[]): Args {
     const token = rest[i];
     if (!token.startsWith('--')) continue;
     const name = token.slice(2);
-    if (name === 'only' || name === 'block' || name === 'topic') values[name] = rest[(i += 1)];
+    if (name === 'only' || name === 'block' || name === 'topic' || name === 'port')
+      values[name] = rest[(i += 1)];
     else flags.add(name);
   }
   return { command, flags, values };
@@ -69,6 +72,7 @@ async function selftest(topic: string | undefined): Promise<void> {
   if (all || topic === 'generate') await runGenerateDrills(drill);
   if (all || topic === 'edit') await runEditDrills(drill);
   if (all || topic === 'report') await runReportDrills(drill);
+  if (all || topic === 'label') await runLabelDrills(drill);
   process.stdout.write(`\n${drill.total - drill.failures}/${drill.total} verificações ok\n`);
   if (drill.failures > 0) process.exitCode = 1;
 }
@@ -116,6 +120,15 @@ async function main(): Promise<void> {
     case 'recompose':
       await runRecompose(args.values.only);
       return;
+    case 'label': {
+      const dir = resolveOutDir(!args.flags.has('dry-run'));
+      const server = createLabelServer(dir, loadCases());
+      const port = await listen(server, Number(args.values.port ?? 3112));
+      process.stdout.write(
+        `Rotulador em http://127.0.0.1:${port} (Ctrl+C encerra). Grava em ${dir}/labels.json\n`,
+      );
+      return new Promise<void>(() => undefined);
+    }
     case 'selftest':
       return selftest(args.values.topic);
     default:
