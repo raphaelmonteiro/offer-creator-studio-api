@@ -46,3 +46,6 @@ pm2-*.log
 # docs gerados ficam fora; o padrão de código entra no repositório
 /docs/*
 !/docs/padroes.md
+
+# Saídas dos scripts de spike (imagens, ledger, relatórios)
+/scripts/out/

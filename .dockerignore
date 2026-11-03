@@ -19,3 +19,6 @@ uploads
 .env
 .env.*
 !.env.example
+
+# Saídas dos scripts de spike
+scripts/out

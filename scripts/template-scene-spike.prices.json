@@ -1,0 +1,64 @@
+{
+  "_comment": "Preços em USD. Toda entrada traz source e consultedAt; entrada sem fonte fica ausente e o script recusa rodar.",
+  "currency": "USD",
+  "entries": {
+    "gpt-image-2.5-sunburst": {
+      "tier": "standard",
+      "perMillionTokens": {
+        "imageInput": 8.0,
+        "imageInputCached": 2.0,
+        "imageOutput": 30.0,
+        "textInput": 5.0,
+        "textInputCached": 1.25
+      },
+      "textOutput": "não cobrado (o modelo gera imagens, não texto)",
+      "formula": "costUsd = (usage.input_tokens_details.image_tokens * 8 + usage.input_tokens_details.text_tokens * 5 + usage.output_tokens * 30) / 1e6. Cache de entrada não se aplica a /v1/images/edits nem a images.generate (só à ferramenta de imagem da Responses API), então os preços de cache não entram na fórmula. Os mesmos preços valem para todas as qualidades (low, medium, high, xhigh, max); a qualidade só muda a quantidade de tokens de saída, lida de usage.",
+      "sources": [
+        "https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst",
+        "https://developers.openai.com/api/docs/guides/image-generation",
+        "https://developers.openai.com/api/docs/pricing"
+      ],
+      "consultedAt": "2026-11-02",
+      "notes": "Tokens de saída por tamanho e qualidade não estão na página: a referência traz só uma calculadora interativa. O custo vem do usage da resposta, não de uma tabela. Batch (US$ 4 imagem entrada, US$ 15 saída, US$ 2,5 texto entrada) não é usado."
+    },
+    "gpt-4o": {
+      "tier": "standard",
+      "perMillionTokens": {
+        "textInput": 2.5,
+        "textInputCached": 1.25,
+        "textOutput": 10.0
+      },
+      "formula": "costUsd = (usage.prompt_tokens * 2.5 + usage.completion_tokens * 10) / 1e6. Imagens de entrada entram em prompt_tokens (a página lista imagem como entrada apenas, sem preço separado).",
+      "sources": [
+        "https://developers.openai.com/api/docs/models/gpt-4o"
+      ],
+      "consultedAt": "2026-11-02",
+      "notes": "A página do modelo marca o gpt-4o como Deprecated em 2026-11-02. O alias pode ser desligado; SPIKE_VISION_MODEL permite trocar, mas o preço de outro modelo precisa de entrada própria."
+    },
+    "replicate:851-labs/background-remover": {
+      "perRunUsd": 0.00051,
+      "costEstimated": true,
+      "formula": "costUsd = 0.00051 por execução (valor aproximado informado pela página; varia com a entrada). Marcado como estimated.",
+      "sources": [
+        "https://replicate.com/851-labs/background-remover"
+      ],
+      "consultedAt": "2026-11-02",
+      "notes": "A página diz: custa aproximadamente US$ 0,00051 por execução, cerca de 1960 execuções por US$ 1."
+    },
+    "gpt-6-luna": {
+      "tier": "standard",
+      "perMillionTokens": {
+        "textInput": 0.1,
+        "textInputCached": 0.01,
+        "textOutput": 0.5
+      },
+      "formula": "costUsd = (usage.prompt_tokens * 0.10 + usage.completion_tokens * 0.50) / 1e6. Imagens de entrada entram em prompt_tokens (a página lista imagem só como entrada); tokens de raciocínio contam em completion_tokens. Cache não se aplica.",
+      "sources": [
+        "https://developers.openai.com/api/docs/models/gpt-6-luna",
+        "https://developers.openai.com/api/docs/deprecations"
+      ],
+      "consultedAt": "2026-11-02",
+      "notes": "Substituto recomendado do gpt-4o (desligamento em 2027-01-14). Página: Input US$ 0,10, Cached input US$ 0,01, Output US$ 0,50 por 1 M de tokens; entrada texto e imagem, saída texto; v1/chat/completions."
+    }
+  }
+}
