@@ -279,7 +279,10 @@ export function buildReport(
   const aIds = cases.edits.filter((e) => e.block === 'A').map((e) => e.id);
   const cIds = cases.edits.filter((e) => e.block === 'C').map((e) => e.id);
   const promoRefs = cases.promotions.map((p) => ({ id: p.id, atmospheric: p.atmospheric }));
-  const decA = decideA(labels, aIds, c.mechanisms);
+  const feather = recommendFeather(c.edits);
+  // A1 pede costura invisível "com o feather escolhido": o rótulo vale no feather vencedor da varredura (PV-22).
+  const seamField = feather.recommended.startsWith('48') ? 'costura_f48' : 'costura';
+  const decA = decideA(labels, aIds, c.mechanisms, seamField);
   const decB = decideB(labels, promoRefs);
   const decC = decideC(labels, cIds);
   const edits = c.edits;
@@ -293,7 +296,6 @@ export function buildReport(
       ? `- ${k}: ${(p.sources ?? []).join(', ')} (consulta ${p.consultedAt}); ${JSON.stringify(p.perMillionTokens ?? { perRunUsd: p.perRunUsd })}`
       : `- ${k}: SEM PREÇO`;
   });
-  const feather = recommendFeather(edits);
   const recs = [
     recommendMargin(edits, labels),
     feather,

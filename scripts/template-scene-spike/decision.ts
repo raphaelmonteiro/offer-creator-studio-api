@@ -24,13 +24,13 @@ interface MechCount {
   failsFor: boolean;
 }
 
-function countMech(labels: Labels, ids: string[], mech: string): MechCount {
+function countMech(labels: Labels, ids: string[], mech: string, seam: string): MechCount {
   const keys = ids.map((id) => `${id}:${mech}`);
   const get = (k: string, f: string): string | null => labels[k]?.[f] ?? null;
   const atendeu = keys.filter((k) => get(k, 'edicao') === 'atendeu').length;
-  const invisivel = keys.filter((k) => get(k, 'costura') === 'invisivel').length;
+  const invisivel = keys.filter((k) => get(k, seam) === 'invisivel').length;
   const noEdit = keys.filter((k) => get(k, 'edicao') === null);
-  const noSeam = keys.filter((k) => get(k, 'costura') === null);
+  const noSeam = keys.filter((k) => get(k, seam) === null);
   const failsFor =
     atendeu + noEdit.length < A_ATENDEU_MIN || invisivel + noSeam.length < A_COSTURA_MIN;
   const passes = atendeu >= A_ATENDEU_MIN && invisivel >= A_COSTURA_MIN;
@@ -45,12 +45,17 @@ function countMech(labels: Labels, ids: string[], mech: string): MechCount {
 }
 
 /** Bloco A (A1, A2, A3): `mechanisms` só traz os braços realmente medidos (markup recusado fica de fora). */
-export function decideA(labels: Labels, ids: string[], mechanisms: string[]): BlockDecision {
-  const counts = mechanisms.map((m) => countMech(labels, ids, m));
+export function decideA(
+  labels: Labels,
+  ids: string[],
+  mechanisms: string[],
+  seamField = 'costura',
+): BlockDecision {
+  const counts = mechanisms.map((m) => countMech(labels, ids, m, seamField));
   const detail = counts
     .map(
       (c) =>
-        `${c.mech}: ${c.atendeu}/${ids.length} atendeu, ${c.invisivel}/${ids.length} costura invisivel`,
+        `${c.mech}: ${c.atendeu}/${ids.length} atendeu, ${c.invisivel}/${ids.length} costura invisivel (${seamField})`,
     )
     .join('; ');
   const passing = counts.filter((c) => c.passes);
