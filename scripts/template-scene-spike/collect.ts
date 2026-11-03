@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import type { EditResult } from './edit-cases';
 import { editJobs } from './edit-jobs';
 import { Ledger } from './ledger';
@@ -55,8 +54,4 @@ export function collect(dir: string, cases: CasesFile): Collected {
     spentUsd: ledger.reduce((s, e) => s + (e.costUsd || 0), 0),
     mechanisms: ['mask', 'markup'].filter((m) => measured.has(m as 'mask' | 'markup')),
   };
-}
-
-export function exists(file: string): boolean {
-  return fs.existsSync(file);
 }
