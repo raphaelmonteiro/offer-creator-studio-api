@@ -1,5 +1,6 @@
 import type { EditResult } from './edit-cases';
 import type { Labels } from './labels';
+import { RETOUCH_BANDS } from './promote';
 import { median, p90 } from './stats';
 import { FEATHER_SWEEP } from './metrics';
 import type { PromoRef } from './decision';
@@ -110,7 +111,7 @@ export function recommendThreshold(edits: EditResult[], labels: Labels): Recomme
 
 /** Faixa do retoque: vence a menor com borda `integrada` em ≥ 4 de 5. */
 export function recommendBand(labels: Labels, promos: PromoRef[]): Recommendation {
-  const bands = [16, 32, 64];
+  const bands = RETOUCH_BANDS;
   const rows = bands.map((b) => {
     const vals = promos.map((p) => labels[`${p.id}:promo`]?.[`borda_${b}`] ?? null);
     return {
