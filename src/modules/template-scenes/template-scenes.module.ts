@@ -5,7 +5,11 @@ import { TemplateScene } from './entities/template-scene.entity';
 import { TemplateSceneAsset } from './entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from './entities/template-scene-message.entity';
 import { TemplateSceneVersion } from './entities/template-scene-version.entity';
+import { SceneLockService } from './services/scene-lock.service';
+import { SceneReadService } from './services/scene-read.service';
+import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
+import { TemplateScenesController } from './template-scenes.controller';
 
 /**
  * Cena de template (estágio 3 do Template Pro): persistência, versões, chat e geração assíncrona.
@@ -21,6 +25,7 @@ import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
     ]),
     SharedModule,
   ],
-  providers: [TemplateSceneEnabledGuard],
+  controllers: [TemplateScenesController],
+  providers: [TemplateSceneEnabledGuard, SceneLockService, SceneReadService, TemplateScenesService],
 })
 export class TemplateScenesModule {}

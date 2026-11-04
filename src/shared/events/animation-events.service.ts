@@ -8,6 +8,9 @@ import { EVENTS_CHANNEL } from '../state/task-transition.service';
 /** Canal pg_notify dedicado do módulo de comerciais (SSE próprio em /commercials/events). */
 export const MC_EVENTS_CHANNEL = 'mc_events';
 
+/** Canal pg_notify da cena de template (SSE por cena em /template-scenes/:id/events). */
+export const TEMPLATE_SCENE_EVENTS_CHANNEL = 'template_scene_events';
+
 /** Todos os canais escutados pela conexão LISTEN única (barato: 1 LISTEN a mais). */
 const LISTEN_CHANNELS = [EVENTS_CHANNEL, MC_EVENTS_CHANNEL] as const;
 
