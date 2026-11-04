@@ -12,7 +12,7 @@ export const MC_EVENTS_CHANNEL = 'mc_events';
 export const TEMPLATE_SCENE_EVENTS_CHANNEL = 'template_scene_events';
 
 /** Todos os canais escutados pela conexão LISTEN única (barato: 1 LISTEN a mais). */
-const LISTEN_CHANNELS = [EVENTS_CHANNEL, MC_EVENTS_CHANNEL] as const;
+const LISTEN_CHANNELS = [EVENTS_CHANNEL, MC_EVENTS_CHANNEL, TEMPLATE_SCENE_EVENTS_CHANNEL] as const;
 
 export interface AnimationEvent {
   userId: string;
@@ -24,6 +24,12 @@ export interface AnimationEvent {
   progressPct?: number;
   stepLabel?: string | null;
   at: string;
+  [key: string]: unknown;
+}
+
+/** Evento do canal da cena: roteado por `sceneId` (sem `userId`, a cena é compartilhada, D-6). */
+export interface TemplateSceneBusEvent {
+  sceneId: string;
   [key: string]: unknown;
 }
 
@@ -51,7 +57,8 @@ export class AnimationEventsService implements OnModuleInit, OnModuleDestroy {
     // desligá-lo mataria o SSE dos comerciais junto.
     const animationsOn = process.env.ANIMATIONS_ENABLED !== 'false';
     const mcOn = process.env.MC_ENABLED === 'true';
-    if (!animationsOn && !mcOn) return;
+    const templateSceneOn = process.env.TEMPLATE_SCENE_ENABLED === 'true';
+    if (!animationsOn && !mcOn && !templateSceneOn) return;
     try {
       const opts = this.dataSource.options as unknown as Record<string, unknown>;
       this.client = new Client({
@@ -65,19 +72,29 @@ export class AnimationEventsService implements OnModuleInit, OnModuleDestroy {
       for (const channel of LISTEN_CHANNELS) {
         await this.client.query(`LISTEN ${channel}`);
       }
-      this.client.on('notification', (msg) => {
-        if (!msg.payload) return;
-        try {
-          const event = JSON.parse(msg.payload) as AnimationEvent;
-          this.emitter.emit(`${msg.channel}:user:${event.userId}`, event);
-        } catch {
-          this.logger.warn('Payload de notificação inválido');
-        }
-      });
+      this.client.on('notification', (msg) => this.handleNotification(msg));
       this.client.on('error', (err) => this.logger.error(`LISTEN: ${err.message}`));
       this.logger.log(`LISTEN ativo em: ${LISTEN_CHANNELS.join(', ')}`);
     } catch (err) {
       this.logger.error(`Falha ao iniciar LISTEN: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Roteia a notificação do LISTEN: canais por usuário (`<canal>:user:<userId>`) e o da cena, por
+   * `template_scene:scene:<sceneId>`.
+   */
+  handleNotification(msg: { channel: string; payload?: string }): void {
+    if (!msg.payload) return;
+    try {
+      const event = JSON.parse(msg.payload) as AnimationEvent | TemplateSceneBusEvent;
+      if (msg.channel === TEMPLATE_SCENE_EVENTS_CHANNEL) {
+        this.emitter.emit(sceneKey((event as TemplateSceneBusEvent).sceneId), event);
+        return;
+      }
+      this.emitter.emit(`${msg.channel}:user:${(event as AnimationEvent).userId}`, event);
+    } catch {
+      this.logger.warn('Payload de notificação inválido');
     }
   }
 
@@ -95,4 +112,13 @@ export class AnimationEventsService implements OnModuleInit, OnModuleDestroy {
     this.emitter.on(key, listener);
     return () => this.emitter.off(key, listener);
   }
+
+  /** Assina os eventos de uma cena (qualquer usuário logado; o canal é por cena, não por usuário). */
+  subscribeScene(sceneId: string, listener: (event: TemplateSceneBusEvent) => void): () => void {
+    const key = sceneKey(sceneId);
+    this.emitter.on(key, listener);
+    return () => this.emitter.off(key, listener);
+  }
 }
+
+const sceneKey = (sceneId: string): string => `template_scene:scene:${sceneId}`;

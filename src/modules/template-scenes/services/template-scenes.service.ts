@@ -5,7 +5,7 @@ import { CreateSceneDto } from '../dto/create-scene.dto';
 import { findSceneFormat } from '../domain/scene-formats';
 import { nativeSizeOfFormat, pixelsPerCm } from '../domain/scene-format-size';
 import { TemplateScene } from '../entities/template-scene.entity';
-import { sceneFormatUnsupported } from '../scene.errors';
+import { sceneFormatUnsupported, sceneNotFound } from '../scene.errors';
 import { publishSceneEvent } from './scene-events';
 import { bumpRevision, findBusyVersion, SceneLockService } from './scene-lock.service';
 import { SceneReadService } from './scene-read.service';
@@ -45,6 +45,12 @@ export class TemplateScenesService {
       data: items,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };
+  }
+
+  /** 404 se a cena não existe ou foi excluída (antes de abrir o stream de eventos). */
+  async assertExists(sceneId: string): Promise<void> {
+    const found = await this.dataSource.manager.exists(TemplateScene, { where: { id: sceneId } });
+    if (!found) throw sceneNotFound();
   }
 
   get(sceneId: string, versionsPage = 1): Promise<SceneDetailView> {

@@ -22,6 +22,7 @@ import { SceneTurnService } from './services/scene-turn.service';
 import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
+import { TemplateSceneEventsController } from './template-scene-events.controller';
 import { TemplateScenesAdminController } from './template-scenes-admin.controller';
 import { TemplateScenesController } from './template-scenes.controller';
 
@@ -40,7 +41,11 @@ import { TemplateScenesController } from './template-scenes.controller';
     SharedModule,
     AiModule,
   ],
-  controllers: [TemplateScenesController, TemplateScenesAdminController],
+  controllers: [
+    TemplateScenesController,
+    TemplateSceneEventsController,
+    TemplateScenesAdminController,
+  ],
   providers: [
     TemplateSceneEnabledGuard,
     SceneLockService,
