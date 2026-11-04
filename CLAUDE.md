@@ -97,6 +97,22 @@ MC_KIT_CANDIDATE_COUNT / MC_KIT_STYLE_REFS_DIR
 MC_MOUTH_GATE_MOCK / MC_LOGO_LOCATOR_MOCK / MC_PRICE_DETECT_MOCK / MC_MOCK_TTS_MAX_S
                               # comportamento dos mocks de visão e TTS (e2e sem chamadas pagas)
 GC_DRY_RUN                    # GC de /uploads (inclui /uploads/commercials) só loga por padrão
+
+# Cena de template (módulo template-scenes, Template Pro) — bloco completo em .env.example
+TEMPLATE_SCENE_ENABLED        # liga rotas, fila, SSE e GC da cena; sem isso as rotas respondem 404 TEMPLATE_SCENE_DISABLED
+TEMPLATE_SCENE_IMAGE_PROVIDER # mock (padrão, sem custo; valor desconhecido também cai no mock) | openai (pago, só na passada do dono)
+TEMPLATE_SCENE_IMAGE_MODEL / TEMPLATE_SCENE_IMAGE_QUALITY
+                              # gpt-image-2.5-sunburst / high; passados explicitamente (não dependem de OPENAI_IMAGE_MODEL)
+TEMPLATE_SCENE_CONCURRENCY    # jobs de geração em paralelo no worker (padrão 1)
+TEMPLATE_SCENE_MOCK_LATENCY_MS / TEMPLATE_SCENE_MOCK_SLOW_MS
+                              # latência do mock (20000; 0 nos testes) e do marcador #lento (3000)
+TEMPLATE_SCENE_ASSET_TTL_DAYS / TEMPLATE_SCENE_DELETED_RETENTION_DAYS / TEMPLATE_SCENE_MASTERS_KEPT
+                              # 7 dias (raw_output, mask, crop) / 30 dias (cena excluída) / 5 versões com master guardada
+TEMPLATE_SCENE_GC_DRY_RUN     # só vale para /uploads/template-scenes; ausente = true (só apaga com false explícito); o GC_DRY_RUN global não muda
+TEMPLATE_SCENE_MAX_PAID_CALLS_PER_MESSAGE
+                              # disjuntor: chamadas pagas por mensagem (padrão 4)
+OPENAI_TIMEOUT_MS             # timeout por requisição do modo sceneCall (padrão 180000); NÃO é global
+TEMPLATE_SCENE_E2E_DB_URL     # só testes: banco descartável chroma_x_e2e (nunca o flyer_db); sem ela os specs de banco ficam skipped
 FAL_API_KEY / ELEVENLABS_API_KEY / GEMINI_API_KEY
                               # pipeline real (vídeo, TTS, imagens)
 FFMPEG_PATH / FFPROBE_PATH    # binários do ffmpeg (worker); o preflight do worker reporta no /v1/health
@@ -544,6 +560,73 @@ and the social media flow on the frontend).
 the `flyers` table: a `flyers` row carries `kind` (`'flyer'` | `'social'`) to discriminate
 print flyers from social art (the `kind` column was added by the `AddKindToFlyers` migration,
 default `'flyer'` for backward compatibility).
+
+---
+
+### template-scenes (cena de template, Template Pro)
+
+Estágio 3 do Template Pro (`docs/designs/template-pro.md`, change `add-template-scene-persistence`): o cliente cria uma
+**cena** num formato de impressão, a primeira mensagem **gera o fundo** na proporção nativa do formato e cena, versões,
+camadas e conversa sobrevivem entre sessões. Sempre registrado no app; a flag `TEMPLATE_SCENE_ENABLED` age nas rotas
+(404 `TEMPLATE_SCENE_DISABLED`), na fila, no SSE e no GC. Workspace compartilhado (D-6): todo usuário logado vê todas as
+cenas; `createdByUserId` só registra o autor. Contrato completo (payloads, erros): `openspec/changes/add-template-scene-persistence/design.md`.
+
+**Endpoints** (prefix `/v1/template-scenes`, `JwtAuthGuard` + `TemplateSceneEnabledGuard`)
+
+| Method | Path | Notes |
+|--------|------|-------|
+| POST | `/` | `{name, formatId}`; formato fora da lista de impressão (revista/folheto) → 422 `SCENE_FORMAT_UNSUPPORTED` |
+| GET | `/` | lista leve paginada (`page`, `limit` ≤ 50), com autor e `previewUrl` da versão atual |
+| GET | `/:id` | cena com `revision`, `zones`, versão atual, `activeVersion`, 50 últimas mensagens e versões paginadas (`versionsPage`) |
+| DELETE | `/:id` | exclusão lógica (204); cancela a versão em curso; repetir dá 404 |
+| POST | `/:id/messages` | 202 `{messageId, versionId, jobId, revision}`; só `generate` (com versão `ready`: 422 `SCENE_EDIT_UNAVAILABLE`) |
+| POST | `/:id/versions/:versionId/cancel` | 202; `cancelRequestedAt` na hora; estado final → 409 `VERSION_NOT_CANCELLABLE` |
+| POST | `/:id/versions/:versionId/restore` | cria versão `restore`; master apagada → 410 `VERSION_NOT_RESTORABLE` |
+| PATCH | `/:id/elements` | camadas à mão (versão `manual` aberta), sem chamar o modelo |
+| POST | `/:id/assets/logo` | multipart `file` (PNG/JPEG/WebP ≤ 10 MB; `LOGO_INVALID`) |
+| GET | `/:id/events` | SSE da cena (heartbeat 25 s, `retry: 5000`, sem replay) |
+| POST | `/admin/gc` | `x-admin-token` (`ADMIN_API_TOKEN`), sem JWT; dispara a limpeza das cenas na hora |
+
+**Regras que não se quebram**
+- Toda mutação roda em transação com `SELECT ... FOR UPDATE` na cena (`SceneLockService`), confere `expectedRevision`
+  (409 `REVISION_CONFLICT`) e cena ocupada (409 `SCENE_BUSY`); o índice parcial `UQ_tsv_scene_busy` garante uma só
+  versão `queued`/`running` por cena. `revision` sobe em toda mutação (API) e quando o worker termina uma versão.
+- Os arquivos ficam em `uploads/template-scenes/<sceneId>/<versionId>/`, gravados pelo próprio módulo (`SceneFilesService`),
+  com URL **relativa**; a API nunca devolve entidade do ORM nem aceita URL de imagem (campo desconhecido é 400).
+- Versões `manual`, `restore` e `set_layer` apontam para a master da origem sem copiar o arquivo.
+
+**Geração (fila `template_scene.turn`)**: `POST /messages` grava a mensagem, a versão `queued` e publica o job **na mesma
+transação** (`AnimationQueueService`, `retryLimit: 0`, expira em 900 s). O consumer só sobe com `WORKER_ONLY=true` e a flag
+(`TemplateScenesModule.onModuleInit`). `SceneTurnProcessor`: `preparing` → `generating` → `saving` → `done`; grava a tentativa
+pendente em `metrics.calls` antes da chamada paga e o custo do `usage` depois; nunca lança depois de chamada paga; confere o
+cancelamento antes de cada etapa e depois da chamada; job repetido sai sem chamar o provedor. `SceneReconcilerService`
+(boot do worker e a cada 5 min) marca `JOB_EXPIRED` a versão presa há mais de 16 min. Provedor atrás da porta
+`SceneImageProvider` (`mock` padrão, `openai` só por `TEMPLATE_SCENE_IMAGE_PROVIDER=openai`). Falhas: `PROVIDER_QUOTA`
+(terminal, log de erro com `sceneId` e `correlationId`), `PROVIDER_CONTENT_POLICY`, `PROVIDER_TIMEOUT`, `PROVIDER_ERROR`,
+`JOB_EXPIRED`, `PAID_CALL_LIMIT`.
+
+**Eventos**: o worker faz `pg_notify('template_scene_events', ...)` na transação da mudança, com `{sceneId, versionId,
+kind, step, status, cancelRequested, costUsd, revision, at}`. O `AnimationEventsService` (que também sobe com a flag da
+cena) roteia por cena em `subscribeScene(sceneId)`; a assinatura por usuário não muda. O front refaz `GET /:id` a cada evento.
+
+**Retenção (D-12, PV-5)**: master e prévia ficam protegidas enquanto uma das `TEMPLATE_SCENE_MASTERS_KEPT` (5) versões
+`ready` mais recentes ou uma versão aprovada as referenciar. `pruneSceneAssets` marca `expiresAt` no restore, no `PATCH` e
+no processor; o GC (`UploadsGcService.runTemplateScenes` → `shared/gc/template-scenes-gc.runner.ts`, regras puras em
+`template-scenes-gc.rules.ts`) trava a cena, grava `purgedAt` e só então apaga o arquivo, sempre sob
+`/uploads/template-scenes/`. "Restaurável" = `purgedAt` nulo na master (derivado, sem marca por versão). O GC das cenas
+roda no worker com a flag da cena, independente de animações e comerciais.
+
+**Chamada de imagem (`OpenAiImageService`, opção `sceneCall`)**: quota terminal (uma requisição só), `maxRetries: 0` do SDK,
+`withOpenAiRetry` para 5xx/429 de taxa/rede, timeout por requisição (`OPENAI_TIMEOUT_MS`), `.withResponse()` com `usage`,
+`requestId` e `costUsd` (tabela `modules/ai/config/openai-image-capabilities.ts`, preços do spike de 2026-11-02), tamanho e
+qualidade validados pela tabela e `correlationId` no log. **Sem `sceneCall` nada muda** para os outros chamadores (teste de
+snapshot do corpo em `openai-image.service.request-snapshot.spec.ts`); o 429 do caminho legado continua (DT-8).
+
+**Testes**: unitários ao lado do código; specs com banco usam `describeIfSceneDb` (`testing/scene-test-db.ts`) e só rodam com
+`TEMPLATE_SCENE_E2E_DB_URL` (banco `chroma_x_e2e`, porta 5434; nunca o `flyer_db`). E2E:
+`TEMPLATE_SCENE_E2E_DB_URL=... npm run test -- template-scenes.controller.e2e` (rodando todos os specs de banco juntos, use
+`--runInBand`: o GC manual olha todas as cenas do banco). Ordem em desenvolvimento: `migration:run` ANTES do
+`docker restart` (o `synchronize` cria o schema sozinho e a migration depois falharia).
 
 ---
 
