@@ -2,6 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI, { toFile } from 'openai';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
+import { ImageUsage } from './config/openai-image-capabilities';
+import { withOpenAiRetry } from '../../shared/providers/openai-errors';
+import {
+  assertSceneRequestAllowed,
+  callSdkWithResponse,
+  SceneCallOptions,
+  SceneCallResponse,
+} from './openai-image-scene-call';
 import {
   MaterializedImage,
   OpenAiImageSize,
@@ -40,6 +48,8 @@ export interface GenerateOpenAiImageOptions {
   background?: OpenAiImageBackground;
   outputFormat?: OpenAiImageOutputFormat;
   outputCompression?: number;
+  /** Modo de chamada da cena (quota terminal, timeout próprio, usage e custo); ausente = comportamento de sempre. */
+  sceneCall?: SceneCallOptions;
 }
 
 export interface OpenAiImageInput {
@@ -63,6 +73,7 @@ export interface EditOpenAiImageOptions {
   outputFormat?: OpenAiImageOutputFormat;
   outputCompression?: number;
   inputFidelity?: OpenAiImageInputFidelity;
+  sceneCall?: SceneCallOptions;
 }
 
 export interface OpenAiImageResult {
@@ -75,6 +86,38 @@ export interface OpenAiImageResult {
   outputCompression?: number;
   inputFidelity?: OpenAiImageInputFidelity;
   mode: OpenAiImageMode;
+  /** Só no modo `sceneCall`. */
+  usage?: ImageUsage;
+  /** Só no modo `sceneCall`; `null` quando o modelo não tem preço conferido na tabela. */
+  costUsd?: number | null;
+  /** Só no modo `sceneCall`: `x-request-id` da OpenAI. */
+  requestId?: string | null;
+}
+
+type ImageCallResponse = { data: { b64_json?: string; url?: string }[] } & Partial<
+  Pick<SceneCallResponse, 'usage' | 'costUsd' | 'requestId'>
+>;
+
+/** Na cena a saída é PNG: `output_compression` só vale para jpeg/webp. Fora da cena, o valor segue como veio. */
+function sceneOutputCompression(
+  sceneCall: SceneCallOptions | undefined,
+  outputFormat: OpenAiImageOutputFormat | undefined,
+  compression: number | undefined,
+): number | undefined {
+  return sceneCall && outputFormat === 'png' ? undefined : compression;
+}
+
+/** `usage`, `costUsd` e `requestId` entram no resultado só no modo `sceneCall`. */
+function sceneCallResult(
+  sceneCall: SceneCallOptions | undefined,
+  response: ImageCallResponse,
+): Pick<OpenAiImageResult, 'usage' | 'costUsd' | 'requestId'> {
+  if (!sceneCall) return {};
+  return {
+    usage: response.usage,
+    costUsd: response.costUsd ?? null,
+    requestId: response.requestId ?? null,
+  };
 }
 
 interface RetryContext {
@@ -120,7 +163,11 @@ export class OpenAiImageService {
     const quality = options.quality ?? preset.quality;
     const background = options.background ?? preset.background;
     const outputFormat = options.outputFormat ?? preset.outputFormat;
-    const outputCompression = options.outputCompression ?? preset.outputCompression;
+    const outputCompression = sceneOutputCompression(
+      options.sceneCall,
+      outputFormat,
+      options.outputCompression ?? preset.outputCompression,
+    );
 
     const request = this.buildGenerateRequest({
       model,
@@ -133,23 +180,16 @@ export class OpenAiImageService {
       legacy: options.assetKind === 'legacy',
     });
 
-    const response = (await withAiLogging(
-      this.logger,
-      {
-        feature: options.feature,
-        endpoint: 'images.generate',
-        model,
-        size: options.size,
-        quality,
-        mode,
-      },
-      () =>
-        this.runImageOperation(() => (this.openai!.images.generate as any)(request), {
-          feature: options.feature,
-          endpoint: 'images.generate',
-          model,
-        }),
-    )) as { data: { b64_json?: string; url?: string }[] };
+    const response = await this.dispatchImageCall({
+      method: 'generate',
+      request,
+      feature: options.feature,
+      model,
+      size: options.size,
+      quality,
+      mode,
+      sceneCall: options.sceneCall,
+    });
 
     const image = await materializeGeneratedImage(response.data[0], preset.fallbackMimeType);
 
@@ -162,6 +202,7 @@ export class OpenAiImageService {
       outputFormat,
       outputCompression,
       mode,
+      ...sceneCallResult(options.sceneCall, response),
     };
   }
 
@@ -177,7 +218,11 @@ export class OpenAiImageService {
     const quality = options.quality ?? preset.quality;
     const background = options.background ?? preset.background;
     const outputFormat = options.outputFormat ?? preset.outputFormat;
-    const outputCompression = options.outputCompression ?? preset.outputCompression;
+    const outputCompression = sceneOutputCompression(
+      options.sceneCall,
+      outputFormat,
+      options.outputCompression ?? preset.outputCompression,
+    );
     const inputFidelity = options.inputFidelity ?? this.models.imageInputFidelity;
     const imageFiles = await this.buildImageFiles(options);
 
@@ -193,24 +238,17 @@ export class OpenAiImageService {
       inputFidelity,
     });
 
-    const response = (await withAiLogging(
-      this.logger,
-      {
-        feature: options.feature,
-        endpoint: 'images.edit',
-        model,
-        size: options.size,
-        quality,
-        mode,
-        inputFidelity: this.supportsConfigurableInputFidelity(model) ? inputFidelity : undefined,
-      },
-      () =>
-        this.runImageOperation(() => (this.openai!.images.edit as any)(request), {
-          feature: options.feature,
-          endpoint: 'images.edit',
-          model,
-        }),
-    )) as { data: { b64_json?: string; url?: string }[] };
+    const response = await this.dispatchImageCall({
+      method: 'edit',
+      request,
+      feature: options.feature,
+      model,
+      size: options.size,
+      quality,
+      mode,
+      inputFidelity: supportsConfigurableInputFidelity(model) ? inputFidelity : undefined,
+      sceneCall: options.sceneCall,
+    });
 
     const image = await materializeGeneratedImage(response.data[0], preset.fallbackMimeType);
 
@@ -224,7 +262,62 @@ export class OpenAiImageService {
       outputCompression,
       inputFidelity,
       mode,
+      ...sceneCallResult(options.sceneCall, response),
     };
+  }
+
+  /** Uma chamada ao SDK com log, semáforo e retry; no modo `sceneCall`, o caminho da cena. */
+  private async dispatchImageCall(args: {
+    method: 'generate' | 'edit';
+    request: Record<string, unknown>;
+    feature: string;
+    model: string;
+    size: string;
+    quality: string;
+    mode: string;
+    inputFidelity?: string;
+    sceneCall?: SceneCallOptions;
+  }): Promise<ImageCallResponse> {
+    const { method, request, feature, model, sceneCall } = args;
+    const endpoint = `images.${method}`;
+    if (sceneCall) assertSceneRequestAllowed(model, args.size, args.quality);
+    // `images.generate`/`images.edit` precisam do `this` do cliente: chamar sempre pelo objeto.
+    const images = this.openai!.images as any;
+
+    return (await withAiLogging(
+      this.logger,
+      {
+        feature,
+        endpoint,
+        model,
+        size: args.size,
+        quality: args.quality,
+        mode: args.mode,
+        inputFidelity: args.inputFidelity,
+        correlationId: sceneCall?.correlationId,
+      },
+      () =>
+        sceneCall
+          ? this.runSceneOperation(() =>
+              callSdkWithResponse(
+                (req, sdkOptions) => images[method](req, sdkOptions),
+                request,
+                model,
+                sceneCall,
+              ),
+            )
+          : this.runImageOperation(() => images[method](request), { feature, endpoint, model }),
+    )) as ImageCallResponse;
+  }
+
+  /** Cena: semáforo + `withOpenAiRetry` (quota terminal na 1ª resposta; 5xx/429 de taxa/rede re-tentam). */
+  private runSceneOperation<T>(operation: () => Promise<T>): Promise<T> {
+    return this.withImageConcurrency(() =>
+      withOpenAiRetry(operation, {
+        attempts: this.imageRetryAttempts + 1,
+        baseDelayMs: this.imageRetryBaseDelayMs,
+      }),
+    );
   }
 
   private async buildImageFiles(options: EditOpenAiImageOptions): Promise<unknown[]> {
@@ -359,15 +452,11 @@ export class OpenAiImageService {
     if (options.outputFormat) request.output_format = options.outputFormat;
     if (options.outputCompression !== undefined)
       request.output_compression = options.outputCompression;
-    if (options.inputFidelity && this.supportsConfigurableInputFidelity(options.model)) {
+    if (options.inputFidelity && supportsConfigurableInputFidelity(options.model)) {
       request.input_fidelity = options.inputFidelity;
     }
 
     return request;
-  }
-
-  private supportsConfigurableInputFidelity(model: string): boolean {
-    return supportsConfigurableInputFidelity(model);
   }
 
   private async runImageOperation<T>(

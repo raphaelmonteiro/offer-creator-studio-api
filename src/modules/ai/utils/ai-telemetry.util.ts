@@ -9,6 +9,8 @@ export interface AiOperationContext {
   quality?: string;
   mode?: string;
   inputFidelity?: string;
+  /** Liga as linhas do log a uma cena/versão (modo `sceneCall`). */
+  correlationId?: string;
 }
 
 interface AiUsageMetrics {
@@ -22,6 +24,7 @@ interface AiCostMetrics extends AiUsageMetrics {
   estimatedCostUsd?: number;
   costSource?: string;
   billableUnits?: number;
+  requestId?: string;
 }
 
 export async function withAiLogging<T>(
@@ -68,6 +71,7 @@ function sanitizeContext(context: AiOperationContext): AiOperationContext {
     quality: context.quality,
     mode: context.mode,
     inputFidelity: context.inputFidelity,
+    ...(context.correlationId ? { correlationId: context.correlationId } : {}),
   };
 }
 
@@ -75,8 +79,9 @@ function buildCostMetrics(context: AiOperationContext, result: unknown): AiCostM
   const usage = extractUsageMetrics(result);
 
   if (context.endpoint.startsWith('images.')) {
-    const imageCost = estimateImageCost(context);
+    const imageCost = reportedImageCost(result) ?? estimateImageCost(context);
     return {
+      ...(requestIdOf(result) ? { requestId: requestIdOf(result) } : {}),
       ...usage,
       billableUnits: 1,
       costEstimated: imageCost.costEstimated,
@@ -92,6 +97,20 @@ function buildCostMetrics(context: AiOperationContext, result: unknown): AiCostM
     estimatedCostUsd: tokenCost.estimatedCostUsd,
     costSource: tokenCost.costSource,
   };
+}
+
+/** Custo calculado do `usage` pela tabela de preços (modo `sceneCall`), quando o resultado o traz. */
+function reportedImageCost(
+  result: unknown,
+): Pick<AiCostMetrics, 'costEstimated' | 'estimatedCostUsd' | 'costSource'> | undefined {
+  const costUsd = (result as { costUsd?: unknown } | null)?.costUsd;
+  if (typeof costUsd !== 'number') return undefined;
+  return { costEstimated: true, estimatedCostUsd: costUsd, costSource: 'usage' };
+}
+
+function requestIdOf(result: unknown): string | undefined {
+  const requestId = (result as { requestId?: unknown } | null)?.requestId;
+  return typeof requestId === 'string' ? requestId : undefined;
 }
 
 function extractUsageMetrics(result: unknown): AiUsageMetrics {
