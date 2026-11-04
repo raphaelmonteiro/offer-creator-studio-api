@@ -7,7 +7,7 @@ import { SCENE_LIMITS } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { logoInvalid, sceneNotFound } from '../scene.errors';
+import { logoInvalid, noCurrentVersion, sceneNotFound } from '../scene.errors';
 import { SceneFilesService } from './scene-files.service';
 
 const LOGO_FORMATS: Readonly<Record<string, string>> = { png: 'png', jpeg: 'jpg', webp: 'webp' };
@@ -41,7 +41,7 @@ export class SceneLogoService {
       where: { sceneId },
       order: { number: 'DESC' },
     });
-    if (!version) throw logoInvalid('Gere a cena antes de enviar um logo.');
+    if (!version) throw noCurrentVersion();
 
     const assetId = randomUUID();
     const written = await this.files.write(

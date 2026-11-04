@@ -120,12 +120,13 @@ describeIfSceneDb('SceneLogoService (banco chroma_x_e2e)', () => {
     });
   });
 
-  it('cena sem versão: 422 pedindo para gerar antes', async () => {
+  it('cena sem versão: 422 NO_CURRENT_VERSION pedindo para gerar antes (nada é gravado)', async () => {
     const scene = await insertScene(dataSource, { name: 'Logo sem versão' });
     createdScenes.push(scene.id);
     const body = await errorBodyOf(service.upload(scene.id, upload(await png(), 'image/png')));
-    expect(body).toMatchObject({ code: 'LOGO_INVALID' });
+    expect(body).toMatchObject({ code: 'NO_CURRENT_VERSION' });
     expect(String(body.message)).toContain('Gere a cena');
+    expect(await assetsOf(scene.id)).toHaveLength(0);
   });
 
   it('cena inexistente ou excluída: 404', async () => {
