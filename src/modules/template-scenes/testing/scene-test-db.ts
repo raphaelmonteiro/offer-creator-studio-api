@@ -27,9 +27,15 @@ const SYNC_LOCK_KEY = 7_770_001;
 export async function openSceneTestDb(): Promise<DataSource> {
   if (!SCENE_DB_URL) throw new Error('TEMPLATE_SCENE_E2E_DB_URL não definida');
   if (/\/flyer_db(\?|$)/.test(SCENE_DB_URL)) throw new Error('O e2e nunca usa o flyer_db');
+  // Campos separados (e não `url`): o AnimationEventsService monta o cliente do LISTEN com eles.
+  const url = new URL(SCENE_DB_URL);
   const dataSource = await new DataSource({
     type: 'postgres',
-    url: SCENE_DB_URL,
+    host: url.hostname,
+    port: Number(url.port || 5432),
+    username: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: url.pathname.replace(/^\//, ''),
     entities: SCENE_TEST_ENTITIES,
     synchronize: false,
   }).initialize();
