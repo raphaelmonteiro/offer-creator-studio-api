@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OpenAiImageService } from '../../ai/openai-image.service';
-import { SCENE_INVALID_REQUEST_CODE, SCENE_TIMEOUT_CODE } from '../../ai/openai-image-scene-call';
+import {
+  PaidResponseUnreadableError,
+  SCENE_INVALID_REQUEST_CODE,
+  SCENE_TIMEOUT_CODE,
+} from '../../ai/openai-image-scene-call';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import {
   SceneGenerateInput,
@@ -19,6 +23,9 @@ type ImageSize = Parameters<OpenAiImageService['generateImage']>[0]['size'];
 /** Classifica o erro do serviço de imagem no código que a versão grava. Nunca inclui chave. */
 export function classifySceneProviderError(error: unknown): SceneProviderError {
   if (error instanceof SceneProviderError) return error;
+  if (error instanceof PaidResponseUnreadableError) {
+    return new SceneProviderError('PROVIDER_ERROR', error.message, error.costUsd);
+  }
   if (error instanceof TerminalProviderError) {
     if (error.code === 'quota') return new SceneProviderError('PROVIDER_QUOTA', error.message);
     if (error.code === SCENE_TIMEOUT_CODE) {

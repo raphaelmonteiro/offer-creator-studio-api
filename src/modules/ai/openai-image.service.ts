@@ -7,6 +7,7 @@ import { withOpenAiRetry } from '../../shared/providers/openai-errors';
 import {
   assertSceneRequestAllowed,
   callSdkWithResponse,
+  PaidResponseUnreadableError,
   SceneCallOptions,
   SceneCallResponse,
 } from './openai-image-scene-call';
@@ -191,7 +192,7 @@ export class OpenAiImageService {
       sceneCall: options.sceneCall,
     });
 
-    const image = await materializeGeneratedImage(response.data[0], preset.fallbackMimeType);
+    const image = await this.materialize(response, preset.fallbackMimeType, options.sceneCall);
 
     return {
       image,
@@ -250,7 +251,7 @@ export class OpenAiImageService {
       sceneCall: options.sceneCall,
     });
 
-    const image = await materializeGeneratedImage(response.data[0], preset.fallbackMimeType);
+    const image = await this.materialize(response, preset.fallbackMimeType, options.sceneCall);
 
     return {
       image,
@@ -264,6 +265,24 @@ export class OpenAiImageService {
       mode,
       ...sceneCallResult(options.sceneCall, response),
     };
+  }
+
+  /** Lê a imagem da resposta; no modo `sceneCall` uma falha aqui já foi paga, então carrega o custo. */
+  private async materialize(
+    response: ImageCallResponse,
+    fallbackMimeType: string,
+    sceneCall?: SceneCallOptions,
+  ): Promise<MaterializedImage> {
+    try {
+      return await materializeGeneratedImage(response.data[0], fallbackMimeType);
+    } catch (error) {
+      if (!sceneCall) throw error;
+      throw new PaidResponseUnreadableError(
+        (error as Error).message,
+        response.costUsd ?? null,
+        response.requestId ?? null,
+      );
+    }
   }
 
   /** Uma chamada ao SDK com log, semáforo e retry; no modo `sceneCall`, o caminho da cena. */

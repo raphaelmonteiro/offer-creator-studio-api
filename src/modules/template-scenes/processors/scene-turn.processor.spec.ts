@@ -254,5 +254,21 @@ describeIfSceneDb(
         await client.end();
       }
     });
+
+    it('resposta paga com imagem ilegível: o custo do usage fica gravado na versão e na cena', async () => {
+      const { provider } = fakeProvider(async () => {
+        throw new SceneProviderError('PROVIDER_ERROR', 'imagem vazia', 0.1365);
+      });
+      const { scene, version } = await queuedScene('imagem ilegível paga');
+
+      await processorWith(provider).process(job(scene.id, version.id));
+
+      expect(await versionOf(version.id)).toMatchObject({
+        status: 'failed',
+        errorCode: 'PROVIDER_ERROR',
+        providerCostUsd: 0.1365,
+      });
+      expect((await sceneOf(scene.id)).totalCostUsd).toBe(0.1365);
+    });
   },
 );

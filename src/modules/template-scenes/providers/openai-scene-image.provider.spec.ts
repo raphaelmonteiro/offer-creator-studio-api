@@ -4,7 +4,11 @@ import {
   TransientProviderError,
 } from '../../../shared/providers/provider-errors';
 import { OpenAiImageService } from '../../ai/openai-image.service';
-import { SCENE_INVALID_REQUEST_CODE, SCENE_TIMEOUT_CODE } from '../../ai/openai-image-scene-call';
+import {
+  PaidResponseUnreadableError,
+  SCENE_INVALID_REQUEST_CODE,
+  SCENE_TIMEOUT_CODE,
+} from '../../ai/openai-image-scene-call';
 import {
   classifySceneProviderError,
   OpenAiSceneImageProvider,
@@ -98,6 +102,13 @@ describe('classifySceneProviderError', () => {
     [null, 'PROVIDER_ERROR'],
   ])('%p vira %s', (error, code) => {
     expect(classifySceneProviderError(error).code).toBe(code);
+  });
+
+  it('imagem ilegível numa resposta paga vira PROVIDER_ERROR com o custo', () => {
+    const classified = classifySceneProviderError(
+      new PaidResponseUnreadableError('vazia', 0.12, 'r'),
+    );
+    expect(classified).toMatchObject({ code: 'PROVIDER_ERROR', costUsd: 0.12 });
   });
 
   it('erro já classificado passa como está', () => {

@@ -1,8 +1,13 @@
 import { ConfigService } from '@nestjs/config';
-import { APIConnectionTimeoutError } from 'openai';
+import { APIConnectionError, APIConnectionTimeoutError } from 'openai';
 import { TerminalProviderError } from '../../shared/providers/provider-errors';
 import { OpenAiImageService } from './openai-image.service';
-import { SCENE_INVALID_REQUEST_CODE, SCENE_TIMEOUT_CODE } from './openai-image-scene-call';
+import {
+  PaidResponseUnreadableError,
+  SCENE_CONNECTION_LOST_CODE,
+  SCENE_INVALID_REQUEST_CODE,
+  SCENE_TIMEOUT_CODE,
+} from './openai-image-scene-call';
 
 const PNG_B64 = Buffer.from('png-falso').toString('base64');
 const SCENE = { timeoutMs: 180_000, correlationId: 'corr-1' };
@@ -208,5 +213,56 @@ describe('OpenAiImageService: modo sceneCall', () => {
     expect(result).not.toHaveProperty('costUsd');
     expect(result).not.toHaveProperty('requestId');
     expect(generate.mock.calls[0]).toHaveLength(1);
+  });
+
+  it('conexão perdida DEPOIS do envio é terminal (pode ter sido cobrada): uma só requisição', async () => {
+    const { service, generate } = buildService();
+    const lost = new APIConnectionError({
+      cause: Object.assign(new Error('reset'), { code: 'ECONNRESET' }),
+    });
+    generate.mockReturnValue(sdkFail(lost));
+
+    await expect(service.generateImage(baseOptions)).rejects.toMatchObject({
+      code: SCENE_CONNECTION_LOST_CODE,
+    });
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('falha de conexão ANTES de a requisição chegar (DNS) continua sendo retentada', async () => {
+    const { service, generate } = buildService();
+    const dns = new APIConnectionError({
+      cause: Object.assign(new Error('dns'), { code: 'ENOTFOUND' }),
+    });
+    generate.mockReturnValueOnce(sdkFail(dns)).mockReturnValueOnce(sdkOk());
+
+    await service.generateImage(baseOptions);
+
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('resposta paga com imagem ilegível leva o custo do usage no erro', async () => {
+    const { service, generate } = buildService();
+    generate.mockReturnValue({
+      withResponse: async () => ({
+        data: { data: [{}], usage: USAGE },
+        response: { headers: { get: () => null } },
+        request_id: 'req_9',
+      }),
+    });
+
+    const error = await service.generateImage(baseOptions).catch((e) => e);
+
+    expect(error).toBeInstanceOf(PaidResponseUnreadableError);
+    expect(error).toMatchObject({ costUsd: 0.13655, requestId: 'req_9' });
+  });
+
+  it('sem sceneCall a imagem ilegível continua sendo o erro comum de antes', async () => {
+    const { service, generate } = buildService();
+    generate.mockResolvedValue({ data: [{}] });
+    const error = await service
+      .generateImage({ ...baseOptions, sceneCall: undefined, size: '1024x1024' })
+      .catch((e) => e);
+    expect(error).not.toBeInstanceOf(PaidResponseUnreadableError);
+    expect(error.message).toContain('Imagem gerada sem b64_json');
   });
 });

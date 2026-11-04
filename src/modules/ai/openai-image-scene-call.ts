@@ -1,5 +1,8 @@
-import { APIConnectionTimeoutError } from 'openai';
-import { TerminalProviderError } from '../../shared/providers/provider-errors';
+import { APIConnectionError, APIConnectionTimeoutError } from 'openai';
+import {
+  isPreRequestNetworkError,
+  TerminalProviderError,
+} from '../../shared/providers/provider-errors';
 import { OPENAI_NO_SDK_RETRY } from '../../shared/providers/openai-errors';
 import {
   estimateCostUsd,
@@ -22,6 +25,22 @@ export interface SceneCallOptions {
 
 /** Código de `TerminalProviderError` para tamanho ou qualidade recusados pela tabela. */
 export const SCENE_INVALID_REQUEST_CODE = 'invalid_request';
+/** Código de `TerminalProviderError` para conexão perdida DEPOIS de a requisição sair (pode ter sido cobrada). */
+export const SCENE_CONNECTION_LOST_CODE = 'connection_lost';
+/** Código de `TerminalProviderError` para resposta paga cuja imagem não pôde ser lida. */
+export const SCENE_UNREADABLE_CODE = 'unreadable_response';
+
+/** A resposta foi paga, mas a imagem veio vazia/ilegível: leva o custo do `usage` para o chamador gravar. */
+export class PaidResponseUnreadableError extends TerminalProviderError {
+  constructor(
+    message: string,
+    readonly costUsd: number | null,
+    readonly requestId: string | null,
+  ) {
+    super(message, SCENE_UNREADABLE_CODE);
+  }
+}
+
 /** Código de `TerminalProviderError` para o timeout da requisição (não se repete chamada paga). */
 export const SCENE_TIMEOUT_CODE = 'timeout';
 
@@ -68,6 +87,14 @@ export async function callSdkWithResponse(
       throw new TerminalProviderError(
         `Tempo esgotado após ${scene.timeoutMs} ms`,
         SCENE_TIMEOUT_CODE,
+      );
+    }
+    // Conexão que caiu depois do envio pode ter sido processada (e cobrada): não se repete. Falha
+    // antes de a requisição chegar ao servidor (DNS, recusada) continua elegível a retentativa.
+    if (err instanceof APIConnectionError && !isPreRequestNetworkError(err)) {
+      throw new TerminalProviderError(
+        `Conexão perdida depois do envio: ${err.message}`,
+        SCENE_CONNECTION_LOST_CODE,
       );
     }
     throw err;
