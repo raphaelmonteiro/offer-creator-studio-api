@@ -24,6 +24,7 @@ import {
   SceneLockService,
 } from './scene-lock.service';
 import { SceneReadService } from './scene-read.service';
+import { pruneSceneAssets } from './scene-retention';
 import { SceneDetailView } from './scene-views';
 
 const ELEMENT_ASSET_ROLES = ['logo', 'element'];
@@ -154,6 +155,7 @@ export class SceneVersionsService {
     version: TemplateSceneVersion,
   ): Promise<SceneDetailView> {
     scene.currentVersionId = version.id;
+    await pruneSceneAssets(manager, scene.id);
     const revision = await bumpRevision(manager, scene);
     await publishSceneEvent(manager, {
       sceneId: scene.id,

@@ -22,6 +22,7 @@ import {
   selectGarbage,
 } from './uploads-gc.rules';
 import { resolveUploadsDir } from '../../common/config/uploads-dir';
+import { TemplateScenesGcRunner, TemplateScenesGcSummary } from './template-scenes-gc.runner';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Espera pós-boot antes da primeira varredura (não competir com o start dos consumers). */
@@ -81,17 +82,13 @@ export class UploadsGcService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly config: ConfigService,
+    private readonly templateScenesGc: TemplateScenesGcRunner,
   ) {}
 
   onModuleInit(): void {
     if (process.env.WORKER_ONLY !== 'true') return; // GC roda apenas no worker
     // roda se QUALQUER um dos módulos com uploads coletáveis estiver ligado
-    if (
-      this.config.get('ANIMATIONS_ENABLED') === 'false' &&
-      this.config.get('MC_ENABLED') !== 'true'
-    ) {
-      return;
-    }
+    if (!this.mediaGcEnabled() && !this.templateSceneGcEnabled()) return;
     this.initialTimer = setTimeout(() => void this.safeRun(), INITIAL_DELAY_MS);
     this.initialTimer.unref();
     this.timer = setInterval(() => void this.safeRun(), DAY_MS);
@@ -103,12 +100,42 @@ export class UploadsGcService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
+  /** Animações e comerciais: a varredura de `runOnce`. */
+  private mediaGcEnabled(): boolean {
+    return (
+      this.config.get('ANIMATIONS_ENABLED') !== 'false' || this.config.get('MC_ENABLED') === 'true'
+    );
+  }
+
+  /** Cena de template: independe de animações e comerciais. */
+  private templateSceneGcEnabled(): boolean {
+    return this.config.get('TEMPLATE_SCENE_ENABLED') === 'true';
+  }
+
   private async safeRun(): Promise<void> {
-    try {
-      await this.runOnce();
-    } catch (err) {
-      this.logger.error(`GC de uploads falhou: ${(err as Error).message}`);
+    if (this.mediaGcEnabled()) {
+      try {
+        await this.runOnce();
+      } catch (err) {
+        this.logger.error(`GC de uploads falhou: ${(err as Error).message}`);
+      }
     }
+    if (this.templateSceneGcEnabled()) {
+      try {
+        await this.runTemplateScenes();
+      } catch (err) {
+        this.logger.error(`GC das cenas falhou: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  /**
+   * Limpeza dos arquivos da cena (`/uploads/template-scenes/`), também por disparo manual
+   * (`POST /v1/template-scenes/admin/gc`). `dryRun` ausente usa `TEMPLATE_SCENE_GC_DRY_RUN`
+   * (padrão `true`), sem depender do `GC_DRY_RUN` global.
+   */
+  runTemplateScenes(options: { dryRun?: boolean } = {}): Promise<TemplateScenesGcSummary> {
+    return this.templateScenesGc.run(options);
   }
 
   /** Uma varredura completa. Exposto para disparo manual/testes. */

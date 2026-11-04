@@ -12,6 +12,7 @@ import { SceneReadService } from './services/scene-read.service';
 import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
+import { TemplateScenesAdminController } from './template-scenes-admin.controller';
 import { TemplateScenesController } from './template-scenes.controller';
 
 /**
@@ -28,7 +29,7 @@ import { TemplateScenesController } from './template-scenes.controller';
     ]),
     SharedModule,
   ],
-  controllers: [TemplateScenesController],
+  controllers: [TemplateScenesController, TemplateScenesAdminController],
   providers: [
     TemplateSceneEnabledGuard,
     SceneLockService,

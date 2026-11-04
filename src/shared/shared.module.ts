@@ -12,6 +12,7 @@ import { RenderPreflightService } from './ffmpeg/render-preflight.service';
 import { ResourceGuardService } from './resource-guard/resource-guard.service';
 import { AnimationEventsService } from './events/animation-events.service';
 import { UploadsGcService } from './gc/uploads-gc.service';
+import { TemplateScenesGcRunner } from './gc/template-scenes-gc.runner';
 import { SystemSetting } from './settings/system-setting.entity';
 import { SystemSettingsService } from './settings/system-settings.service';
 import { WorkerHeartbeatService } from './settings/worker-heartbeat.service';
@@ -56,6 +57,7 @@ import { ModerationProvider } from './providers/moderation.provider';
     ResourceGuardService,
     AnimationEventsService,
     UploadsGcService,
+    TemplateScenesGcRunner,
     SystemSettingsService,
     WorkerHeartbeatService,
     ElevenLabsProvider,
