@@ -10,16 +10,21 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipValidation } from '../../common/decorators/skip-validation.decorator';
 import { CurrentUser } from '../../common/decorators/user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { createFileInterceptor } from '../../common/utils/multer.util';
 import { CreateSceneDto } from './dto/create-scene.dto';
 import { GetSceneQueryDto, ListScenesQueryDto } from './dto/list-scenes-query.dto';
 import { PatchElementsDto } from './dto/patch-elements.dto';
 import { RestoreVersionDto } from './dto/restore-version.dto';
 import { sceneNotFound, versionNotFound } from './scene.errors';
+import { SceneLogoService } from './services/scene-logo.service';
 import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
@@ -36,6 +41,7 @@ export class TemplateScenesController {
   constructor(
     private readonly scenes: TemplateScenesService,
     private readonly versions: SceneVersionsService,
+    private readonly logos: SceneLogoService,
   ) {}
 
   @Post()
@@ -83,5 +89,15 @@ export class TemplateScenesController {
     @CurrentUser() user: { id: string },
   ) {
     return this.versions.patchElements(id, dto, user?.id ?? null);
+  }
+
+  @Post(':id/assets/logo')
+  @HttpCode(HttpStatus.CREATED)
+  @SkipValidation()
+  @UseInterceptors(createFileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Envia o logo da cena (PNG, JPEG ou WebP até 10 MB)' })
+  uploadLogo(@Param('id', SceneIdPipe) id: string, @UploadedFile() file: Express.Multer.File) {
+    return this.logos.upload(id, file);
   }
 }

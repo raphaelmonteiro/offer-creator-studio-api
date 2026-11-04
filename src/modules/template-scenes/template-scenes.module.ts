@@ -5,7 +5,9 @@ import { TemplateScene } from './entities/template-scene.entity';
 import { TemplateSceneAsset } from './entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from './entities/template-scene-message.entity';
 import { TemplateSceneVersion } from './entities/template-scene-version.entity';
+import { SceneFilesService } from './services/scene-files.service';
 import { SceneLockService } from './services/scene-lock.service';
+import { SceneLogoService } from './services/scene-logo.service';
 import { SceneReadService } from './services/scene-read.service';
 import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
@@ -33,6 +35,8 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneReadService,
     TemplateScenesService,
     SceneVersionsService,
+    SceneFilesService,
+    SceneLogoService,
   ],
 })
 export class TemplateScenesModule {}
