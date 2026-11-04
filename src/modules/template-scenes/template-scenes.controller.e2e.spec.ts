@@ -1,97 +1,18 @@
-import { Logger } from '@nestjs/common';
-import * as fs from 'fs/promises';
-import * as os from 'os';
-import * as path from 'path';
-import * as request from 'supertest';
 import * as sharp from 'sharp';
-import { DataSource } from 'typeorm';
-import { TemplateScene } from './entities/template-scene.entity';
-import { insertReadyVersion, insertScene } from './testing/scene-fixtures';
-import { createSceneE2eApp, E2E_ADMIN_TOKEN, SceneE2eApp } from './testing/scene-e2e-app';
-import {
-  createTestUser,
-  deleteTestScenes,
-  describeIfSceneDb,
-  openSceneTestDb,
-} from './testing/scene-test-db';
-import { SceneFilesService } from './services/scene-files.service';
 import { ConfigService } from '@nestjs/config';
+import { SceneFilesService } from './services/scene-files.service';
+import { E2E_ADMIN_TOKEN } from './testing/scene-e2e-app';
+import { useE2eHarness } from './testing/scene-e2e-harness';
+import { describeIfSceneDb } from './testing/scene-test-db';
 
 /**
- * E2E da cena (D-7, achado 7): controller, services e processor reais, pg-boss real e o banco
- * descartável `chroma_x_e2e`, com o provedor `mock` sem latência. Fluxo base e acesso negado; as
- * bordas ficam nos specs de unidade. Rodar com `TEMPLATE_SCENE_E2E_DB_URL=... npm run test --
- * template-scenes.controller.e2e` (e com `--runInBand` se rodar junto com os outros specs de
- * banco, porque o GC manual olha todas as cenas do banco).
+ * E2E da cena (fluxo base, exclusão, SSE e acesso negado). Rodar com `TEMPLATE_SCENE_E2E_DB_URL=... npm run test --
+ * template-scenes.controller.e2e` (com `--runInBand` junto dos outros specs de banco, porque o GC
+ * manual olha todas as cenas do banco).
  */
 describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () => {
-  jest.setTimeout(60_000);
-
-  let dataSource: DataSource;
-  let harness: SceneE2eApp;
-  let uploadsDir: string;
-  let token: string;
-  const createdScenes: string[] = [];
-  const env = { ...process.env };
-
-  beforeAll(async () => {
-    Logger.overrideLogger(false);
-    process.env.NODE_ENV = 'production'; // o filtro de erros não escreve console.error por teste
-    process.env.TEMPLATE_SCENE_ENABLED = 'true';
-    process.env.ANIMATIONS_ENABLED = 'false';
-    process.env.MC_ENABLED = 'false';
-    process.env.TEMPLATE_SCENE_GC_DRY_RUN = 'false';
-    delete process.env.WORKER_ONLY;
-    dataSource = await openSceneTestDb();
-    uploadsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scene-e2e-'));
-    harness = await createSceneE2eApp(dataSource, { uploadsDir, mockSlowMs: 2500 });
-    const user = await createTestUser(dataSource, 'Usuária E2E');
-    token = harness.jwt.sign({ sub: user.id, email: user.email });
-  });
-
-  afterAll(async () => {
-    process.env = { ...env };
-    await harness?.close();
-    await deleteTestScenes(dataSource, createdScenes);
-    await dataSource.destroy();
-    await fs.rm(uploadsDir, { recursive: true, force: true });
-  });
-
-  const http = () => request(harness.app.getHttpServer());
-  const authed = (req: request.Test) => req.set('Authorization', `Bearer ${token}`);
-  const get = (url: string) => authed(http().get(`/v1/template-scenes${url}`));
-  const post = (url: string, body?: object) =>
-    authed(http().post(`/v1/template-scenes${url}`)).send(body);
-
-  async function newScene(name: string, formatId = 'folheto-27x54') {
-    const response = await post('', { name, formatId });
-    expect(response.status).toBe(201);
-    createdScenes.push(response.body.data.id);
-    return response.body.data as {
-      id: string;
-      revision: number;
-      widthPx: number;
-      heightPx: number;
-    };
-  }
-
-  /** Espera a condição sobre o `GET /:id` (o worker roda no mesmo processo, pela fila real). */
-  async function waitForScene(
-    sceneId: string,
-    done: (scene: Record<string, any>) => boolean,
-    timeoutMs = 30_000,
-  ): Promise<Record<string, any>> {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const response = await get(`/${sceneId}`);
-      if (response.status === 200 && done(response.body.data)) return response.body.data;
-      if (Date.now() > deadline)
-        throw new Error(`tempo esgotado: ${JSON.stringify(response.body).slice(0, 400)}`);
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-  }
-
-  const isReady = (scene: Record<string, any>) => scene.currentVersion?.status === 'ready';
+  const h = useE2eHarness();
+  const { http, authed, get, post, newScene, waitForScene, isReady } = h;
 
   describe('fluxo base', () => {
     it('cria, lista, gera pela fila (com animações desligadas) e lê a versão ready', async () => {
@@ -127,7 +48,7 @@ describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () =
       expect(scene.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
       expect(scene.activeVersion).toBeNull();
 
-      const files = new SceneFilesService(new ConfigService({ UPLOAD_DEST: uploadsDir }));
+      const files = new SceneFilesService(new ConfigService({ UPLOAD_DEST: h.uploadsDir }));
       const master = await sharp(files.absolutePath(scene.currentVersion.master.url)).metadata();
       expect(master).toMatchObject({ format: 'png', width: 1920, height: 3840 });
       const after = await get('?limit=50');
@@ -174,154 +95,6 @@ describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () =
       expect(scene.versions.total).toBe(1);
     });
 
-    it('cancela durante a chamada: continua ocupada até o worker parar, descarta o resultado e libera', async () => {
-      const created = await newScene('E2E Cancelar');
-      const sent = await post(`/${created.id}/messages`, {
-        content: 'campo #lento',
-        expectedRevision: 0,
-      });
-      const running = await waitForScene(created.id, (s) => s.activeVersion?.step === 'generating');
-
-      const cancel = await post(`/${created.id}/versions/${sent.body.data.versionId}/cancel`);
-      expect(cancel.status).toBe(202);
-      expect(cancel.body.data).toMatchObject({
-        versionId: sent.body.data.versionId,
-        status: 'running',
-      });
-      const blocked = await post(`/${created.id}/messages`, {
-        content: 'outra',
-        expectedRevision: cancel.body.data.revision,
-      });
-      expect(blocked.body.error.code).toBe('SCENE_BUSY');
-      expect(running.activeVersion.cancelRequested).toBe(false);
-
-      const done = await waitForScene(created.id, (s) => s.activeVersion === null);
-      expect(done.currentVersion).toBeNull();
-      expect(done.versions.items[0]).toMatchObject({ status: 'cancelled', previewUrl: null });
-      expect(done.messages.at(-1).content).toBe('Geração cancelada.');
-      const again = await post(`/${created.id}/messages`, {
-        content: 'campo verde',
-        expectedRevision: done.revision,
-      });
-      expect(again.status).toBe(202);
-      await waitForScene(created.id, isReady);
-    });
-
-    it('logo por upload + PATCH das camadas: uma só versão manual aberta acumula os ajustes', async () => {
-      const created = await newScene('E2E Camadas');
-      await post(`/${created.id}/messages`, { content: 'campo verde', expectedRevision: 0 });
-      const ready = await waitForScene(created.id, isReady);
-
-      const png = await sharp({
-        create: { width: 30, height: 30, channels: 4, background: '#f00' },
-      })
-        .png()
-        .toBuffer();
-      const logo = await authed(
-        http().post(`/v1/template-scenes/${created.id}/assets/logo`),
-      ).attach('file', png, {
-        filename: 'logo.png',
-        contentType: 'image/png',
-      });
-      expect(logo.status).toBe(201);
-      expect(logo.body.data).toMatchObject({ width: 30, height: 30 });
-
-      const element = (extra: object) => ({
-        id: 'logo-1',
-        kind: 'logo',
-        name: 'Logo',
-        x: 0.5,
-        y: 0.1,
-        w: 0.2,
-        aspect: 1,
-        rotation: 0,
-        z: 1,
-        assetId: logo.body.data.assetId,
-        ...extra,
-      });
-      const first = await authed(http().patch(`/v1/template-scenes/${created.id}/elements`)).send({
-        expectedRevision: ready.revision,
-        elements: [element({ x: 0.3 })],
-      });
-      expect(first.status).toBe(200);
-      const second = await authed(http().patch(`/v1/template-scenes/${created.id}/elements`)).send({
-        expectedRevision: first.body.data.revision,
-        elements: [element({ x: 0.3, rotation: 5 })],
-      });
-      expect(second.body.data.versions.total).toBe(2);
-      expect(second.body.data.currentVersion).toMatchObject({
-        operation: 'manual',
-        isOpenManual: true,
-      });
-      expect(second.body.data.currentVersion.assets.map((a: { role: string }) => a.role)).toEqual(
-        expect.arrayContaining(['master', 'logo']),
-      );
-
-      const svg = await authed(http().post(`/v1/template-scenes/${created.id}/assets/logo`)).attach(
-        'file',
-        Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),
-        { filename: 'logo.svg', contentType: 'image/svg+xml' },
-      );
-      expect(svg.status).toBe(422);
-      expect(svg.body.error.code).toBe('LOGO_INVALID');
-      const url = await authed(http().patch(`/v1/template-scenes/${created.id}/elements`)).send({
-        expectedRevision: second.body.data.revision,
-        elements: [{ ...element({}), src: 'http://x/a.png' }],
-      });
-      expect(url.status).toBe(400);
-    });
-
-    it('restaurar e, depois do GC manual, 410 para a versão podada', async () => {
-      const scene = await insertScene(dataSource, { name: 'E2E Restaurar' });
-      createdScenes.push(scene.id);
-      const files = new SceneFilesService(new ConfigService({ UPLOAD_DEST: uploadsDir }));
-      const ready = [];
-      for (let number = 1; number <= 6; number++) {
-        const item = await insertReadyVersion(dataSource, scene, number);
-        for (const asset of [item.master, item.preview]) {
-          const name = path.basename(asset.url);
-          await files.write(scene.id, item.version.id, name, Buffer.from(name));
-        }
-        ready.push(item);
-      }
-      await dataSource.manager.update(
-        TemplateScene,
-        { id: scene.id },
-        { currentVersionId: ready[5].version.id },
-      );
-      await dataSource.query(
-        `UPDATE template_scene_assets SET "expiresAt" = now() - interval '1 minute' WHERE "versionId" = $1`,
-        [ready[0].version.id],
-      );
-
-      const gc = await http()
-        .post('/v1/template-scenes/admin/gc')
-        .set('x-admin-token', E2E_ADMIN_TOKEN)
-        .send({ dryRun: false });
-      expect(gc.status).toBe(200);
-      expect(gc.body.data).toMatchObject({ dryRun: false });
-      expect(gc.body.data.files).toEqual(
-        expect.arrayContaining([ready[0].master.url, ready[0].preview.url]),
-      );
-      await expect(fs.access(files.absolutePath(ready[0].master.url))).rejects.toThrow();
-
-      const gone = await post(`/${scene.id}/versions/${ready[0].version.id}/restore`);
-      expect(gone.status).toBe(410);
-      expect(gone.body.error).toMatchObject({
-        code: 'VERSION_NOT_RESTORABLE',
-        details: { reason: 'master_purged' },
-      });
-      const ok = await post(`/${scene.id}/versions/${ready[2].version.id}/restore`);
-      expect(ok.status).toBe(200);
-      expect(ok.body.data.currentVersion).toMatchObject({ operation: 'restore', number: 7 });
-      expect(
-        ok.body.data.versions.items.find((v: { number: number }) => v.number === 1),
-      ).toMatchObject({
-        restorable: false,
-        previewUrl: null,
-      });
-    });
-
     it('exclui, a cena some e responde 404', async () => {
       const created = await newScene('E2E Excluir');
       const removed = await authed(http().delete(`/v1/template-scenes/${created.id}`));
@@ -336,7 +109,7 @@ describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () =
 
     it('recebe por SSE as etapas de uma geração', async () => {
       const created = await newScene('E2E SSE');
-      const server = harness.app.getHttpServer().listen(0);
+      const server = h.harness.app.getHttpServer().listen(0);
       const { port } = server.address() as { port: number };
       const controller = new AbortController();
       const events: Array<Record<string, any>> = [];
@@ -344,7 +117,7 @@ describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () =
         const response = await fetch(
           `http://127.0.0.1:${port}/v1/template-scenes/${created.id}/events`,
           {
-            headers: { Authorization: `Bearer ${token}` },
+            headers: { Authorization: `Bearer ${h.token}` },
             signal: controller.signal,
           },
         );
