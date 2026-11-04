@@ -22,6 +22,7 @@ import { FlyerBuilderV2Module } from './modules/flyer-builder-v2/flyer-builder-v
 import { AnimationsModule } from './modules/animations/animations.module';
 import { MascotsModule } from './modules/mascots/mascots.module';
 import { CommercialsModule } from './modules/commercials/commercials.module';
+import { TemplateScenesModule } from './modules/template-scenes/template-scenes.module';
 
 @Module({
   imports: [
@@ -49,6 +50,8 @@ import { CommercialsModule } from './modules/commercials/commercials.module';
     MascotsModule,
     // sempre registrado — a flag MC_ENABLED age nas rotas e no consumer
     CommercialsModule,
+    // sempre registrado — a flag TEMPLATE_SCENE_ENABLED age nas rotas e no consumer
+    TemplateScenesModule,
   ],
   providers: [
     {
