@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { SCENE_BUSY_STATUSES, SCENE_LIMITS } from '../domain/scene.types';
-import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
+import { sceneZonesFor } from '../domain/scene-formats';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
@@ -16,12 +16,6 @@ import {
   toSummaryView,
   toVersionView,
 } from './scene-views';
-
-const EMPTY_ZONES = {
-  header: { x: 0, y: 0, w: 1, h: 0 },
-  body: { x: 0, y: 0, w: 1, h: 1 },
-  footer: { x: 0, y: 1, w: 1, h: 0 },
-};
 
 /** Leituras da cena (detalhe e lista) como views; roda no `manager` da mutação quando recebe um. */
 @Injectable()
@@ -59,10 +53,9 @@ export class SceneReadService {
       ...(current ? [current] : []),
       ...(active ? [active] : []),
     ]);
-    const format = findSceneFormat(scene.formatId);
     return {
       ...toSummaryView(scene),
-      zones: format ? computeSceneZones(format) : EMPTY_ZONES,
+      zones: sceneZonesFor(scene.formatId),
       currentVersion: current ? toCurrentVersionView(current, assets) : null,
       activeVersion: active ? toVersionView(active, assets) : null,
       messages: messages.reverse().map(toMessageView),

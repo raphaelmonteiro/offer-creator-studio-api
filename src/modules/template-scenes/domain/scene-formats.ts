@@ -65,3 +65,16 @@ export function computeSceneZones(format: SceneFormatSpec): SceneZones {
     footer: rect(1 - footer, footer),
   };
 }
+
+/** Cena sem formato conhecido: o miolo ocupa tudo (nada é reservado). */
+const FULL_BODY_ZONES: SceneZones = {
+  header: { x: 0, y: 0, w: 1, h: 0 },
+  body: { x: 0, y: 0, w: 1, h: 1 },
+  footer: { x: 0, y: 1, w: 1, h: 0 },
+};
+
+/** Zonas do formato pelo id; formato desconhecido (removido da lista) cai no miolo inteiro. */
+export function sceneZonesFor(formatId: string): SceneZones {
+  const format = findSceneFormat(formatId);
+  return format ? computeSceneZones(format) : FULL_BODY_ZONES;
+}

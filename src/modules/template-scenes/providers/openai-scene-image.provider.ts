@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OpenAiImageService } from '../../ai/openai-image.service';
 import { SCENE_INVALID_REQUEST_CODE, SCENE_TIMEOUT_CODE } from '../../ai/openai-image-scene-call';
@@ -45,7 +45,6 @@ export function classifySceneProviderError(error: unknown): SceneProviderError {
 @Injectable()
 export class OpenAiSceneImageProvider implements SceneImageProvider {
   readonly name = 'openai' as const;
-  private readonly logger = new Logger(OpenAiSceneImageProvider.name);
 
   constructor(
     private readonly images: OpenAiImageService,
@@ -73,13 +72,7 @@ export class OpenAiSceneImageProvider implements SceneImageProvider {
         latencyMs: Date.now() - startedAt,
       };
     } catch (error) {
-      const classified = classifySceneProviderError(error);
-      if (classified.code === 'PROVIDER_QUOTA') {
-        this.logger.error(
-          `OpenAI sem saldo para a cena (correlationId ${input.correlationId}): avise o administrador`,
-        );
-      }
-      throw classified;
+      throw classifySceneProviderError(error);
     }
   }
 
