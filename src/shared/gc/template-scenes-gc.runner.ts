@@ -17,6 +17,18 @@ import {
 /** O GC das cenas só toca neste prefixo. */
 export const SCENE_UPLOADS_URL_PREFIX = '/uploads/template-scenes/';
 
+/**
+ * Caminho absoluto de uma URL `/uploads/template-scenes/...` dentro de `uploadsDir`; `null` para o
+ * que estiver fora desse prefixo (inclusive com `..`). Única regra de caminho das cenas: o módulo
+ * (`SceneFilesService`) e o GC usam esta função.
+ */
+export function resolveSceneUploadPath(uploadsDir: string, url: string): string | null {
+  if (!url.startsWith(SCENE_UPLOADS_URL_PREFIX)) return null;
+  const absolute = path.resolve(uploadsDir, url.replace(/^\/uploads\//, ''));
+  const root = path.join(uploadsDir, 'template-scenes') + path.sep;
+  return absolute.startsWith(root) ? absolute : null;
+}
+
 export interface TemplateScenesGcSummary {
   /** Assets selecionados para apagar. */
   selected: number;
@@ -212,10 +224,6 @@ export class TemplateScenesGcRunner {
 
   /** Caminho absoluto da URL, só se estiver sob `uploads/template-scenes/`. */
   private resolveUnderScenes(url: string): string | null {
-    if (!url.startsWith(SCENE_UPLOADS_URL_PREFIX)) return null;
-    const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
-    const absolute = path.resolve(uploadsDir, url.replace(/^\/uploads\//, ''));
-    const root = path.join(uploadsDir, 'template-scenes') + path.sep;
-    return absolute.startsWith(root) ? absolute : null;
+    return resolveSceneUploadPath(resolveUploadsDir(this.config.get<string>('UPLOAD_DEST')), url);
   }
 }

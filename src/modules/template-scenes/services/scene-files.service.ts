@@ -4,9 +4,13 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { resolveUploadsDir } from '../../../common/config/uploads-dir';
+import {
+  resolveSceneUploadPath,
+  SCENE_UPLOADS_URL_PREFIX,
+} from '../../../shared/gc/template-scenes-gc.runner';
 
 /** Prefixo público dos arquivos da cena; o GC só apaga sob ele. */
-export const SCENE_UPLOADS_PREFIX = '/uploads/template-scenes/';
+export const SCENE_UPLOADS_PREFIX = SCENE_UPLOADS_URL_PREFIX;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
@@ -65,11 +69,8 @@ export class SceneFilesService {
 
   /** Caminho absoluto de uma URL da cena; recusa o que não estiver sob o prefixo da cena. */
   absolutePath(url: string): string {
-    if (!url.startsWith(SCENE_UPLOADS_PREFIX))
-      throw new Error('URL fora de uploads/template-scenes');
-    const absolute = path.resolve(this.uploadsDir, url.replace(/^\/uploads\//, ''));
-    const root = path.join(this.uploadsDir, 'template-scenes') + path.sep;
-    if (!absolute.startsWith(root)) throw new Error('Caminho fora de uploads/template-scenes');
+    const absolute = resolveSceneUploadPath(this.uploadsDir, url);
+    if (!absolute) throw new Error('Caminho fora de uploads/template-scenes');
     return absolute;
   }
 }
