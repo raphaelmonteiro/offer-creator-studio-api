@@ -6,8 +6,9 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { CANCELLED_REPLY, failureReply, READY_REPLY } from '../scene-texts';
-import { publishSceneEvent, SceneEventKind } from '../services/scene-events';
+import { READY_REPLY } from '../scene-texts';
+import { SceneEventKind } from '../services/scene-events';
+import { cancelVersion, emitVersionEvent, failVersion } from './scene-turn-finish';
 import { bumpRevision, SceneLockService } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
@@ -243,43 +244,21 @@ export class SceneTurnState {
     });
   }
 
-  private async cancelIn(
+  private cancelIn(
     manager: EntityManager,
     scene: TemplateScene,
     version: TemplateSceneVersion,
   ): Promise<void> {
-    version.status = 'cancelled';
-    version.cancelRequestedAt = version.cancelRequestedAt ?? new Date();
-    await manager.save(version);
-    await settleUserMessage(manager, version.id, 'failed');
-    await addAssistantMessage(manager, {
-      sceneId: scene.id,
-      versionId: version.id,
-      content: CANCELLED_REPLY,
-      status: 'done',
-    });
-    await bumpRevision(manager, scene);
-    await this.emit(manager, scene, version, 'version.cancelled');
+    return cancelVersion(manager, scene, version);
   }
 
-  async failIn(
+  failIn(
     manager: EntityManager,
     scene: TemplateScene,
     version: TemplateSceneVersion,
     code: SceneFailureCode,
   ): Promise<void> {
-    version.status = 'failed';
-    version.errorCode = code;
-    await manager.save(version);
-    await settleUserMessage(manager, version.id, 'failed');
-    await addAssistantMessage(manager, {
-      sceneId: scene.id,
-      versionId: version.id,
-      content: failureReply(code),
-      status: 'failed',
-    });
-    await bumpRevision(manager, scene);
-    await this.emit(manager, scene, version, 'version.failed');
+    return failVersion(manager, scene, version, code);
   }
 
   private emit(
@@ -288,15 +267,6 @@ export class SceneTurnState {
     version: TemplateSceneVersion,
     kind: SceneEventKind,
   ): Promise<void> {
-    return publishSceneEvent(manager, {
-      sceneId: scene.id,
-      versionId: version.id,
-      kind,
-      step: version.step,
-      status: version.status,
-      cancelRequested: version.cancelRequestedAt !== null,
-      costUsd: version.providerCostUsd,
-      revision: scene.revision,
-    });
+    return emitVersionEvent(manager, scene, version, kind);
   }
 }
