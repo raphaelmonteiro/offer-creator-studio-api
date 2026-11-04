@@ -22,9 +22,11 @@ import { createFileInterceptor } from '../../common/utils/multer.util';
 import { CreateSceneDto } from './dto/create-scene.dto';
 import { GetSceneQueryDto, ListScenesQueryDto } from './dto/list-scenes-query.dto';
 import { PatchElementsDto } from './dto/patch-elements.dto';
+import { SendMessageDto } from './dto/send-message.dto';
 import { RestoreVersionDto } from './dto/restore-version.dto';
 import { sceneNotFound, versionNotFound } from './scene.errors';
 import { SceneLogoService } from './services/scene-logo.service';
+import { SceneTurnService } from './services/scene-turn.service';
 import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
@@ -42,6 +44,7 @@ export class TemplateScenesController {
     private readonly scenes: TemplateScenesService,
     private readonly versions: SceneVersionsService,
     private readonly logos: SceneLogoService,
+    private readonly turns: SceneTurnService,
   ) {}
 
   @Post()
@@ -99,5 +102,28 @@ export class TemplateScenesController {
   @ApiOperation({ summary: 'Envia o logo da cena (PNG, JPEG ou WebP até 10 MB)' })
   uploadLogo(@Param('id', SceneIdPipe) id: string, @UploadedFile() file: Express.Multer.File) {
     return this.logos.upload(id, file);
+  }
+
+  @Post(':id/messages')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Envia uma mensagem; a primeira gera a cena (processamento assíncrono)',
+  })
+  sendMessage(
+    @Param('id', SceneIdPipe) id: string,
+    @Body() dto: SendMessageDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.turns.sendMessage(id, dto, user?.id ?? null);
+  }
+
+  @Post(':id/versions/:versionId/cancel')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Pede o cancelamento da versão em curso' })
+  cancel(
+    @Param('id', SceneIdPipe) id: string,
+    @Param('versionId', VersionIdPipe) versionId: string,
+  ) {
+    return this.turns.cancel(id, versionId);
   }
 }

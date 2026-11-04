@@ -14,6 +14,7 @@ import { SceneFilesService } from './services/scene-files.service';
 import { SceneLockService } from './services/scene-lock.service';
 import { SceneLogoService } from './services/scene-logo.service';
 import { SceneReadService } from './services/scene-read.service';
+import { SceneTurnService } from './services/scene-turn.service';
 import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
@@ -44,6 +45,7 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneVersionsService,
     SceneFilesService,
     SceneLogoService,
+    SceneTurnService,
     {
       provide: SCENE_IMAGE_PROVIDER,
       inject: [ConfigService, OpenAiImageService],
