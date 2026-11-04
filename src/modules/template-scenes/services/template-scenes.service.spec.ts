@@ -1,4 +1,3 @@
-import { HttpException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { SceneLockService } from './scene-lock.service';
 import { SceneReadService } from './scene-read.service';
@@ -10,22 +9,13 @@ import {
   insertScene,
   insertVersion,
 } from '../testing/scene-fixtures';
+import { errorOf } from '../testing/scene-test-helpers';
 import {
   createTestUser,
   deleteTestScenes,
   describeIfSceneDb,
   openSceneTestDb,
 } from '../testing/scene-test-db';
-
-async function codeOf(promise: Promise<unknown>): Promise<{ status: number; code: string }> {
-  try {
-    await promise;
-  } catch (error) {
-    const http = error as HttpException;
-    return { status: http.getStatus(), code: (http.getResponse() as { code: string }).code };
-  }
-  throw new Error('esperava um erro');
-}
 
 describeIfSceneDb('TemplateScenesService (banco chroma_x_e2e)', () => {
   let dataSource: DataSource;
@@ -75,7 +65,7 @@ describeIfSceneDb('TemplateScenesService (banco chroma_x_e2e)', () => {
       'formato %s não suportado: 422 e nada é gravado',
       async (formatId) => {
         const name = `Nao suportado ${formatId} ${Date.now()}`;
-        const result = await codeOf(service.create({ name, formatId }, null));
+        const result = await errorOf(service.create({ name, formatId }, null));
         expect(result).toEqual({ status: 422, code: 'SCENE_FORMAT_UNSUPPORTED' });
         expect(await dataSource.manager.countBy(TemplateScene, { name })).toBe(0);
       },
@@ -184,7 +174,7 @@ describeIfSceneDb('TemplateScenesService (banco chroma_x_e2e)', () => {
     });
 
     it('cena inexistente: 404 SCENE_NOT_FOUND', async () => {
-      expect(await codeOf(service.get('00000000-0000-4000-8000-000000000000'))).toEqual({
+      expect(await errorOf(service.get('00000000-0000-4000-8000-000000000000'))).toEqual({
         status: 404,
         code: 'SCENE_NOT_FOUND',
       });
@@ -198,14 +188,17 @@ describeIfSceneDb('TemplateScenesService (banco chroma_x_e2e)', () => {
       expect(
         (await service.list(1, 50)).data.find((entry) => entry.id === scene.id),
       ).toBeUndefined();
-      expect(await codeOf(service.get(scene.id))).toEqual({ status: 404, code: 'SCENE_NOT_FOUND' });
+      expect(await errorOf(service.get(scene.id))).toEqual({
+        status: 404,
+        code: 'SCENE_NOT_FOUND',
+      });
       const row = await dataSource.manager.findOne(TemplateScene, {
         where: { id: scene.id },
         withDeleted: true,
       });
       expect(row?.deletedAt).not.toBeNull();
       expect(row?.revision).toBe(1);
-      expect(await codeOf(service.remove(scene.id))).toEqual({
+      expect(await errorOf(service.remove(scene.id))).toEqual({
         status: 404,
         code: 'SCENE_NOT_FOUND',
       });

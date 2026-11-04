@@ -1,0 +1,41 @@
+import { HttpException } from '@nestjs/common';
+import { SceneElementDto } from '../dto/patch-elements.dto';
+
+/** Status HTTP e `code` do erro lançado pela promessa (falha o teste se ela resolver). */
+export async function errorOf(
+  promise: Promise<unknown>,
+): Promise<{ status: number; code: string }> {
+  try {
+    await promise;
+  } catch (error) {
+    const http = error as HttpException;
+    return { status: http.getStatus(), code: (http.getResponse() as { code: string }).code };
+  }
+  throw new Error('esperava um erro');
+}
+
+/** Corpo do erro HTTP lançado pela promessa (`code`, `message`, `details`). */
+export async function errorBodyOf(promise: Promise<unknown>): Promise<Record<string, unknown>> {
+  try {
+    await promise;
+  } catch (error) {
+    return (error as HttpException).getResponse() as Record<string, unknown>;
+  }
+  throw new Error('esperava um erro');
+}
+
+export function textElement(id: string, overrides: Partial<SceneElementDto> = {}): SceneElementDto {
+  return Object.assign(new SceneElementDto(), {
+    id,
+    kind: 'text',
+    name: `Texto ${id}`,
+    x: 0.5,
+    y: 0.1,
+    w: 0.4,
+    aspect: 3,
+    rotation: 0,
+    z: 1,
+    text: 'Páscoa',
+    ...overrides,
+  });
+}

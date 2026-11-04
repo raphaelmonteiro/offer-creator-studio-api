@@ -81,3 +81,12 @@ export async function nextVersionNumber(manager: EntityManager, sceneId: string)
     .getRawOne<{ max: string }>();
   return Number(row?.max ?? 0) + 1;
 }
+
+/** Fecha a versão manual aberta (próximo pedido ao chat, restauração ou aprovação). */
+export async function closeOpenManual(manager: EntityManager, sceneId: string): Promise<void> {
+  await manager.update(
+    TemplateSceneVersion,
+    { sceneId, isOpenManual: true },
+    { isOpenManual: false },
+  );
+}

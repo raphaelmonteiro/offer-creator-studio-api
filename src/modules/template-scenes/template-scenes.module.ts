@@ -7,6 +7,7 @@ import { TemplateSceneMessage } from './entities/template-scene-message.entity';
 import { TemplateSceneVersion } from './entities/template-scene-version.entity';
 import { SceneLockService } from './services/scene-lock.service';
 import { SceneReadService } from './services/scene-read.service';
+import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
 import { TemplateScenesController } from './template-scenes.controller';
@@ -26,6 +27,12 @@ import { TemplateScenesController } from './template-scenes.controller';
     SharedModule,
   ],
   controllers: [TemplateScenesController],
-  providers: [TemplateSceneEnabledGuard, SceneLockService, SceneReadService, TemplateScenesService],
+  providers: [
+    TemplateSceneEnabledGuard,
+    SceneLockService,
+    SceneReadService,
+    TemplateScenesService,
+    SceneVersionsService,
+  ],
 })
 export class TemplateScenesModule {}

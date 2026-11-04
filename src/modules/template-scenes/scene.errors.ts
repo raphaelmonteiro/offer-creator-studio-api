@@ -58,6 +58,13 @@ export const versionNotReady = () =>
     'Só é possível restaurar uma versão pronta.',
   );
 
+export const noCurrentVersion = () =>
+  sceneError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'NO_CURRENT_VERSION',
+    'A cena ainda não tem imagem. Gere a cena antes de editar as camadas.',
+  );
+
 export const sceneFormatUnsupported = (formatId: string) =>
   sceneError(
     HttpStatus.UNPROCESSABLE_ENTITY,
