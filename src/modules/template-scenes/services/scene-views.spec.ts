@@ -158,10 +158,17 @@ describe('métricas e alvo da edição na versão', () => {
     const view = toVersionView(version(), new Map());
     expect(view).toMatchObject({
       metrics: null,
+      targetSource: null,
+      isNewImage: false,
       requestedRegion: null,
       requestedMask: null,
       targetElementId: null,
     });
+  });
+
+  it('Imagem nova: isNewImage vem do plano', () => {
+    const plan = { operation: 'new_image', instruction: 'x' };
+    expect(toVersionView(version({ metrics: { plan } }), new Map()).isNewImage).toBe(true);
   });
 
   it('edição local: só as métricas públicas, sem calls nem diagnóstico', () => {
@@ -191,6 +198,22 @@ describe('métricas e alvo da edição na versão', () => {
       notApplied: false,
       vision: { satisfied: 'sim' },
     });
+  });
+
+  it('Zona pelo texto, Área marcada e camada: targetSource vem do plano gravado', () => {
+    const planOf = (target: unknown) => ({
+      metrics: { plan: { operation: 'local_edit', target, instruction: 'x', remove: false } },
+    });
+    const source = (target: unknown) =>
+      toVersionView(version(planOf(target) as never), new Map()).targetSource;
+    expect(source({ kind: 'rect', rect: { x: 0, y: 0, w: 0.1, h: 0.1 } })).toBe('marked');
+    expect(source({ kind: 'zone', zone: 'header', from: 'text' })).toBe('zone_text');
+    expect(source({ kind: 'zone', zone: 'header', from: 'field' })).toBe('zone_field');
+    expect(source({ kind: 'element', elementId: 'e1' })).toBe('element');
+    expect(
+      toVersionView(version({ metrics: { plan: { operation: 'set_layer' } } } as never), new Map())
+        .targetSource,
+    ).toBeNull();
   });
 
   it('ajuste geral não atendido: as métricas aparecem só com notApplied e o resto null', () => {

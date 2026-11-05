@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { LocalTarget, SceneClassification } from '../domain/scene-operation.classifier';
 import { RegionSpec } from '../domain/scene-shapes';
+import { ZONE_LABEL } from '../domain/scene-target-source';
 import { elementRect } from '../domain/scene-element-rect';
 import { Rect, SceneElement } from '../domain/scene.types';
 import { SCENE_IMAGE_PROVIDER, SceneImageProvider } from '../providers/scene-image-provider';
@@ -148,7 +149,7 @@ export class SceneEditHandler implements TurnHandler {
       if (call.status === 'ok' && call.value.ok) facts = call.value;
     }
     await this.support.finishWithImage(ctx, edit.finalPng, {
-      reply: edit.noChange ? NO_CHANGE_REPLY : editReply(facts),
+      reply: edit.noChange ? NO_CHANGE_REPLY : editReply(facts, 'area', this.areaLabel(ctx, plan)),
       ...(facts?.satisfied === 'nao' ? { notApplied: { changed: facts.changed } } : {}),
       ...this.withoutIntegratedLayer(ctx, plan, edit.noChange),
       metrics: {
@@ -160,6 +161,19 @@ export class SceneEditHandler implements TurnHandler {
       // Elemento selecionado: a região alterada é a caixa dele (rect, zona e forma já a gravam ao enfileirar).
       ...(ctx.requestedRegion ? {} : { requestedRegion: this.elementBox(ctx) }),
     });
+  }
+
+  /** Nome da área entendida para a resposta: a zona, a marcada ou a camada. */
+  private areaLabel(
+    ctx: TurnContext,
+    plan: Extract<SceneClassification, { operation: 'local_edit' }>,
+  ): string {
+    const { target } = plan;
+    if (target.kind === 'zone') return ZONE_LABEL[target.zone];
+    if (target.kind === 'element') {
+      return ctx.parent?.elements.find((e) => e.id === target.elementId)?.name ?? 'a camada';
+    }
+    return 'a marcada';
   }
 
   /** Integrada ao fundo, a camada sai da versão (não se `noChange`: nada foi pintado). */

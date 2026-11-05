@@ -178,7 +178,7 @@ describeIfSceneDb('SceneTurnProcessor: edição local (banco chroma_x_e2e)', () 
     });
     const messages = await h.messagesOf(scene.id);
     expect(messages[messages.length - 1].content).toBe(
-      'Pronto! Editei a área marcada. O resto da imagem foi preservado.',
+      'Área: a marcada. Pronto! Editei a área marcada.',
     );
   });
 
@@ -224,6 +224,35 @@ describeIfSceneDb('SceneTurnProcessor: edição local (banco chroma_x_e2e)', () 
 
       expect((await h.sceneOf(scene.id)).currentVersionId).toBe(version.id);
       expect((await h.versionOf(version.id)).metrics.notApplied).toBeUndefined();
+    });
+
+    it('Área marcada: a resposta cita a área marcada e o "preservado" só vem com atendido sim', async () => {
+      const { scene } = await h.readyScene();
+      const version = await h.queueTurn(scene, {
+        plan: editPlan(),
+        request: 'deixa o sol laranja',
+      });
+      await h
+        .processorWith(pricedProvider().provider, {}, goodVision())
+        .process(h.job(scene.id, version.id));
+      const messages = await h.messagesOf(scene.id);
+      expect(messages[messages.length - 1].content).toBe(
+        'Área: a marcada. Pronto! O sol ficou alaranjado. O resto da imagem foi preservado.',
+      );
+    });
+
+    it('Zona pelo texto: a resposta diz que a área entendida foi o cabeçalho', async () => {
+      const { scene } = await h.readyScene();
+      const plan = editPlan({ kind: 'zone', zone: 'header', from: 'text' });
+      const version = await h.queueTurn(scene, {
+        plan,
+        request: 'deixa o céu do cabeçalho mais limpo',
+      });
+      await h
+        .processorWith(pricedProvider().provider, {}, goodVision())
+        .process(h.job(scene.id, version.id));
+      const messages = await h.messagesOf(scene.id);
+      expect(messages[messages.length - 1].content).toContain('Área: cabeçalho.');
     });
 
     it('Atendido em parte: a resposta não diz que o resto foi preservado', async () => {

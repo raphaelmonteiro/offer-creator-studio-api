@@ -52,8 +52,9 @@ export function buildVisionPrompt(request: string): string {
   return (
     'Você compara duas imagens de um recorte de cena: a primeira é ANTES, a segunda é DEPOIS de uma edição pedida pelo cliente. ' +
     `Pedido: "${literal}". ` +
+    'Você só vê este recorte: não afirme nada sobre o resto da imagem. ' +
     'Responda só com JSON no formato {"mudou": string, "atendeu": "sim"|"parcial"|"nao"}, ' +
-    'onde "mudou" descreve em uma frase curta, em português, o que mudou, e "atendeu" diz se o pedido foi atendido.'
+    'onde "mudou" descreve em uma frase curta, em português, o que mudou em relação ao pedido (e não qualquer diferença), e "atendeu" diz se o pedido foi atendido.'
   );
 }
 

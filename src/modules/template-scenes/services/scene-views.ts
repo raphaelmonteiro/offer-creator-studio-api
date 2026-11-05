@@ -11,6 +11,8 @@ import {
   SceneVersionStatus,
   SceneZones,
 } from '../domain/scene.types';
+import { SceneClassification } from '../domain/scene-operation.classifier';
+import { SceneTargetSource, targetSourceOf } from '../domain/scene-target-source';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
@@ -69,6 +71,8 @@ export interface SceneVersionView {
   requestedRegion: Rect | null;
   requestedMask: MaskShape | null;
   targetElementId: string | null;
+  /** De onde veio a área entendida; o chip "região marcada" só aparece em `marked`, `zone_field` e `element`. */
+  targetSource: SceneTargetSource | null;
   /** Imagem nova do zero (D-18): o painel mostra "Imagem nova" em vez de "Ajuste geral". */
   isNewImage: boolean;
   /** Só nas edições locais; `null` nas demais versões. */
@@ -215,6 +219,7 @@ export function toVersionView(
     requestedRegion: version.requestedRegion,
     requestedMask: version.requestedMask,
     targetElementId: version.targetElementId,
+    targetSource: targetSourceOf(version.metrics?.plan as SceneClassification | undefined),
     isNewImage: isNewImage(version),
     metrics: toMetricsView(version),
   };

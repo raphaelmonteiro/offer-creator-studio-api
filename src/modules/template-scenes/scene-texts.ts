@@ -48,18 +48,29 @@ export interface VisionFacts {
 
 const endSentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
 
-/** Resposta de uma edição local (ou do ajuste geral): descreve o que mudou pela visão, ou pelas métricas. */
-export function editReply(vision: VisionFacts | null, scope: 'area' | 'scene' = 'area'): string {
-  const tail = scope === 'area' ? 'O resto da imagem foi preservado.' : 'Logo e texto não mudaram.';
+/**
+ * Resposta de uma edição local (ou do ajuste geral): a área entendida, o que mudou pela visão, ou pelas
+ * métricas. "Preservado" só entra quando a visão confirmou o atendimento (`sim`) numa edição local.
+ */
+export function editReply(
+  vision: VisionFacts | null,
+  scope: 'area' | 'scene' = 'area',
+  area?: string,
+): string {
+  const where = area ? `Área: ${area}. ` : '';
+  const preserved =
+    scope === 'area' ? 'O resto da imagem foi preservado.' : 'Logo e texto não mudaram.';
   if (!vision) {
     return scope === 'area'
-      ? `Pronto! Editei a área marcada. ${tail}`
-      : `Pronto! Criei uma nova versão do fundo. ${tail}`;
+      ? `${where}Pronto! Editei a área${area && area !== 'a marcada' ? '' : ' marcada'}.`
+      : `Pronto! Criei uma nova versão do fundo. ${preserved}`;
   }
   const changed = endSentence(vision.changed);
-  if (vision.satisfied === 'nao') return `${changed} ${RETRY_HINT}`;
-  if (vision.satisfied === 'parcial') return `${changed} Atendi o pedido em parte. ${RETRY_HINT}`;
-  return `Pronto! ${changed} ${tail}`;
+  if (vision.satisfied === 'nao') return `${where}${changed} ${RETRY_HINT}`;
+  if (vision.satisfied === 'parcial') {
+    return `${where}${changed} Atendi o pedido em parte. ${RETRY_HINT}`;
+  }
+  return `${where}Pronto! ${changed} ${preserved}`;
 }
 
 const ADD_PLACE: Record<'area' | 'center' | SceneZoneName, string> = {
