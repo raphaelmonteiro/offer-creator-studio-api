@@ -20,6 +20,15 @@ export const MOVE_UNAVAILABLE_REPLY =
 export const GLOBAL_CONFIRM_REPLY =
   'Isso cria uma nova versão do fundo inteiro. Logo e texto não mudam.';
 
+export const NEW_IMAGE_CONFIRM_REPLY =
+  'Isso gera uma imagem nova do zero, como uma nova versão, e custa cerca de US$ 0,13. As versões anteriores continuam em Versões. Logo, texto e elementos adicionados ficam como estão.';
+
+export const CHOOSE_LAYER_REPLY =
+  'Há mais de uma camada possível. Selecione na prévia a camada que quer integrar ao fundo. Nada foi alterado.';
+
+export const needsPlaceReply = (subject: string): string =>
+  `Marque onde quer "${subject}" e envie de novo. Nada foi alterado.`;
+
 export const NO_CHANGE_REPLY =
   'Não vi mudança na área marcada. Quer tentar de novo? Marque a área de novo ou descreva de outro jeito.';
 

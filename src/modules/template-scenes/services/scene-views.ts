@@ -67,6 +67,8 @@ export interface SceneVersionView {
   requestedRegion: Rect | null;
   requestedMask: MaskShape | null;
   targetElementId: string | null;
+  /** Imagem nova do zero (D-18): o painel mostra "Imagem nova" em vez de "Ajuste geral". */
+  isNewImage: boolean;
   /** Só nas edições locais; `null` nas demais versões. */
   metrics: SceneMetricsView | null;
 }
@@ -144,6 +146,9 @@ export function restorableState(
   return { restorable: true, reason: null };
 }
 
+const isNewImage = (version: Pick<TemplateSceneVersion, 'metrics'>): boolean =>
+  (version.metrics?.plan as { operation?: string } | undefined)?.operation === 'new_image';
+
 const iso = (date: Date | null): string | null => (date ? date.toISOString() : null);
 
 const numberOrNull = (value: unknown): number | null =>
@@ -206,6 +211,7 @@ export function toVersionView(
     requestedRegion: version.requestedRegion,
     requestedMask: version.requestedMask,
     targetElementId: version.targetElementId,
+    isNewImage: isNewImage(version),
     metrics: toMetricsView(version),
   };
 }

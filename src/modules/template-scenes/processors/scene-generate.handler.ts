@@ -10,7 +10,7 @@ import { TurnHandler } from './scene-turn-handler';
 import { TurnContext } from './scene-turn-state';
 
 /**
- * `generate` (primeira geração) e `global_regenerate` (ajuste geral confirmado). O ajuste geral edita a
+ * `generate` (primeira geração e imagem nova da D-18, sem referência) e `global_regenerate` (ajuste geral confirmado). O ajuste geral edita a
  * master inteira, no tamanho nativo e sem máscara, com a imagem atual como referência; logo e texto são
  * camadas e ficam como estão (os elementos `generated` também: a composição é mantida).
  */
@@ -29,6 +29,19 @@ export class SceneGenerateHandler implements TurnHandler {
     return ctx.plan?.operation === 'global_regenerate' ? this.regenerate(ctx) : this.generate(ctx);
   }
 
+  /**
+   * Pedido de uma geração: a mensagem. Na imagem nova (D-18), o tema da primeira geração mais o
+   * pedido atual, porque "gere outra imagem" não diz o tema. Sem imagem de referência.
+   */
+  private generationRequest(ctx: TurnContext): string {
+    const original = ctx.originalRequest;
+    if (ctx.plan?.operation !== 'new_image' || !original) return ctx.request;
+    const current = ctx.plan.instruction;
+    return current.trim() === original.trim()
+      ? original
+      : `${original} (pedido atual do cliente: ${current})`;
+  }
+
   private async generate(ctx: TurnContext): Promise<void> {
     const { state } = this.support;
     if (!(await state.advance(ctx, 'generating'))) return;
@@ -40,7 +53,7 @@ export class SceneGenerateHandler implements TurnHandler {
       run: () =>
         this.provider.generate({
           model: this.support.model(),
-          prompt: buildGeneratePrompt({ ...ctx, request: ctx.request }),
+          prompt: buildGeneratePrompt({ ...ctx, request: this.generationRequest(ctx) }),
           size,
           quality: this.support.generateQuality(),
           correlationId: ctx.correlationId,

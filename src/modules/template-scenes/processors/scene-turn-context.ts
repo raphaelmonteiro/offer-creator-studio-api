@@ -1,4 +1,4 @@
-import { EntityManager, In } from 'typeorm';
+import { EntityManager, In, IsNull } from 'typeorm';
 import {
   MaskShape,
   Rect,
@@ -51,6 +51,8 @@ export interface TurnContext {
   targetElementId: string | null;
   parent: TurnParent | null;
   attachmentAssets: TurnAttachmentAsset[];
+  /** Pedido da primeira geração da cena (o tema que "gere outra imagem" não repete); só na imagem nova. */
+  originalRequest: string | null;
 }
 
 /** Monta o contexto do turno a partir da versão `queued` (leitura sob o lock da cena). */
@@ -63,6 +65,7 @@ export async function loadTurnContext(
     where: { versionId: version.id, role: 'user' },
     order: { createdAt: 'ASC' },
   });
+  const plan = (version.metrics.plan as SceneClassification | undefined) ?? null;
   return {
     sceneId: scene.id,
     versionId: version.id,
@@ -75,13 +78,32 @@ export async function loadTurnContext(
     request: message?.content ?? '',
     formatId: scene.formatId,
     operation: version.operation,
-    plan: (version.metrics.plan as SceneClassification | undefined) ?? null,
+    plan,
     requestedRegion: version.requestedRegion,
     requestedMask: version.requestedMask,
     targetElementId: version.targetElementId,
     parent: await loadParent(manager, scene),
     attachmentAssets: await loadAttachments(manager, scene.id, message),
+    originalRequest:
+      plan?.operation === 'new_image' ? await loadOriginalRequest(manager, scene.id) : null,
   };
+}
+
+/** Mensagem do usuário da primeira geração (versão `generate` sem origem): o tema da conversa (D-18). */
+async function loadOriginalRequest(
+  manager: EntityManager,
+  sceneId: string,
+): Promise<string | null> {
+  const first = await manager.findOne(TemplateSceneVersion, {
+    where: { sceneId, operation: 'generate', parentVersionId: IsNull() },
+    order: { number: 'ASC' },
+  });
+  if (!first) return null;
+  const message = await manager.findOne(TemplateSceneMessage, {
+    where: { versionId: first.id, role: 'user' },
+    order: { createdAt: 'ASC' },
+  });
+  return message?.content ?? null;
 }
 
 async function loadParent(

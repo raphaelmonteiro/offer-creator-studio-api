@@ -22,8 +22,11 @@ import {
 import {
   GLOBAL_CONFIRM_REPLY,
   MOVE_UNAVAILABLE_REPLY,
+  NEW_IMAGE_CONFIRM_REPLY,
   NEEDS_REGION_LAYER_REPLY,
   NEEDS_REGION_REPLY,
+  CHOOSE_LAYER_REPLY,
+  needsPlaceReply,
 } from '../scene-texts';
 
 /** A mensagem vira um job pago/assíncrono (versão `queued`). */
@@ -43,14 +46,18 @@ export interface ReplyPlan {
   classification: SceneClassification;
   reply: string;
   /** Ajuste geral perguntado: o pedido original fica guardado para a confirmação. */
-  pendingConfirmation: { request: string } | null;
+  pendingConfirmation: { request: string; kind: ConfirmationKind } | null;
 }
 
 export type MessagePlan = JobPlan | ReplyPlan;
 
 /** Marca na versão `rejected` que a pergunta do ajuste geral já foi respondida. */
+export type ConfirmationKind = 'global' | 'new_image';
+
 export interface PendingConfirmation {
   request: string;
+  /** Tipo da pergunta (D-18); perguntas gravadas antes dele são do ajuste geral. */
+  kind?: ConfirmationKind;
   consumedByMessageId?: string;
 }
 
@@ -127,7 +134,7 @@ async function consumeConfirmation(
   manager: EntityManager,
   scene: TemplateScene,
   dto: SendMessageDto,
-): Promise<string> {
+): Promise<{ request: string; kind: ConfirmationKind }> {
   const reply = await manager.findOne(TemplateSceneMessage, {
     where: { id: dto.replyToMessageId, sceneId: scene.id, role: 'assistant' },
   });
@@ -143,7 +150,7 @@ async function consumeConfirmation(
     pendingConfirmation: { ...pending, consumedByMessageId: reply!.id },
   };
   await manager.save(version);
-  return pending.request;
+  return { request: pending.request, kind: pending.kind ?? 'global' };
 }
 
 /** Alvo da edição: zona vira o retângulo do formato; a forma guarda a caixa; o elemento, o id. */
@@ -167,9 +174,11 @@ function requestedTarget(
 const replyFor = (classification: SceneClassification): string => {
   if (classification.operation === 'move_unavailable') return MOVE_UNAVAILABLE_REPLY;
   if (classification.operation === 'needs_confirmation_global') return GLOBAL_CONFIRM_REPLY;
-  return classification.operation === 'needs_region' && classification.reason === 'layer_visual'
-    ? NEEDS_REGION_LAYER_REPLY
-    : NEEDS_REGION_REPLY;
+  if (classification.operation === 'needs_confirmation_new_image') return NEW_IMAGE_CONFIRM_REPLY;
+  if (classification.operation !== 'needs_region') return NEEDS_REGION_REPLY;
+  if (classification.reason === 'layer_visual') return NEEDS_REGION_LAYER_REPLY;
+  if (classification.reason === 'place') return needsPlaceReply(classification.subject ?? '');
+  return classification.reason === 'choose_layer' ? CHOOSE_LAYER_REPLY : NEEDS_REGION_REPLY;
 };
 
 /** Operação gravada na versão (as respostas imediatas usam a mais próxima do pedido). */
@@ -186,6 +195,17 @@ const OPERATION_OF: Record<SceneClassification['operation'], SceneVersionOperati
   set_layer: 'set_layer',
 };
 
+function pendingOf(
+  classification: SceneClassification,
+  request: string,
+): ReplyPlan['pendingConfirmation'] {
+  if (classification.operation === 'needs_confirmation_global') return { request, kind: 'global' };
+  if (classification.operation === 'needs_confirmation_new_image') {
+    return { request, kind: 'new_image' };
+  }
+  return null;
+}
+
 function toPlan(
   classification: SceneClassification,
   scene: TemplateScene,
@@ -195,15 +215,15 @@ function toPlan(
   if (
     classification.operation === 'needs_region' ||
     classification.operation === 'move_unavailable' ||
-    classification.operation === 'needs_confirmation_global'
+    classification.operation === 'needs_confirmation_global' ||
+    classification.operation === 'needs_confirmation_new_image'
   ) {
     return {
       kind: 'reply',
       operation,
       classification,
       reply: replyFor(classification),
-      pendingConfirmation:
-        classification.operation === 'needs_confirmation_global' ? { request: dto.content } : null,
+      pendingConfirmation: pendingOf(classification, dto.content),
     };
   }
   const target =
@@ -236,7 +256,8 @@ export async function planMessage(
   const confirmed = dto.confirmGlobal ? await consumeConfirmation(manager, scene, dto) : null;
   const classification = classifySceneRequest({
     hasReadyVersion,
-    content: confirmed ?? dto.content,
+    content: confirmed?.request ?? dto.content,
+    confirmKind: confirmed?.kind,
     region: dto.region,
     mask: dto.mask,
     zone: dto.zone,
