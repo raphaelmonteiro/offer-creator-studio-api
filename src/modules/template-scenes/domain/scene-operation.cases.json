@@ -264,6 +264,42 @@
     "expect": { "operation": "add_element", "subject": "nuvem", "target": null }
   },
   {
+    "id": "adicionar-no-cabecalho",
+    "input": { "hasReadyVersion": true, "content": "adiciona um balão no cabeçalho" },
+    "expect": {
+      "operation": "add_element",
+      "subject": "balão",
+      "target": { "kind": "zone", "zone": "header" }
+    }
+  },
+  {
+    "id": "adicionar-no-miolo",
+    "input": { "hasReadyVersion": true, "content": "adiciona um balão no miolo da imagem." },
+    "expect": {
+      "operation": "add_element",
+      "subject": "balão",
+      "target": { "kind": "zone", "zone": "body" }
+    }
+  },
+  {
+    "id": "adicionar-no-rodape",
+    "input": { "hasReadyVersion": true, "content": "acrescenta uma nuvem no rodapé" },
+    "expect": {
+      "operation": "add_element",
+      "subject": "nuvem",
+      "target": { "kind": "zone", "zone": "footer" }
+    }
+  },
+  {
+    "id": "adicionar-zona-pelo-campo",
+    "input": { "hasReadyVersion": true, "content": "adiciona um balão", "zone": "footer" },
+    "expect": {
+      "operation": "add_element",
+      "subject": "balão",
+      "target": { "kind": "zone", "zone": "footer" }
+    }
+  },
+  {
     "id": "colocar-um-sem-item",
     "input": { "hasReadyVersion": true, "content": "coloca um balão de ar quente" },
     "expect": { "operation": "add_element", "subject": "balão de ar quente" }

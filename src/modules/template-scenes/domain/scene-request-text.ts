@@ -134,6 +134,10 @@ export function wantsAddition(folded: string): boolean {
   );
 }
 
+/** "no cabeçalho", "na base da imagem": a citação da zona não faz parte do assunto (D-14). */
+const ZONE_PHRASE =
+  /\s+(?:n[oa]s?|em|ao|para\s+[oa])\s+(?:[oa]\s+)?(?:cabe[cç]alho|header|topo|miolo|corpo|meio|rodap[eé]|footer|base)(?![a-zà-ÿ])(?:\s+d[aoe]s?\s+(?:imagem|arte|encarte|cena|folheto))?/i;
+
 /** O que se quer adicionar ("um balão de ar quente" → "balão de ar quente"). */
 export function additionSubject(original: string): string {
   const cleaned = original
@@ -143,7 +147,11 @@ export function additionSubject(original: string): string {
     )
     .replace(/^(um|uma|uns|umas|o|a)\s+/i, '')
     .trim();
-  return cleaned.replace(/[.!]+$/, '') || original.trim();
+  const subject = cleaned
+    .replace(ZONE_PHRASE, '')
+    .replace(/[.!]+$/, '')
+    .trim();
+  return subject || cleaned.replace(/[.!]+$/, '') || original.trim();
 }
 
 export interface ParsedText {

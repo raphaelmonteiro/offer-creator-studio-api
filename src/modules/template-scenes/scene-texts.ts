@@ -1,4 +1,4 @@
-import { SceneFailureCode } from './domain/scene.types';
+import { SceneFailureCode, SceneZoneName } from './domain/scene.types';
 
 /** Mensagens do assistente no chat da cena (pt-BR). */
 
@@ -47,8 +47,16 @@ export function editReply(vision: VisionFacts | null, scope: 'area' | 'scene' = 
   return `Pronto! ${changed} ${tail}`;
 }
 
-export const addElementReply = (subject: string, where: 'area' | 'center'): string =>
-  `Pronto! Adicionei "${subject}" ${where === 'area' ? 'na área marcada' : 'no centro do miolo'}. É uma camada: arraste para onde quiser. O fundo não mudou.`;
+const ADD_PLACE: Record<'area' | 'center' | SceneZoneName, string> = {
+  area: 'na área marcada',
+  center: 'no centro do miolo',
+  header: 'no cabeçalho',
+  body: 'no miolo',
+  footer: 'no rodapé',
+};
+
+export const addElementReply = (subject: string, where: keyof typeof ADD_PLACE): string =>
+  `Pronto! Adicionei "${subject}" ${ADD_PLACE[where]}. É uma camada: arraste para onde quiser. O fundo não mudou.`;
 
 export const layerReply = (changed: string[]): string =>
   `Alterado apenas: ${changed.map((name) => name.toLowerCase()).join(', ')}. A imagem de fundo não mudou.`;

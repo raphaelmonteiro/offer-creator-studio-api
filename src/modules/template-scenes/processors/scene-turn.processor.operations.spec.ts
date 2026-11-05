@@ -1,5 +1,6 @@
 import * as sharp from 'sharp';
 import { loadRgb } from '../../../shared/image/rgb';
+import { sceneZonesFor } from '../domain/scene-formats';
 import { SceneElement } from '../domain/scene.types';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import * as retention from '../services/scene-retention';
@@ -297,7 +298,10 @@ describeIfSceneDb(
 
     describe('adicionar (PNG transparente)', () => {
       const addPlan = (
-        target: { kind: 'rect'; rect: { x: number; y: number; w: number; h: number } } | null,
+        target:
+          | { kind: 'rect'; rect: { x: number; y: number; w: number; h: number } }
+          | { kind: 'zone'; zone: 'header' | 'body' | 'footer' }
+          | null,
       ) => ({
         operation: 'add_element' as const,
         subject: 'balão de ar quente',
@@ -364,6 +368,49 @@ describeIfSceneDb(
         expect(added).toMatchObject({ kind: 'generated', x: 0.5, w: 0.25 });
         expect(added.y).toBeCloseTo(0.5, 1);
         expect(await lastReply(scene.id)).toContain('no centro do miolo');
+      });
+
+      it.each([
+        ['header', 'no cabeçalho'],
+        ['body', 'no miolo'],
+        ['footer', 'no rodapé'],
+      ] as const)(
+        'zona citada (%s) sem área: no centro da zona, sem esticar, e a resposta nomeia a zona',
+        async (zone, wording) => {
+          const { scene, masterAsset } = await h.readyScene();
+          const version = await h.queueTurn(scene, {
+            plan: { ...addPlan({ kind: 'zone', zone }), subject: 'balão' },
+            request: `adiciona um balão ${wording}`,
+            operation: 'add_element',
+          });
+          await h.processorWith(h.mock()).process(h.job(scene.id, version.id));
+          const done = await h.versionOf(version.id);
+          const area = sceneZonesFor(scene.formatId)[zone];
+          const added = done.elements[0];
+          expect(done).toMatchObject({ status: 'ready', masterAssetId: masterAsset.id });
+          expect(added).toMatchObject({ kind: 'generated', name: 'Balão', x: 0.5 });
+          expect(added.y).toBeCloseTo(area.y + area.h / 2, 5);
+          expect(added.w).toBeLessThanOrEqual(0.25 + 1e-9);
+          const heightPx = (added.w * scene.widthPx) / added.aspect;
+          expect(heightPx).toBeLessThanOrEqual(area.h * scene.heightPx + 1e-6);
+          const reply = await lastReply(scene.id);
+          expect(reply).toContain(`"balão" ${wording}.`);
+          expect(reply).not.toContain('centro do miolo');
+        },
+      );
+
+      it('zona estreita reduz a largura para caber na altura, sem esticar', async () => {
+        const { scene } = await h.readyScene();
+        const area = sceneZonesFor(scene.formatId).footer;
+        const version = await h.queueTurn(scene, {
+          plan: addPlan({ kind: 'zone', zone: 'footer' }),
+          request: 'adiciona um balão no rodapé',
+          operation: 'add_element',
+        });
+        await h.processorWith(h.mock()).process(h.job(scene.id, version.id));
+        const added = (await h.versionOf(version.id)).elements[0];
+        const fit = ((area.h * scene.heightPx) / scene.widthPx) * added.aspect;
+        expect(added.w).toBeCloseTo(Math.min(0.25, fit), 9);
       });
 
       it('imagem toda transparente: falha com o custo gravado e sem elemento', async () => {
