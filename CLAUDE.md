@@ -113,6 +113,8 @@ TEMPLATE_SCENE_MAX_PAID_CALLS_PER_MESSAGE
                               # disjuntor: chamadas pagas por mensagem (padrão 4)
 TEMPLATE_SCENE_VISION_MODEL / TEMPLATE_SCENE_VISION_TIMEOUT_MS
                               # gpt-6-luna (reasoning_effort low, detail low) / 20000: passou do tempo, a resposta sai das métricas
+TEMPLATE_SCENE_INTENT_MODEL / TEMPLATE_SCENE_INTENT_TIMEOUT_MS
+                              # reconhecimento de intenção (D-19): gpt-6-luna (só texto, reasoning_effort low, json_schema) / 8000 ms; só roda com TEMPLATE_SCENE_IMAGE_PROVIDER=openai (senão MockSceneIntentClient, sem custo)
 TEMPLATE_SCENE_EDIT_QUALITY   # qualidade das edições com máscara e do ajuste geral (padrão high)
 TEMPLATE_SCENE_FEATHER_PX / TEMPLATE_SCENE_MARGIN_RATIO / TEMPLATE_SCENE_INSET_PX / TEMPLATE_SCENE_NOOP_THRESHOLD
                               # edição local (M3): feather 48 px, margem 4% do menor lado, recuo 40 px na saída do modelo, limiar 0,02 de "sem mudança"
@@ -615,17 +617,25 @@ kind, step, status, cancelRequested, costUsd, revision, at}`. O `AnimationEvents
 cena) roteia por cena em `subscribeScene(sceneId)`; a assinatura por usuário não muda. O front refaz `GET /:id` a cada evento.
 
 **Retenção (D-12, PV-5)**: master e prévia ficam protegidas enquanto uma das `TEMPLATE_SCENE_MASTERS_KEPT` (5) versões
-`ready` mais recentes ou uma versão aprovada as referenciar. `pruneSceneAssets` marca `expiresAt` no restore, no `PATCH` e
+`ready` mais recentes (inclusive as tentativas `notApplied`, D-20), uma versão aprovada ou a versão atual as referenciar (R22). `pruneSceneAssets` marca `expiresAt` no restore, no `PATCH` e
 no processor; o GC (`UploadsGcService.runTemplateScenes` → `shared/gc/template-scenes-gc.runner.ts`, regras puras em
 `template-scenes-gc.rules.ts`) trava a cena, grava `purgedAt` e só então apaga o arquivo, sempre sob
 `/uploads/template-scenes/`. "Restaurável" = `purgedAt` nulo na master (derivado, sem marca por versão). O GC das cenas
 roda no worker com a flag da cena, independente de animações e comerciais.
 
-**Edição local (estágio 4, change `add-template-scene-local-edit`)**: `POST /messages` classifica a mensagem **por regra, sem
-modelo** (`domain/scene-operation.classifier.ts`; tabela de casos compartilhada com o front em
-`domain/scene-operation.cases.json`) e, sob o lock da cena, ou enfileira o job ou responde na hora (versão `rejected`,
-custo 0, `jobId: null`) nos casos `needs_region`, `move_unavailable` e na pergunta do ajuste geral
-(`needs_confirmation_global`, confirmada com `confirmGlobal` + `replyToMessageId`). O alvo é um só: `region`, `mask`
+**Edição local (estágio 4, change `add-template-scene-local-edit`)**: `POST /messages` reconhece a **intenção por modelo**
+(D-19). Sem modelo, por sinal estruturado (`domain/scene-operation.classifier.ts`): sem versão pronta (geração), anexo de logo
+e elemento selecionado (lista curta de verbos: mover, redimensionar, tirar, integrar); a confirmação (`confirmGlobal` +
+`replyToMessageId`) segue o plano guardado na pergunta, sem reclassificar. Nos demais casos, **antes do lock**, uma chamada de
+`gpt-6-luna` só com texto (`OpenAiIntentService` no módulo `ai`; `SceneIntentService` na cena; `SCENE_INTENT_CLIENT`
+`openai` | `MockSceneIntentClient`) devolve um JSON de schema fechado (`domain/scene-intent.ts`); o código valida e decide o
+efeito (`domain/scene-intent-plan.ts`, `planFromIntent`; marcação sempre manda no alvo). O lock é tomado depois, com
+`expectedRevision` e `SCENE_BUSY` conferidos de novo. Falha do modelo (JSON, schema, tempo de 8 s, erro) não gasta imagem:
+`needs_region` sem marcação, `needs_confirmation_edit` com marcação. O custo vai em `metrics.intent` e soma em
+`providerCostUsd` (fora de `metrics.calls`). O conjunto de avaliação (`domain/scene-intent.eval.json`) serve de fixture do
+`mock` e da avaliação paga (task 1.45). Em seguida, sob o lock, ou enfileira o job ou responde na hora (versão `rejected`,
+sem chamada de imagem, `jobId: null`) nos casos `needs_region`, `move_unavailable` e nas perguntas
+(`needs_confirmation_global`, `needs_confirmation_new_image`, `needs_confirmation_edit`). O alvo é um só: `region`, `mask`
 (`MaskShape`, até 2000 pontos), `zone` ou `targetElementId` (400 se vierem juntos; 422 `REGION_TOO_SMALL` abaixo de 0,1% da
 cena). O consumer escolhe o tratador pela operação (`processors/scene-*.handler.ts`):
 - `local_edit` (e "remover"): `SceneImageService` recorta a região com margem (`domain/scene-region.ts`), monta a máscara
