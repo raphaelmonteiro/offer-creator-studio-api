@@ -32,6 +32,8 @@ function equalRgb(a: Img, b: Img, skip: Raster): number {
 }
 
 describe('SceneImageService', () => {
+  // imagens de até 1920x3840 em memória: com a suíte inteira em paralelo passam dos 5 s padrão
+  jest.setTimeout(30_000);
   let master: Buffer;
   beforeAll(async () => {
     master = await syntheticScenePng(W, H);
