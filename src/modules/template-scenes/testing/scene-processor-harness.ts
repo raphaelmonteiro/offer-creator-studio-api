@@ -12,6 +12,7 @@ import { SceneTurnProcessor } from '../processors/scene-turn.processor';
 import { SceneTurnState } from '../processors/scene-turn-state';
 import { MockSceneImageProvider } from '../providers/mock-scene-image.provider';
 import {
+  SceneEditInput,
   SceneGenerateInput,
   SceneGenerateResult,
   SceneImageProvider,
@@ -80,10 +81,26 @@ export function useProcessorHarness() {
         where: { sceneId },
         order: { createdAt: 'ASC' },
       }),
-    /** Provedor controlado: devolve o resultado ou lança o erro, e registra as chamadas. */
-    fakeProvider(behavior: (input: SceneGenerateInput) => Promise<SceneGenerateResult>) {
+    /**
+     * Provedor controlado: devolve o resultado ou lança o erro, e registra as chamadas. `edit` e
+     * `generateTransparent` usam o mesmo comportamento quando não vêm explícitos.
+     */
+    fakeProvider(
+      behavior: (input: SceneGenerateInput) => Promise<SceneGenerateResult>,
+      others: {
+        edit?: (input: SceneEditInput) => Promise<SceneGenerateResult>;
+        transparent?: (input: SceneGenerateInput) => Promise<SceneGenerateResult>;
+      } = {},
+    ) {
       const generate = jest.fn(behavior);
-      return { provider: { name: 'mock', generate } as SceneImageProvider, generate };
+      const edit = jest.fn(others.edit ?? behavior);
+      const generateTransparent = jest.fn(others.transparent ?? behavior);
+      return {
+        provider: { name: 'mock', generate, edit, generateTransparent } as SceneImageProvider,
+        generate,
+        edit,
+        generateTransparent,
+      };
     },
     okResult: async (costUsd: number | null = 0.1365): Promise<SceneGenerateResult> => ({
       buffer: await sharp({

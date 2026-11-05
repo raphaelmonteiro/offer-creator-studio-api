@@ -24,13 +24,23 @@ export interface SceneGenerateResult {
   latencyMs: number;
 }
 
+export interface SceneEditInput extends SceneGenerateInput {
+  /** PNG enviado: o recorte da edição local, ou a master inteira no ajuste geral. */
+  image: Buffer;
+  /** PNG da máscara (alfa 255 = editar) do tamanho de `image`; ausente no ajuste geral. */
+  mask?: Buffer;
+}
+
 /**
- * Porta do provedor de imagem da cena (D-2). `generate` neste estágio; `edit` entra no estágio 4.
+ * Porta do provedor de imagem da cena (D-2): `generate` (primeira geração), `edit` (edição local com
+ * máscara ou ajuste geral sem ela) e `generateTransparent` (PNG com fundo transparente do "adicionar").
  * Falha do provedor vira `SceneProviderError` com o código que a versão grava.
  */
 export interface SceneImageProvider {
   readonly name: 'mock' | 'openai';
   generate(input: SceneGenerateInput): Promise<SceneGenerateResult>;
+  edit(input: SceneEditInput): Promise<SceneGenerateResult>;
+  generateTransparent(input: SceneGenerateInput): Promise<SceneGenerateResult>;
 }
 
 /** Falha do provedor já classificada para a versão (`errorCode`). */

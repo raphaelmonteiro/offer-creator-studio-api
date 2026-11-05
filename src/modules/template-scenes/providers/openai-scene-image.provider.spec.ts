@@ -82,6 +82,89 @@ describe('OpenAiSceneImageProvider', () => {
   });
 });
 
+describe('OpenAiSceneImageProvider: edição e imagem transparente', () => {
+  const IMAGE = Buffer.from('recorte');
+  const MASK = Buffer.from('mascara');
+  const OK = {
+    image: { buffer: Buffer.from('png') },
+    usage: { output_tokens: 10 },
+    costUsd: 0.035,
+    requestId: 'req_edit',
+  };
+
+  it('edição com máscara: envia recorte e máscara no modo sceneCall, PNG opaco', async () => {
+    const editImage = jest.fn().mockResolvedValue(OK);
+    const provider = new OpenAiSceneImageProvider(
+      { editImage } as unknown as OpenAiImageService,
+      new ConfigService({ OPENAI_TIMEOUT_MS: '60000' }),
+    );
+
+    const result = await provider.edit({ ...INPUT, size: '1024x1024', image: IMAGE, mask: MASK });
+
+    expect(editImage).toHaveBeenCalledWith({
+      feature: 'template-scene',
+      prompt: 'campo verde',
+      imageBuffer: IMAGE,
+      imageMimeType: 'image/png',
+      size: '1024x1024',
+      assetKind: 'template',
+      model: 'gpt-image-2.5-sunburst',
+      quality: 'high',
+      outputFormat: 'png',
+      background: 'opaque',
+      sceneCall: { timeoutMs: 60_000, correlationId: 'corr-1' },
+      mask: { buffer: MASK },
+    });
+    expect(result).toMatchObject({ costUsd: 0.035, requestId: 'req_edit' });
+  });
+
+  it('ajuste geral: sem máscara, o campo mask nem vai', async () => {
+    const editImage = jest.fn().mockResolvedValue(OK);
+    const provider = new OpenAiSceneImageProvider(
+      { editImage } as unknown as OpenAiImageService,
+      new ConfigService({}),
+    );
+    await provider.edit({ ...INPUT, image: IMAGE });
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty('mask');
+  });
+
+  it('imagem transparente: background transparent e PNG, no modo sceneCall', async () => {
+    const generateImage = jest.fn().mockResolvedValue(OK);
+    const provider = new OpenAiSceneImageProvider(
+      { generateImage } as unknown as OpenAiImageService,
+      new ConfigService({}),
+    );
+
+    await provider.generateTransparent({ ...INPUT, size: '1024x1024' });
+
+    expect(generateImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetKind: 'transparent',
+        background: 'transparent',
+        outputFormat: 'png',
+        sceneCall: { timeoutMs: 180_000, correlationId: 'corr-1' },
+      }),
+    );
+  });
+
+  it('falhas da edição e da imagem transparente saem classificadas', async () => {
+    const quota = new TerminalProviderError('sem saldo', 'quota');
+    const provider = new OpenAiSceneImageProvider(
+      {
+        editImage: jest.fn().mockRejectedValue(quota),
+        generateImage: jest.fn().mockRejectedValue(quota),
+      } as unknown as OpenAiImageService,
+      new ConfigService({}),
+    );
+    await expect(provider.edit({ ...INPUT, image: IMAGE, mask: MASK })).rejects.toMatchObject({
+      code: 'PROVIDER_QUOTA',
+    });
+    await expect(provider.generateTransparent(INPUT)).rejects.toMatchObject({
+      code: 'PROVIDER_QUOTA',
+    });
+  });
+});
+
 describe('classifySceneProviderError', () => {
   it.each([
     [new TerminalProviderError('q', 'quota'), 'PROVIDER_QUOTA'],
