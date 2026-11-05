@@ -173,6 +173,31 @@ describeIfSceneDb(
           errorCode: 'PAID_CALL_LIMIT',
         });
       });
+
+      it('limite 1 e nada gravado (PV-8): a imagem roda, a visão é pulada, a versão fica ready e o custo é só o da edição', async () => {
+        const { scene } = await h.readyScene({ elements: [genEl] });
+        const version = await h.queueTurn(scene, {
+          plan: globalPlan,
+          request: 'Confirmar',
+          operation: 'generate',
+        });
+        const real = h.mock();
+        const { provider, edit } = h.fakeProvider(() => h.okResult(), {
+          edit: async (input) => ({ ...(await real.edit(input)), costUsd: 0.14 }),
+        });
+        const vision = { compare: jest.fn() };
+
+        await h
+          .processorWith(provider, { TEMPLATE_SCENE_MAX_PAID_CALLS_PER_MESSAGE: '1' }, vision)
+          .process(h.job(scene.id, version.id));
+
+        expect(edit).toHaveBeenCalledTimes(1);
+        expect(vision.compare).not.toHaveBeenCalled();
+        const done = await h.versionOf(version.id);
+        expect(done).toMatchObject({ status: 'ready', errorCode: null, providerCostUsd: 0.14 });
+        expect(done.metrics.calls).toEqual([expect.objectContaining({ kind: 'edit' })]);
+        expect(await lastReply(scene.id)).toContain('Criei uma nova versão do fundo');
+      });
     });
 
     describe('set_layer pelo chat (sem modelo)', () => {
