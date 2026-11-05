@@ -6,6 +6,7 @@ import { TemplateSceneVersion } from '../entities/template-scene-version.entity'
 import { insertReadyVersion, insertScene } from '../testing/scene-fixtures';
 import { errorOf } from '../testing/scene-test-helpers';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
+import { SceneReadService } from './scene-read.service';
 import { SceneLockService } from './scene-lock.service';
 import { SceneTurnService } from './scene-turn.service';
 
@@ -70,6 +71,28 @@ describeIfSceneDb('SceneTurnService: classificação do pedido (banco chroma_x_e
       ['user', 'done'],
       ['assistant', 'done'],
     ]);
+  });
+
+  it('ordem das mensagens na resposta sem job: o usuário vem antes do assistente em todas', async () => {
+    const scene = await readyScene('Cls ordem');
+    const prompts = ['coloca um brilho no sol', 'troca o sol de lado', 'deixa tudo mais quente'];
+    let revision = 0;
+    for (const content of prompts) {
+      const result = await send(scene.id, { content }, revision);
+      expect(result.jobId).toBeNull();
+      revision = result.revision;
+    }
+
+    const detail = await new SceneReadService(dataSource).loadDetail(scene.id);
+    expect(detail.messages.map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
+    expect(detail.messages.filter((m) => m.role === 'user').map((m) => m.content)).toEqual(prompts);
   });
 
   it('mover um item da imagem: explica e oferece remover e adicionar, sem job', async () => {

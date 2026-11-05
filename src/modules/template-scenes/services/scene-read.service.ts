@@ -44,7 +44,10 @@ export class SceneReadService {
     });
     const messages = await manager.find(TemplateSceneMessage, {
       where: { sceneId },
-      order: { createdAt: 'DESC' },
+      // Resposta sem job grava as duas mensagens na mesma transação, e o `now()` do Postgres é a hora de
+      // início dela: `createdAt` empata. Em ordem DESC (antes do `reverse`), 'assistant' < 'user' põe o
+      // assistente primeiro, e o `reverse` deixa o usuário antes do assistente (PV-21).
+      order: { createdAt: 'DESC', role: 'ASC' },
       take: SCENE_LIMITS.recentMessages,
     });
 

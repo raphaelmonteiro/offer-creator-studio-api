@@ -146,6 +146,13 @@ describeIfSceneDb('Cena de template: edição local (e2e, banco chroma_x_e2e)', 
     expect(after.activeVersion).toBeNull();
     expect(after.currentVersion.number).toBe(1);
     expect(after.totalCostUsd).toBe(first.totalCostUsd);
+    // PV-21: nas respostas sem job o usuário vem antes do assistente.
+    expect(after.messages.slice(-4).map((m: { role: string }) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
     expect(after.versions.items.slice(0, 2).map((v: { status: string }) => v.status)).toEqual([
       'rejected',
       'rejected',
