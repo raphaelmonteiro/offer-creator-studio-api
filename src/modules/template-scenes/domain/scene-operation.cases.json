@@ -1,0 +1,382 @@
+[
+  {
+    "id": "generate-sem-versao",
+    "input": { "hasReadyVersion": false, "content": "campo verde com sol à direita" },
+    "expect": { "operation": "generate" }
+  },
+  {
+    "id": "generate-ignora-marcacao",
+    "input": {
+      "hasReadyVersion": false,
+      "content": "campo verde",
+      "region": { "x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2 }
+    },
+    "expect": { "operation": "generate" }
+  },
+  {
+    "id": "logo-e-frase",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "coloca a logo à esquerda no cabeçalho e escreve \"Ofertas da semana\" embaixo dela",
+      "attachments": [{ "assetId": "11111111-1111-4111-8111-111111111111" }]
+    },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [
+        { "type": "add_logo", "side": "left", "zone": "header" },
+        { "type": "set_text", "text": "Ofertas da semana", "placement": "below-logo" }
+      ]
+    }
+  },
+  {
+    "id": "logo-padrao",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "coloca a logo",
+      "attachments": [{ "assetId": "11111111-1111-4111-8111-111111111111" }]
+    },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "add_logo", "side": "left", "zone": "header" }]
+    }
+  },
+  {
+    "id": "logo-direita-rodape",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "coloca a logo à direita no rodapé",
+      "attachments": [{ "assetId": "11111111-1111-4111-8111-111111111111" }]
+    },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "add_logo", "side": "right", "zone": "footer" }]
+    }
+  },
+  {
+    "id": "texto-entre-aspas",
+    "input": { "hasReadyVersion": true, "content": "escreve \"Super oferta\"" },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [
+        { "type": "set_text", "text": "Super oferta", "placement": "none", "replace": false }
+      ]
+    }
+  },
+  {
+    "id": "texto-aspas-com-marcacao",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "escreve \"Black Friday\" em cima",
+      "region": { "x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2 }
+    },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "set_text", "text": "Black Friday", "placement": "top" }]
+    }
+  },
+  {
+    "id": "troca-o-texto",
+    "input": { "hasReadyVersion": true, "content": "muda o texto para Black Friday" },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "set_text", "text": "Black Friday", "replace": true }]
+    }
+  },
+  {
+    "id": "selecionado-logo-mover",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "passa para a direita",
+      "targetElement": { "id": "logo-1", "kind": "logo" }
+    },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "move", "target": { "elementId": "logo-1" }, "side": "right" }]
+    }
+  },
+  {
+    "id": "selecionado-texto-aumentar",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "aumenta",
+      "targetElement": { "id": "text-1", "kind": "text" }
+    },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "resize", "target": { "elementId": "text-1" }, "direction": "bigger" }]
+    }
+  },
+  {
+    "id": "selecionado-logo-tirar",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "tira",
+      "targetElement": { "id": "logo-1", "kind": "logo" }
+    },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "remove", "target": { "elementId": "logo-1" } }]
+    }
+  },
+  {
+    "id": "selecionado-gerado-visual",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "deixa mais colorido",
+      "targetElement": { "id": "gen-1", "kind": "generated" }
+    },
+    "expect": {
+      "operation": "local_edit",
+      "target": { "kind": "element", "elementId": "gen-1" },
+      "remove": false
+    }
+  },
+  {
+    "id": "selecionado-gerado-mover",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "move para a esquerda",
+      "targetElement": { "id": "gen-1", "kind": "generated" }
+    },
+    "expect": { "operation": "set_layer", "actions": [{ "type": "move", "side": "left" }] }
+  },
+  {
+    "id": "selecionado-logo-visual",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "deixa mais azul",
+      "targetElement": { "id": "logo-1", "kind": "logo" }
+    },
+    "expect": { "operation": "needs_region", "reason": "layer_visual" }
+  },
+  {
+    "id": "logo-para-a-direita",
+    "input": { "hasReadyVersion": true, "content": "passa a logo para a direita" },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "move", "target": { "kind": "logo" }, "side": "right" }]
+    }
+  },
+  {
+    "id": "logo-de-lado",
+    "input": { "hasReadyVersion": true, "content": "troca a logo de lado" },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "move", "target": { "kind": "logo" }, "side": "toggle" }]
+    }
+  },
+  {
+    "id": "texto-maior",
+    "input": { "hasReadyVersion": true, "content": "aumenta o texto" },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "resize", "target": { "kind": "text" }, "direction": "bigger" }]
+    }
+  },
+  {
+    "id": "tira-a-logo",
+    "input": { "hasReadyVersion": true, "content": "tira a logo" },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "remove", "target": { "kind": "logo" } }]
+    }
+  },
+  {
+    "id": "remover-o-texto",
+    "input": { "hasReadyVersion": true, "content": "remover o texto" },
+    "expect": {
+      "operation": "set_layer",
+      "actions": [{ "type": "remove", "target": { "kind": "text" } }]
+    }
+  },
+  {
+    "id": "logo-visual-sem-area",
+    "input": { "hasReadyVersion": true, "content": "deixa a logo mais brilhante" },
+    "expect": { "operation": "needs_region", "reason": "layer_visual" }
+  },
+  {
+    "id": "mover-sol-de-lado",
+    "input": { "hasReadyVersion": true, "content": "troca o sol de lado" },
+    "expect": { "operation": "move_unavailable" }
+  },
+  {
+    "id": "mover-sol-esquerda",
+    "input": { "hasReadyVersion": true, "content": "mover o sol para a esquerda" },
+    "expect": { "operation": "move_unavailable" }
+  },
+  {
+    "id": "mover-nuvem-com-area",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "move a nuvem para a direita",
+      "region": { "x": 0.5, "y": 0.1, "w": 0.2, "h": 0.1 }
+    },
+    "expect": { "operation": "move_unavailable" }
+  },
+  {
+    "id": "levar-sol",
+    "input": { "hasReadyVersion": true, "content": "leva o sol para a direita" },
+    "expect": { "operation": "move_unavailable" }
+  },
+  {
+    "id": "remover-nao-e-mover",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "remover o sol",
+      "region": { "x": 0.6, "y": 0.1, "w": 0.2, "h": 0.2 }
+    },
+    "expect": { "operation": "local_edit", "target": { "kind": "rect" }, "remove": true }
+  },
+  {
+    "id": "tirar-nuvem-pincel",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "tira a nuvem",
+      "mask": {
+        "kind": "brush",
+        "radius": 0.02,
+        "strokes": [
+          [
+            { "x": 0.3, "y": 0.2 },
+            { "x": 0.4, "y": 0.2 }
+          ]
+        ]
+      }
+    },
+    "expect": { "operation": "local_edit", "target": { "kind": "mask" }, "remove": true }
+  },
+  {
+    "id": "adicionar-balao",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "adiciona um balão de ar quente",
+      "region": { "x": 0.3, "y": 0.1, "w": 0.2, "h": 0.2 }
+    },
+    "expect": {
+      "operation": "add_element",
+      "subject": "balão de ar quente",
+      "target": { "kind": "rect" }
+    }
+  },
+  {
+    "id": "adicionar-sem-area",
+    "input": { "hasReadyVersion": true, "content": "acrescenta uma nuvem" },
+    "expect": { "operation": "add_element", "subject": "nuvem", "target": null }
+  },
+  {
+    "id": "colocar-um-sem-item",
+    "input": { "hasReadyVersion": true, "content": "coloca um balão de ar quente" },
+    "expect": { "operation": "add_element", "subject": "balão de ar quente" }
+  },
+  {
+    "id": "item-sem-area",
+    "input": { "hasReadyVersion": true, "content": "coloca um brilho no sol" },
+    "expect": { "operation": "needs_region", "reason": "item" }
+  },
+  {
+    "id": "sol-sem-area",
+    "input": { "hasReadyVersion": true, "content": "deixa o sol mais brilhante" },
+    "expect": { "operation": "needs_region", "reason": "item" }
+  },
+  {
+    "id": "sol-com-retangulo",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "deixa o sol mais alaranjado",
+      "region": { "x": 0.6, "y": 0.05, "w": 0.3, "h": 0.15 }
+    },
+    "expect": { "operation": "local_edit", "target": { "kind": "rect" }, "remove": false }
+  },
+  {
+    "id": "sol-com-laco",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "deixa o sol mais brilhante",
+      "mask": {
+        "kind": "lasso",
+        "points": [
+          { "x": 0.6, "y": 0.1 },
+          { "x": 0.7, "y": 0.1 },
+          { "x": 0.65, "y": 0.2 }
+        ]
+      }
+    },
+    "expect": { "operation": "local_edit", "target": { "kind": "mask" } }
+  },
+  {
+    "id": "zona-no-texto-cabecalho",
+    "input": { "hasReadyVersion": true, "content": "deixa o céu do cabeçalho mais limpo" },
+    "expect": { "operation": "local_edit", "target": { "kind": "zone", "zone": "header" } }
+  },
+  {
+    "id": "zona-no-texto-rodape",
+    "input": { "hasReadyVersion": true, "content": "deixa o rodapé mais escuro" },
+    "expect": { "operation": "local_edit", "target": { "kind": "zone", "zone": "footer" } }
+  },
+  {
+    "id": "zona-sinonimo-miolo",
+    "input": { "hasReadyVersion": true, "content": "deixa o meio mais claro" },
+    "expect": { "operation": "local_edit", "target": { "kind": "zone", "zone": "body" } }
+  },
+  {
+    "id": "zona-sinonimo-topo",
+    "input": { "hasReadyVersion": true, "content": "mais nuvens no topo" },
+    "expect": { "operation": "local_edit", "target": { "kind": "zone", "zone": "header" } }
+  },
+  {
+    "id": "zona-pelo-campo",
+    "input": { "hasReadyVersion": true, "content": "deixa mais limpo", "zone": "footer" },
+    "expect": { "operation": "local_edit", "target": { "kind": "zone", "zone": "footer" } }
+  },
+  {
+    "id": "trocar-nao-e-adicionar",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "troca o sol por uma lua",
+      "region": { "x": 0.6, "y": 0.05, "w": 0.3, "h": 0.15 }
+    },
+    "expect": { "operation": "local_edit", "remove": false }
+  },
+  {
+    "id": "colocar-no-ceu-com-area",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "coloca um balão no céu",
+      "region": { "x": 0.2, "y": 0.1, "w": 0.3, "h": 0.2 }
+    },
+    "expect": { "operation": "local_edit", "target": { "kind": "rect" } }
+  },
+  {
+    "id": "global-tudo-quente",
+    "input": { "hasReadyVersion": true, "content": "deixa tudo mais quente" },
+    "expect": { "operation": "needs_confirmation_global" }
+  },
+  {
+    "id": "global-imagem-vibrante",
+    "input": { "hasReadyVersion": true, "content": "deixa a imagem mais vibrante" },
+    "expect": { "operation": "needs_confirmation_global" }
+  },
+  {
+    "id": "global-fundo-claro",
+    "input": { "hasReadyVersion": true, "content": "deixa o fundo mais claro" },
+    "expect": { "operation": "needs_confirmation_global" }
+  },
+  {
+    "id": "global-confirmado",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "deixa tudo mais quente",
+      "confirmGlobal": true
+    },
+    "expect": { "operation": "global_regenerate" }
+  },
+  {
+    "id": "logo-visual-com-area",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "deixa o fundo atrás do texto mais claro",
+      "region": { "x": 0.1, "y": 0.02, "w": 0.8, "h": 0.1 }
+    },
+    "expect": { "operation": "local_edit", "target": { "kind": "rect" } }
+  }
+]
