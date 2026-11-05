@@ -9,7 +9,7 @@ import {
   SceneProviderError,
 } from '../providers/scene-image-provider';
 import { SceneFilesService } from '../services/scene-files.service';
-import { buildSceneOutputs, SceneOutputs } from './scene-output';
+import { buildSceneOutputs, SceneOutputs } from '../services/scene-output';
 import { buildGeneratePrompt } from './scene-prompt';
 import { SceneTurnState, StoredFile, TurnContext } from './scene-turn-state';
 
