@@ -210,7 +210,8 @@ describe('SceneImageService', () => {
     const TALL_RECT: RegionSpec = { kind: 'rect', rect: { x: 0.4, y: 0.4, w: 0.2, h: 0.1 } };
     const mock = () =>
       new MockSceneImageProvider(new ConfigService({ TEMPLATE_SCENE_MOCK_LATENCY_MS: '0' }));
-    const mockEdit = (
+    const mockEdit = async (
+      svc: SceneImageService,
       prepared: Awaited<ReturnType<SceneImageService['prepareEdit']>>,
       mask: Buffer,
     ) =>
@@ -222,7 +223,7 @@ describe('SceneImageService', () => {
         correlationId: 'c',
         image: prepared.imagePng,
         mask,
-        paintMask: prepared.shapeMaskPng,
+        paintMask: await svc.shapeMask(prepared),
       });
 
     it('modelo que devolve a entrada: margem 0, sem redução e com recorte reduzido (a reamostragem não pesa)', async () => {
@@ -249,7 +250,10 @@ describe('SceneImageService', () => {
       const tall = await syntheticScenePng(1920, 3840);
       const prepared = await svc.prepareEdit({ master: tall, region: TALL_RECT, zones });
       const image = await loadRgb(prepared.imagePng);
-      const alpha = await sharp(prepared.shapeMaskPng).ensureAlpha().raw().toBuffer();
+      const alpha = await sharp(await svc.shapeMask(prepared))
+        .ensureAlpha()
+        .raw()
+        .toBuffer();
       const data = Buffer.from(image.data);
       for (let i = 0; i < image.width * image.height; i += 1) {
         if (alpha[i * 4 + 3] === 255) data.set([250, 120, 0], i * 3);
@@ -268,7 +272,7 @@ describe('SceneImageService', () => {
       const svc = service();
       const tall = await syntheticScenePng(1920, 3840);
       const prepared = await svc.prepareEdit({ master: tall, region: TALL_RECT, zones });
-      const out = await mockEdit(prepared, prepared.maskPng);
+      const out = await mockEdit(svc, prepared, prepared.maskPng);
       const result = await svc.completeEdit(prepared, out.buffer);
       expect(result.metrics.insideMaskDiffRatio).toBeGreaterThan(0.9);
       expect(result.metrics.marginDiffRatio).toBeLessThan(0.05);

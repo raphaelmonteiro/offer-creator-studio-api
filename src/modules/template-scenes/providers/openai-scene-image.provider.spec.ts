@@ -118,6 +118,22 @@ describe('OpenAiSceneImageProvider: edição e imagem transparente', () => {
     expect(result).toMatchObject({ costUsd: 0.035, requestId: 'req_edit' });
   });
 
+  it('paintMask é só do mock: o corpo enviado ao serviço de imagem é o mesmo com e sem ele (R4)', async () => {
+    const editImage = jest.fn().mockResolvedValue(OK);
+    const provider = new OpenAiSceneImageProvider(
+      { editImage } as unknown as OpenAiImageService,
+      new ConfigService({ OPENAI_TIMEOUT_MS: '60000' }),
+    );
+    const base = { ...INPUT, size: '1024x1024', image: IMAGE, mask: MASK };
+
+    await provider.edit(base);
+    await provider.edit({ ...base, paintMask: Buffer.from('so-o-mock') });
+
+    expect(editImage.mock.calls[1][0]).toEqual(editImage.mock.calls[0][0]);
+    expect(Object.keys(editImage.mock.calls[1][0])).not.toContain('paintMask');
+    expect(JSON.stringify(editImage.mock.calls[1][0])).not.toContain('so-o-mock');
+  });
+
   it('ajuste geral: sem máscara, o campo mask nem vai', async () => {
     const editImage = jest.fn().mockResolvedValue(OK);
     const provider = new OpenAiSceneImageProvider(

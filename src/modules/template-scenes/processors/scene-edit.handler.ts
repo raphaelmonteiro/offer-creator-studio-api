@@ -97,6 +97,8 @@ export class SceneEditHandler implements TurnHandler {
     prompt: string,
   ): Promise<Buffer | null> {
     const size = `${prepared.plan.sendW}x${prepared.plan.sendH}`;
+    const paintMask =
+      this.provider.name === 'mock' ? await this.images.shapeMask(prepared) : undefined;
     const result = await this.calls.imageCall(ctx, {
       kind: 'edit',
       model: this.support.model(),
@@ -110,7 +112,7 @@ export class SceneEditHandler implements TurnHandler {
           correlationId: ctx.correlationId,
           image: prepared.imagePng,
           mask: prepared.maskPng,
-          paintMask: prepared.shapeMaskPng,
+          ...(paintMask ? { paintMask } : {}),
         }),
     });
     return result?.buffer ?? null;
