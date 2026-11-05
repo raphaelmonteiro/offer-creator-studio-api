@@ -5,21 +5,18 @@ import {
   fold,
   LayerKind,
   layerKindIn,
-  logoPositionIn,
-  LogoPosition,
   mentionsIntegrate,
   mentionsMove,
   mentionsPlaceOfItem,
   mentionsRemove,
   mentionsResize,
-  parseText,
-  ParsedText,
   Side,
   sideIn,
   wantsAddition,
   wantsNewImage,
   zoneAsPlace,
 } from './scene-request-text';
+import { LogoPosition, logoPositionIn, ParsedText, parseText } from './scene-request-parse';
 
 /** Elemento selecionado na prévia como alvo do pedido. */
 export interface ClassifierTargetElement {

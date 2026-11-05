@@ -7,10 +7,10 @@ import {
   detectZone,
   fold,
   mentionsMove,
-  parseText,
   wantsNewImage,
   zoneAsPlace,
 } from './scene-request-text';
+import { parseText } from './scene-request-parse';
 
 interface Case {
   id: string;
