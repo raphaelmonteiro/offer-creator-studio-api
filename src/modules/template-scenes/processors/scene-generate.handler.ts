@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import * as sharp from 'sharp';
 import { SCENE_IMAGE_PROVIDER, SceneImageProvider } from '../providers/scene-image-provider';
-import { editReply } from '../scene-texts';
+import { editReply, VisionFacts } from '../scene-texts';
 import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneCallRunner } from './scene-call-runner';
 import { buildGeneratePrompt, buildGlobalPrompt } from './scene-prompt';
@@ -83,18 +83,8 @@ export class SceneGenerateHandler implements TurnHandler {
     const next = await this.editWholeScene(ctx, master, instruction);
     if (!next) return;
     if (!(await state.advance(ctx, 'checking'))) return;
-    const assessment = await this.calls.visionCall(ctx, {
-      model: this.vision.model(),
-      run: async () =>
-        this.vision.assess({
-          request: instruction,
-          before: await this.support.thumbnail(master),
-          after: await this.support.thumbnail(next),
-          correlationId: ctx.correlationId,
-        }),
-    });
-    if (assessment.status === 'over') return;
-    const facts = assessment.status === 'ok' && assessment.value.ok ? assessment.value : null;
+    const facts = await this.assess(ctx, { before: master, after: next, instruction });
+    if (facts === 'over') return;
     await this.support.finishWithImage(ctx, next, {
       reply: editReply(facts, 'scene'),
       ...(facts?.satisfied === 'nao' ? { notApplied: { changed: facts.changed } } : {}),
@@ -103,6 +93,25 @@ export class SceneGenerateHandler implements TurnHandler {
         vision: facts ? { satisfied: facts.satisfied } : null,
       },
     });
+  }
+
+  /** Visão antes/depois do ajuste geral: os fatos, `null` sem visão, ou `'over'` se a versão já foi encerrada (limite de chamadas ou cancelamento). */
+  private async assess(
+    ctx: TurnContext,
+    input: { before: Buffer; after: Buffer; instruction: string },
+  ): Promise<VisionFacts | 'over' | null> {
+    const assessment = await this.calls.visionCall(ctx, {
+      model: this.vision.model(),
+      run: async () =>
+        this.vision.assess({
+          request: input.instruction,
+          before: await this.support.thumbnail(input.before),
+          after: await this.support.thumbnail(input.after),
+          correlationId: ctx.correlationId,
+        }),
+    });
+    if (assessment.status === 'over') return 'over';
+    return assessment.status === 'ok' && assessment.value.ok ? assessment.value : null;
   }
 
   /** `images.edit` sem máscara sobre a master inteira; devolve a saída no tamanho da cena, ou `null` se a chamada não deu resultado. */
