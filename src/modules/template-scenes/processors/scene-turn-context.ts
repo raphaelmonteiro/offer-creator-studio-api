@@ -51,7 +51,7 @@ export interface TurnContext {
   targetElementId: string | null;
   parent: TurnParent | null;
   attachmentAssets: TurnAttachmentAsset[];
-  /** Pedido da primeira geração da cena (o tema que "gere outra imagem" não repete); só na imagem nova. */
+  /** Pedido efetivo da geração `ready` mais recente (o tema que "gere outra imagem" não repete); só na imagem nova. */
   originalRequest: string | null;
 }
 
@@ -89,13 +89,22 @@ export async function loadTurnContext(
   };
 }
 
-/** Mensagem do usuário da primeira geração (versão `generate` sem origem): o tema da conversa (D-18). */
+/**
+ * Pedido efetivo da geração `ready` mais recente (PV-33): o que a geração gravou em `metrics`. Sem ele
+ * (versões antigas), cai na mensagem da primeira geração da cena, também `ready` (R30).
+ */
 async function loadOriginalRequest(
   manager: EntityManager,
   sceneId: string,
 ): Promise<string | null> {
+  const latest = await manager.findOne(TemplateSceneVersion, {
+    where: { sceneId, operation: 'generate', status: 'ready' },
+    order: { number: 'DESC' },
+  });
+  const recorded = latest?.metrics.generationRequest;
+  if (typeof recorded === 'string' && recorded.trim()) return recorded;
   const first = await manager.findOne(TemplateSceneVersion, {
-    where: { sceneId, operation: 'generate', parentVersionId: IsNull() },
+    where: { sceneId, operation: 'generate', parentVersionId: IsNull(), status: 'ready' },
     order: { number: 'ASC' },
   });
   if (!first) return null;

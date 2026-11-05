@@ -30,22 +30,25 @@ export class SceneGenerateHandler implements TurnHandler {
   }
 
   /**
-   * Pedido de uma geração: a mensagem. Na imagem nova (D-18), o tema da primeira geração mais o
-   * pedido atual, porque "gere outra imagem" não diz o tema. Sem imagem de referência.
+   * Pedido de uma geração: a mensagem. Na imagem nova (D-18), o pedido da geração `ready` mais recente
+   * (PV-33) mais o pedido atual, que prevalece, porque "gere outra imagem" não diz o tema. Sem geração
+   * anterior, vale a instrução do plano, nunca o texto do botão de confirmar (R30). Sem imagem de referência.
    */
   private generationRequest(ctx: TurnContext): string {
-    const original = ctx.originalRequest;
-    if (ctx.plan?.operation !== 'new_image' || !original) return ctx.request;
+    if (ctx.plan?.operation !== 'new_image') return ctx.request;
     const current = ctx.plan.instruction;
-    return current.trim() === original.trim()
-      ? original
-      : `${original} (pedido atual do cliente: ${current})`;
+    const previous = ctx.originalRequest;
+    if (!previous) return current;
+    return current.trim() === previous.trim()
+      ? previous
+      : `${previous} (pedido atual do cliente, que prevalece sobre o anterior: ${current})`;
   }
 
   private async generate(ctx: TurnContext): Promise<void> {
     const { state } = this.support;
     if (!(await state.advance(ctx, 'generating'))) return;
     const size = `${ctx.widthPx}x${ctx.heightPx}`;
+    const request = this.generationRequest(ctx);
     const result = await this.calls.imageCall(ctx, {
       kind: 'generate',
       model: this.support.model(),
@@ -53,13 +56,17 @@ export class SceneGenerateHandler implements TurnHandler {
       run: () =>
         this.provider.generate({
           model: this.support.model(),
-          prompt: buildGeneratePrompt({ ...ctx, request: this.generationRequest(ctx) }),
+          prompt: buildGeneratePrompt({ ...ctx, request }),
           size,
           quality: this.support.generateQuality(),
           correlationId: ctx.correlationId,
         }),
     });
-    if (result) await this.finish(ctx, result.buffer);
+    if (result) {
+      await this.support.finishWithImage(ctx, result.buffer, {
+        metrics: { generationRequest: request },
+      });
+    }
   }
 
   private async regenerate(ctx: TurnContext): Promise<void> {
@@ -121,9 +128,5 @@ export class SceneGenerateHandler implements TurnHandler {
     });
     if (!result) return null;
     return sharp(result.buffer).resize(ctx.widthPx, ctx.heightPx, { fit: 'fill' }).png().toBuffer();
-  }
-
-  private finish(ctx: TurnContext, png: Buffer): Promise<void> {
-    return this.support.finishWithImage(ctx, png);
   }
 }
