@@ -166,6 +166,24 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
       expect(publish).not.toHaveBeenCalled();
     });
 
+    it('anexo da própria cena que não é logo (master, crop, mask): 422 e nada é criado (R3)', async () => {
+      const scene = await newScene('Turno anexo papel');
+      const { version } = await insertReadyVersion(dataSource, scene, 1);
+      for (const role of ['master', 'crop', 'mask'] as const) {
+        const other = await insertAsset(dataSource, version, role);
+        const body = { ...message(), attachments: [{ assetId: other.id }] };
+        expect(await errorOf(service.sendMessage(scene.id, body, null))).toEqual({
+          status: 422,
+          code: 'ASSET_NOT_IN_SCENE',
+        });
+      }
+      const logo = await insertAsset(dataSource, version, 'logo');
+      await expect(
+        service.sendMessage(scene.id, { ...message(), attachments: [{ assetId: logo.id }] }, null),
+      ).resolves.toBeDefined();
+      expect(publish).toHaveBeenCalledTimes(1);
+    });
+
     it('falha ao publicar o job desfaz tudo (sem versão órfã e sem revisão nova)', async () => {
       const scene = await newScene('Turno rollback');
       publish.mockRejectedValueOnce(new Error('fila fora do ar'));

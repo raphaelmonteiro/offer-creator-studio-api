@@ -161,7 +161,7 @@ export class SceneTurnState {
   ): Promise<TurnAttachmentAsset[]> {
     const ids = (message?.attachments ?? []).map((attachment) => attachment.assetId);
     if (ids.length === 0) return [];
-    const assets = await manager.findBy(TemplateSceneAsset, { sceneId, id: In(ids) });
+    const assets = await manager.findBy(TemplateSceneAsset, { sceneId, id: In(ids), role: 'logo' });
     return assets
       .filter((asset) => !asset.purgedAt)
       .map((a) => ({ id: a.id, url: a.url, width: a.width, height: a.height }));

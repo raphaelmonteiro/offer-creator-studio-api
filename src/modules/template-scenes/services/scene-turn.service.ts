@@ -251,7 +251,7 @@ export class SceneTurnService {
     });
   }
 
-  /** Anexos só podem ser assets da própria cena. */
+  /** Anexos só podem ser logos já enviados à própria cena (outro papel é `ASSET_NOT_IN_SCENE`). */
   private async assertAttachmentsInScene(
     manager: EntityManager,
     sceneId: string,
@@ -259,7 +259,7 @@ export class SceneTurnService {
   ): Promise<void> {
     for (const attachment of dto.attachments ?? []) {
       const found = await manager.findOne(TemplateSceneAsset, {
-        where: { id: attachment.assetId, sceneId },
+        where: { id: attachment.assetId, sceneId, role: 'logo' },
       });
       if (!found || found.purgedAt) throw assetNotInScene(attachment.assetId);
     }
