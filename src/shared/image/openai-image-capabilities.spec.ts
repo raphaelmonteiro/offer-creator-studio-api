@@ -1,6 +1,8 @@
 import {
   estimateCostUsd,
   findImageModelCapabilities,
+  validateImageBackground,
+  validateImageMask,
   validateImageQuality,
   validateImageSize,
 } from './openai-image-capabilities';
@@ -110,5 +112,28 @@ describe('openai-image-capabilities', () => {
       expect(estimateCostUsd('gpt-image-2.5-flare', usage)).toBeNull();
       expect(estimateCostUsd('gpt-image-2.5-sunburst', undefined)).toBeNull();
     });
+  });
+});
+
+describe('capacidades da edição local (fundo transparente e máscara por JSON)', () => {
+  it('o sunburst tem fundo transparente e máscara por JSON conferidos, com fonte e data', () => {
+    const capabilities = findImageModelCapabilities('gpt-image-2.5-sunburst');
+    expect(capabilities).toMatchObject({ transparentBackground: true, jsonMask: true });
+    expect(capabilities?.capabilitiesSource).toContain('/guides/image-generation');
+    expect(capabilities?.capabilitiesConsultedAt).toBe('2026-11-05');
+  });
+
+  it('fundo opaco ou automático passa em qualquer modelo; transparente só onde foi conferido', () => {
+    expect(validateImageBackground('gpt-image-1.5', 'opaque')).toBeNull();
+    expect(validateImageBackground('gpt-image-1.5', 'auto')).toBeNull();
+    expect(validateImageBackground('gpt-image-2.5-sunburst', 'transparent')).toBeNull();
+    expect(validateImageBackground('gpt-image-1.5', 'transparent')).toMatch(/transparente/);
+    expect(validateImageBackground('modelo-novo', 'transparent')).toBeNull();
+  });
+
+  it('máscara por JSON só no modelo conferido (modelo desconhecido não valida)', () => {
+    expect(validateImageMask('gpt-image-2.5-sunburst')).toBeNull();
+    expect(validateImageMask('gpt-image-1.5')).toMatch(/máscara/);
+    expect(validateImageMask('modelo-novo')).toBeNull();
   });
 });

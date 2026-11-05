@@ -7,7 +7,7 @@ import {
   SCENE_CONNECTION_LOST_CODE,
   SCENE_INVALID_REQUEST_CODE,
   SCENE_TIMEOUT_CODE,
-} from './openai-image-scene-call';
+} from '../../shared/providers/openai-scene-call-errors';
 
 const PNG_B64 = Buffer.from('png-falso').toString('base64');
 const SCENE = { timeoutMs: 180_000, correlationId: 'corr-1' };

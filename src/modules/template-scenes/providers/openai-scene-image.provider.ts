@@ -5,7 +5,7 @@ import {
   PaidResponseUnreadableError,
   SCENE_INVALID_REQUEST_CODE,
   SCENE_TIMEOUT_CODE,
-} from '../../ai/openai-image-scene-call';
+} from '../../../shared/providers/openai-scene-call-errors';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import {
   SceneGenerateInput,

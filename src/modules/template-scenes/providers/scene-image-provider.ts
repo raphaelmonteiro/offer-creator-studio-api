@@ -1,4 +1,4 @@
-import { ImageUsage } from '../../ai/config/openai-image-capabilities';
+import { ImageUsage } from '../../../shared/image/openai-image-capabilities';
 import { SceneFailureCode } from '../domain/scene.types';
 
 /** Token de injeção do provedor de imagem da cena (`mock` ou `openai`, D-2). */

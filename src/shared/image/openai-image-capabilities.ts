@@ -29,9 +29,16 @@ export interface ImageModelCapabilities {
   qualities: readonly string[];
   /** O modelo aceita `input_fidelity` na edição. */
   inputFidelity: boolean;
+  /** Aceita `background: transparent` (com `output_format` png ou webp). Ausente = não conferido. */
+  transparentBackground?: boolean;
+  /** Aceita a edição com `images` + `mask` por corpo JSON (data URL), alfa 255 = editar. Ausente = não conferido. */
+  jsonMask?: boolean;
   prices?: ImageTokenPrices;
   priceSource?: string;
   priceConsultedAt?: string;
+  /** Fonte e data da conferência de `transparentBackground` e `jsonMask`. */
+  capabilitiesSource?: string;
+  capabilitiesConsultedAt?: string;
 }
 
 /** Limites dos tamanhos livres (família gpt-image-2 e 2.5). */
@@ -45,6 +52,13 @@ export const CUSTOM_SIZE_LIMITS = {
 
 const CLASSIC_SIZES = ['1024x1024', '1024x1536', '1536x1024', 'auto'] as const;
 const GPT_IMAGE_2_QUALITIES = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'] as const;
+/**
+ * Guia oficial de geração de imagens, consultado em 2026-11-05: "gpt-image-2.5-sunburst e
+ * gpt-image-2.5-flare" aceitam `background: "transparent"` com `output_format` png ou webp, e as
+ * edições em JSON usam `images` (e `mask`) com `image_url` em data URL. Conferido só pela leitura da
+ * página (nenhuma chamada paga): o teste real fica para a passada do dono.
+ */
+const CAPABILITIES_SOURCE = 'https://developers.openai.com/api/docs/guides/image-generation';
 const SUNBURST_PRICE_SOURCE =
   'https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst; https://developers.openai.com/api/docs/pricing';
 
@@ -55,9 +69,13 @@ export const IMAGE_MODEL_CAPABILITIES: readonly ImageModelCapabilities[] = [
     fixedSizes: CLASSIC_SIZES,
     qualities: GPT_IMAGE_2_QUALITIES,
     inputFidelity: false,
+    transparentBackground: true,
+    jsonMask: true,
     prices: { imageInput: 8, textInput: 5, imageOutput: 30 },
     priceSource: SUNBURST_PRICE_SOURCE,
     priceConsultedAt: '2026-11-02',
+    capabilitiesSource: CAPABILITIES_SOURCE,
+    capabilitiesConsultedAt: '2026-11-05',
   },
   {
     prefix: 'gpt-image-2.5',
@@ -153,6 +171,22 @@ export function validateImageQuality(model: string, quality: string): string | n
   const capabilities = findImageModelCapabilities(model);
   if (!capabilities || capabilities.qualities.includes(quality)) return null;
   return `${model} não aceita a qualidade "${quality}" (aceita ${capabilities.qualities.join(', ')})`;
+}
+
+/** Motivo da recusa de `background: transparent`, ou `null` (fundo opaco/auto e modelo desconhecido passam). */
+export function validateImageBackground(model: string, background: string): string | null {
+  const capabilities = findImageModelCapabilities(model);
+  if (!capabilities || background !== 'transparent' || capabilities.transparentBackground) {
+    return null;
+  }
+  return `${model} não tem fundo transparente conferido na tabela de capacidades`;
+}
+
+/** Motivo da recusa da edição com máscara por JSON, ou `null` (modelo desconhecido não valida). */
+export function validateImageMask(model: string): string | null {
+  const capabilities = findImageModelCapabilities(model);
+  if (!capabilities || capabilities.jsonMask) return null;
+  return `${model} não tem a edição com máscara por JSON conferida na tabela de capacidades`;
 }
 
 const MILLION = 1_000_000;

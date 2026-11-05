@@ -2,15 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI, { toFile } from 'openai';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
-import { ImageUsage } from './config/openai-image-capabilities';
+import { ImageUsage } from '../../shared/image/openai-image-capabilities';
 import { withOpenAiRetry } from '../../shared/providers/openai-errors';
+import { PaidResponseUnreadableError } from '../../shared/providers/openai-scene-call-errors';
 import {
   assertSceneRequestAllowed,
   callSdkWithResponse,
-  PaidResponseUnreadableError,
   SceneCallOptions,
   SceneCallResponse,
+  SceneRequestExtras,
 } from './openai-image-scene-call';
+import { buildMaskedEditBody, MaskedEditInput } from './openai-image-masked-edit';
 import {
   MaterializedImage,
   OpenAiImageSize,
@@ -75,6 +77,11 @@ export interface EditOpenAiImageOptions {
   outputCompression?: number;
   inputFidelity?: OpenAiImageInputFidelity;
   sceneCall?: SceneCallOptions;
+  /**
+   * Edição local da cena: recorte e máscara PNG (alfa 255 = editar) do mesmo tamanho, enviados em
+   * corpo JSON (`images` + `mask`, sem `markup`). Exige `sceneCall`; sem ela, o caminho multipart de sempre.
+   */
+  mask?: MaskedEditInput;
 }
 
 export interface OpenAiImageResult {
@@ -119,6 +126,11 @@ function sceneCallResult(
     costUsd: response.costUsd ?? null,
     requestId: response.requestId ?? null,
   };
+}
+
+/** `client.post` do SDK (a 6.x não tipa `mask` por JSON em `images.edit`). */
+interface OpenAiJsonClient {
+  post(path: string, options: object): { withResponse(): Promise<any> };
 }
 
 interface RetryContext {
@@ -190,6 +202,7 @@ export class OpenAiImageService {
       quality,
       mode,
       sceneCall: options.sceneCall,
+      extras: { background },
     });
 
     const image = await this.materialize(response, preset.fallbackMimeType, options.sceneCall);
@@ -209,6 +222,7 @@ export class OpenAiImageService {
 
   async editImage(options: EditOpenAiImageOptions): Promise<OpenAiImageResult> {
     if (!this.openai) throw new Error('OpenAI não configurada');
+    if (options.mask) return this.editImageWithMask(options);
 
     const assetKind = options.assetKind ?? 'template';
     // Public endpoints still default to final. Internal callers can opt into preview
@@ -267,6 +281,64 @@ export class OpenAiImageService {
     };
   }
 
+  /**
+   * Ramo separado da edição com máscara (M3 do spike): `POST /images/edits` em JSON pelo `client.post`,
+   * porque o `images.edit` do SDK só envia multipart e o SDK instalado não tipa `mask` por JSON. Roda no
+   * mesmo semáforo e retry do modo `sceneCall`; tamanho do recorte e da máscara conferidos antes da rede.
+   */
+  private async editImageWithMask(options: EditOpenAiImageOptions): Promise<OpenAiImageResult> {
+    if (!options.sceneCall || !options.mask) {
+      throw new Error('A edição com máscara só existe no modo sceneCall');
+    }
+    const { sceneCall } = options;
+    const assetKind = options.assetKind ?? 'template';
+    const mode = options.mode ?? this.models.imageDefaultMode;
+    const model = options.model ?? this.resolveModel(mode, assetKind);
+    const quality = options.quality ?? this.resolvePreset(assetKind, mode).quality;
+    const outputFormat = options.outputFormat ?? 'png';
+    const background = options.background ?? 'opaque';
+    const input = options.images?.[0] ?? {
+      buffer: options.imageBuffer,
+      mimeType: options.imageMimeType ?? 'image/png',
+      filename: 'crop.png',
+    };
+    const body = await buildMaskedEditBody({
+      model,
+      prompt: options.prompt,
+      size: options.size,
+      quality,
+      background,
+      outputFormat,
+      image: input as OpenAiImageInput,
+      mask: options.mask,
+    });
+    const client = this.openai as unknown as OpenAiJsonClient;
+    const response = await this.dispatchImageCall({
+      method: 'edit',
+      request: body,
+      feature: options.feature,
+      model,
+      size: options.size,
+      quality,
+      mode,
+      sceneCall,
+      extras: { mask: true, background },
+      invoke: (req, sdkOptions) =>
+        client.post('/images/edits', { body: req, ...(sdkOptions as object) }),
+    });
+    const image = await this.materialize(response, 'image/png', sceneCall);
+    return {
+      image,
+      model,
+      size: options.size,
+      quality,
+      background,
+      outputFormat,
+      mode,
+      ...sceneCallResult(sceneCall, response),
+    };
+  }
+
   /** Lê a imagem da resposta; no modo `sceneCall` uma falha aqui já foi paga, então carrega o custo. */
   private async materialize(
     response: ImageCallResponse,
@@ -296,10 +368,14 @@ export class OpenAiImageService {
     mode: string;
     inputFidelity?: string;
     sceneCall?: SceneCallOptions;
+    /** Fundo transparente e máscara conferidos pela tabela de capacidades (só no modo `sceneCall`). */
+    extras?: SceneRequestExtras;
+    /** Chamada própria no lugar de `images[method]` (edição com máscara por JSON). */
+    invoke?: (request: unknown, sdkOptions: unknown) => { withResponse(): Promise<any> };
   }): Promise<ImageCallResponse> {
     const { method, request, feature, model, sceneCall } = args;
     const endpoint = `images.${method}`;
-    if (sceneCall) assertSceneRequestAllowed(model, args.size, args.quality);
+    if (sceneCall) assertSceneRequestAllowed(model, args.size, args.quality, args.extras);
     // `images.generate`/`images.edit` precisam do `this` do cliente: chamar sempre pelo objeto.
     const images = this.openai!.images as any;
 
@@ -319,7 +395,7 @@ export class OpenAiImageService {
         sceneCall
           ? this.runSceneOperation(() =>
               callSdkWithResponse(
-                (req, sdkOptions) => images[method](req, sdkOptions),
+                args.invoke ?? ((req, sdkOptions) => images[method](req, sdkOptions)),
                 request,
                 model,
                 sceneCall,
