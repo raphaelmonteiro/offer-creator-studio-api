@@ -1,79 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { EntityManager, In } from 'typeorm';
-import {
-  MaskShape,
-  Rect,
-  SceneCallRecord,
-  SceneElement,
-  SceneFailureCode,
-  SceneStep,
-  SceneVersionOperation,
-  SceneZones,
-} from '../domain/scene.types';
-import { SceneClassification } from '../domain/scene-operation.classifier';
-import { sceneZonesFor } from '../domain/scene-formats';
+import { EntityManager } from 'typeorm';
+import { SceneCallRecord, SceneFailureCode, SceneStep } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
-import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
-import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { SceneEventKind } from '../services/scene-events';
 import { cancelVersion, emitVersionEvent, failVersion } from './scene-turn-finish';
 import { SceneLockService } from '../services/scene-lock.service';
+import { CallOutcome, closeCallIn, recordCallIn } from './scene-turn-calls';
+import { loadTurnContext, TurnContext } from './scene-turn-context';
 import { CompleteExtra, readyVersion, rejectVersion, StoredFile } from './scene-turn-complete';
 
 export type { CompleteExtra, StoredFile } from './scene-turn-complete';
+export type { TurnAttachmentAsset, TurnContext, TurnParent } from './scene-turn-context';
 
-/** A versão de onde o turno parte: imagem em disco e camadas. */
-export interface TurnParent {
-  versionId: string;
-  elements: SceneElement[];
-  masterAssetId: string | null;
-  previewAssetId: string | null;
-  /** `null` quando a master foi apagada pelo GC (ou nunca existiu). */
-  masterUrl: string | null;
-}
-
-/** Logo (ou outra imagem) anexada à mensagem. */
-export interface TurnAttachmentAsset {
-  id: string;
-  url: string;
-  width: number | null;
-  height: number | null;
-}
-
-/** O que o processor precisa saber da versão para trabalhar sem segurar lock durante a chamada paga. */
-export interface TurnContext {
-  sceneId: string;
-  versionId: string;
-  correlationId: string;
-  zones: SceneZones;
-  artWidthCm: number;
-  artHeightCm: number;
-  widthPx: number;
-  heightPx: number;
-  request: string;
-  formatId: string;
-  operation: SceneVersionOperation;
-  /** Classificação gravada ao enfileirar; `null` na geração simples (versões antigas). */
-  plan: SceneClassification | null;
-  requestedRegion: Rect | null;
-  requestedMask: MaskShape | null;
-  targetElementId: string | null;
-  parent: TurnParent | null;
-  attachmentAssets: TurnAttachmentAsset[];
-}
-
+export type { CallOutcome } from './scene-turn-calls';
 export type CompleteResult = 'ready' | 'cancelled' | 'stale';
-
-export interface CallOutcome {
-  status: 'done' | 'failed';
-  costUsd: number | null;
-  requestId?: string | null;
-  errorCode?: string;
-  latencyMs?: number;
-}
-
-const round6 = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
 
 /**
  * Transições da versão durante o turno. Cada uma roda sob o lock da cena (curta, nunca durante a
@@ -108,63 +49,8 @@ export class SceneTurnState {
       version.step = 'preparing';
       await manager.save(version);
       await this.emit(manager, scene, version, 'version.step');
-      const message = await manager.findOne(TemplateSceneMessage, {
-        where: { versionId, role: 'user' },
-        order: { createdAt: 'ASC' },
-      });
-      return {
-        sceneId,
-        versionId,
-        correlationId: version.correlationId,
-        zones: sceneZonesFor(scene.formatId),
-        artWidthCm: scene.artWidthCm,
-        artHeightCm: scene.artHeightCm,
-        widthPx: scene.widthPx,
-        heightPx: scene.heightPx,
-        request: message?.content ?? '',
-        formatId: scene.formatId,
-        operation: version.operation,
-        plan: (version.metrics.plan as SceneClassification | undefined) ?? null,
-        requestedRegion: version.requestedRegion,
-        requestedMask: version.requestedMask,
-        targetElementId: version.targetElementId,
-        parent: await this.loadParent(manager, scene),
-        attachmentAssets: await this.loadAttachments(manager, scene.id, message),
-      };
+      return loadTurnContext(manager, scene, version);
     });
-  }
-
-  private async loadParent(
-    manager: EntityManager,
-    scene: TemplateScene,
-  ): Promise<TurnParent | null> {
-    const parent = scene.currentVersionId
-      ? await manager.findOne(TemplateSceneVersion, { where: { id: scene.currentVersionId } })
-      : null;
-    if (!parent) return null;
-    const master = parent.masterAssetId
-      ? await manager.findOne(TemplateSceneAsset, { where: { id: parent.masterAssetId } })
-      : null;
-    return {
-      versionId: parent.id,
-      elements: parent.elements,
-      masterAssetId: parent.masterAssetId,
-      previewAssetId: parent.previewAssetId,
-      masterUrl: master && !master.purgedAt ? master.url : null,
-    };
-  }
-
-  private async loadAttachments(
-    manager: EntityManager,
-    sceneId: string,
-    message: TemplateSceneMessage | null,
-  ): Promise<TurnAttachmentAsset[]> {
-    const ids = (message?.attachments ?? []).map((attachment) => attachment.assetId);
-    if (ids.length === 0) return [];
-    const assets = await manager.findBy(TemplateSceneAsset, { sceneId, id: In(ids), role: 'logo' });
-    return assets
-      .filter((asset) => !asset.purgedAt)
-      .map((a) => ({ id: a.id, url: a.url, width: a.width, height: a.height }));
   }
 
   /** Há pedido de cancelamento (ou a cena foi excluída)? */
@@ -209,14 +95,11 @@ export class SceneTurnState {
         await this.cancelIn(manager, scene, version);
         return 'cancelled';
       }
-      const calls = version.metrics.calls ?? [];
-      if (calls.length >= maxCalls) {
-        if (onLimit === 'fail') await this.failIn(manager, scene, version, 'PAID_CALL_LIMIT');
-        return 'limit';
+      const result = await recordCallIn(manager, version, call, maxCalls);
+      if (result === 'limit' && onLimit === 'fail') {
+        await this.failIn(manager, scene, version, 'PAID_CALL_LIMIT');
       }
-      version.metrics = { ...version.metrics, calls: [...calls, call] };
-      await manager.save(version);
-      return 'ok';
+      return result;
     });
   }
 
@@ -224,28 +107,7 @@ export class SceneTurnState {
   closeCall(ctx: TurnContext, callId: string, outcome: CallOutcome): Promise<void> {
     return this.run(ctx, async (manager, scene) => {
       const version = await manager.findOneBy(TemplateSceneVersion, { id: ctx.versionId });
-      if (!version) return;
-      const cost = outcome.costUsd ?? 0;
-      version.metrics = {
-        ...version.metrics,
-        calls: (version.metrics.calls ?? []).map((call) =>
-          call.id === callId
-            ? {
-                ...call,
-                status: outcome.status,
-                finishedAt: new Date().toISOString(),
-                costUsd: outcome.costUsd,
-                requestId: outcome.requestId ?? null,
-                ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),
-              }
-            : call,
-        ),
-      };
-      version.providerCostUsd = round6(version.providerCostUsd + cost);
-      if (outcome.latencyMs !== undefined) version.latencyMs = outcome.latencyMs;
-      scene.totalCostUsd = round6(scene.totalCostUsd + cost);
-      await manager.save(version);
-      await manager.save(scene);
+      if (version) await closeCallIn(manager, scene, version, callId, outcome);
     });
   }
 
