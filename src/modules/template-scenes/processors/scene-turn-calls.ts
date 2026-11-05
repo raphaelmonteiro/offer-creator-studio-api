@@ -30,11 +30,11 @@ export async function recordCallIn(
 /** Fecha a tentativa com o custo real e soma na versão e na cena. */
 export async function closeCallIn(
   manager: EntityManager,
-  scene: TemplateScene,
-  version: TemplateSceneVersion,
+  target: { scene: TemplateScene; version: TemplateSceneVersion },
   callId: string,
   outcome: CallOutcome,
 ): Promise<void> {
+  const { scene, version } = target;
   const cost = outcome.costUsd ?? 0;
   version.metrics = {
     ...version.metrics,

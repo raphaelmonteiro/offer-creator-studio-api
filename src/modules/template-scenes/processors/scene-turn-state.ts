@@ -113,7 +113,7 @@ export class SceneTurnState {
   closeCall(ctx: TurnContext, callId: string, outcome: CallOutcome): Promise<void> {
     return this.run(ctx, async (manager, scene) => {
       const version = await manager.findOneBy(TemplateSceneVersion, { id: ctx.versionId });
-      if (version) await closeCallIn(manager, scene, version, callId, outcome);
+      if (version) await closeCallIn(manager, { scene, version }, callId, outcome);
     });
   }
 
