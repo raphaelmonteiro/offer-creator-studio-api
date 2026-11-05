@@ -106,8 +106,11 @@ const byGroup = (g: string) => rows.filter((r) => r.group === g);
 const lines: string[] = [];
 lines.push('# Task 1.45: avaliação paga da intenção (add-template-scene-local-edit)');
 lines.push('');
+const rerun = new Set(pass2.map((r) => r.id));
+const pass1Only = pass1.filter((r) => !rerun.has(r.id));
+const failedBefore = pass1.filter((r) => !r.actionZoneOk || r.costly).length;
 lines.push(
-  `Frases avaliadas: ${rows.length} (passada 1: ${pass1.length}; passada 2, só as que erraram: ${pass2.length}). Só texto, modelo \`gpt-6-luna\`, sem chamada de imagem.`,
+  `Frases avaliadas: ${rows.length}. Passada 1 (prompt original): ${pass1.length} frases. Passada 2 (prompt ajustado uma vez): ${pass2.length} frases, as ${failedBefore} que erraram ou deram erro caro mais ${pass2.length - failedBefore} de guarda de regressão. ${pass1Only.length} frases só têm a passada 1 (teto de custo): valem os resultados com o prompt original. Só texto, modelo \`gpt-6-luna\`, sem chamada de imagem.`,
 );
 lines.push(
   `**Custo total: US$ ${state.spentUsd.toFixed(6)}** em ${state.calls} chamadas (teto US$ 0,06; ${state.unknownCostCalls ?? 0} chamada(s) sem \`usage\` contada(s) a US$ 0,0004 cada, por conservadorismo).`,
@@ -170,6 +173,20 @@ row(
   mean < 0.001,
 );
 lines.push('');
+lines.push('## Passada 1 (prompt original), para comparar');
+lines.push('');
+const p1Owner = pass1.filter((r) => r.group === 'dono');
+const p1Latency = pass1.map((r) => r.latencyMs);
+lines.push(
+  `- Frases do dono: ${pct(
+    count(p1Owner, (r) => r.actionZoneOk),
+    p1Owner.length,
+  )}; erro caro: ${count(pass1, (r) => r.costly)}; conjunto inteiro, \`action\` e \`zone\`: ${pct(
+    count(pass1, (r) => r.actionZoneOk),
+    pass1.length,
+  )}; tempo esgotado: ${count(pass1, (r) => r.status === 'timeout')}; latência p50 ${(percentile(p1Latency, 50) / 1000).toFixed(2)} s, p95 ${(percentile(p1Latency, 95) / 1000).toFixed(2)} s.`,
+);
+lines.push('');
 lines.push('## Por grupo (`action` e `zone`)');
 lines.push('');
 lines.push('| Grupo | Acertos |');
@@ -191,6 +208,11 @@ for (const r of wrong) {
     `- \`${r.id}\` [${r.group}, ${r.marked ? 'com' : 'sem'} marcação]${r.costly ? ' **ERRO CARO**' : ''}: "${r.message}" | esperado ${exp} | obtido ${got}${r.gotOp ? ` (${r.expectedOp} -> ${r.gotOp})` : ''}`,
   );
 }
+lines.push('');
+lines.push(`## Sem a passada com o prompt ajustado (${pass1Only.length}): vale a passada 1`);
+lines.push('');
+for (const r of pass1Only)
+  lines.push(`- \`${r.id}\` (${r.expect.action}): ${r.actionZoneOk ? 'ok' : 'ERRO'}`);
 fs.writeFileSync(path.join(out, 'report.md'), `${lines.join('\n')}\n`);
 
 const per: string[] = [
@@ -209,4 +231,4 @@ for (const r of rows) {
   );
 }
 fs.writeFileSync(path.join(out, 'per-phrase.md'), `${per.join('\n')}\n`);
-process.stdout.write(`${lines.slice(0, 26).join('\n')}\n`);
+process.stdout.write(`${lines.slice(0, 30).join('\n')}\n`);
