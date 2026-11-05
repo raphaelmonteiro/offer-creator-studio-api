@@ -25,15 +25,6 @@ function cleanRequest(request: string): string {
     .trim();
 }
 
-/**
- * D-17: sugestão de menos detalhe no centro. Desligada até o dono ver as imagens com e sem ela (task
- * 1.37); ligar é trocar esta constante (ou passar `lessDetailAtCenter` no teste real).
- */
-export const SUGGEST_LESS_DETAIL_AT_CENTER = false;
-
-export const LESS_DETAIL_AT_CENTER_HINT =
-  'Se o pedido não disser outra coisa, deixe a parte central da imagem com menos detalhe, sem criar divisão nem faixa.';
-
 /** D-16: a composição só entra se o cliente pedir; o resto é uma imagem única e contínua. */
 export const CONTINUOUS_IMAGE_RULE =
   'Salvo se o pedido acima disser outra coisa, a imagem é única e contínua, sem divisões, faixas ou molduras.';
@@ -45,18 +36,13 @@ export const FIXED_RULES =
  * Prompt da geração (primeira, e imagem nova da D-18): o pedido literal, o formato em cm e a
  * proporção, a imagem única e contínua (D-16) e as regras fixas. Sem composição por faixas ou zonas.
  */
-export function buildGeneratePrompt(
-  input: ScenePromptInput,
-  options: { lessDetailAtCenter?: boolean } = {},
-): string {
+export function buildGeneratePrompt(input: ScenePromptInput): string {
   const ratio = (input.artWidthCm / input.artHeightCm).toFixed(2).replace('.', ',');
-  const lessDetail = options.lessDetailAtCenter ?? SUGGEST_LESS_DETAIL_AT_CENTER;
   return [
     'Crie a imagem de fundo de um encarte de ofertas de supermercado, para impressão.',
     `Pedido do cliente: "${cleanRequest(input.request)}".`,
     `Formato: ${cm(input.artWidthCm)} x ${cm(input.artHeightCm)} cm (proporção largura/altura ${ratio}), imagem de ${input.widthPx} x ${input.heightPx} px, ocupando toda a área, sem bordas nem molduras.`,
     CONTINUOUS_IMAGE_RULE,
-    ...(lessDetail ? [LESS_DETAIL_AT_CENTER_HINT] : []),
     FIXED_RULES,
   ].join('\n');
 }

@@ -6,9 +6,7 @@ import {
   buildGlobalPrompt,
   buildTransparentPrompt,
   CONTINUE_BACKGROUND,
-  LESS_DETAIL_AT_CENTER_HINT,
   REMOVE_INSTRUCTION,
-  SUGGEST_LESS_DETAIL_AT_CENTER,
 } from './scene-prompt';
 
 const format = findSceneFormat('folheto-27x54')!;
@@ -46,15 +44,10 @@ describe('Composição do prompt só a pedido do cliente: buildGeneratePrompt', 
     expect(prompt).toContain('sem preços');
   });
 
-  it('a sugestão de menos detalhe no centro (D-17) está desligada por padrão', () => {
-    expect(SUGGEST_LESS_DETAIL_AT_CENTER).toBe(false);
-    expect(buildGeneratePrompt(base)).not.toContain('menos detalhe');
-  });
-
-  it('ligada, a sugestão entra sem criar composição por faixas', () => {
-    const prompt = buildGeneratePrompt(base, { lessDetailAtCenter: true });
-    expect(prompt).toContain(LESS_DETAIL_AT_CENTER_HINT);
-    for (const banned of BANNED) expect(prompt).not.toMatch(banned);
+  it('Comparação lado a lado: a D-17 saiu, e o prompt sem pedido de composição não sugere menos detalhe no centro', () => {
+    const prompt = buildGeneratePrompt(base);
+    expect(prompt).not.toMatch(/menos detalhe|parte central|centro/i);
+    expect(prompt.split('\n')).toHaveLength(5);
   });
 
   it('o cliente pode pedir divisão: o pedido vai literal e a regra só vale "salvo pedido"', () => {
