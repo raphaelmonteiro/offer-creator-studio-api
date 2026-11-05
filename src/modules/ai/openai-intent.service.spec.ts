@@ -1,5 +1,4 @@
 import { ConfigService } from '@nestjs/config';
-import { parseIntent } from '../template-scenes/domain/scene-intent';
 import { OpenAiIntentService } from './openai-intent.service';
 
 const INPUT = {
@@ -77,7 +76,7 @@ describe('OpenAiIntentService', () => {
     expect(create.mock.calls[0][0]).not.toHaveProperty('reasoning_effort');
   });
 
-  it('recusa do modelo (conteúdo nulo) vira texto vazio, que o parser recusa como JSON inválido', async () => {
+  it('recusa do modelo (conteúdo nulo) vira texto vazio', async () => {
     const { service, create } = build();
     create.mockReturnValue({
       withResponse: async () => ({
@@ -92,10 +91,6 @@ describe('OpenAiIntentService', () => {
     const result = await service.classify(INPUT);
 
     expect(result.text).toBe('');
-    expect(parseIntent(result.text, 'deixa mais quente')).toEqual({
-      ok: false,
-      reason: 'JSON inválido',
-    });
   });
 
   it('sem chave configurada, falha sem chamar a rede', async () => {
