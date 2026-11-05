@@ -111,7 +111,11 @@ function textElements(
   elements: SceneElement[],
 ): { elements: SceneElement[]; changed: string } {
   const texts = elements.filter((e) => e.kind === 'text');
-  const current = action.replace ? texts[texts.length - 1] : undefined;
+  const current = action.elementId
+    ? texts.find((e) => e.id === action.elementId)
+    : action.replace
+      ? texts[texts.length - 1]
+      : undefined;
   if (current) {
     return {
       elements: elements.map((e) => (e.id === current.id ? { ...e, text: action.text } : e)),

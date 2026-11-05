@@ -122,6 +122,15 @@ describe('applyLayerActions', () => {
     expect(result.ok && result.elements[0].text).toBe('Black Friday');
   });
 
+  it('texto selecionado (elementId) troca esse texto, não o último', () => {
+    const els = [text({ id: 't1', text: 'A' }), text({ id: 't2', text: 'B' })];
+    const result = apply(
+      [{ type: 'set_text', text: 'Novo', placement: 'none', replace: true, elementId: 't1' }],
+      els,
+    );
+    expect(result.ok && result.elements.map((e) => e.text)).toEqual(['Novo', 'B']);
+  });
+
   it('mover por tipo citado: direita, esquerda e alternar; o resto da cena não é tocado', () => {
     const els = [logo({ x: 0.2 }), text()];
     const right = apply([{ type: 'move', target: { kind: 'logo' }, side: 'right' }], els);

@@ -131,6 +131,49 @@ describe('classifySceneRequest: só sinais estruturados, sem texto livre (D-19)'
   });
 });
 
+describe('Texto exato com elemento selecionado (PV-50, correção 6)', () => {
+  it('generated e logo selecionados: cria um texto novo, sem modelo', () => {
+    for (const kind of ['generated', 'logo'] as const) {
+      const result = selected(kind, 'escreve "Feliz Páscoa"');
+      expect(result).toEqual({
+        operation: 'set_layer',
+        actions: [{ type: 'set_text', text: 'Feliz Páscoa', placement: 'none', replace: false }],
+      });
+    }
+  });
+
+  it('texto selecionado: troca esse texto', () => {
+    expect(selected('text', 'escreve "Feliz Páscoa"')).toEqual({
+      operation: 'set_layer',
+      actions: [
+        {
+          type: 'set_text',
+          text: 'Feliz Páscoa',
+          placement: 'none',
+          replace: true,
+          elementId: 'text-1',
+        },
+      ],
+    });
+  });
+
+  it('sem seleção devolve null, e o anexo ainda vem primeiro', () => {
+    expect(classifySceneRequest(ready({ content: 'escreve "Oi"' }))).toBeNull();
+    const withLogo = classifySceneRequest(
+      ready({
+        content: 'escreve "Oi"',
+        attachments: [{ assetId: LOGO_ASSET }],
+        targetElement: { id: 'e', kind: 'generated' },
+      }),
+    );
+    expect(withLogo).toMatchObject({ actions: [{ type: 'add_logo' }, { type: 'set_text' }] });
+  });
+
+  it('elemento selecionado sem texto exato segue a regra do elemento', () => {
+    expect(selected('generated', 'deixa mais rústico')).toMatchObject({ operation: 'local_edit' });
+  });
+});
+
 describe('palavras da lista curta que fica no código', () => {
   it('"remover" não é "mover" (palavra inteira)', () => {
     expect(mentionsMove(fold('remover o sol'))).toBe(false);

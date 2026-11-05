@@ -35,7 +35,7 @@ export type LocalTarget =
 /** Mudança exata numa camada (logo, texto, elemento adicionado), sem IA. */
 export type LayerAction =
   | ({ type: 'add_logo'; assetId: string } & LogoPosition)
-  | ({ type: 'set_text' } & ParsedText)
+  | ({ type: 'set_text'; elementId?: string } & ParsedText)
   | { type: 'move'; target: LayerTarget; side: Side }
   | { type: 'resize'; target: LayerTarget; direction: 'bigger' | 'smaller' }
   | { type: 'remove'; target: LayerTarget };
@@ -113,6 +113,20 @@ function selectedLayerAction(
 }
 
 /**
+ * Texto exato (PV-50, correção 6): camada sem modelo, antes do elemento selecionado. Com um texto
+ * selecionado, troca esse texto; com outro elemento, cria um texto novo.
+ */
+function exactText(input: ClassifierInput): SceneClassification | null {
+  const text = parseText(input.content);
+  const element = input.targetElement;
+  if (!text || !element) return null;
+  if (element.kind === 'text') {
+    return layerOp({ type: 'set_text', ...text, replace: true, elementId: element.id });
+  }
+  return layerOp({ type: 'set_text', ...text, replace: false });
+}
+
+/**
  * Elemento selecionado: o alvo é ele. Mover, redimensionar e tirar (verbos da lista curta) são camada;
  * o resto é pedido visual, que só o elemento `generated` aceita (`local_edit` na caixa dele).
  */
@@ -136,12 +150,12 @@ function selectedElement(input: ClassifierInput, folded: string): SceneClassific
 
 /**
  * Classifica a mensagem pelos sinais estruturados, sem texto livre e sem modelo (D-19): sem versão
- * pronta → `generate`; anexo de logo → camadas exatas; elemento selecionado → o alvo é ele. Devolve
+ * pronta → `generate`; anexo de logo → camadas exatas; texto exato com elemento selecionado → camada; elemento selecionado → o alvo é ele. Devolve
  * `null` quando a intenção depende do texto: aí roda o modelo de intenção (`planFromIntent`). A
  * confirmação segue o plano guardado na pergunta e nunca passa por aqui.
  */
 export function classifySceneRequest(input: ClassifierInput): SceneClassification | null {
   if (!input.hasReadyVersion) return { operation: 'generate' };
   const folded = fold(input.content);
-  return logoAttachment(input, folded) ?? selectedElement(input, folded);
+  return logoAttachment(input, folded) ?? exactText(input) ?? selectedElement(input, folded);
 }
