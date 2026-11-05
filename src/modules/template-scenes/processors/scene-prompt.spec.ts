@@ -144,6 +144,39 @@ describe('buildEditPrompt', () => {
   );
 });
 
+describe('buildEditPrompt: regras fixas (correção 6)', () => {
+  const edit = (request: string, remove = false) =>
+    buildEditPrompt({ request, remove, knownElements: [] });
+
+  it('Edição sem pedido de texto: sem texto legível, sem logotipos e sem preços', () => {
+    const prompt = edit('deixa mais rústico');
+    expect(prompt).toContain('sem texto legível');
+    expect(prompt).toContain('sem letras ou números');
+    expect(prompt).toContain('sem logotipos');
+    expect(prompt).toContain('sem preços');
+  });
+
+  it('a remoção também leva as regras', () => {
+    expect(edit('remova os ovos', true)).toContain('sem texto legível');
+  });
+
+  it('Texto exato: com "uma placa com letras", sai só a regra de texto', () => {
+    const prompt = edit('desenha uma placa com letras');
+    expect(prompt).not.toContain('sem texto legível');
+    expect(prompt).not.toContain('sem letras');
+    expect(prompt).toContain('sem logotipos');
+    expect(prompt).toContain('sem preços');
+  });
+
+  it.each(['uma frase na placa', 'com palavras escritas', 'um texto na faixa'])(
+    'pedido que fala em texto (%s) tira só a regra de texto',
+    (request) => {
+      expect(edit(request)).not.toContain('sem texto legível');
+      expect(edit(request)).toContain('sem preços');
+    },
+  );
+});
+
 describe('buildGlobalPrompt e buildTransparentPrompt', () => {
   it('Prompt do ajuste geral: sem composição por faixas nem porcentagens de zona', () => {
     const prompt = buildGlobalPrompt({ request: 'deixa tudo mais quente' });

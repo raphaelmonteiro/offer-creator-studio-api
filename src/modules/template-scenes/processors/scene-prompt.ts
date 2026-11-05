@@ -64,6 +64,18 @@ export function buildGeneratePrompt(
 const KEEP_REST =
   'Preserve todo o resto da imagem exatamente como está, sem mudar estilo, cor ou composição fora da região.';
 
+const ASKS_FOR_TEXT = /\b(textos?|letras?|escrit[oa]s?|palavras?|frases?)\b/;
+
+/**
+ * Regras fixas da edição (correção 6): sem logotipos e sem preços sempre; a regra de texto só sai se o
+ * pedido fala em texto na imagem ("uma placa com letras"). Texto exato é camada, sem passar pelo modelo.
+ */
+export function editRules(request: string): string {
+  return ASKS_FOR_TEXT.test(fold(request))
+    ? 'Regras: sem logotipos e sem preços.'
+    : 'Regras: sem texto legível, sem letras ou números, sem logotipos e sem preços.';
+}
+
 /** Remoção sem objeto nomeado ("remove isso", "tira essa área"): só aponta a marcação. */
 export const REMOVE_INSTRUCTION = 'remova o que está na área marcada e continue o fundo ao redor';
 
@@ -91,7 +103,7 @@ export function buildEditPrompt(input: {
   const integrate = input.integrateLayer
     ? ` Pinte "${input.integrateLayer}" integrado ao fundo, como se já fizesse parte da cena, com a mesma luz e as mesmas cores.`
     : '';
-  return `Na área marcada${names}: ${instruction}.${removal}${integrate} Altere somente a área indicada pela máscara. ${KEEP_REST}`;
+  return `Na área marcada${names}: ${instruction}.${removal}${integrate} Altere somente a área indicada pela máscara. ${KEEP_REST} ${editRules(literal)}`;
 }
 
 /** Prompt do ajuste geral: a imagem atual entra como referência; sem composição por faixas (D-16). */
