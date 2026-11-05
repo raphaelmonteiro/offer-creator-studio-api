@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { DataSource } from 'typeorm';
+import { TemplateScenesGcRunner } from './template-scenes-gc.runner';
 import { UploadsGcService } from './uploads-gc.service';
 
 /**
@@ -172,6 +173,7 @@ describe('UploadsGcService — varredura de /uploads/commercials/ (8.2)', () => 
       {
         get: (key: string, fallback?: unknown) => (key === 'UPLOAD_DEST' ? uploadsDir : fallback),
       } as unknown as ConfigService,
+      { run: jest.fn() } as unknown as TemplateScenesGcRunner,
     );
   }
 

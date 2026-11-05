@@ -29,12 +29,17 @@ export const QUEUES = {
    * recursos, expiração própria de 900 s).
    */
   MC_RENDER: 'mc.render',
+  /** Cena de template (change add-template-scene-persistence): um turno do chat da cena (`generate`). */
+  TEMPLATE_SCENE_TURN: 'template_scene.turn',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
 /** Jobs pesados expirados voltam para a fila (retomada pós-restart do worker). */
 export const DEFAULT_EXPIRE_IN_SECONDS = 15 * 60;
+
+/** Retentativas padrão de um job (pg-boss `retryLimit`). */
+export const DEFAULT_RETRY_LIMIT = 3;
 
 export interface PublishOptions {
   startAfterSeconds?: number;
@@ -50,6 +55,11 @@ export interface PublishOptions {
    * Manager fora de transação ativa → pool do pg-boss (comportamento antigo).
    */
   manager?: EntityManager;
+  /**
+   * Retentativas do pg-boss (padrão 3, o que todos os chamadores atuais usam). Job que faz chamada
+   * PAGA e não é idempotente por chamada (a cena) publica com 0.
+   */
+  retryLimit?: number;
 }
 
 /** Executor de SQL do pg-boss (`send(..., { db })`). */
@@ -108,7 +118,10 @@ export class AnimationQueueService implements QueuePort, OnModuleInit, OnModuleD
   constructor(private readonly config: ConfigService) {}
 
   async onModuleInit(): Promise<void> {
-    if (this.config.get('ANIMATIONS_ENABLED') === 'false') return;
+    // A fila sobe se animações OU a cena de template estiverem ligadas (a cena não depende de animações).
+    const animationsOn = this.config.get('ANIMATIONS_ENABLED') !== 'false';
+    const templateSceneOn = this.config.get('TEMPLATE_SCENE_ENABLED') === 'true';
+    if (!animationsOn && !templateSceneOn) return;
     const host = this.config.get('DB_HOST', 'localhost');
     const port = this.config.get('DB_PORT', '5432');
     const user = this.config.get('DB_USERNAME', 'postgres');
@@ -137,7 +150,7 @@ export class AnimationQueueService implements QueuePort, OnModuleInit, OnModuleD
     return this.boss.send(queue, data, {
       startAfter: options.startAfterSeconds,
       singletonKey: options.singletonKey,
-      retryLimit: 3,
+      retryLimit: options.retryLimit ?? DEFAULT_RETRY_LIMIT,
       retryBackoff: true,
       expireInSeconds: options.expireInSeconds ?? DEFAULT_EXPIRE_IN_SECONDS,
       ...(db ? { db: db as PgBoss.Db } : {}),
