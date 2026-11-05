@@ -12,8 +12,7 @@ import { TurnContext } from './scene-turn-state';
 /**
  * `generate` (primeira geração) e `global_regenerate` (ajuste geral confirmado). O ajuste geral edita a
  * master inteira, no tamanho nativo e sem máscara, com a imagem atual como referência; logo e texto são
- * camadas e ficam como estão (os elementos `generated` também: reposicionar é a opção do cliente, que
- * aqui só fica registrada, porque a composição é mantida).
+ * camadas e ficam como estão (os elementos `generated` também: a composição é mantida).
  */
 @Injectable()
 export class SceneGenerateHandler implements TurnHandler {
