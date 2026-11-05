@@ -293,6 +293,59 @@ describeIfSceneDb('SceneTurnService: classificação do pedido (banco chroma_x_e
       expect(publish).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+      ['region', { region: RECT }],
+      [
+        'mask',
+        {
+          mask: {
+            kind: 'lasso',
+            points: [
+              { x: 0.1, y: 0.1 },
+              { x: 0.4, y: 0.1 },
+              { x: 0.2, y: 0.4 },
+            ],
+          },
+        },
+      ],
+      ['zone', { zone: 'header' }],
+      ['targetElementId', { targetElementId: 'logo-1' }],
+      ['attachments', { attachments: [{ assetId: '11111111-1111-4111-8111-111111111111' }] }],
+    ])(
+      'confirmação com %s: 400, nada gravado, e a confirmação válida seguinte é aceita',
+      async (_name, extra) => {
+        const scene = await readyScene(`Cls confirma alvo ${_name}`);
+        const asked = await send(scene.id, { content: 'deixa tudo mais quente' });
+        const reply = asked.assistantMessage!.id;
+        const versionsBefore = (await versionsOf(scene.id)).length;
+        const messagesBefore = await dataSource.manager.count(TemplateSceneMessage, {
+          where: { sceneId: scene.id },
+        });
+
+        const error = await errorOf(
+          send(
+            scene.id,
+            { content: 'sim', confirmGlobal: true, replyToMessageId: reply, ...extra },
+            asked.revision,
+          ),
+        );
+
+        expect(error).toEqual({ status: 400, code: 'BAD_REQUEST' });
+        expect(publish).not.toHaveBeenCalled();
+        expect(await versionsOf(scene.id)).toHaveLength(versionsBefore);
+        expect(
+          await dataSource.manager.count(TemplateSceneMessage, { where: { sceneId: scene.id } }),
+        ).toBe(messagesBefore);
+        expect((await sceneOf(scene.id)).revision).toBe(asked.revision);
+        const ok = await send(
+          scene.id,
+          { content: 'sim', confirmGlobal: true, replyToMessageId: reply },
+          asked.revision,
+        );
+        expect(ok).toMatchObject({ operation: 'global_regenerate', jobId: 'job-1' });
+      },
+    );
+
     it('confirmar sem replyToMessageId: 400; resposta a mensagem que não é pergunta: 409', async () => {
       const scene = await readyScene('Cls global inválida');
       expect((await errorOf(send(scene.id, { confirmGlobal: true }))).status).toBe(400);

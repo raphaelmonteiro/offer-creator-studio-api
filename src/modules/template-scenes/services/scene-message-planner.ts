@@ -56,15 +56,26 @@ export interface PendingConfirmation {
 
 const TARGET_KEYS = ['region', 'mask', 'zone', 'targetElementId'] as const;
 
+/** A confirmação do ajuste geral vem sozinha: com alvo ou anexo é 400, e a pergunta segue pendente. */
+function assertConfirmationAlone(dto: SendMessageDto, given: readonly string[]): void {
+  if (!dto.confirmGlobal) return;
+  if (!dto.replyToMessageId) {
+    throw invalidBody('Para confirmar o ajuste geral, envie também replyToMessageId.');
+  }
+  if (given.length > 0 || (dto.attachments?.length ?? 0) > 0) {
+    throw invalidBody(
+      'Confirmar o ajuste geral não aceita área, zona, elemento nem anexo: envie só a confirmação.',
+    );
+  }
+}
+
 /** Região, máscara, zona e elemento são alvos exclusivos (400, nada é gravado). */
 export function assertSingleTarget(dto: SendMessageDto): void {
   const given = TARGET_KEYS.filter((key) => dto[key] !== undefined && dto[key] !== null);
   if (given.length > 1) {
     throw invalidBody(`Envie um alvo só: ${given.join(', ')} não podem vir juntos.`);
   }
-  if (dto.confirmGlobal && !dto.replyToMessageId) {
-    throw invalidBody('Para confirmar o ajuste geral, envie também replyToMessageId.');
-  }
+  assertConfirmationAlone(dto, given);
   if (
     dto.region &&
     (dto.region.x + dto.region.w > 1.0001 || dto.region.y + dto.region.h > 1.0001)

@@ -17,7 +17,7 @@ import {
 import { CANCELLED_REPLY } from '../scene-texts';
 import { SceneClassification } from '../domain/scene-operation.classifier';
 import { publishSceneEvent } from './scene-events';
-import { JobPlan, planMessage, ReplyPlan } from './scene-message-planner';
+import { assertSingleTarget, JobPlan, planMessage, ReplyPlan } from './scene-message-planner';
 import { addAssistantMessage, settleUserMessage } from './scene-messages';
 import {
   assertExpectedRevision,
@@ -75,6 +75,7 @@ export class SceneTurnService {
       return await this.locks.run(sceneId, async ({ manager, scene }) => {
         assertExpectedRevision(scene, dto.expectedRevision);
         await assertSceneIdle(manager, sceneId);
+        assertSingleTarget(dto); // 400 antes de qualquer consulta: o corpo inválido vence o 422 do anexo
         await this.assertAttachmentsInScene(manager, sceneId, dto);
         const plan = await planMessage(manager, scene, dto);
         if (plan.kind === 'reply') return this.recordReply(manager, scene, dto, plan, userId);
