@@ -1,4 +1,4 @@
-import { SceneIntent } from './scene-intent';
+import { IntentAction, SceneIntent } from './scene-intent';
 import { layerNamedIn } from './scene-layer-name';
 import {
   LayerAction,
@@ -110,6 +110,29 @@ function textPlan(intent: SceneIntent): Plan {
   };
 }
 
+type Planner = (intent: SceneIntent, input: IntentPlanInput) => Plan;
+
+/** Com marcação, ajuste geral, imagem nova e "pedir a área" viram edição local da área; sem ela, perguntam ou pedem a área. */
+const orMarked =
+  (unmarked: Plan): Planner =>
+  (_intent, input) =>
+    input.marked ? markedEdit(input, input.marked) : unmarked;
+
+const PLANNERS: Record<IntentAction, Planner> = {
+  edit: (intent, input) => editPlan(intent, input, false),
+  remove: (intent, input) => editPlan(intent, input, true),
+  add_element: addPlan,
+  integrate: integratePlan,
+  global_adjust: orMarked({ operation: 'needs_confirmation_global' }),
+  new_image: orMarked({ operation: 'needs_confirmation_new_image' }),
+  move_item: () => ({ operation: 'move_unavailable' }),
+  layer_move: layerPlan,
+  layer_resize: layerPlan,
+  layer_remove: layerPlan,
+  set_text: textPlan,
+  ask_region: orMarked(NEEDS_ITEM),
+};
+
 /**
  * Do modelo ao plano (D-19), função pura. A intenção do modelo já passou pelo schema fechado; aqui o
  * código decide o efeito. Com marcação, o alvo é sempre a marcação (a zona do modelo é ignorada) e
@@ -117,30 +140,5 @@ function textPlan(intent: SceneIntent): Plan {
  * imagem nova pedem confirmação, e citar um item sem lugar pede a área.
  */
 export function planFromIntent(intent: SceneIntent, input: IntentPlanInput): Plan {
-  switch (intent.action) {
-    case 'edit':
-      return editPlan(intent, input, false);
-    case 'remove':
-      return editPlan(intent, input, true);
-    case 'add_element':
-      return addPlan(intent, input);
-    case 'integrate':
-      return integratePlan(intent, input);
-    case 'global_adjust':
-      return input.marked
-        ? markedEdit(input, input.marked)
-        : { operation: 'needs_confirmation_global' };
-    case 'new_image':
-      return input.marked
-        ? markedEdit(input, input.marked)
-        : { operation: 'needs_confirmation_new_image' };
-    case 'move_item':
-      return { operation: 'move_unavailable' };
-    case 'set_text':
-      return textPlan(intent);
-    case 'ask_region':
-      return input.marked ? markedEdit(input, input.marked) : NEEDS_ITEM;
-    default:
-      return layerPlan(intent, input);
-  }
+  return PLANNERS[intent.action](intent, input);
 }

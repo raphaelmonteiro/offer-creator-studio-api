@@ -85,6 +85,12 @@ function specOf(plan: LocalEditPlan): RegionSpec | null {
 
 const CHOOSE_LAYER: SceneClassification = { operation: 'needs_region', reason: 'choose_layer' };
 
+/** Camadas que o nome citado aponta: uma só é o alvo, duas ou mais pedem a escolha. */
+function namedLayers(layers: SceneElement[], hint: string | undefined, content: string) {
+  const folded = fold(`${hint ?? ''} ${content}`);
+  return layers.filter((layer) => namedIn(layer, folded));
+}
+
 /**
  * Acha a camada `generated` a integrar (D-21), nesta ordem: 1. a selecionada; 2. o nome citado (uma
  * palavra de 4 letras ou mais do nome da camada, no `object` ou na mensagem) que aponta para uma só
@@ -97,26 +103,30 @@ export async function resolveIntegration(
   classification: SceneClassification,
   input: { content: string; layers: SceneElement[]; scene: IntegrateScene },
 ): Promise<SceneClassification> {
-  const unmarked =
-    classification.operation === 'needs_region' && classification.reason === 'integrate';
-  const plan =
-    classification.operation === 'local_edit' && classification.integrate ? classification : null;
-  if (!unmarked && !plan) return classification;
   const layers = input.layers.filter((layer) => layer.kind === 'generated');
-  if (plan?.target.kind === 'element') {
+  if (classification.operation === 'needs_region' && classification.reason === 'integrate') {
+    const named = namedLayers(layers, classification.subject, input.content);
+    if (named.length > 1) return CHOOSE_LAYER;
+    return named.length === 1
+      ? onLayerBox(input.content, named[0])
+      : { operation: 'needs_region', reason: 'item' };
+  }
+  if (classification.operation !== 'local_edit' || !classification.integrate) return classification;
+  return resolveMarked(classification, layers, input);
+}
+
+async function resolveMarked(
+  plan: LocalEditPlan,
+  layers: SceneElement[],
+  input: { content: string; scene: IntegrateScene },
+): Promise<SceneClassification> {
+  if (plan.target.kind === 'element') {
     const { elementId } = plan.target;
     const layer = layers.find((candidate) => candidate.id === elementId);
     return layer ? { ...plan, integrateLayer: layerRef(layer) } : plan;
   }
-  const hint = plan ? plan.object : (classification as { subject?: string }).subject;
-  const folded = fold(`${hint ?? ''} ${input.content}`);
-  const named = layers.filter((layer) => namedIn(layer, folded));
+  const named = namedLayers(layers, plan.object ?? undefined, input.content);
   if (named.length > 1) return CHOOSE_LAYER;
-  if (named.length === 1) {
-    return plan
-      ? { ...plan, integrateLayer: layerRef(named[0]) }
-      : onLayerBox(input.content, named[0]);
-  }
-  if (!plan) return { operation: 'needs_region', reason: 'item' };
+  if (named.length === 1) return { ...plan, integrateLayer: layerRef(named[0]) };
   return resolveInArea(plan, layers, { spec: specOf(plan), scene: input.scene });
 }

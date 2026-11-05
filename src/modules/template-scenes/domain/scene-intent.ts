@@ -142,21 +142,31 @@ function sharesWord(value: string, message: string): boolean {
 
 const collapse = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
-/** Regras do código que o schema não expressa: palavras da mensagem, texto literal e campos exigidos pela ação. */
-function semanticProblem(intent: SceneIntent, message: string): string | null {
+/** `object` e `subject` precisam ter alguma palavra da mensagem. */
+function invented(intent: SceneIntent, message: string): string | null {
   for (const field of ['object', 'subject'] as const) {
     const value = intent[field];
     if (value && !sharesWord(value, message)) return `${field} sem palavra da mensagem`;
   }
+  return null;
+}
+
+/** Cada ação exige o que precisa para virar plano. */
+function missingForAction(intent: SceneIntent): string | null {
+  const { action, layer } = intent;
+  if (action === 'add_element' && !intent.subject) return 'add_element sem subject';
+  if (action === 'set_text' && !intent.text) return 'set_text sem text';
+  if (action.startsWith('layer_') && !layer) return `${action} sem layer`;
+  if (action === 'layer_resize' && !layer?.direction) return 'layer_resize sem direction';
+  return null;
+}
+
+/** Regras do código que o schema não expressa: palavras da mensagem, texto literal e campos exigidos pela ação. */
+function semanticProblem(intent: SceneIntent, message: string): string | null {
   if (intent.text && !collapse(message).includes(collapse(intent.text.value))) {
     return 'texto exato fora da mensagem';
   }
-  if (intent.action === 'add_element' && !intent.subject) return 'add_element sem subject';
-  if (intent.action === 'set_text' && !intent.text) return 'set_text sem text';
-  if (intent.action.startsWith('layer_') && !intent.layer) return `${intent.action} sem layer`;
-  if (intent.action === 'layer_resize' && !intent.layer?.direction)
-    return 'layer_resize sem direction';
-  return null;
+  return invented(intent, message) ?? missingForAction(intent);
 }
 
 /** Valida a saída do modelo: JSON, schema fechado e regras do código. Nunca lança. */

@@ -37,6 +37,21 @@ function knownElementNames(ctx: TurnContext, region: Rect | null): string[] {
     .map((e) => e.name);
 }
 
+/** Prompt da edição: o `imagePrompt` da intenção (ou a mensagem), o objeto e a camada a integrar (D-19). */
+function promptOf(
+  ctx: TurnContext,
+  plan: Extract<SceneClassification, { operation: 'local_edit' }>,
+): string {
+  return buildEditPrompt({
+    request: plan.imagePrompt ?? plan.instruction,
+    original: plan.instruction,
+    remove: plan.remove,
+    object: plan.object,
+    knownElements: knownElementNames(ctx, ctx.requestedRegion),
+    integrateLayer: plan.integrateLayer?.name,
+  });
+}
+
 /**
  * `local_edit` (e "remover", que é uma edição local): recorta a região com margem, edita o recorte
  * com a máscara (M3), recompõe sobre a master anterior com recuo e feather, confere o exterior byte a
@@ -68,14 +83,7 @@ export class SceneEditHandler implements TurnHandler {
     const prepared = await this.images.prepareEdit({ master, region: spec, zones: ctx.zones });
     if (prepared.plan.belowMinArea) return state.reject(ctx, CROP_TOO_SMALL_REPLY);
     if (!(await state.advance(ctx, 'editing'))) return;
-    const prompt = buildEditPrompt({
-      request: plan.imagePrompt ?? plan.instruction,
-      original: plan.instruction,
-      remove: plan.remove,
-      object: plan.object,
-      knownElements: knownElementNames(ctx, ctx.requestedRegion),
-      integrateLayer: plan.integrateLayer?.name,
-    });
+    const prompt = promptOf(ctx, plan);
     const raw = await this.callModel(ctx, prepared, prompt);
     if (!raw) return;
     if (!(await state.advance(ctx, 'blending'))) return;
