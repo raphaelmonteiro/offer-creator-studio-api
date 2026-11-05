@@ -236,6 +236,83 @@ describeIfSceneDb('Cena de template: edição local (e2e, banco chroma_x_e2e)', 
     expect(done.totalCostUsd).toBe(first.totalCostUsd);
   });
 
+  it('pedido não atendido (#visao-nao): a imagem atual fica, a tentativa vira versão e "Usar esta versão" restaura', async () => {
+    const first = await generatedScene('E2E Não atendido');
+
+    const sent = await post(`/${first.id}/messages`, {
+      content: 'remova os ovos da area marcada #visao-nao',
+      expectedRevision: first.revision,
+      region: RECT,
+    });
+    expect(sent.status).toBe(202);
+
+    const after = await waitForScene(
+      first.id,
+      (s) => s.activeVersion === null && s.versions.total === 2,
+    );
+    expect(after.currentVersion.number).toBe(1);
+    const attempt = after.versions.items[0];
+    expect(attempt).toMatchObject({ status: 'ready', metrics: { notApplied: true } });
+    expect(attempt.restorable).toBe(true);
+    expect(after.messages.at(-1).content).toContain('Mantive a imagem atual');
+
+    const restored = await post(`/${first.id}/versions/${attempt.id}/restore`, {
+      expectedRevision: after.revision,
+    });
+    expect(restored.status).toBe(200);
+    expect(restored.body.data.currentVersion.number).toBe(3);
+    expect(restored.body.data.totalCostUsd).toBe(after.totalCostUsd);
+  });
+
+  it('imagem nova: pergunta com o custo, e só depois de confirmar gera uma versão sem a referência', async () => {
+    const first = await generatedScene('E2E Imagem nova');
+
+    const asked = await post(`/${first.id}/messages`, {
+      content: 'gere uma segunda imagem',
+      expectedRevision: first.revision,
+    });
+    expect(asked.body.data).toMatchObject({
+      jobId: null,
+      operation: 'needs_confirmation_new_image',
+    });
+    expect(asked.body.data.assistantMessage.content).toContain('US$ 0,13');
+
+    const confirmed = await post(`/${first.id}/messages`, {
+      content: 'Confirmar',
+      expectedRevision: asked.body.data.revision,
+      confirmGlobal: true,
+      replyToMessageId: asked.body.data.assistantMessage.id,
+    });
+    expect(confirmed.body.data).toMatchObject({ operation: 'new_image' });
+
+    const done = await waitForVersion(first.id, 3);
+    expect(done.currentVersion).toMatchObject({ status: 'ready', isNewImage: true });
+    expect(done.currentVersion.master.id).not.toBe(first.currentVersion.master.id);
+  });
+
+  it('integrar: a camada some da versão nova e o fundo é editado na área dela', async () => {
+    const first = await generatedScene('E2E Integrar');
+    const area: Rect = { x: 0.1, y: 0.3, w: 0.3, h: 0.1 };
+    await post(`/${first.id}/messages`, {
+      content: 'adiciona uma cesta de ovos',
+      expectedRevision: first.revision,
+      region: area,
+    });
+    const added = await waitForVersion(first.id, 2);
+    expect(added.currentVersion.elements).toHaveLength(1);
+
+    const sent = await post(`/${first.id}/messages`, {
+      content: 'integre esta cesta ao cenário de fundo',
+      expectedRevision: added.revision,
+      region: area,
+    });
+    expect(sent.body.data.operation).toBe('local_edit');
+
+    const done = await waitForVersion(first.id, 3);
+    expect(done.currentVersion.elements).toHaveLength(0);
+    expect(done.currentVersion.master.id).not.toBe(added.currentVersion.master.id);
+  });
+
   it('alvo duplo (região e elemento): 400 e nada é gravado; sem token: 401', async () => {
     const first = await generatedScene('E2E Alvo duplo');
 
