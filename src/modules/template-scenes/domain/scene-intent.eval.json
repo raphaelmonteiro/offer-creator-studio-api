@@ -1,0 +1,2699 @@
+[
+  {
+    "id": "dono-v2-sem",
+    "group": "dono",
+    "message": "Gostei mas o cabeçalho e o resto, tem uma divisão na imagem gerada muito bruta, não ficou natural é como se fosse duas imagens",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "corrigir a divisão brusca entre o cabeçalho e o resto, deixando a imagem natural e contínua",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v2-com",
+    "group": "dono",
+    "message": "Gostei mas o cabeçalho e o resto, tem uma divisão na imagem gerada muito bruta, não ficou natural é como se fosse duas imagens",
+    "marked": true,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "corrigir a divisão brusca, deixando a imagem natural e contínua",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "global_adjust",
+        "zone": null
+      },
+      {
+        "action": "edit",
+        "zone": null
+      },
+      {
+        "action": "ask_region",
+        "zone": null
+      },
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ],
+    "note": "marcação manda: o efeito é local_edit"
+  },
+  {
+    "id": "dono-v3-sem",
+    "group": "dono",
+    "message": "gere uma segunda imagem, de fundo para substituir essa, eu nao gostei, pois o header está completamente diferente do body e do footer. Preciso de uma imagem q tenha harmonia, pense em um template de pascoa para com ovos de pascoa e um coelho de pascoa, em um cenario que tenha referencia a essa epoca",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "template de páscoa com ovos de páscoa e um coelho, imagem harmônica",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v3-com",
+    "group": "dono",
+    "message": "gere uma segunda imagem, de fundo para substituir essa, eu nao gostei, pois o header está completamente diferente do body e do footer. Preciso de uma imagem q tenha harmonia, pense em um template de pascoa para com ovos de pascoa e um coelho de pascoa, em um cenario que tenha referencia a essa epoca",
+    "marked": true,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "template de páscoa com ovos de páscoa e um coelho, imagem harmônica",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "global_adjust",
+        "zone": null
+      },
+      {
+        "action": "edit",
+        "zone": null
+      },
+      {
+        "action": "ask_region",
+        "zone": null
+      },
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ],
+    "note": "marcação manda: o efeito é local_edit"
+  },
+  {
+    "id": "dono-v4-sem",
+    "group": "dono",
+    "message": "não mais uma vez vc fez igual e o a parte de baixo é exatamente a msm, vc só mudou o cabeçalho quero que mude tudo",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "uma imagem nova, diferente da anterior",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v4-com",
+    "group": "dono",
+    "message": "não mais uma vez vc fez igual e o a parte de baixo é exatamente a msm, vc só mudou o cabeçalho quero que mude tudo",
+    "marked": true,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "uma imagem nova, diferente da anterior",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "global_adjust",
+        "zone": null
+      },
+      {
+        "action": "edit",
+        "zone": null
+      },
+      {
+        "action": "ask_region",
+        "zone": null
+      },
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ],
+    "note": "marcação manda: o efeito é local_edit"
+  },
+  {
+    "id": "dono-v5-sem",
+    "group": "dono",
+    "message": "ta a imagem ta melhor mas remove para mim da parte de baixo os ovos a direita.",
+    "marked": false,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "os ovos",
+      "subject": null,
+      "imagePrompt": "remover os ovos da direita, na parte de baixo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v6-com",
+    "group": "dono",
+    "message": "ta a imagem ta melhor mas remove para mim da parte de baixo os ovos a direita.",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "os ovos",
+      "subject": null,
+      "imagePrompt": "remover os ovos da direita, na parte de baixo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v7-com",
+    "group": "dono",
+    "message": "remova os ovos da area marcada",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "os ovos",
+      "subject": null,
+      "imagePrompt": "remover os ovos",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v7-sem",
+    "group": "dono",
+    "message": "remova os ovos da area marcada",
+    "marked": false,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "os ovos",
+      "subject": null,
+      "imagePrompt": "remover os ovos",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v8-sem",
+    "group": "dono",
+    "message": "Adicione uma cesta de ovos no lugar da cerca removida",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "cesta de ovos",
+      "imagePrompt": "uma cesta de ovos",
+      "relativePlace": true,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v8-com",
+    "group": "dono",
+    "message": "Adicione uma cesta de ovos no lugar da cerca removida",
+    "marked": true,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "cesta de ovos",
+      "imagePrompt": "uma cesta de ovos",
+      "relativePlace": true,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v10-com",
+    "group": "dono",
+    "message": "integre esta cesta ai cenario de fundo como se ela divesse colocada no gramado, e são ovos de pascoa nao de galhinha",
+    "marked": true,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": "esta cesta",
+      "subject": null,
+      "imagePrompt": "integrar a cesta ao cenário de fundo, no gramado, com ovos de páscoa",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "dono-v10-sem",
+    "group": "dono",
+    "message": "integre esta cesta ai cenario de fundo como se ela divesse colocada no gramado, e são ovos de pascoa nao de galhinha",
+    "marked": false,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": "esta cesta",
+      "subject": null,
+      "imagePrompt": "integrar a cesta ao cenário de fundo, no gramado, com ovos de páscoa",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "logo-para-a-direita",
+    "group": "tabela",
+    "message": "passa a logo para a direita",
+    "marked": false,
+    "expect": {
+      "action": "layer_move",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": {
+        "kind": "logo",
+        "name": null,
+        "side": "right",
+        "direction": null
+      },
+      "text": null
+    }
+  },
+  {
+    "id": "logo-de-lado",
+    "group": "tabela",
+    "message": "troca a logo de lado",
+    "marked": false,
+    "expect": {
+      "action": "layer_move",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": {
+        "kind": "logo",
+        "name": null,
+        "side": "toggle",
+        "direction": null
+      },
+      "text": null
+    }
+  },
+  {
+    "id": "texto-maior",
+    "group": "tabela",
+    "message": "aumenta o texto",
+    "marked": false,
+    "expect": {
+      "action": "layer_resize",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": {
+        "kind": "text",
+        "name": null,
+        "side": null,
+        "direction": "bigger"
+      },
+      "text": null
+    }
+  },
+  {
+    "id": "tira-a-logo",
+    "group": "tabela",
+    "message": "tira a logo",
+    "marked": false,
+    "expect": {
+      "action": "layer_remove",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": {
+        "kind": "logo",
+        "name": null,
+        "side": null,
+        "direction": null
+      },
+      "text": null
+    }
+  },
+  {
+    "id": "remover-o-texto",
+    "group": "tabela",
+    "message": "remover o texto",
+    "marked": false,
+    "expect": {
+      "action": "layer_remove",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": {
+        "kind": "text",
+        "name": null,
+        "side": null,
+        "direction": null
+      },
+      "text": null
+    }
+  },
+  {
+    "id": "texto-entre-aspas",
+    "group": "tabela",
+    "message": "escreve \"Super oferta\"",
+    "marked": false,
+    "expect": {
+      "action": "set_text",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": {
+        "value": "Super oferta",
+        "placement": "none"
+      }
+    }
+  },
+  {
+    "id": "texto-aspas-com-marcacao",
+    "group": "tabela",
+    "message": "escreve \"Black Friday\" em cima",
+    "marked": true,
+    "expect": {
+      "action": "set_text",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": {
+        "value": "Black Friday",
+        "placement": "top"
+      }
+    }
+  },
+  {
+    "id": "troca-o-texto",
+    "group": "tabela",
+    "message": "muda o texto para Black Friday",
+    "marked": false,
+    "expect": {
+      "action": "set_text",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": {
+        "kind": "text",
+        "name": null,
+        "side": null,
+        "direction": null
+      },
+      "text": {
+        "value": "Black Friday",
+        "placement": "none"
+      }
+    }
+  },
+  {
+    "id": "logo-visual-sem-area",
+    "group": "tabela",
+    "message": "deixa a logo mais brilhante",
+    "marked": false,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "logo mais brilhante",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "ask_region",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "logo-visual-com-area",
+    "group": "tabela",
+    "message": "deixa a logo mais brilhante",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "logo mais brilhante",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "mover-sol-de-lado",
+    "group": "tabela",
+    "message": "troca o sol de lado",
+    "marked": false,
+    "expect": {
+      "action": "move_item",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "mover-sol-esquerda",
+    "group": "tabela",
+    "message": "mover o sol para a esquerda",
+    "marked": false,
+    "expect": {
+      "action": "move_item",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "mover-nuvem-com-area",
+    "group": "tabela",
+    "message": "move a nuvem para a direita",
+    "marked": true,
+    "expect": {
+      "action": "move_item",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "levar-sol",
+    "group": "tabela",
+    "message": "leva o sol para a direita",
+    "marked": false,
+    "expect": {
+      "action": "move_item",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "remover-o-sol",
+    "group": "tabela",
+    "message": "remover o sol",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "o sol",
+      "subject": null,
+      "imagePrompt": "remover o sol",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "remover-o-sol-sem-area",
+    "group": "tabela",
+    "message": "remover o sol",
+    "marked": false,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "o sol",
+      "subject": null,
+      "imagePrompt": "remover o sol",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "tirar-nuvem-pincel",
+    "group": "tabela",
+    "message": "tira a nuvem",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "a nuvem",
+      "subject": null,
+      "imagePrompt": "remover a nuvem",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "adicionar-balao",
+    "group": "tabela",
+    "message": "adiciona um balão de ar quente",
+    "marked": true,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "balão de ar quente",
+      "imagePrompt": "um balão de ar quente",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "adicionar-sem-area",
+    "group": "tabela",
+    "message": "acrescenta uma nuvem",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "nuvem",
+      "imagePrompt": "uma nuvem",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "adicionar-no-cabecalho",
+    "group": "tabela",
+    "message": "adiciona um balão no cabeçalho",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": "header",
+      "object": null,
+      "subject": "balão",
+      "imagePrompt": "um balão",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "adicionar-no-miolo",
+    "group": "tabela",
+    "message": "adiciona um balão no miolo da imagem.",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": "body",
+      "object": null,
+      "subject": "balão",
+      "imagePrompt": "um balão",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "adicionar-no-rodape",
+    "group": "tabela",
+    "message": "acrescenta uma nuvem no rodapé",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": "footer",
+      "object": null,
+      "subject": "nuvem",
+      "imagePrompt": "uma nuvem",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "adicionar-zona-pelo-campo",
+    "group": "tabela",
+    "message": "adiciona um balão",
+    "marked": true,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "balão",
+      "imagePrompt": "um balão",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "por-efeito-de-luz",
+    "group": "tabela",
+    "message": "põe um efeito de luz",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "um efeito de luz",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "por-rosto",
+    "group": "tabela",
+    "message": "põe um rosto",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "um rosto",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "colocar-balao-com-area",
+    "group": "tabela",
+    "message": "coloca um balão de ar quente",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "um balão de ar quente",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "colocar-balao-com-zona-campo",
+    "group": "tabela",
+    "message": "coloca um balão",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "um balão",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "colocar-um-sem-item",
+    "group": "tabela",
+    "message": "coloca um balão de ar quente",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "balão de ar quente",
+      "imagePrompt": "um balão de ar quente",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "colocar-no-ceu-com-area",
+    "group": "tabela",
+    "message": "coloca um balão no céu",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "um balão no céu",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "item-sem-area",
+    "group": "tabela",
+    "message": "coloca um brilho no sol",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "sol-sem-area",
+    "group": "tabela",
+    "message": "deixa o sol mais brilhante",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "sol-com-retangulo",
+    "group": "tabela",
+    "message": "deixa o sol mais alaranjado",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "sol mais alaranjado",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "sol-com-laco",
+    "group": "tabela",
+    "message": "deixa o sol mais brilhante",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "sol mais brilhante",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "zona-ceu-cabecalho",
+    "group": "tabela",
+    "message": "deixa o céu do cabeçalho mais limpo",
+    "marked": false,
+    "expect": {
+      "action": "edit",
+      "zone": "header",
+      "object": null,
+      "subject": null,
+      "imagePrompt": "céu mais limpo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "zona-rodape-escuro",
+    "group": "tabela",
+    "message": "deixa o rodapé mais escuro",
+    "marked": false,
+    "expect": {
+      "action": "edit",
+      "zone": "footer",
+      "object": null,
+      "subject": null,
+      "imagePrompt": "mais escuro",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "zona-sinonimo-miolo",
+    "group": "tabela",
+    "message": "deixa o meio mais claro",
+    "marked": false,
+    "expect": {
+      "action": "edit",
+      "zone": "body",
+      "object": null,
+      "subject": null,
+      "imagePrompt": "mais claro",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "zona-sinonimo-topo",
+    "group": "tabela",
+    "message": "mais nuvens no topo",
+    "marked": false,
+    "expect": {
+      "action": "edit",
+      "zone": "header",
+      "object": null,
+      "subject": null,
+      "imagePrompt": "mais nuvens",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "zona-pelo-campo",
+    "group": "tabela",
+    "message": "deixa mais limpo",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "mais limpo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "trocar-nao-e-adicionar",
+    "group": "tabela",
+    "message": "troca o sol por uma lua",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "trocar o sol por uma lua",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "global-tudo-quente",
+    "group": "tabela",
+    "message": "deixa tudo mais quente",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "imagem toda em tons mais quentes",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "global-imagem-vibrante",
+    "group": "tabela",
+    "message": "deixa a imagem mais vibrante",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "imagem mais vibrante",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "global-fundo-claro",
+    "group": "tabela",
+    "message": "deixa o fundo mais claro",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "fundo mais claro",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "global-tons-de-azul",
+    "group": "tabela",
+    "message": "muda tudo para tons de azul",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "imagem toda em tons de azul",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "fundo-atras-do-texto",
+    "group": "tabela",
+    "message": "deixa o fundo atrás do texto mais claro",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "fundo mais claro",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "reclamacao-header",
+    "group": "tabela",
+    "message": "o header está diferente",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "reclamacao-so-mudou-cabecalho",
+    "group": "tabela",
+    "message": "você só mudou o cabeçalho",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "zona-como-lugar",
+    "group": "tabela",
+    "message": "coloca mais luz no cabeçalho",
+    "marked": false,
+    "expect": {
+      "action": "edit",
+      "zone": "header",
+      "object": null,
+      "subject": null,
+      "imagePrompt": "mais luz",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "zona-comparacao-nao-vale",
+    "group": "tabela",
+    "message": "deixa igual ao rodapé",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "campo-zone-vale-sempre",
+    "group": "tabela",
+    "message": "o header está diferente",
+    "marked": true,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "global_adjust",
+        "zone": null
+      },
+      {
+        "action": "edit",
+        "zone": null
+      },
+      {
+        "action": "ask_region",
+        "zone": null
+      },
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ],
+    "note": "marcação manda: o efeito é local_edit"
+  },
+  {
+    "id": "imagem-nova-simples",
+    "group": "tabela",
+    "message": "gere outra imagem",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "imagem-nova-com-area",
+    "group": "tabela",
+    "message": "gere outra imagem",
+    "marked": true,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "imagem-nova-do-zero",
+    "group": "tabela",
+    "message": "refaz do zero",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r23-coelho-cabecalho",
+    "group": "rodada3",
+    "message": "gere outra imagem com o coelho no cabeçalho",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r23-arte-rodape",
+    "group": "rodada3",
+    "message": "faça uma nova arte com ovos no rodapé",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r23-zero-cesta",
+    "group": "rodada3",
+    "message": "refaz do zero com cesta no meio",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r23-adicione-coelho",
+    "group": "rodada3",
+    "message": "gere outra imagem e adicione um coelho",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r23-tire-logo",
+    "group": "rodada3",
+    "message": "gere outra imagem, tire o logo",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "layer_remove",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r23-espaco-logo",
+    "group": "rodada3",
+    "message": "gere outra imagem com espaço para o logo",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r23-nova-imagem-move-sol",
+    "group": "rodada3",
+    "message": "cria uma nova imagem e move o sol para a direita",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "move_item",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r24-header-body-footer",
+    "group": "rodada3",
+    "message": "o header está diferente do body e do footer",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-cabecalho-corpo-rodape",
+    "group": "rodada3",
+    "message": "o cabeçalho está diferente do corpo e do rodapé",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-igual-ao-do-rodape",
+    "group": "rodada3",
+    "message": "ficou igual ao do rodapé",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-so-mexeu",
+    "group": "rodada3",
+    "message": "vc só mexeu no cabeçalho",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-ficou-so",
+    "group": "rodada3",
+    "message": "a mudança ficou só no cabeçalho",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-nao-mexa",
+    "group": "rodada3",
+    "message": "não mexa no cabeçalho, muda o resto",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r24-como-esta",
+    "group": "rodada3",
+    "message": "deixa o cabeçalho como está e muda o resto",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r24-sem-mexer",
+    "group": "rodada3",
+    "message": "sem mexer no rodapé, deixa mais quente",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "mais quente, sem mexer no rodapé",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-corpo-coelho",
+    "group": "rodada3",
+    "message": "muda a cor do corpo do coelho",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r24-escurece-corpo",
+    "group": "rodada3",
+    "message": "escurece o corpo do coelho",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r24-base-cesta",
+    "group": "rodada3",
+    "message": "muda a base da cesta",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r24-base-bolo",
+    "group": "rodada3",
+    "message": "clareia a base do bolo",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r24-estrela-topo",
+    "group": "rodada3",
+    "message": "coloca uma estrela no topo da árvore",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "estrela",
+      "imagePrompt": "uma estrela",
+      "relativePlace": true,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-meio-azulado",
+    "group": "rodada3",
+    "message": "deixa meio azulado",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "levemente azulado",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-meio-escuro",
+    "group": "rodada3",
+    "message": "deixa meio escuro",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "levemente escuro",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-meio-transparente",
+    "group": "rodada3",
+    "message": "faz meio transparente",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "ask_region",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r24-divisao-meio",
+    "group": "rodada3",
+    "message": "tem uma divisão no meio da imagem",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-separa",
+    "group": "rodada3",
+    "message": "separa o cabeçalho do rodapé",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "global_adjust",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r24-coelho-base-arvore",
+    "group": "rodada3",
+    "message": "adiciona um coelho na base da árvore",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "coelho",
+      "imagePrompt": "um coelho",
+      "relativePlace": true,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r24-cesta-meio-gramado",
+    "group": "rodada3",
+    "message": "adicione uma cesta de ovos no meio do gramado",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "cesta de ovos",
+      "imagePrompt": "uma cesta de ovos",
+      "relativePlace": true,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-estes-ovos",
+    "group": "rodada3",
+    "message": "tira estes ovos",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "estes ovos",
+      "subject": null,
+      "imagePrompt": "remover os ovos",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-aquelas-pedras",
+    "group": "rodada3",
+    "message": "remova aquelas pedras",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "aquelas pedras",
+      "subject": null,
+      "imagePrompt": "remover as pedras",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-remove-ovos",
+    "group": "rodada3",
+    "message": "remove ovos",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "ovos",
+      "subject": null,
+      "imagePrompt": "remover os ovos",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-tire-ovos-daqui",
+    "group": "rodada3",
+    "message": "tire ovos daqui",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "ovos",
+      "subject": null,
+      "imagePrompt": "remover os ovos",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-remove-divisao",
+    "group": "rodada3",
+    "message": "remove a divisão entre o cabeçalho e o resto",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "a divisão entre o cabeçalho e o resto",
+      "subject": null,
+      "imagePrompt": "remover a divisão entre o cabeçalho e o resto",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-tira-brilho",
+    "group": "rodada3",
+    "message": "tira o brilho",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "o brilho",
+      "subject": null,
+      "imagePrompt": "remover o brilho",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-tira-luz",
+    "group": "rodada3",
+    "message": "tira a luz",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "a luz",
+      "subject": null,
+      "imagePrompt": "remover a luz",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-remove-cor",
+    "group": "rodada3",
+    "message": "remove esta cor",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "esta cor",
+      "subject": null,
+      "imagePrompt": "remover esta cor",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-remove-fundo",
+    "group": "rodada3",
+    "message": "remove o fundo",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "o fundo",
+      "subject": null,
+      "imagePrompt": "remover o fundo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-remove-isso",
+    "group": "rodada3",
+    "message": "remove isso",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "remover o que está na área marcada",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r25-tira-essa-area",
+    "group": "rodada3",
+    "message": "tira essa área",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "remover o que está na área marcada",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r26-feia",
+    "group": "rodada3",
+    "message": "a imagem está feia",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r26-fundo-escuro",
+    "group": "rodada3",
+    "message": "o fundo está escuro",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "fundo mais claro",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r26-escura-clareia",
+    "group": "rodada3",
+    "message": "a imagem está escura, clareia",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "clarear a imagem",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r26-esta-escuro",
+    "group": "rodada3",
+    "message": "está escuro",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "mais claro",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r26-tema-natal",
+    "group": "rodada3",
+    "message": "muda o tema para natal",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "tema de natal",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r26-troca-tema",
+    "group": "rodada3",
+    "message": "troca o tema",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r26-cenario-escuro",
+    "group": "rodada3",
+    "message": "deixa o cenário mais escuro",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "cenário mais escuro",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r26-muda-cenario",
+    "group": "rodada3",
+    "message": "muda o cenário",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r26-template-feio",
+    "group": "rodada3",
+    "message": "o template está feio",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r26-composicao-ruim",
+    "group": "rodada3",
+    "message": "a composição ficou ruim",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r26-melhora-layout",
+    "group": "rodada3",
+    "message": "melhora o layout",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r26-encarte-ruim",
+    "group": "rodada3",
+    "message": "o encarte ficou ruim",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r26-ambiente-claro",
+    "group": "rodada3",
+    "message": "deixa o ambiente mais claro",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "ambiente mais claro",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r26-nao-e-o-que-pedi",
+    "group": "rodada3",
+    "message": "não é o que eu pedi",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r26-nao-ficou-jeito",
+    "group": "rodada3",
+    "message": "não ficou do jeito que eu pedi",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "new_image",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r27-outra-nuvem",
+    "group": "rodada3",
+    "message": "crie outra nuvem",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "nuvem",
+      "imagePrompt": "uma nuvem",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-mais-uma-nuvem",
+    "group": "rodada3",
+    "message": "cria mais uma nuvem",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "nuvem",
+      "imagePrompt": "uma nuvem",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-mais-uma-flor",
+    "group": "rodada3",
+    "message": "gere mais uma flor",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "flor",
+      "imagePrompt": "uma flor",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-outra-cesta",
+    "group": "rodada3",
+    "message": "gere outra cesta de ovos",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "cesta de ovos",
+      "imagePrompt": "uma cesta de ovos",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-nova-sombra",
+    "group": "rodada3",
+    "message": "crie nova sombra",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "sombra",
+      "imagePrompt": "uma sombra",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r27-nova-versao-coelho",
+    "group": "rodada3",
+    "message": "faz uma nova versão do coelho",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r27-nova-variacao-coelho",
+    "group": "rodada3",
+    "message": "gera uma nova variação do coelho",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r27-outra-opcao-cor",
+    "group": "rodada3",
+    "message": "cria outra opção de cor",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "ask_region",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r27-refaz-coelho-zero",
+    "group": "rodada3",
+    "message": "refaz o coelho do zero",
+    "marked": false,
+    "expect": {
+      "action": "ask_region",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    },
+    "accept": [
+      {
+        "action": "edit",
+        "zone": null
+      }
+    ]
+  },
+  {
+    "id": "r27-refaca-cabecalho-zero",
+    "group": "rodada3",
+    "message": "refaça o cabeçalho do zero",
+    "marked": false,
+    "expect": {
+      "action": "edit",
+      "zone": "header",
+      "object": null,
+      "subject": null,
+      "imagePrompt": "refazer o cabeçalho",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-refaz-quente",
+    "group": "rodada3",
+    "message": "refaz tudo mais quente",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "imagem toda mais quente",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-refaz-azul",
+    "group": "rodada3",
+    "message": "refaz tudo em tons de azul",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "imagem toda em tons de azul",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-muda-tudo-quente",
+    "group": "rodada3",
+    "message": "muda tudo, deixa mais quente",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "imagem toda mais quente",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-mude-tudo-azul",
+    "group": "rodada3",
+    "message": "mude tudo, deixa azul",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "imagem toda azul",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-azul-verde",
+    "group": "rodada3",
+    "message": "muda tudo que é azul para verde",
+    "marked": false,
+    "expect": {
+      "action": "global_adjust",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "trocar o azul por verde",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-quero-outra",
+    "group": "rodada3",
+    "message": "quero outra imagem",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-nao-gostei",
+    "group": "rodada3",
+    "message": "não gostei, quero outra imagem",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-imagem-nova",
+    "group": "rodada3",
+    "message": "quero uma imagem nova",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-outra-opcao",
+    "group": "rodada3",
+    "message": "me dá outra opção",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-faca-outra",
+    "group": "rodada3",
+    "message": "faça outra",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-refaz",
+    "group": "rodada3",
+    "message": "refaz",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-refaca-imagem",
+    "group": "rodada3",
+    "message": "refaça a imagem",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-comeca-de-novo",
+    "group": "rodada3",
+    "message": "começa de novo",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-gera-de-novo",
+    "group": "rodada3",
+    "message": "gera de novo",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-gere-novamente",
+    "group": "rodada3",
+    "message": "gere novamente",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-troque-imagem",
+    "group": "rodada3",
+    "message": "troque a imagem",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-substitua-imagem",
+    "group": "rodada3",
+    "message": "substitua a imagem",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r27-mude-tudo",
+    "group": "rodada3",
+    "message": "mude tudo",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r28-adiciona-pao",
+    "group": "rodada3",
+    "message": "adiciona um pão integral",
+    "marked": true,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "pão integral",
+      "imagePrompt": "um pão integral",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r28-troca-arroz",
+    "group": "rodada3",
+    "message": "troca por arroz integral",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "trocar por arroz integral",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r28-remove-pao",
+    "group": "rodada3",
+    "message": "remove o pão integral",
+    "marked": true,
+    "expect": {
+      "action": "remove",
+      "zone": null,
+      "object": "o pão integral",
+      "subject": null,
+      "imagePrompt": "remover o pão integral",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r35-poe-balao",
+    "group": "rodada3",
+    "message": "põe um balão onde estava a cerca",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "balão",
+      "imagePrompt": "um balão",
+      "relativePlace": true,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r35-poe-balao-com",
+    "group": "rodada3",
+    "message": "põe um balão onde estava a cerca",
+    "marked": true,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "balão",
+      "imagePrompt": "um balão",
+      "relativePlace": true,
+      "layer": null,
+      "text": null
+    }
+  }
+]
