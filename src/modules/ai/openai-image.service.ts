@@ -292,17 +292,8 @@ export class OpenAiImageService {
       throw new Error('A edição com máscara só existe no modo sceneCall');
     }
     const { sceneCall } = options;
-    const assetKind = options.assetKind ?? 'template';
-    const mode = options.mode ?? this.models.imageDefaultMode;
-    const model = options.model ?? this.resolveModel(mode, assetKind);
-    const quality = options.quality ?? this.resolvePreset(assetKind, mode).quality;
-    const outputFormat = options.outputFormat ?? 'png';
-    const background = options.background ?? 'opaque';
-    const input = options.images?.[0] ?? {
-      buffer: options.imageBuffer,
-      mimeType: options.imageMimeType ?? 'image/png',
-      filename: 'crop.png',
-    };
+    const { model, quality, outputFormat, background, mode, input } =
+      this.resolveMaskedEdit(options);
     const body = await buildMaskedEditBody({
       model,
       prompt: options.prompt,
@@ -337,6 +328,24 @@ export class OpenAiImageService {
       outputFormat,
       mode,
       ...sceneCallResult(sceneCall, response),
+    };
+  }
+
+  /** Modelo, qualidade, formato e imagem da edição com máscara, com os padrões do serviço. */
+  private resolveMaskedEdit(options: EditOpenAiImageOptions) {
+    const assetKind = options.assetKind ?? 'template';
+    const mode = options.mode ?? this.models.imageDefaultMode;
+    return {
+      mode,
+      model: options.model ?? this.resolveModel(mode, assetKind),
+      quality: options.quality ?? this.resolvePreset(assetKind, mode).quality,
+      outputFormat: options.outputFormat ?? 'png',
+      background: options.background ?? 'opaque',
+      input: options.images?.[0] ?? {
+        buffer: options.imageBuffer,
+        mimeType: options.imageMimeType ?? 'image/png',
+        filename: 'crop.png',
+      },
     };
   }
 

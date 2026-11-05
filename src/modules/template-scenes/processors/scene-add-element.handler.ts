@@ -81,31 +81,20 @@ export class SceneAddElementHandler implements TurnHandler {
       return state.fail(ctx, 'PROVIDER_ERROR');
     }
     if (!(await state.advance(ctx, 'generating'))) return;
-    const result = await this.calls.imageCall(ctx, {
-      kind: 'transparent',
-      model: this.support.model(),
-      size: ELEMENT_SIZE,
-      run: () =>
-        this.provider.generateTransparent({
-          model: this.support.model(),
-          prompt: buildTransparentPrompt(plan.subject),
-          size: ELEMENT_SIZE,
-          quality: this.support.generateQuality(),
-          correlationId: ctx.correlationId,
-        }),
-    });
-    if (!result) return;
-    const trimmed = await trimToAlpha(result.buffer);
-    if (!trimmed) {
-      this.logger.warn(`Imagem transparente vazia (versão ${ctx.versionId})`);
-      return state.fail(ctx, 'PROVIDER_ERROR');
-    }
+    const trimmed = await this.generateTrimmed(ctx, plan.subject);
+    if (!trimmed) return;
     if (await state.isCancelRequested(ctx)) return state.cancel(ctx);
     if (!(await state.advance(ctx, 'saving'))) return;
     const box = markedBox(plan.target, ctx);
     const zone = box ? null : citedZone(plan.target);
     const file = await this.support.storeElement(ctx, trimmed.png, trimmed);
-    const element = this.buildElement(ctx, plan.subject, file.id, trimmed, box, zone);
+    const element = this.buildElement(ctx, {
+      subject: plan.subject,
+      assetId: file.id,
+      image: trimmed,
+      box,
+      zone,
+    });
     const outcome = await state.completeReusingImage(
       ctx,
       {
@@ -118,14 +107,44 @@ export class SceneAddElementHandler implements TurnHandler {
     if (outcome !== 'ready') await this.support.removeFiles([file]);
   }
 
-  private buildElement(
+  /** Chamada de imagem do elemento e recorte do alfa; `null` quando não deu resultado (a versão já foi encerrada). */
+  private async generateTrimmed(
     ctx: TurnContext,
     subject: string,
-    assetId: string,
-    image: { width: number; height: number },
-    box: Rect | null,
-    zone: SceneZoneName | null,
+  ): Promise<Awaited<ReturnType<typeof trimToAlpha>>> {
+    const result = await this.calls.imageCall(ctx, {
+      kind: 'transparent',
+      model: this.support.model(),
+      size: ELEMENT_SIZE,
+      run: () =>
+        this.provider.generateTransparent({
+          model: this.support.model(),
+          prompt: buildTransparentPrompt(subject),
+          size: ELEMENT_SIZE,
+          quality: this.support.generateQuality(),
+          correlationId: ctx.correlationId,
+        }),
+    });
+    if (!result) return null;
+    const trimmed = await trimToAlpha(result.buffer);
+    if (!trimmed) {
+      this.logger.warn(`Imagem transparente vazia (versão ${ctx.versionId})`);
+      await this.support.state.fail(ctx, 'PROVIDER_ERROR');
+    }
+    return trimmed;
+  }
+
+  private buildElement(
+    ctx: TurnContext,
+    spec: {
+      subject: string;
+      assetId: string;
+      image: { width: number; height: number };
+      box: Rect | null;
+      zone: SceneZoneName | null;
+    },
   ): SceneElement {
+    const { subject, assetId, image, box, zone } = spec;
     const aspect = image.width / image.height;
     const placed = placeElement(box, aspect, ctx, zone ?? 'body');
     const elements = ctx.parent?.elements ?? [];

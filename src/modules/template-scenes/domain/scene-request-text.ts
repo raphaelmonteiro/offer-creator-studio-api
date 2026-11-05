@@ -171,28 +171,45 @@ function placementOf(tail: string): ParsedText['placement'] {
   return tail ? 'bottom' : 'none';
 }
 
+/** Conteúdo e trecho final (para a posição) de um texto entre aspas. */
+function quotedParts(
+  folded: string,
+  quoted: RegExpMatchArray,
+): { content: string; tailSource: string } {
+  return {
+    content: quoted[1],
+    tailSource: folded.slice((quoted.index ?? 0) + quoted[0].length),
+  };
+}
+
+/** Conteúdo e trecho final (para a posição) de um texto que vem depois do verbo ("escreve ..."). */
+function afterVerbParts(
+  original: string,
+  verb: RegExpMatchArray,
+): { content: string; tailSource: string } {
+  const content = original.slice((verb.index ?? 0) + verb[0].length);
+  const tail = fold(content).match(PLACEMENT_TAIL);
+  if (!tail) return { content, tailSource: '' };
+  return { content: content.slice(0, tail.index), tailSource: tail[0] };
+}
+
+const cleanText = (content: string): string =>
+  content
+    .trim()
+    .replace(/[.!]+$/, '')
+    .replace(/^["“«]+|["”»]+$/g, '')
+    .trim();
+
 /** Texto entre aspas, ou depois de "escreve"/"muda o texto para"; `null` se o pedido não traz texto. */
 export function parseText(original: string): ParsedText | null {
   const folded = fold(original);
   const quoted = original.match(/["“«]([^"”»]+)["”»]/);
   const verb = folded.match(TEXT_VERB);
   if (!quoted && !verb) return null;
-  let content: string;
-  let tailSource: string;
-  if (quoted) {
-    content = quoted[1];
-    tailSource = folded.slice((quoted.index ?? 0) + quoted[0].length);
-  } else {
-    content = original.slice((verb?.index ?? 0) + (verb?.[0].length ?? 0));
-    const tail = fold(content).match(PLACEMENT_TAIL);
-    tailSource = tail ? tail[0] : '';
-    if (tail) content = content.slice(0, tail.index);
-  }
-  const text = content
-    .trim()
-    .replace(/[.!]+$/, '')
-    .replace(/^["“«]+|["”»]+$/g, '')
-    .trim();
+  const { content, tailSource } = quoted
+    ? quotedParts(folded, quoted)
+    : afterVerbParts(original, verb as RegExpMatchArray);
+  const text = cleanText(content);
   if (!text) return null;
   const replace = !quoted && /(muda|alter|troc|texto para|texto:)/.test(verb?.[0] ?? '');
   return { text, placement: placementOf(tailSource), replace };

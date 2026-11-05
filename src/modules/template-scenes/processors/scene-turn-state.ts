@@ -8,7 +8,13 @@ import { cancelVersion, emitVersionEvent, failVersion } from './scene-turn-finis
 import { SceneLockService } from '../services/scene-lock.service';
 import { CallOutcome, closeCallIn, recordCallIn } from './scene-turn-calls';
 import { loadTurnContext, TurnContext } from './scene-turn-context';
-import { CompleteExtra, readyVersion, rejectVersion, StoredFile } from './scene-turn-complete';
+import {
+  CompleteExtra,
+  CompleteImage,
+  readyVersion,
+  rejectVersion,
+  StoredFile,
+} from './scene-turn-complete';
 
 export type { CompleteExtra, StoredFile } from './scene-turn-complete';
 export type { TurnAttachmentAsset, TurnContext, TurnParent } from './scene-turn-context';
@@ -136,7 +142,7 @@ export class SceneTurnState {
 
   private completeWith(
     ctx: TurnContext,
-    image: Parameters<typeof readyVersion>[4],
+    image: CompleteImage,
     extra: CompleteExtra,
     elementFile?: StoredFile & { id: string },
   ): Promise<CompleteResult> {
@@ -149,7 +155,7 @@ export class SceneTurnState {
         parentElements: structuredClone(ctx.parent?.elements ?? []),
         elementFile,
       };
-      return readyVersion(manager, scene, version, target, image, extra);
+      return readyVersion(manager, scene, version, { target, image, extra });
     });
   }
 

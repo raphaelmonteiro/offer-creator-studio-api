@@ -39,7 +39,7 @@ describe('recompose e verifyOutside', () => {
   const region = regionOf(120, 120, 30, 30, 90, 90);
 
   it('troca o miolo da região, mistura na borda e não toca o resto', async () => {
-    const out = await recompose(original, raw, box, region, 16);
+    const out = await recompose(original, raw, box, { region, feather: 16 });
     const at = (x: number, y: number) => out.final.data[(y * 120 + x) * 3];
     expect(at(60, 60)).toBe(200);
     expect(at(5, 5)).toBe(40);
@@ -50,7 +50,7 @@ describe('recompose e verifyOutside', () => {
   });
 
   it('lança RECOMPOSE_MISMATCH com a contagem quando um pixel fora da região muda', async () => {
-    const out = await recompose(original, raw, box, region, 16);
+    const out = await recompose(original, raw, box, { region, feather: 16 });
     out.final.data[0] = 41;
     out.final.data[(119 * 120 + 119) * 3 + 2] = 0;
     const error = (() => {
@@ -67,8 +67,8 @@ describe('recompose e verifyOutside', () => {
   });
 
   it('recusa saída bruta de tamanho diferente do recorte', async () => {
-    await expect(recompose(original, solid(50, 50, 1), box, region, 16)).rejects.toThrow(
-      /tamanho do recorte/,
-    );
+    await expect(
+      recompose(original, solid(50, 50, 1), box, { region, feather: 16 }),
+    ).rejects.toThrow(/tamanho do recorte/);
   });
 });

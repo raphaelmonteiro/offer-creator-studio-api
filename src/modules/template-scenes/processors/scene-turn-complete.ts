@@ -78,10 +78,9 @@ export async function readyVersion(
   manager: EntityManager,
   scene: TemplateScene,
   version: TemplateSceneVersion,
-  target: CompleteTarget,
-  image: CompleteImage,
-  extra: CompleteExtra = {},
+  completion: { target: CompleteTarget; image: CompleteImage; extra?: CompleteExtra },
 ): Promise<'ready' | 'cancelled'> {
+  const { target, image, extra = {} } = completion;
   if (scene.deletedAt || version.cancelRequestedAt) {
     await cancelVersion(manager, scene, version);
     return 'cancelled';

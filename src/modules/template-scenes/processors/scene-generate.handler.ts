@@ -58,28 +58,10 @@ export class SceneGenerateHandler implements TurnHandler {
       return;
     }
     if (!(await state.advance(ctx, 'generating'))) return;
-    const size = `${ctx.widthPx}x${ctx.heightPx}`;
     const instruction =
       ctx.plan?.operation === 'global_regenerate' ? ctx.plan.instruction : ctx.request;
-    const result = await this.calls.imageCall(ctx, {
-      kind: 'edit',
-      model: this.support.model(),
-      size,
-      run: () =>
-        this.provider.edit({
-          model: this.support.model(),
-          prompt: buildGlobalPrompt({ request: instruction, zones: ctx.zones }),
-          size,
-          quality: this.support.editQuality(),
-          correlationId: ctx.correlationId,
-          image: master,
-        }),
-    });
-    if (!result) return;
-    const next = await sharp(result.buffer)
-      .resize(ctx.widthPx, ctx.heightPx, { fit: 'fill' })
-      .png()
-      .toBuffer();
+    const next = await this.editWholeScene(ctx, master, instruction);
+    if (!next) return;
     if (!(await state.advance(ctx, 'checking'))) return;
     const assessment = await this.calls.visionCall(ctx, {
       model: this.vision.model(),
@@ -100,6 +82,31 @@ export class SceneGenerateHandler implements TurnHandler {
         vision: facts ? { satisfied: facts.satisfied } : null,
       },
     });
+  }
+
+  /** `images.edit` sem máscara sobre a master inteira; devolve a saída no tamanho da cena, ou `null` se a chamada não deu resultado. */
+  private async editWholeScene(
+    ctx: TurnContext,
+    master: Buffer,
+    instruction: string,
+  ): Promise<Buffer | null> {
+    const size = `${ctx.widthPx}x${ctx.heightPx}`;
+    const result = await this.calls.imageCall(ctx, {
+      kind: 'edit',
+      model: this.support.model(),
+      size,
+      run: () =>
+        this.provider.edit({
+          model: this.support.model(),
+          prompt: buildGlobalPrompt({ request: instruction, zones: ctx.zones }),
+          size,
+          quality: this.support.editQuality(),
+          correlationId: ctx.correlationId,
+          image: master,
+        }),
+    });
+    if (!result) return null;
+    return sharp(result.buffer).resize(ctx.widthPx, ctx.heightPx, { fit: 'fill' }).png().toBuffer();
   }
 
   private finish(ctx: TurnContext, png: Buffer): Promise<void> {

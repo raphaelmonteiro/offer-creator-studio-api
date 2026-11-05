@@ -78,9 +78,9 @@ export class SceneTurnService {
         assertSingleTarget(dto); // 400 antes de qualquer consulta: o corpo inválido vence o 422 do anexo
         await this.assertAttachmentsInScene(manager, sceneId, dto);
         const plan = await planMessage(manager, scene, dto);
-        if (plan.kind === 'reply') return this.recordReply(manager, scene, dto, plan, userId);
+        if (plan.kind === 'reply') return this.recordReply(manager, scene, { dto, userId }, plan);
         await closeOpenManual(manager, sceneId);
-        return this.enqueueJob(manager, scene, dto, plan, userId);
+        return this.enqueueJob(manager, scene, { dto, userId }, plan);
       });
     } catch (error) {
       if (isBusyIndexViolation(error)) throw sceneBusy();
@@ -91,11 +91,9 @@ export class SceneTurnService {
   private async saveUserMessage(
     manager: EntityManager,
     scene: TemplateScene,
-    versionId: string,
-    dto: SendMessageDto,
-    status: 'queued' | 'done',
-    userId: string | null,
+    saved: TurnInput & { versionId: string; status: 'queued' | 'done' },
   ): Promise<TemplateSceneMessage> {
+    const { dto, userId, versionId, status } = saved;
     return manager.save(
       manager.create(TemplateSceneMessage, {
         sceneId: scene.id,
@@ -112,10 +110,10 @@ export class SceneTurnService {
   private async enqueueJob(
     manager: EntityManager,
     scene: TemplateScene,
-    dto: SendMessageDto,
+    input: TurnInput,
     plan: JobPlan,
-    userId: string | null,
   ): Promise<SendMessageResult> {
+    const { userId } = input;
     const version = await manager.save(
       manager.create(TemplateSceneVersion, {
         sceneId: scene.id,
@@ -131,7 +129,11 @@ export class SceneTurnService {
         createdByUserId: userId,
       }),
     );
-    const message = await this.saveUserMessage(manager, scene, version.id, dto, 'queued', userId);
+    const message = await this.saveUserMessage(manager, scene, {
+      ...input,
+      versionId: version.id,
+      status: 'queued',
+    });
     const jobId = await this.queue.publish(
       QUEUES.TEMPLATE_SCENE_TURN,
       { sceneId: scene.id, versionId: version.id },
@@ -163,10 +165,10 @@ export class SceneTurnService {
   private async recordReply(
     manager: EntityManager,
     scene: TemplateScene,
-    dto: SendMessageDto,
+    input: TurnInput,
     plan: ReplyPlan,
-    userId: string | null,
   ): Promise<SendMessageResult> {
+    const { userId } = input;
     const version = await manager.save(
       manager.create(TemplateSceneVersion, {
         sceneId: scene.id,
@@ -182,7 +184,11 @@ export class SceneTurnService {
         createdByUserId: userId,
       }),
     );
-    const message = await this.saveUserMessage(manager, scene, version.id, dto, 'done', userId);
+    const message = await this.saveUserMessage(manager, scene, {
+      ...input,
+      versionId: version.id,
+      status: 'done',
+    });
     const assistant = await addAssistantMessage(manager, {
       sceneId: scene.id,
       versionId: version.id,
@@ -265,6 +271,12 @@ export class SceneTurnService {
       if (!found || found.purgedAt) throw assetNotInScene(attachment.assetId);
     }
   }
+}
+
+/** A mensagem recebida e quem a enviou. */
+interface TurnInput {
+  dto: SendMessageDto;
+  userId: string | null;
 }
 
 /** O índice parcial `UQ_tsv_scene_busy` é a rede de segurança de D-3: a violação também é SCENE_BUSY. */

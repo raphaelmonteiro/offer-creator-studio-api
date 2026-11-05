@@ -64,9 +64,9 @@ export async function recompose(
   original: Img,
   raw: Img,
   box: Box,
-  region: Raster,
-  feather: number,
+  blend: { region: Raster; feather: number },
 ): Promise<Recomposed> {
+  const { region, feather } = blend;
   if (raw.width !== box.w || raw.height !== box.h) {
     throw new Error('A saída bruta deve ter o tamanho do recorte');
   }

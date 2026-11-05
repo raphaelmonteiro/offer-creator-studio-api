@@ -156,7 +156,7 @@ export class SceneImageService {
     const rawSent = await resizeImg(decoded, plan.sendW, plan.sendH);
     const region = this.recomposeRegion(prepared, settings.insetPx);
     const rawCrop = await resizeImg(rawSent, plan.box.w, plan.box.h);
-    const out = await recompose(scene, rawCrop, plan.box, region, settings.featherPx);
+    const out = await recompose(scene, rawCrop, plan.box, { region, feather: settings.featherPx });
     verifyOutside(scene, out.final, region);
     const metrics = this.measure({
       prepared,
