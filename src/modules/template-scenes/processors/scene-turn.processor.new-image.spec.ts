@@ -91,6 +91,43 @@ describeIfSceneDb('SceneTurnProcessor: imagem nova, D-18 (banco chroma_x_e2e)', 
     expect((await h.versionOf(third.id)).status).toBe('ready');
   });
 
+  it('ajuste geral no meio, aplicado ou não, não devolve o tema à primeira geração (R39)', async () => {
+    const { scene, version: first } = await h.readyScene();
+    await insertMessage(h.dataSource, scene.id, { versionId: first.id, content: 'páscoa' });
+    const { provider, generate } = h.fakeProvider(() => h.okResult());
+    const second = await h.queueTurn(scene, {
+      plan: { operation: 'new_image', instruction: 'gere outra imagem de natal' },
+      request: 'Confirmar',
+      operation: 'generate',
+    });
+    await h.processorWith(provider).process(h.job(scene.id, second.id));
+    const recorded =
+      'páscoa (pedido atual do cliente, que prevalece sobre o anterior: gere outra imagem de natal)';
+    for (const [number, status] of [
+      [3, 'ready'],
+      [4, 'failed'],
+    ] as const) {
+      await insertVersion(h.dataSource, scene.id, {
+        number,
+        status,
+        operation: 'generate',
+        metrics: { globalInstruction: 'deixa mais quente' },
+      });
+    }
+
+    const fifth = await h.queueTurn(await h.sceneOf(scene.id), {
+      plan: { operation: 'new_image', instruction: 'gere outra imagem' },
+      request: 'Confirmar',
+      number: 5,
+      operation: 'generate',
+    });
+    await h.processorWith(provider).process(h.job(scene.id, fifth.id));
+
+    const prompt = generate.mock.calls[1][0].prompt;
+    expect(prompt).toContain(`${recorded} (pedido atual do cliente, que prevalece`);
+    expect(prompt).toContain('natal');
+  });
+
   it('a primeira geração ignora a que falhou e grava o tema (R30)', async () => {
     const { scene, version: first } = await h.readyScene();
     await insertMessage(h.dataSource, scene.id, { versionId: first.id, content: 'páscoa' });

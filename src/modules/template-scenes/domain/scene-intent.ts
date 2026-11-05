@@ -132,9 +132,12 @@ const wordsOf = (text: string): string[] =>
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
 
-/** Alguma palavra do valor (3 letras ou mais) aparece na mensagem, inclusive no plural ou na raiz. */
+/**
+ * Alguma palavra do valor aparece na mensagem, inclusive no plural ou na raiz. Só contam palavras de 3
+ * letras ou mais dos dois lados: "o", "a", "e" e "um" são prefixo de quase tudo (R40).
+ */
 function sharesWord(value: string, message: string): boolean {
-  const known = wordsOf(message);
+  const known = wordsOf(message).filter((word) => word.length >= 3);
   return wordsOf(value)
     .filter((word) => word.length >= 3)
     .some((word) => known.some((other) => other.startsWith(word) || word.startsWith(other)));

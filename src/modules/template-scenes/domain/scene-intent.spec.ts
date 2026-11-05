@@ -66,6 +66,23 @@ describe('parseIntent: schema fechado', () => {
     ).toBe(false);
   });
 
+  it.each([
+    ['abacaxi', 'tira a nuvem'],
+    ['ovos', 'tira o coelho'],
+    ['estrela', 'sol e nuvem'],
+    ['desenho', 'tira o sol de lado'],
+    ['zebra', 'tira o sol'],
+  ])('R40: object "%s" não vale com palavras curtas de "%s"', (object, message) => {
+    expect(parseIntent(json({ object }), message).ok).toBe(false);
+    expect(parseIntent(json({ action: 'add_element', subject: object }), message).ok).toBe(false);
+  });
+
+  it('palavra de 1 ou 2 letras da mensagem não prova nada, mas as de 3 ou mais continuam valendo', () => {
+    expect(parseIntent(json({ object: 'sol' }), 'tira o sol de lado').ok).toBe(true);
+    expect(parseIntent(json({ object: 'o sol' }), 'tira o sol').ok).toBe(true);
+    expect(parseIntent(json({ object: 'cestas' }), 'põe uma cesta').ok).toBe(true);
+  });
+
   it('aceita o plural e a raiz como palavra da mensagem', () => {
     expect(parseIntent(json({ object: 'ovo' }), 'remova os ovos').ok).toBe(true);
     expect(parseIntent(json({ object: 'os ovos' }), 'remova os ovos da direita').ok).toBe(true);

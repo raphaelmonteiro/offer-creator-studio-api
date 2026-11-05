@@ -90,18 +90,21 @@ export async function loadTurnContext(
 }
 
 /**
- * Pedido efetivo da geração `ready` mais recente (PV-33): o que a geração gravou em `metrics`. Sem ele
- * (versões antigas), cai na mensagem da primeira geração da cena, também `ready` (R30).
+ * Pedido efetivo da geração `ready` mais recente que o gravou (PV-33): `metrics.generationRequest`. O ajuste
+ * geral também é `generate`, mas grava `globalInstruction`, então não conta (R39). Sem nenhuma (versões
+ * antigas), cai na mensagem da primeira geração da cena, também `ready` (R30).
  */
 async function loadOriginalRequest(
   manager: EntityManager,
   sceneId: string,
 ): Promise<string | null> {
-  const latest = await manager.findOne(TemplateSceneVersion, {
+  const generations = await manager.find(TemplateSceneVersion, {
     where: { sceneId, operation: 'generate', status: 'ready' },
     order: { number: 'DESC' },
   });
-  const recorded = latest?.metrics.generationRequest;
+  const recorded = generations
+    .map((version) => version.metrics.generationRequest)
+    .find((value) => typeof value === 'string' && value.trim());
   if (typeof recorded === 'string' && recorded.trim()) return recorded;
   const first = await manager.findOne(TemplateSceneVersion, {
     where: { sceneId, operation: 'generate', parentVersionId: IsNull(), status: 'ready' },

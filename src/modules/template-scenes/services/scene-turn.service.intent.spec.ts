@@ -117,6 +117,10 @@ describeIfSceneDb('SceneTurnService: reconhecimento de intenção por modelo (D-
         () => h.intentClassify.mockResolvedValueOnce({ ...modelSays({}), text: 'oi' }),
       ],
       [
+        'recusa do modelo (conteúdo vazio)',
+        () => h.intentClassify.mockResolvedValueOnce({ ...modelSays({}), text: '' }),
+      ],
+      [
         'ação fora da lista',
         () => h.intentClassify.mockResolvedValueOnce(modelSays({ action: 'x' as never })),
       ],
