@@ -2686,15 +2686,16 @@
     "message": "põe um balão onde estava a cerca",
     "marked": true,
     "expect": {
-      "action": "add_element",
+      "action": "edit",
       "zone": null,
       "object": null,
-      "subject": "balão",
-      "imagePrompt": "um balão",
-      "relativePlace": true,
+      "subject": null,
+      "imagePrompt": "um balão onde estava a cerca",
+      "relativePlace": false,
       "layer": null,
       "text": null
-    }
+    },
+    "note": "gabarito corrigido depois da passada 1: com marcação, \"pôr um(a) X\" é edit (D-15, regra 3 do prompt); era add_element por engano"
   },
   {
     "id": "r29-integra-ao-fundo",

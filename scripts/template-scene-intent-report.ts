@@ -92,7 +92,7 @@ const sameOutcome = count(rows, (r) => r.outcomeOk);
 
 // object e subject: comparação automática com o esperado (a leitura por uma pessoa fica na amostra)
 const withObject = rows.filter(
-  (r) => r.status === 'ok' && (r.expect.object !== null || r.got?.object),
+  (r) => r.status === 'ok' && ['remove', 'integrate'].includes(r.expect.action),
 );
 const objectOk = count(withObject, (r) =>
   r.expect.object === null

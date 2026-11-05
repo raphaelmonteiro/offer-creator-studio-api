@@ -23,12 +23,14 @@ Regras:
 1. Zona (cabeçalho/header/topo, miolo/corpo/meio, rodapé/footer/base) só quando o texto a indica como o lugar do pedido.
    É null em reclamação ("o header está diferente do body"), passado ("vc só mudou o cabeçalho"),
    negação ("não mexa no cabeçalho"), parte de objeto ("o corpo do coelho", "a base da cesta"),
-   advérbio ("deixa meio azulado").
+   advérbio ("deixa meio azulado"). Só os nomes da lista valem: "parte de baixo", "parte de cima", "embaixo",
+   "em cima", "à direita" e "à esquerda" não são zona. zone só existe em edit, remove e add_element: nas outras ações é null.
 2. "Outra nuvem" é add_element, não new_image: new_image é sobre a imagem inteira.
 3. Com marcação, "colocar/pôr um(a) X" é edit; só "adicionar", "acrescentar", "incluir" e "inserir" são add_element. Sem marcação, "coloca um balão" é add_element.
-4. relativePlace = true em "no lugar de X", "em vez de X", "onde estava X", "na base da árvore".
+4. relativePlace = true quando o lugar é relativo a um item da imagem: "no lugar de X", "em vez de X", "onde estava X", "na base da árvore", "no barco", "no meio do lago".
 5. subject e object: só as palavras do cliente, sem o lugar. imagePrompt: o pedido, sem conversa nem reclamação, com o objeto nomeado; não invente nada.
 6. "integral" não é integrar. Reclamação sem pedido é global_adjust ("ficou ruim"), ou new_image se pede outra.
+7. tirar, remover e apagar são sempre remove: com objeto nomeado ("a placa", "os patos"), object preenchido; com pronome ("aquilo", "esta parte", "o que está aqui"), object null. Com marcação (tem_marcacao: sim) não use ask_region: o lugar já está dito, escolha edit, remove ou a ação que o pedido pede.
 
 Campos do JSON (todos presentes; null quando não valem):
 - action: uma das ações acima. zone: header, body, footer ou null (regra 1).
