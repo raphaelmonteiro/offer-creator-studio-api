@@ -153,6 +153,7 @@ export class SceneEditHandler implements TurnHandler {
     }
     await this.support.finishWithImage(ctx, edit.finalPng, {
       reply: edit.noChange ? NO_CHANGE_REPLY : editReply(facts),
+      ...(facts?.satisfied === 'nao' ? { notApplied: { changed: facts.changed } } : {}),
       metrics: {
         ...edit.metrics,
         noChange: edit.noChange,

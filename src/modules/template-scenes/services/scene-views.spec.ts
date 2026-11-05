@@ -188,8 +188,22 @@ describe('métricas e alvo da edição na versão', () => {
       seamSsim: 0.98,
       maskAreaRatio: 0.04,
       noChange: false,
+      notApplied: false,
       vision: { satisfied: 'sim' },
     });
+  });
+
+  it('ajuste geral não atendido: as métricas aparecem só com notApplied e o resto null', () => {
+    expect(toMetricsView({ metrics: { notApplied: true, vision: { satisfied: 'nao' } } })).toEqual({
+      insideMaskDiffRatio: null,
+      marginDiffRatio: null,
+      seamSsim: null,
+      maskAreaRatio: null,
+      noChange: false,
+      notApplied: true,
+      vision: { satisfied: 'nao' },
+    });
+    expect(toMetricsView({ metrics: { vision: { satisfied: 'sim' } } })).toBeNull();
   });
 
   it('sem amostra a métrica vai como null (o chip "preservou X%" não aparece); visão que falhou vira null', () => {
@@ -202,6 +216,7 @@ describe('métricas e alvo da edição na versão', () => {
       seamSsim: null,
       maskAreaRatio: null,
       noChange: true,
+      notApplied: false,
       vision: null,
     });
   });

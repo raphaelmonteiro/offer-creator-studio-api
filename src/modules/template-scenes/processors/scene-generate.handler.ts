@@ -90,6 +90,7 @@ export class SceneGenerateHandler implements TurnHandler {
     const facts = assessment.status === 'ok' && assessment.value.ok ? assessment.value : null;
     await this.support.finishWithImage(ctx, next, {
       reply: editReply(facts, 'scene'),
+      ...(facts?.satisfied === 'nao' ? { notApplied: { changed: facts.changed } } : {}),
       metrics: {
         globalInstruction: instruction,
         vision: facts ? { satisfied: facts.satisfied } : null,

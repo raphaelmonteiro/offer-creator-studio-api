@@ -37,6 +37,8 @@ export interface SceneMetricsView {
   maskAreaRatio: number | null;
   /** O modelo devolveu praticamente a mesma área (a versão fica `ready` com aviso). */
   noChange: boolean;
+  /** A visão disse que o pedido não foi atendido: a versão não virou a atual (D-18/correção 3). */
+  notApplied: boolean;
   /** Resultado da visão antes/depois; `null` quando ela não rodou ou falhou. */
   vision: { satisfied: 'sim' | 'parcial' | 'nao' } | null;
 }
@@ -159,14 +161,16 @@ export function toMetricsView(
   version: Pick<TemplateSceneVersion, 'metrics'>,
 ): SceneMetricsView | null {
   const m = version.metrics ?? {};
-  if (typeof m.noChange !== 'boolean') return null;
+  // O ajuste geral não grava `noChange`: ele só tem métricas quando não foi aplicado.
+  if (typeof m.noChange !== 'boolean' && m.notApplied !== true) return null;
   const vision = m.vision as { satisfied?: 'sim' | 'parcial' | 'nao' } | null | undefined;
   return {
     insideMaskDiffRatio: numberOrNull(m.insideMaskDiffRatio),
     marginDiffRatio: numberOrNull(m.marginDiffRatio),
     seamSsim: numberOrNull(m.seamSsim),
     maskAreaRatio: numberOrNull(m.maskAreaRatio),
-    noChange: m.noChange,
+    noChange: m.noChange === true,
+    notApplied: m.notApplied === true,
     vision: vision?.satisfied ? { satisfied: vision.satisfied } : null,
   };
 }

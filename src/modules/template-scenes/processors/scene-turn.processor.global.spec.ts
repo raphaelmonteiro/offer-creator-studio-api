@@ -149,4 +149,37 @@ describeIfSceneDb('SceneTurnProcessor: ajuste geral (banco chroma_x_e2e)', () =>
       expect(await lastReply(scene.id)).toContain('Criei uma nova versão do fundo');
     });
   });
+
+  describe('ajuste geral não atendido (correção 3)', () => {
+    it('Ajuste geral não atendido: versão ready com notApplied e a atual não muda', async () => {
+      const { scene } = await h.readyScene({ elements: [genEl] });
+      const version = await h.queueTurn(scene, {
+        plan: { operation: 'global_regenerate', instruction: 'deixa tudo mais quente' },
+        request: 'Confirmar',
+        operation: 'generate',
+      });
+      const real = h.mock();
+      const { provider } = h.fakeProvider(() => h.okResult(), {
+        edit: async (input) => ({ ...(await real.edit(input)), costUsd: 0.14 }),
+      });
+      const vision = {
+        compare: jest.fn(async () => ({
+          text: JSON.stringify({ mudou: 'A imagem ficou igual.', atendeu: 'nao' }),
+          usage: null,
+          requestId: 'req_v',
+          latencyMs: 1,
+        })),
+      };
+
+      await h.processorWith(provider, {}, vision).process(h.job(scene.id, version.id));
+
+      const done = await h.versionOf(version.id);
+      expect(done.status).toBe('ready');
+      expect(done.metrics.notApplied).toBe(true);
+      expect((await h.sceneOf(scene.id)).currentVersionId).toBe(scene.currentVersionId);
+      expect((await h.sceneOf(scene.id)).totalCostUsd).toBeCloseTo(0.14, 5);
+      expect(await lastReply(scene.id)).toContain('Mantive a imagem atual');
+      expect(await lastReply(scene.id)).toContain('US$ 0,14');
+    });
+  });
 });

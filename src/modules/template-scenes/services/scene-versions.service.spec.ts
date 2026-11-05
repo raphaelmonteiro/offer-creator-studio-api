@@ -52,6 +52,25 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
     (await dataSource.manager.findOneByOrFail(TemplateScene, { id: sceneId })).revision;
 
   describe('restore', () => {
+    it('Usar a versão mesmo assim: restaura a tentativa não aplicada sem custo novo', async () => {
+      const { scene, ready } = await sceneWithVersions('Restore não aplicada', 2);
+      const attempt = await insertReadyVersion(dataSource, scene, 3, {
+        metrics: { notApplied: true },
+        providerCostUsd: 0.05,
+      });
+
+      const detail = await service.restore(scene.id, attempt.version.id, null);
+
+      expect(detail.currentVersion).toMatchObject({
+        operation: 'restore',
+        providerCostUsd: 0,
+        parentVersionId: attempt.version.id,
+      });
+      expect(detail.currentVersion?.master?.id).toBe(attempt.master.id);
+      expect(ready).toHaveLength(2);
+      expect((await versionsOf(scene.id)).map((v) => v.number)).toEqual([1, 2, 3, 4]);
+    });
+
     it('restaurar a versão 1 cria a versão 4 com a imagem da 1 e mantém as outras e as mensagens', async () => {
       const { scene, ready } = await sceneWithVersions('Restore ok', 3);
       ready[0].version.elements = [textElement('t1')] as never;

@@ -8,7 +8,7 @@ import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
 import { cancelVersion, emitVersionEvent } from './scene-turn-finish';
-import { READY_REPLY } from '../scene-texts';
+import { notAppliedReply, READY_REPLY } from '../scene-texts';
 
 export interface StoredFile {
   url: string;
@@ -26,6 +26,11 @@ export interface CompleteExtra {
   metrics?: Record<string, unknown>;
   /** Região alterada (a caixa de uma forma de pincel/laço), para o destaque na prévia. */
   requestedRegion?: Rect | null;
+  /**
+   * A visão disse que o pedido não foi atendido: a versão fica `ready` (restaurável), mas NÃO vira a
+   * atual. O custo já está na versão; a resposta informa a tentativa e o valor.
+   */
+  notApplied?: { changed: string };
 }
 
 /** Imagem da versão: arquivos novos (master e prévia) ou a da versão de origem, sem copiar. */
@@ -92,16 +97,22 @@ export async function readyVersion(
   version.masterAssetId = ids.masterAssetId;
   version.previewAssetId = ids.previewAssetId;
   version.elements = extra.elements ?? target.parentElements;
-  version.metrics = { ...version.metrics, ...extra.metrics };
+  version.metrics = {
+    ...version.metrics,
+    ...extra.metrics,
+    ...(extra.notApplied ? { notApplied: true } : {}),
+  };
   if (extra.requestedRegion !== undefined) version.requestedRegion = extra.requestedRegion;
   await manager.save(version);
-  scene.currentVersionId = version.id;
+  if (!extra.notApplied) scene.currentVersionId = version.id;
   await pruneSceneAssets(manager, scene.id);
   await settleUserMessage(manager, version.id, 'done');
   await addAssistantMessage(manager, {
     sceneId: scene.id,
     versionId: version.id,
-    content: extra.reply ?? READY_REPLY,
+    content: extra.notApplied
+      ? notAppliedReply(extra.notApplied.changed, version.providerCostUsd)
+      : (extra.reply ?? READY_REPLY),
     status: 'done',
   });
   await bumpRevision(manager, scene);

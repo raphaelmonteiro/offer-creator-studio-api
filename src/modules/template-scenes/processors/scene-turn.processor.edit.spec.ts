@@ -180,4 +180,73 @@ describeIfSceneDb('SceneTurnProcessor: edição local (banco chroma_x_e2e)', () 
       'Pronto! Editei a área marcada. O resto da imagem foi preservado.',
     );
   });
+
+  describe('pedido não atendido (correção 3)', () => {
+    const visionSays = (satisfied: 'sim' | 'parcial' | 'nao') => ({
+      compare: jest.fn(async () => ({
+        text: JSON.stringify({ mudou: 'Os ovos continuam na imagem.', atendeu: satisfied }),
+        usage: { prompt_tokens: 1000, completion_tokens: 100 },
+        requestId: 'req_v',
+        latencyMs: 10,
+      })),
+    });
+
+    it('Visão diz que não atendeu: versão ready com notApplied, a atual não muda, o custo soma e a resposta informa', async () => {
+      const { scene } = await h.readyScene();
+      const version = await h.queueTurn(scene, { plan: editPlan(), request: 'remova os ovos' });
+      const { provider } = pricedProvider(0.035);
+
+      await h.processorWith(provider, {}, visionSays('nao')).process(h.job(scene.id, version.id));
+
+      const done = await h.versionOf(version.id);
+      expect(done).toMatchObject({ status: 'ready', step: 'done' });
+      expect(done.metrics.notApplied).toBe(true);
+      expect(done.masterAssetId).not.toBeNull();
+      const stored = await h.sceneOf(scene.id);
+      expect(stored.currentVersionId).toBe(scene.currentVersionId);
+      expect(stored.totalCostUsd).toBeCloseTo(0.03515, 5);
+      expect(done.providerCostUsd).toBeCloseTo(0.03515, 5);
+      const messages = await h.messagesOf(scene.id);
+      const reply = messages[messages.length - 1].content;
+      expect(reply).toBe(
+        'Não consegui atender ao pedido: Os ovos continuam na imagem. Mantive a imagem atual. Esta tentativa custou US$ 0,04.',
+      );
+      expect(reply).not.toContain('preservado');
+    });
+
+    it.each(['sim', 'parcial'] as const)('%s continua trocando a imagem atual', async (answer) => {
+      const { scene } = await h.readyScene();
+      const version = await h.queueTurn(scene, { plan: editPlan(), request: 'deixa mais claro' });
+      const { provider } = pricedProvider();
+
+      await h.processorWith(provider, {}, visionSays(answer)).process(h.job(scene.id, version.id));
+
+      expect((await h.sceneOf(scene.id)).currentVersionId).toBe(version.id);
+      expect((await h.versionOf(version.id)).metrics.notApplied).toBeUndefined();
+    });
+
+    it('Atendido em parte: a resposta não diz que o resto foi preservado', async () => {
+      const { scene } = await h.readyScene();
+      const version = await h.queueTurn(scene, { plan: editPlan(), request: 'deixa mais claro' });
+      const { provider } = pricedProvider();
+
+      await h
+        .processorWith(provider, {}, visionSays('parcial'))
+        .process(h.job(scene.id, version.id));
+
+      const messages = await h.messagesOf(scene.id);
+      expect(messages[messages.length - 1].content).not.toContain('preservado');
+      expect(messages[messages.length - 1].content).toContain('em parte');
+    });
+
+    it('visão indisponível continua como antes: a edição vale', async () => {
+      const { scene } = await h.readyScene();
+      const version = await h.queueTurn(scene, { plan: editPlan(), request: 'deixa mais claro' });
+      const broken: SceneVisionClient = { compare: jest.fn().mockRejectedValue(new Error('503')) };
+
+      await h.processorWith(h.mock(), {}, broken).process(h.job(scene.id, version.id));
+
+      expect((await h.sceneOf(scene.id)).currentVersionId).toBe(version.id);
+    });
+  });
 });

@@ -32,6 +32,12 @@ export const needsPlaceReply = (subject: string): string =>
 export const NO_CHANGE_REPLY =
   'Não vi mudança na área marcada. Quer tentar de novo? Marque a área de novo ou descreva de outro jeito.';
 
+const brl = (usd: number): string => `US$ ${usd.toFixed(2).replace('.', ',')}`;
+
+/** Visão: o pedido não foi atendido. A imagem atual fica, e a tentativa (já cobrada) fica em Versões. */
+export const notAppliedReply = (changed: string, costUsd: number): string =>
+  `Não consegui atender ao pedido: ${changed.trim().replace(/[.!]+$/, '')}. Mantive a imagem atual. Esta tentativa custou ${brl(costUsd)}.`;
+
 const RETRY_HINT = 'Se não ficou como queria, marque a área de novo ou descreva de outro jeito.';
 
 /** Fatos da visão que entram na resposta (a visão é opcional: sem ela, a resposta sai das métricas). */
