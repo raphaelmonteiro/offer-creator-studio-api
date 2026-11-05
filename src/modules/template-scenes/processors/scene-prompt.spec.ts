@@ -174,6 +174,36 @@ describe('buildEditPrompt: regras fixas (correção 6)', () => {
     expect(prompt).toContain('sem preços');
   });
 
+  it.each([
+    'coloca uma placa dizendo Feliz Páscoa',
+    'uma faixa com os dizeres Feliz Páscoa',
+    'uma placa com a inscrição Páscoa',
+    'uma placa com o nome Páscoa',
+    'coloca o número 10',
+  ])('R32: texto pedido pelo cliente em "%s" tira só a regra de texto', (request) => {
+    const prompt = edit(request);
+    expect(prompt).not.toContain('sem texto legível');
+    expect(prompt).toContain('Regras: sem logotipos e sem preços.');
+  });
+
+  it('R32: a regra vale sobre a mensagem original, e não sobre a paráfrase do modelo', () => {
+    const prompt = buildEditPrompt({
+      request: 'uma placa de madeira',
+      original: 'coloca uma placa dizendo Feliz Páscoa',
+      remove: false,
+      knownElements: [],
+    });
+    expect(prompt).toContain('Regras: sem logotipos e sem preços.');
+    expect(
+      buildEditPrompt({
+        request: 'uma placa com o nome do mercado',
+        original: 'coloca uma placa',
+        remove: false,
+        knownElements: [],
+      }),
+    ).toContain('sem texto legível');
+  });
+
   it.each(['uma frase na placa', 'com palavras escritas', 'um texto na faixa'])(
     'pedido que fala em texto (%s) tira só a regra de texto',
     (request) => {

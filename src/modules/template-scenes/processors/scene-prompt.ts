@@ -50,7 +50,9 @@ export function buildGeneratePrompt(input: ScenePromptInput): string {
 const KEEP_REST =
   'Preserve todo o resto da imagem exatamente como está, sem mudar estilo, cor ou composição fora da região.';
 
-const ASKS_FOR_TEXT = /\b(textos?|letras?|escrit[oa]s?|palavras?|frases?)\b/;
+/** Pedido que fala em texto na imagem (R32): "dizendo", "dizeres", "inscrição", "nome" e "número" também contam. */
+const ASKS_FOR_TEXT =
+  /\b(textos?|letras?|escrit[oa]s?|palavras?|frases?|dizendo|dizeres|inscri(?:cao|coes)|nomes?|numeros?)\b/;
 
 /**
  * Regras fixas da edição (correção 6): sem logotipos e sem preços sempre; a regra de texto só sai se o
