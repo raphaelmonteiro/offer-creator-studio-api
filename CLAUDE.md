@@ -111,6 +111,11 @@ TEMPLATE_SCENE_ASSET_TTL_DAYS / TEMPLATE_SCENE_DELETED_RETENTION_DAYS / TEMPLATE
 TEMPLATE_SCENE_GC_DRY_RUN     # só vale para /uploads/template-scenes; ausente = true (só apaga com false explícito); o GC_DRY_RUN global não muda
 TEMPLATE_SCENE_MAX_PAID_CALLS_PER_MESSAGE
                               # disjuntor: chamadas pagas por mensagem (padrão 4)
+TEMPLATE_SCENE_VISION_MODEL / TEMPLATE_SCENE_VISION_TIMEOUT_MS
+                              # gpt-6-luna (reasoning_effort low, detail low) / 20000: passou do tempo, a resposta sai das métricas
+TEMPLATE_SCENE_EDIT_QUALITY   # qualidade das edições com máscara e do ajuste geral (padrão high)
+TEMPLATE_SCENE_FEATHER_PX / TEMPLATE_SCENE_MARGIN_RATIO / TEMPLATE_SCENE_INSET_PX / TEMPLATE_SCENE_NOOP_THRESHOLD
+                              # edição local (M3): feather 48 px, margem 4% do menor lado, recuo 40 px na saída do modelo, limiar 0,02 de "sem mudança"
 OPENAI_TIMEOUT_MS             # timeout por requisição do modo sceneCall (padrão 180000); NÃO é global
 TEMPLATE_SCENE_E2E_DB_URL     # só testes: banco descartável chroma_x_e2e (nunca o flyer_db); sem ela os specs de banco ficam skipped
 FAL_API_KEY / ELEVENLABS_API_KEY / GEMINI_API_KEY
@@ -616,15 +621,38 @@ no processor; o GC (`UploadsGcService.runTemplateScenes` → `shared/gc/template
 `/uploads/template-scenes/`. "Restaurável" = `purgedAt` nulo na master (derivado, sem marca por versão). O GC das cenas
 roda no worker com a flag da cena, independente de animações e comerciais.
 
+**Edição local (estágio 4, change `add-template-scene-local-edit`)**: `POST /messages` classifica a mensagem **por regra, sem
+modelo** (`domain/scene-operation.classifier.ts`; tabela de casos compartilhada com o front em
+`domain/scene-operation.cases.json`) e, sob o lock da cena, ou enfileira o job ou responde na hora (versão `rejected`,
+custo 0, `jobId: null`) nos casos `needs_region`, `move_unavailable` e na pergunta do ajuste geral
+(`needs_confirmation_global`, confirmada com `confirmGlobal` + `replyToMessageId`). O alvo é um só: `region`, `mask`
+(`MaskShape`, até 2000 pontos), `zone` ou `targetElementId` (400 se vierem juntos; 422 `REGION_TOO_SMALL` abaixo de 0,1% da
+cena). O consumer escolhe o tratador pela operação (`processors/scene-*.handler.ts`):
+- `local_edit` (e "remover"): `SceneImageService` recorta a região com margem (`domain/scene-region.ts`), monta a máscara
+  (alfa 255 = editar), o provedor edita o recorte (M3: JSON com `images` e `mask`, sem `markup`), e a recomposição em
+  `erode(A, 40/escala) ∪ S` com feather de 48 px é conferida byte a byte fora da região (`RECOMPOSE_MISMATCH`). Métricas
+  gravadas na versão (`insideMaskDiffRatio`, `marginDiffRatio`, `seamSsim` com `null` sem amostra, `maskAreaRatio`). Etapas:
+  `preparing` → `editing` → `blending` → `checking` → `saving`. Sem mudança (`insideMaskDiffRatio` < limiar): `ready` com aviso.
+- `generate` com `global_regenerate`: `edit` sem máscara sobre a master inteira (ajuste geral confirmado).
+- `set_layer`: logo (clipe) e texto entre aspas ou "escreve", mover/redimensionar/tirar camada; sem modelo, mesma master.
+- `add_element`: PNG transparente (`generateTransparent`), alfa recortado, elemento `generated` movível.
+- Resposta pela visão (`SceneVisionService`, `gpt-6-luna`, 20 s): opcional, nunca falha a versão; pulada quando o disjuntor
+  (`TEMPLATE_SCENE_MAX_PAID_CALLS_PER_MESSAGE`) barraria a chamada; só chamada de IMAGEM barrada falha com `PAID_CALL_LIMIT`.
+- Toda versão `ready` poda as masters (`pruneSceneAssets`); custo por chamada em `metrics.calls` (tentativa antes, custo depois).
+Morfologia, `ssimGray` e `percentile` têm implementação única em `src/shared/image/` (DT-10), usada também por `commercials`;
+a tabela de capacidades (`openai-image-capabilities`, com `transparentBackground` e `jsonMask`) e os códigos do modo `sceneCall`
+estão em `src/shared/` (DT-12). Contrato: `openspec/changes/add-template-scene-local-edit/design.md`.
+
 **Chamada de imagem (`OpenAiImageService`, opção `sceneCall`)**: quota terminal (uma requisição só), `maxRetries: 0` do SDK,
 `withOpenAiRetry` para 5xx/429 de taxa/rede, timeout por requisição (`OPENAI_TIMEOUT_MS`), `.withResponse()` com `usage`,
-`requestId` e `costUsd` (tabela `modules/ai/config/openai-image-capabilities.ts`, preços do spike de 2026-11-02), tamanho e
-qualidade validados pela tabela e `correlationId` no log. **Sem `sceneCall` nada muda** para os outros chamadores (teste de
+`requestId` e `costUsd` (tabela `shared/image/openai-image-capabilities.ts`, preços do spike de 2026-11-02), tamanho e
+qualidade (e fundo transparente e máscara) validados pela tabela e `correlationId` no log. `editImage` com `mask` é um ramo
+separado (`openai-image-masked-edit.ts`): `client.post('/images/edits')` em JSON. **Sem `sceneCall` nada muda** para os outros chamadores (teste de
 snapshot do corpo em `openai-image.service.request-snapshot.spec.ts`); o 429 do caminho legado continua (DT-8).
 
 **Testes**: unitários ao lado do código; specs com banco usam `describeIfSceneDb` (`testing/scene-test-db.ts`) e só rodam com
 `TEMPLATE_SCENE_E2E_DB_URL` (banco `chroma_x_e2e`, porta 5434; nunca o `flyer_db`). E2E:
-`TEMPLATE_SCENE_E2E_DB_URL=... npm run test -- template-scenes.controller.e2e` (rodando todos os specs de banco juntos, use
+`TEMPLATE_SCENE_E2E_DB_URL=... npm run test -- template-scenes.controller.e2e` (estágio 3) e `template-scenes.local-edit.e2e` (estágio 4) (rodando todos os specs de banco juntos, use
 `--runInBand`: o GC manual olha todas as cenas do banco). Ordem em desenvolvimento: `migration:run` ANTES do
 `docker restart` (o `synchronize` cria o schema sozinho e a migration depois falharia).
 
