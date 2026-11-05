@@ -55,6 +55,8 @@ export interface PreparedEdit {
   /** Recorte enviado ao modelo e máscara (alfa 255 = editar), ambos PNG do tamanho enviado. */
   imagePng: Buffer;
   maskPng: Buffer;
+  /** Máscara só com S (alfa 255 = S), para o provedor `mock` pintar apenas a forma (PV-30). */
+  shapeMaskPng: Buffer;
 }
 
 export interface EditResult {
@@ -139,6 +141,7 @@ export class SceneImageService {
       sentAuthorized,
       imagePng: await imgToPng(sent),
       maskPng: await renderEditMask(sentAuthorized),
+      shapeMaskPng: await renderEditMask(sentShape),
     };
   }
 

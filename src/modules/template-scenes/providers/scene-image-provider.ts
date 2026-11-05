@@ -29,6 +29,11 @@ export interface SceneEditInput extends SceneGenerateInput {
   image: Buffer;
   /** PNG da máscara (alfa 255 = editar) do tamanho de `image`; ausente no ajuste geral. */
   mask?: Buffer;
+  /**
+   * PNG (alfa 255 = pintar) do tamanho de `image` com só a forma S. Serve ao provedor `mock`, para não
+   * pintar a faixa R \ S (PV-30); o provedor `openai` ignora o campo e o corpo enviado não muda.
+   */
+  paintMask?: Buffer;
 }
 
 /**

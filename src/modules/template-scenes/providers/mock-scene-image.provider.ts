@@ -41,7 +41,7 @@ const color = (hash: Buffer, offset: number): string =>
  * formas, determinístico pelo hash do prompt, exatamente no tamanho pedido. A latência vem de
  * `TEMPLATE_SCENE_MOCK_LATENCY_MS` (20000; 0 nos testes), e os marcadores `#falha-quota`,
  * `#falha-timeout`, `#falha-conteudo` e `#lento` simulam os caminhos de erro. A edição pinta uma cor
- * sólida na área da máscara (o resto fica byte a byte igual), então o diff é real; `#sem-mudanca`
+ * sólida na forma S (`paintMask`; sem ela, na área da máscara) (o resto fica byte a byte igual), então o diff é real; `#sem-mudanca`
  * devolve o recorte intacto. O "adicionar" devolve um balão sobre fundo transparente.
  */
 @Injectable()
@@ -73,7 +73,9 @@ export class MockSceneImageProvider implements SceneImageProvider {
       return this.result(hash, input.image, startedAt);
     }
     const image = await loadRgb(input.image);
-    const alpha = input.mask ? await this.alphaOf(input.mask, image.width, image.height) : null;
+    // Pinta só a forma S quando o chamador a informa: a tinta fora de S entraria na faixa R \ S (PV-30).
+    const paint = input.paintMask ?? input.mask;
+    const alpha = paint ? await this.alphaOf(paint, image.width, image.height) : null;
     const tint = [hash[9], hash[10], hash[11]];
     const out = Uint8Array.from(image.data);
     for (let i = 0; i < image.width * image.height; i += 1) {

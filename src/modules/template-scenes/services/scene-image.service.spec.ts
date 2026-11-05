@@ -4,6 +4,7 @@ import { Raster } from '../../../shared/image/raster';
 import { Img, loadRgb } from '../../../shared/image/rgb';
 import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
 import { RegionSpec } from '../domain/scene-shapes';
+import { MockSceneImageProvider } from '../providers/mock-scene-image.provider';
 import { fakeModelOutput, syntheticScenePng } from '../testing/synthetic-scene';
 import { SceneImageService } from './scene-image.service';
 import * as recomposeModule from './scene-recompose';
@@ -201,5 +202,91 @@ describe('SceneImageService', () => {
     const [original, final] = await Promise.all([loadRgb(tall), loadRgb(result.finalPng)]);
     expect([final.width, final.height]).toEqual([1920, 3840]);
     expect(equalRgb(original, final, prepared.authorized)).toBe(0);
+  });
+
+  describe('margem preservada (PV-30)', () => {
+    const TALL_RECT: RegionSpec = { kind: 'rect', rect: { x: 0.4, y: 0.4, w: 0.2, h: 0.1 } };
+    const mock = () =>
+      new MockSceneImageProvider(new ConfigService({ TEMPLATE_SCENE_MOCK_LATENCY_MS: '0' }));
+    const mockEdit = (
+      prepared: Awaited<ReturnType<SceneImageService['prepareEdit']>>,
+      mask: Buffer,
+    ) =>
+      mock().edit({
+        model: 'm',
+        prompt: 'deixa o céu laranja',
+        size: `${prepared.plan.sendW}x${prepared.plan.sendH}`,
+        quality: 'high',
+        correlationId: 'c',
+        image: prepared.imagePng,
+        mask,
+        paintMask: prepared.shapeMaskPng,
+      });
+
+    it('modelo que devolve a entrada: margem 0, sem redução e com recorte reduzido (a reamostragem não pesa)', async () => {
+      const svc = service();
+      const wide = await syntheticScenePng(1920, 1920);
+      for (const [img, region] of [
+        [master, RECT],
+        [wide, { kind: 'zone', zone: 'header' } as RegionSpec],
+      ] as const) {
+        const prepared = await svc.prepareEdit({ master: img, region, zones });
+        const result = await svc.completeEdit(prepared, prepared.imagePng);
+        expect(result.metrics.marginDiffRatio).toBe(0);
+      }
+      const reduced = await svc.prepareEdit({
+        master: wide,
+        region: { kind: 'zone', zone: 'header' },
+        zones,
+      });
+      expect(reduced.plan.downscaled).toBe(true);
+    });
+
+    it('modelo que altera só S: a faixa fica quase intacta (só o feather chega a ela)', async () => {
+      const svc = service();
+      const tall = await syntheticScenePng(1920, 3840);
+      const prepared = await svc.prepareEdit({ master: tall, region: TALL_RECT, zones });
+      const image = await loadRgb(prepared.imagePng);
+      const alpha = await sharp(prepared.shapeMaskPng).ensureAlpha().raw().toBuffer();
+      const data = Buffer.from(image.data);
+      for (let i = 0; i < image.width * image.height; i += 1) {
+        if (alpha[i * 4 + 3] === 255) data.set([250, 120, 0], i * 3);
+      }
+      const raw = await sharp(data, {
+        raw: { width: image.width, height: image.height, channels: 3 },
+      })
+        .png()
+        .toBuffer();
+      const result = await svc.completeEdit(prepared, raw);
+      expect(result.metrics.marginDiffRatio).toBeLessThan(0.05);
+      expect(result.metrics.insideMaskDiffRatio).toBeGreaterThan(0.9);
+    });
+
+    it('provedor mock: pinta só S, e a faixa R \\ S sai com marginDiffRatio abaixo de 5% (chip acima de 95%)', async () => {
+      const svc = service();
+      const tall = await syntheticScenePng(1920, 3840);
+      const prepared = await svc.prepareEdit({ master: tall, region: TALL_RECT, zones });
+      const out = await mockEdit(prepared, prepared.maskPng);
+      const result = await svc.completeEdit(prepared, out.buffer);
+      expect(result.metrics.insideMaskDiffRatio).toBeGreaterThan(0.9);
+      expect(result.metrics.marginDiffRatio).toBeLessThan(0.05);
+    });
+
+    it('provedor mock sem a forma (só a máscara A): pinta a faixa, e o chip cai (causa do PV-30)', async () => {
+      const svc = service();
+      const tall = await syntheticScenePng(1920, 3840);
+      const prepared = await svc.prepareEdit({ master: tall, region: TALL_RECT, zones });
+      const out = await mock().edit({
+        model: 'm',
+        prompt: 'deixa o céu laranja',
+        size: `${prepared.plan.sendW}x${prepared.plan.sendH}`,
+        quality: 'high',
+        correlationId: 'c',
+        image: prepared.imagePng,
+        mask: prepared.maskPng,
+      });
+      const result = await svc.completeEdit(prepared, out.buffer);
+      expect(result.metrics.marginDiffRatio).toBeGreaterThan(0.4);
+    });
   });
 });

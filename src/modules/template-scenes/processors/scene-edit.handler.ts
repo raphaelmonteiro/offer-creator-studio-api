@@ -110,6 +110,7 @@ export class SceneEditHandler implements TurnHandler {
           correlationId: ctx.correlationId,
           image: prepared.imagePng,
           mask: prepared.maskPng,
+          paintMask: prepared.shapeMaskPng,
         }),
     });
     return result?.buffer ?? null;
