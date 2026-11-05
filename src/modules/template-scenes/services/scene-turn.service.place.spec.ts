@@ -34,4 +34,39 @@ describeIfSceneDb('SceneTurnService: "no lugar de X" no adicionar (banco chroma_
       subject: 'cesta de ovos',
     });
   });
+
+  it('R35: "põe" com acento também fica de fora do assunto (o assunto vem do modelo)', async () => {
+    const scene = await h.readyScene('Lugar põe');
+
+    const result = await h.send(scene.id, { content: 'põe um balão onde estava a cerca' });
+
+    expect(result.assistantMessage?.content).toBe(
+      'Marque onde quer "balão" e envie de novo. Nada foi alterado.',
+    );
+  });
+
+  it('o assunto do adicionar vai ao prompt sem o lugar: vale o subject da intenção', async () => {
+    const scene = await h.readyScene('Lugar assunto');
+    h.intentClassify.mockResolvedValueOnce({
+      text: JSON.stringify({
+        action: 'add_element',
+        zone: null,
+        object: null,
+        subject: 'cesta de ovos',
+        imagePrompt: 'uma cesta de ovos',
+        relativePlace: false,
+        layer: null,
+        text: null,
+      }),
+      usage: null,
+      requestId: null,
+      latencyMs: 5,
+    });
+
+    await h.send(scene.id, { content: PHRASE, region: { x: 0.1, y: 0.1, w: 0.3, h: 0.15 } });
+
+    expect((await h.versionsOf(scene.id))[1].metrics.plan).toMatchObject({
+      subject: 'cesta de ovos',
+    });
+  });
 });

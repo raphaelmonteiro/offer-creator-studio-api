@@ -69,7 +69,8 @@ export class SceneEditHandler implements TurnHandler {
     if (prepared.plan.belowMinArea) return state.reject(ctx, CROP_TOO_SMALL_REPLY);
     if (!(await state.advance(ctx, 'editing'))) return;
     const prompt = buildEditPrompt({
-      request: plan.instruction,
+      request: plan.imagePrompt ?? plan.instruction,
+      original: plan.instruction,
       remove: plan.remove,
       object: plan.object,
       knownElements: knownElementNames(ctx, ctx.requestedRegion),

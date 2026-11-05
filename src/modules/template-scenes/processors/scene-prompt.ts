@@ -75,7 +75,10 @@ export const CONTINUE_BACKGROUND = 'Continue o fundo ao redor, sem deixar marca 
  * o fundo ao redor"; só com pronome ("remove isso"), a instrução fixa `REMOVE_INSTRUCTION`.
  */
 export function buildEditPrompt(input: {
+  /** O pedido para o modelo de imagem: `imagePrompt` da intenção, ou a mensagem do cliente (D-19). */
   request: string;
+  /** A mensagem original do cliente, sobre a qual valem as regras fixas (R32); sem ela, `request`. */
+  original?: string;
   remove: boolean;
   /** O objeto que o cliente nomeia (D-19); `null` só com pronome ("remove isso"); ausente em planos antigos. */
   object?: string | null;
@@ -91,7 +94,7 @@ export function buildEditPrompt(input: {
   const integrate = input.integrateLayer
     ? ` Pinte "${input.integrateLayer}" integrado ao fundo, como se já fizesse parte da cena, com a mesma luz e as mesmas cores.`
     : '';
-  return `Na área marcada${names}: ${instruction}.${removal}${integrate} Altere somente a área indicada pela máscara. ${KEEP_REST} ${editRules(literal)}`;
+  return `Na área marcada${names}: ${instruction}.${removal}${integrate} Altere somente a área indicada pela máscara. ${KEEP_REST} ${editRules(cleanRequest(input.original ?? input.request))}`;
 }
 
 /** Prompt do ajuste geral: a imagem atual entra como referência; sem composição por faixas (D-16). */
