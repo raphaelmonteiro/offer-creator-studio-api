@@ -11,17 +11,19 @@ import { TemplateSceneVersion } from '../entities/template-scene-version.entity'
 import {
   assetNotInScene,
   sceneBusy,
-  sceneEditUnavailable,
   versionNotCancellable,
   versionNotFound,
 } from '../scene.errors';
 import { CANCELLED_REPLY } from '../scene-texts';
+import { SceneClassification } from '../domain/scene-operation.classifier';
 import { publishSceneEvent } from './scene-events';
+import { JobPlan, planMessage, ReplyPlan } from './scene-message-planner';
 import { addAssistantMessage, settleUserMessage } from './scene-messages';
 import {
   assertExpectedRevision,
   assertSceneIdle,
   bumpRevision,
+  closeOpenManual,
   nextVersionNumber,
   SceneLockService,
 } from './scene-lock.service';
@@ -33,8 +35,13 @@ const BUSY_INDEX = 'UQ_tsv_scene_busy';
 export interface SendMessageResult {
   messageId: string;
   versionId: string;
-  jobId: string;
+  /** `null` quando a resposta é imediata (sem job): pedir a área, mover item da imagem, confirmar o ajuste geral. */
+  jobId: string | null;
   revision: number;
+  /** Como o pedido foi classificado (`generate`, `local_edit`, `needs_region`...). */
+  operation: SceneClassification['operation'];
+  /** Resposta do assistente quando ela já existe na hora do envio. */
+  assistantMessage: { id: string; content: string } | null;
 }
 
 export interface CancelVersionResult {
@@ -54,9 +61,10 @@ export class SceneTurnService {
   ) {}
 
   /**
-   * Neste estágio só a primeira geração existe (`generate`): numa cena com versão `ready`, a API
-   * responde 422 `SCENE_EDIT_UNAVAILABLE` (a edição entra no estágio 4). O job nasce com
-   * `retryLimit: 0`: chamada paga nunca é repetida pela fila.
+   * Classifica a mensagem por regra (sem modelo) sob o lock da cena e: enfileira o job (versão
+   * `queued`, `retryLimit: 0`: chamada paga nunca é repetida pela fila) ou responde na hora, sem job
+   * (versão `rejected`, custo 0), nos casos de pedir a área, mover item da imagem e confirmar o
+   * ajuste geral.
    */
   async sendMessage(
     sceneId: string,
@@ -67,11 +75,11 @@ export class SceneTurnService {
       return await this.locks.run(sceneId, async ({ manager, scene }) => {
         assertExpectedRevision(scene, dto.expectedRevision);
         await assertSceneIdle(manager, sceneId);
-        if (await manager.exists(TemplateSceneVersion, { where: { sceneId, status: 'ready' } })) {
-          throw sceneEditUnavailable();
-        }
         await this.assertAttachmentsInScene(manager, sceneId, dto);
-        return this.enqueueGeneration(manager, scene, dto, userId);
+        const plan = await planMessage(manager, scene, dto);
+        if (plan.kind === 'reply') return this.recordReply(manager, scene, dto, plan, userId);
+        await closeOpenManual(manager, sceneId);
+        return this.enqueueJob(manager, scene, dto, plan, userId);
       });
     } catch (error) {
       if (isBusyIndexViolation(error)) throw sceneBusy();
@@ -79,10 +87,32 @@ export class SceneTurnService {
     }
   }
 
-  private async enqueueGeneration(
+  private async saveUserMessage(
+    manager: EntityManager,
+    scene: TemplateScene,
+    versionId: string,
+    dto: SendMessageDto,
+    status: 'queued' | 'done',
+    userId: string | null,
+  ): Promise<TemplateSceneMessage> {
+    return manager.save(
+      manager.create(TemplateSceneMessage, {
+        sceneId: scene.id,
+        versionId,
+        role: 'user',
+        content: dto.content,
+        attachments: dto.attachments ?? [],
+        status,
+        createdByUserId: userId,
+      }),
+    );
+  }
+
+  private async enqueueJob(
     manager: EntityManager,
     scene: TemplateScene,
     dto: SendMessageDto,
+    plan: JobPlan,
     userId: string | null,
   ): Promise<SendMessageResult> {
     const version = await manager.save(
@@ -90,23 +120,20 @@ export class SceneTurnService {
         sceneId: scene.id,
         parentVersionId: scene.currentVersionId,
         number: await nextVersionNumber(manager, scene.id),
-        operation: 'generate',
+        operation: plan.operation,
         status: 'queued',
+        requestedRegion: plan.requestedRegion,
+        requestedMask: plan.requestedMask,
+        targetElementId: plan.targetElementId,
+        metrics: {
+          plan: plan.classification,
+          ...(plan.repositionGenerated ? { repositionGenerated: true } : {}),
+        },
         correlationId: randomUUID(),
         createdByUserId: userId,
       }),
     );
-    const message = await manager.save(
-      manager.create(TemplateSceneMessage, {
-        sceneId: scene.id,
-        versionId: version.id,
-        role: 'user',
-        content: dto.content,
-        attachments: dto.attachments ?? [],
-        status: 'queued',
-        createdByUserId: userId,
-      }),
-    );
+    const message = await this.saveUserMessage(manager, scene, version.id, dto, 'queued', userId);
     const jobId = await this.queue.publish(
       QUEUES.TEMPLATE_SCENE_TURN,
       { sceneId: scene.id, versionId: version.id },
@@ -124,7 +151,55 @@ export class SceneTurnService {
       costUsd: 0,
       revision,
     });
-    return { messageId: message.id, versionId: version.id, jobId, revision };
+    return {
+      messageId: message.id,
+      versionId: version.id,
+      jobId,
+      revision,
+      operation: plan.classification.operation,
+      assistantMessage: null,
+    };
+  }
+
+  /** Resposta imediata: versão `rejected` (custo 0), as duas mensagens do chat e nenhum job. */
+  private async recordReply(
+    manager: EntityManager,
+    scene: TemplateScene,
+    dto: SendMessageDto,
+    plan: ReplyPlan,
+    userId: string | null,
+  ): Promise<SendMessageResult> {
+    const version = await manager.save(
+      manager.create(TemplateSceneVersion, {
+        sceneId: scene.id,
+        parentVersionId: scene.currentVersionId,
+        number: await nextVersionNumber(manager, scene.id),
+        operation: plan.operation,
+        status: 'rejected',
+        metrics: {
+          plan: plan.classification,
+          ...(plan.pendingConfirmation ? { pendingConfirmation: plan.pendingConfirmation } : {}),
+        },
+        correlationId: randomUUID(),
+        createdByUserId: userId,
+      }),
+    );
+    const message = await this.saveUserMessage(manager, scene, version.id, dto, 'done', userId);
+    const assistant = await addAssistantMessage(manager, {
+      sceneId: scene.id,
+      versionId: version.id,
+      content: plan.reply,
+      status: 'done',
+    });
+    const revision = await bumpRevision(manager, scene);
+    return {
+      messageId: message.id,
+      versionId: version.id,
+      jobId: null,
+      revision,
+      operation: plan.classification.operation,
+      assistantMessage: { id: assistant.id, content: assistant.content },
+    };
   }
 
   /**

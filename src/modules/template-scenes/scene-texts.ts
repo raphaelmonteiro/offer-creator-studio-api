@@ -7,6 +7,19 @@ export const READY_REPLY =
 
 export const CANCELLED_REPLY = 'Geração cancelada.';
 
+/** Respostas imediatas (sem job pago): o pedido não gera versão nova. */
+export const NEEDS_REGION_REPLY =
+  'Marque a área na prévia (retângulo, pincel ou laço) para eu saber onde mudar. Nada foi alterado.';
+
+export const NEEDS_REGION_LAYER_REPLY =
+  'Logo e texto não passam pelo modelo de imagem. Selecione o elemento para movê-lo ou redimensioná-lo, ou marque a área do fundo que você quer mudar.';
+
+export const MOVE_UNAVAILABLE_REPLY =
+  'Não consigo mover um item que faz parte da imagem sem refazê-lo. Posso removê-lo daqui (marque a área) e desenhar um novo onde você marcar.';
+
+export const GLOBAL_CONFIRM_REPLY =
+  'Isso cria uma nova versão do fundo inteiro. Logo e texto não mudam.';
+
 const FAILURE_REPLIES: Record<SceneFailureCode, string> = {
   PROVIDER_QUOTA: 'O serviço de imagem está sem saldo. Avise o administrador.',
   PROVIDER_CONTENT_POLICY:
@@ -16,6 +29,8 @@ const FAILURE_REPLIES: Record<SceneFailureCode, string> = {
   JOB_EXPIRED: 'O processamento foi interrompido. Tente de novo.',
   PAID_CALL_LIMIT:
     'Atingi o limite de chamadas ao serviço de imagem para este pedido. Tente de novo com um pedido mais simples.',
+  RECOMPOSE_MISMATCH:
+    'Não consegui aplicar a edição sem alterar o resto da imagem, então descartei o resultado. Tente de novo.',
 };
 
 export function failureReply(code: SceneFailureCode): string {

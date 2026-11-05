@@ -75,14 +75,60 @@ describe('DTOs da cena', () => {
       await expect(body(payload, SendMessageDto)).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it.each(['imageUrl', 'region', 'mask', 'targetElementId', 'target'])(
-      'recusa o campo %s (URL e alvo não existem neste estágio)',
+    it.each(['imageUrl', 'target', 'maskUploadId', 'url'])(
+      'recusa o campo %s (a API recebe dados, nunca URL)',
       async (field) => {
         await expect(
           body({ content: 'x', expectedRevision: 0, [field]: 'http://x/a.png' }, SendMessageDto),
         ).rejects.toBeInstanceOf(BadRequestException);
       },
     );
+
+    describe('campos de alvo (estágio 4)', () => {
+      const send = (extra: Record<string, unknown>) =>
+        body(
+          { content: 'x', expectedRevision: 0, ...extra },
+          SendMessageDto,
+        ) as Promise<SendMessageDto>;
+      const lasso = (n: number) => ({
+        kind: 'lasso',
+        points: Array.from({ length: n }, (_v, i) => ({ x: (i % 100) / 100, y: 0.5 })),
+      });
+
+      it('aceita região, forma, zona, elemento e confirmação', async () => {
+        expect((await send({ region: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } })).region?.w).toBe(0.2);
+        expect((await send({ mask: lasso(10) })).mask?.kind).toBe('lasso');
+        expect((await send({ zone: 'body' })).zone).toBe('body');
+        expect((await send({ targetElementId: 'logo-1' })).targetElementId).toBe('logo-1');
+        const confirm = await send({
+          confirmGlobal: true,
+          replyToMessageId: '11111111-1111-4111-8111-111111111111',
+          repositionGenerated: true,
+        });
+        expect(confirm.confirmGlobal).toBe(true);
+      });
+
+      it('aceita 2000 pontos e recusa 2001', async () => {
+        await expect(send({ mask: lasso(2000) })).resolves.toBeDefined();
+        await expect(send({ mask: lasso(2001) })).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it.each([
+        [{ region: { x: -0.1, y: 0, w: 0.2, h: 0.2 } }],
+        [{ region: { x: 0, y: 0, w: 0, h: 0.2 } }],
+        [{ region: { x: 0, y: 0, w: 1.5, h: 0.2 } }],
+        [{ region: 'a' }],
+        [{ mask: { kind: 'lasso', points: [{ x: 0, y: 0 }] } }],
+        [{ mask: { kind: 'brush', radius: 0.02, strokes: [[{ x: 3, y: 0 }]] } }],
+        [{ mask: 'x' }],
+        [{ zone: 'meio' }],
+        [{ targetElementId: 'x'.repeat(65) }],
+        [{ confirmGlobal: 'sim' }],
+        [{ replyToMessageId: 'abc' }],
+      ])('recusa %j', async (extra) => {
+        await expect(send(extra)).rejects.toBeInstanceOf(BadRequestException);
+      });
+    });
 
     it('recusa anexo sem assetId válido', async () => {
       await expect(

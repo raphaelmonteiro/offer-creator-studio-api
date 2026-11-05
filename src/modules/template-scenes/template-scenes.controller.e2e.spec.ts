@@ -80,8 +80,8 @@ describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () =
         content: 'deixa o sol laranja',
         expectedRevision: 2,
       });
-      expect(edit.status).toBe(422);
-      expect(edit.body.error.code).toBe('SCENE_EDIT_UNAVAILABLE');
+      expect(edit.status).toBe(202);
+      expect(edit.body.data).toMatchObject({ jobId: null, operation: 'needs_region' });
     });
 
     it('duas mensagens ao mesmo tempo: uma 202, a outra 409, uma só versão', async () => {

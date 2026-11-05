@@ -3,16 +3,60 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
+  ValidateBy,
   ValidateNested,
 } from 'class-validator';
-import { SCENE_LIMITS } from '../domain/scene.types';
+import { maskShapeProblem } from '../domain/scene-mask-shape';
+import { MaskShape, SCENE_LIMITS, SceneZoneName } from '../domain/scene.types';
+
+const ZONES: SceneZoneName[] = ['header', 'body', 'footer'];
+
+/** Forma do pincel ou do laço (D-10): até 2000 pontos, coordenadas entre 0 e 1. */
+const IsMaskShape = () =>
+  ValidateBy({
+    name: 'isMaskShape',
+    validator: {
+      validate: (value: unknown) => maskShapeProblem(value) === null,
+      defaultMessage: ({ value }) => `mask inválida: ${maskShapeProblem(value)}`,
+    },
+  });
+
+export class RegionDto {
+  @ApiProperty({ minimum: 0, maximum: 1 })
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  x: number;
+
+  @ApiProperty({ minimum: 0, maximum: 1 })
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  y: number;
+
+  @ApiProperty({ minimum: 0, maximum: 1, description: 'Largura, fração da cena' })
+  @IsNumber()
+  @Min(0.0001)
+  @Max(1)
+  w: number;
+
+  @ApiProperty({ minimum: 0, maximum: 1, description: 'Altura, fração da cena' })
+  @IsNumber()
+  @Min(0.0001)
+  @Max(1)
+  h: number;
+}
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -28,7 +72,11 @@ export class MessageAttachmentDto {
   name?: string;
 }
 
-/** Os campos de alvo (região, máscara, elemento) entram no estágio 4. */
+/**
+ * Mensagem do chat. O alvo da edição é um só: `region`, `mask`, `zone` e `targetElementId` são
+ * mutuamente exclusivos (400, conferido no service). `confirmGlobal` responde à pergunta do ajuste
+ * geral (com `replyToMessageId`).
+ */
 export class SendMessageDto {
   @ApiProperty({
     example: 'campo verde com sol à direita',
@@ -52,4 +100,46 @@ export class SendMessageDto {
   @ValidateNested({ each: true })
   @Type(() => MessageAttachmentDto)
   attachments?: MessageAttachmentDto[];
+
+  @ApiPropertyOptional({ type: RegionDto, description: 'Retângulo marcado (0..1)' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RegionDto)
+  region?: RegionDto;
+
+  @ApiPropertyOptional({
+    description:
+      '`{kind:"brush",strokes,radius}` ou `{kind:"lasso",points}`; até 2000 pontos, coordenadas 0..1',
+  })
+  @IsOptional()
+  @IsMaskShape()
+  mask?: MaskShape;
+
+  @ApiPropertyOptional({ enum: ZONES })
+  @IsOptional()
+  @IsIn(ZONES)
+  zone?: SceneZoneName;
+
+  @ApiPropertyOptional({ maxLength: 64, description: 'Elemento selecionado na prévia' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  targetElementId?: string;
+
+  @ApiPropertyOptional({ description: 'Confirma o ajuste geral perguntado antes' })
+  @IsOptional()
+  @IsBoolean()
+  confirmGlobal?: boolean;
+
+  @ApiPropertyOptional({ description: 'Mensagem do assistente com a pergunta que se responde' })
+  @IsOptional()
+  @IsUUID()
+  replyToMessageId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Ajuste geral: reposiciona os elementos adicionados (nunca os regenera)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  repositionGenerated?: boolean;
 }

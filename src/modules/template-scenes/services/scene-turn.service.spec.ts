@@ -136,20 +136,6 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
       await insertVersion(dataSource, scene.id, { number: 3, status: 'failed' });
     });
 
-    it('cena com versão ready: 422 SCENE_EDIT_UNAVAILABLE e nenhum job', async () => {
-      const scene = await newScene('Turno edição');
-      await insertReadyVersion(dataSource, scene, 1);
-
-      expect(
-        await errorOf(service.sendMessage(scene.id, message('deixa o sol mais laranja'), null)),
-      ).toEqual({
-        status: 422,
-        code: 'SCENE_EDIT_UNAVAILABLE',
-      });
-      expect(publish).not.toHaveBeenCalled();
-      expect(await versionsOf(scene.id)).toHaveLength(1);
-    });
-
     it('depois de uma geração que falhou, tentar de novo é permitido (versão 2)', async () => {
       const scene = await newScene('Turno retry');
       await insertVersion(dataSource, scene.id, {

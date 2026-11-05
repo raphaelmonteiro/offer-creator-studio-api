@@ -73,11 +73,26 @@ export const sceneFormatUnsupported = (formatId: string) =>
     { formatId },
   );
 
-export const sceneEditUnavailable = () =>
+export const regionTooSmall = () =>
   sceneError(
     HttpStatus.UNPROCESSABLE_ENTITY,
-    'SCENE_EDIT_UNAVAILABLE',
-    'A edição da cena por mensagem ainda não está disponível. Só a primeira geração funciona nesta versão.',
+    'REGION_TOO_SMALL',
+    'A área marcada é pequena demais. Marque uma área maior (pelo menos 0,1% da imagem).',
+  );
+
+export const targetElementNotFound = (elementId: string) =>
+  sceneError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'TARGET_ELEMENT_NOT_FOUND',
+    'O elemento selecionado não existe mais nesta cena.',
+    { elementId },
+  );
+
+export const confirmationNotPending = () =>
+  sceneError(
+    HttpStatus.CONFLICT,
+    'CONFIRMATION_NOT_PENDING',
+    'Não há uma pergunta de ajuste geral pendente para essa resposta. Envie o pedido de novo.',
   );
 
 export const logoInvalid = (reason: string) =>

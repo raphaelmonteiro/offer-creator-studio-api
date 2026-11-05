@@ -39,7 +39,15 @@ export const SCENE_FINAL_STATUSES = [
   'cancelled',
 ] as const satisfies readonly SceneVersionStatus[];
 
-export const SCENE_STEPS = ['preparing', 'generating', 'saving', 'done'] as const;
+export const SCENE_STEPS = [
+  'preparing',
+  'generating',
+  'editing',
+  'blending',
+  'checking',
+  'saving',
+  'done',
+] as const;
 export type SceneStep = (typeof SCENE_STEPS)[number];
 
 export const SCENE_ASSET_ROLES = [
@@ -64,6 +72,7 @@ export const SCENE_FAILURE_CODES = [
   'PROVIDER_ERROR',
   'JOB_EXPIRED',
   'PAID_CALL_LIMIT',
+  'RECOMPOSE_MISMATCH',
 ] as const;
 export type SceneFailureCode = (typeof SCENE_FAILURE_CODES)[number];
 
@@ -85,7 +94,7 @@ export type MaskShape =
   | { kind: 'brush'; strokes: Pt[][]; radius: number }
   | { kind: 'lasso'; points: Pt[] };
 
-export const SCENE_ELEMENT_KINDS = ['sun', 'cloud', 'logo', 'text'] as const;
+export const SCENE_ELEMENT_KINDS = ['sun', 'cloud', 'logo', 'text', 'generated'] as const;
 export type SceneElementKind = (typeof SCENE_ELEMENT_KINDS)[number];
 
 /** Camada manual da cena. Imagem só por `assetId` da própria cena (a API nunca aceita URL). */
@@ -118,7 +127,7 @@ export type SceneZones = Record<SceneZoneName, Rect>;
 /** Uma chamada paga (ou a reserva dela) em `metrics.calls` da versão. */
 export interface SceneCallRecord {
   id: string;
-  kind: 'generate' | 'edit';
+  kind: 'generate' | 'edit' | 'transparent' | 'vision';
   /** `pending` é gravada ANTES da chamada (R10); fechada depois com o custo real. */
   status: 'pending' | 'done' | 'failed' | 'discarded';
   model: string;
