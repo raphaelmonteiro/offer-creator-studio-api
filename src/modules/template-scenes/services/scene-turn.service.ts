@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { SendMessageDto } from '../dto/send-message.dto';
 import { TemplateScene } from '../entities/template-scene.entity';
@@ -17,6 +17,7 @@ import {
 import { CANCELLED_REPLY } from '../scene-texts';
 import { SceneClassification } from '../domain/scene-operation.classifier';
 import { publishSceneEvent } from './scene-events';
+import { isBusyIndexViolation, publishQueued, TurnInput } from './scene-turn-helpers';
 import { assertSingleTarget, JobPlan, planMessage, ReplyPlan } from './scene-message-planner';
 import { addAssistantMessage, settleUserMessage } from './scene-messages';
 import {
@@ -30,7 +31,6 @@ import {
 
 /** Quanto o job da cena pode rodar antes de expirar (a chamada paga tem timeout de 180 s). */
 const TURN_EXPIRE_SECONDS = 900;
-const BUSY_INDEX = 'UQ_tsv_scene_busy';
 
 export interface SendMessageResult {
   messageId: string;
@@ -141,16 +141,7 @@ export class SceneTurnService {
     );
     if (!jobId) throw new Error('A fila não aceitou o job da cena');
     const revision = await bumpRevision(manager, scene);
-    await publishSceneEvent(manager, {
-      sceneId: scene.id,
-      versionId: version.id,
-      kind: 'version.step',
-      step: null,
-      status: 'queued',
-      cancelRequested: false,
-      costUsd: 0,
-      revision,
-    });
+    await publishQueued(manager, scene.id, version.id, revision);
     return {
       messageId: message.id,
       versionId: version.id,
@@ -271,17 +262,4 @@ export class SceneTurnService {
       if (!found || found.purgedAt) throw assetNotInScene(attachment.assetId);
     }
   }
-}
-
-/** A mensagem recebida e quem a enviou. */
-interface TurnInput {
-  dto: SendMessageDto;
-  userId: string | null;
-}
-
-/** O índice parcial `UQ_tsv_scene_busy` é a rede de segurança de D-3: a violação também é SCENE_BUSY. */
-function isBusyIndexViolation(error: unknown): boolean {
-  if (!(error instanceof QueryFailedError)) return false;
-  const driver = error.driverError as { code?: string; constraint?: string } | undefined;
-  return driver?.code === '23505' && driver.constraint === BUSY_INDEX;
 }
