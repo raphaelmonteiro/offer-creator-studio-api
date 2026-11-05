@@ -154,6 +154,8 @@ function semanticProblem(intent: SceneIntent, message: string): string | null {
   if (intent.action === 'add_element' && !intent.subject) return 'add_element sem subject';
   if (intent.action === 'set_text' && !intent.text) return 'set_text sem text';
   if (intent.action.startsWith('layer_') && !intent.layer) return `${intent.action} sem layer`;
+  if (intent.action === 'layer_resize' && !intent.layer?.direction)
+    return 'layer_resize sem direction';
   return null;
 }
 

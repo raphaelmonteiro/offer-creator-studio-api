@@ -1,4 +1,5 @@
-import { fold, mentionsIntegrate } from '../domain/scene-request-text';
+import { fold } from '../domain/scene-request-text';
+import { layerNamedIn } from '../domain/scene-layer-name';
 import { elementRect } from '../domain/scene-element-rect';
 import { SceneClassification } from '../domain/scene-operation.classifier';
 import { RegionSpec, rasterizeRegion } from '../domain/scene-shapes';
@@ -6,7 +7,6 @@ import { Rect, SceneElement, SceneZones } from '../domain/scene.types';
 
 /** Integrar uma camada ao fundo (correção 5): o planner conhece as camadas e escolhe o alvo. */
 
-const STOP_WORDS = new Set(['de', 'da', 'do', 'das', 'dos', 'com', 'para', 'uma', 'um']);
 const RASTER_WIDTH = 256;
 /** A camada conta como "na área" se pelo menos metade da caixa dela está dentro da marcação. */
 const MIN_INSIDE_RATIO = 0.5;
@@ -19,15 +19,7 @@ export interface IntegrateScene {
 
 type LocalEditPlan = Extract<SceneClassification, { operation: 'local_edit' }>;
 
-const words = (name: string): string[] =>
-  fold(name)
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word.length >= 4 && !STOP_WORDS.has(word));
-
-/** O texto do pedido cita o nome da camada (alguma palavra significativa dele)? */
-function namedIn(layer: SceneElement, folded: string): boolean {
-  return words(layer.name).some((word) => new RegExp(`\\b${word}`).test(folded));
-}
+const namedIn = (layer: SceneElement, folded: string): boolean => layerNamedIn(layer, folded);
 
 /** Fração da caixa da camada que cai dentro da forma marcada. */
 async function insideRatio(
@@ -104,10 +96,11 @@ export async function resolveIntegration(
 ): Promise<SceneClassification> {
   const folded = fold(input.content);
   const layers = input.layers.filter((layer) => layer.kind === 'generated');
-  if (classification.operation === 'needs_region' && classification.reason === 'item') {
-    if (!mentionsIntegrate(folded)) return classification;
+  if (classification.operation === 'needs_region' && classification.reason === 'integrate') {
     const named = layers.filter((layer) => namedIn(layer, folded));
-    return named.length === 1 ? onLayerBox(input.content, named[0]) : classification;
+    return named.length === 1
+      ? onLayerBox(input.content, named[0])
+      : { operation: 'needs_region', reason: 'item' };
   }
   if (classification.operation !== 'local_edit' || !classification.integrate) return classification;
   if (classification.target.kind === 'element') {

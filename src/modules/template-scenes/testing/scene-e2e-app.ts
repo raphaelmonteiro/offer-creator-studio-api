@@ -27,9 +27,12 @@ import { SceneTurnSupport } from '../processors/scene-turn-support';
 import { SceneTurnState } from '../processors/scene-turn-state';
 import { MockSceneImageProvider } from '../providers/mock-scene-image.provider';
 import { SCENE_IMAGE_PROVIDER } from '../providers/scene-image-provider';
+import { MockSceneIntentClient } from '../providers/mock-scene-intent.client';
 import { MockSceneVisionClient } from '../providers/mock-scene-vision.client';
+import { SCENE_INTENT_CLIENT } from '../providers/scene-intent-client';
 import { SCENE_VISION_CLIENT } from '../providers/scene-vision-client';
 import { SceneImageService } from '../services/scene-image.service';
+import { SceneIntentService } from '../services/scene-intent.service';
 import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
@@ -111,12 +114,14 @@ export async function createSceneE2eApp(
       SceneCallRunner,
       SceneImageService,
       SceneVisionService,
+      SceneIntentService,
       SceneGenerateHandler,
       SceneEditHandler,
       SceneLayerHandler,
       SceneAddElementHandler,
       SceneTurnProcessor,
       { provide: SCENE_VISION_CLIENT, useValue: new MockSceneVisionClient() },
+      { provide: SCENE_INTENT_CLIENT, useValue: new MockSceneIntentClient() },
       SceneReconcilerService,
       TemplateScenesGcRunner,
       UploadsGcService,

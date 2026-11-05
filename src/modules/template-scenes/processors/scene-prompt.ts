@@ -1,4 +1,4 @@
-import { fold, namesObject } from '../domain/scene-request-text';
+import { fold } from '../domain/scene-request-text';
 
 export interface ScenePromptInput {
   /** Pedido literal do cliente, em português. */
@@ -62,7 +62,7 @@ export function editRules(request: string): string {
     : 'Regras: sem texto legível, sem letras ou números, sem logotipos e sem preços.';
 }
 
-/** Remoção sem objeto nomeado ("remove isso", "tira essa área"): só aponta a marcação. */
+/** Remoção sem objeto nomeado (`object` nulo: "remove isso", "tira essa área"): só aponta a marcação. */
 export const REMOVE_INSTRUCTION = 'remova o que está na área marcada e continue o fundo ao redor';
 
 /** Remoção com objeto nomeado: a frase do cliente vale, e o fundo continua ao redor. */
@@ -77,13 +77,15 @@ export const CONTINUE_BACKGROUND = 'Continue o fundo ao redor, sem deixar marca 
 export function buildEditPrompt(input: {
   request: string;
   remove: boolean;
+  /** O objeto que o cliente nomeia (D-19); `null` só com pronome ("remove isso"); ausente em planos antigos. */
+  object?: string | null;
   knownElements: string[];
   /** Camada `generated` a integrar ao fundo (correção 5): o modelo a pinta no fundo, sem recebê-la. */
   integrateLayer?: string;
 }): string {
   const names = input.knownElements.length > 0 ? ` (${input.knownElements.join(', ')})` : '';
   const literal = cleanRequest(input.request);
-  const pointsOnly = input.remove && !namesObject(fold(literal));
+  const pointsOnly = input.remove && input.object === null;
   const instruction = pointsOnly ? REMOVE_INSTRUCTION : literal.replace(/[.!]+$/, '');
   const removal = input.remove && !pointsOnly ? ` ${CONTINUE_BACKGROUND}` : '';
   const integrate = input.integrateLayer

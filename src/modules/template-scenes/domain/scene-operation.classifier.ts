@@ -1,20 +1,13 @@
 import { MaskShape, Rect, SceneZoneName } from './scene.types';
 import {
-  additionSubject,
-  citesImageItem,
   fold,
   LayerKind,
-  layerKindIn,
   mentionsIntegrate,
   mentionsMove,
-  mentionsPlaceOfItem,
   mentionsRemove,
   mentionsResize,
   Side,
   sideIn,
-  wantsAddition,
-  wantsNewImage,
-  zoneAsPlace,
 } from './scene-request-text';
 import { LogoPosition, logoPositionIn, ParsedText, parseText } from './scene-request-parse';
 
@@ -27,15 +20,9 @@ export interface ClassifierTargetElement {
 export interface ClassifierInput {
   hasReadyVersion: boolean;
   content: string;
-  region?: Rect;
-  mask?: MaskShape;
-  zone?: SceneZoneName;
   targetElement?: ClassifierTargetElement;
   /** Logo já enviado pelo clipe (o chat só anexa logo). */
   attachments?: Array<{ assetId: string }>;
-  confirmGlobal?: boolean;
-  /** Tipo da pergunta que a confirmação responde (D-18); sem isto vale o ajuste geral. */
-  confirmKind?: 'global' | 'new_image';
 }
 
 /** Onde uma edição local acontece. */
@@ -53,7 +40,7 @@ export type LayerAction =
   | { type: 'resize'; target: LayerTarget; direction: 'bigger' | 'smaller' }
   | { type: 'remove'; target: LayerTarget };
 
-/** Elemento escolhido por seleção (`elementId`) ou pelo tipo citado no texto (`kind`). */
+/** Elemento escolhido por seleção (`elementId`) ou pelo tipo citado (`kind`). */
 export type LayerTarget = { elementId: string } | { kind: LayerKind };
 
 export type SceneClassification =
@@ -62,9 +49,14 @@ export type SceneClassification =
   | {
       operation: 'local_edit';
       target: LocalTarget;
+      /** A mensagem do cliente, sempre: a visão e a resposta partem dela. */
       instruction: string;
       remove: boolean;
-      /** Pede integrar uma camada ao fundo (correção 5); o planner acha a camada (`integrateLayer`). */
+      /** Frase para o modelo de imagem, vinda da intenção (D-19); sem ela vale `instruction`. */
+      imagePrompt?: string;
+      /** O objeto nomeado; `null` só com pronome ("remove isso"). */
+      object?: string | null;
+      /** Pede integrar uma camada ao fundo; o planner acha a camada (`integrateLayer`). */
       integrate?: boolean;
       integrateLayer?: { elementId: string; name: string };
     }
@@ -73,43 +65,39 @@ export type SceneClassification =
   | { operation: 'new_image'; instruction: string }
   | { operation: 'needs_confirmation_global' }
   | { operation: 'needs_confirmation_new_image' }
+  | { operation: 'needs_confirmation_edit' }
   | { operation: 'move_unavailable' }
   | { operation: 'needs_region'; reason: NeedsRegionReason; subject?: string };
 
-export type NeedsRegionReason = 'item' | 'layer_visual' | 'place' | 'choose_layer';
-
-type Rule = (input: ClassifierInput, folded: string) => SceneClassification | null;
+/**
+ * `item`: cita um item sem área; `layer_visual`: pedido visual sobre logo ou texto; `place`: "no lugar de
+ * X"; `choose_layer`: mais de uma camada possível ao integrar; `select_layer`: a camada citada não se
+ * resolve; `not_understood`: o modelo de intenção falhou; `integrate`: interno, resolvido por
+ * `resolveIntegration` antes de responder.
+ */
+export type NeedsRegionReason =
+  | 'item'
+  | 'layer_visual'
+  | 'place'
+  | 'choose_layer'
+  | 'select_layer'
+  | 'not_understood'
+  | 'integrate';
 
 const layerOp = (...actions: LayerAction[]): SceneClassification => ({
   operation: 'set_layer',
   actions,
 });
 
-/** Alvo explícito da mensagem: forma marcada, retângulo ou zona (campo ou citada no texto). */
-function markedTarget(input: ClassifierInput): LocalTarget | null {
-  if (input.mask) return { kind: 'mask', mask: input.mask };
-  if (input.region) return { kind: 'rect', rect: input.region };
-  if (input.zone) return { kind: 'zone', zone: input.zone, from: 'field' };
-  const zone = zoneAsPlace(input.content);
-  return zone ? { kind: 'zone', zone, from: 'text' } : null;
-}
-
-const ruleGenerate: Rule = (input) => (input.hasReadyVersion ? null : { operation: 'generate' });
-
 /** Anexo de logo (com texto entre aspas junto, se houver): camadas exatas. */
-const ruleLogoAttachment: Rule = (input, folded) => {
+function logoAttachment(input: ClassifierInput, folded: string): SceneClassification | null {
   const assetId = input.attachments?.[0]?.assetId;
   if (!assetId) return null;
   const actions: LayerAction[] = [{ type: 'add_logo', assetId, ...logoPositionIn(folded) }];
   const text = parseText(input.content);
   if (text) actions.push({ type: 'set_text', ...text });
   return layerOp(...actions);
-};
-
-const ruleQuotedText: Rule = (input) => {
-  const text = parseText(input.content);
-  return text ? layerOp({ type: 'set_text', ...text }) : null;
-};
+}
 
 function selectedLayerAction(
   element: ClassifierTargetElement,
@@ -124,8 +112,11 @@ function selectedLayerAction(
   return direction ? layerOp({ type: 'resize', target, direction }) : null;
 }
 
-/** Elemento selecionado: mover/redimensionar/tirar é camada; pedido visual vai ao modelo só se for `generated`. */
-const ruleSelectedElement: Rule = (input, folded) => {
+/**
+ * Elemento selecionado: o alvo é ele. Mover, redimensionar e tirar (verbos da lista curta) são camada;
+ * o resto é pedido visual, que só o elemento `generated` aceita (`local_edit` na caixa dele).
+ */
+function selectedElement(input: ClassifierInput, folded: string): SceneClassification | null {
   const element = input.targetElement;
   if (!element) return null;
   const integrates = element.kind === 'generated' && mentionsIntegrate(folded);
@@ -137,111 +128,20 @@ const ruleSelectedElement: Rule = (input, folded) => {
       target: { kind: 'element', elementId: element.id },
       instruction: input.content,
       remove: false,
-      ...(element.kind === 'generated' && mentionsIntegrate(folded) ? { integrate: true } : {}),
+      ...(integrates ? { integrate: true } : {}),
     };
   }
   return { operation: 'needs_region', reason: 'layer_visual' };
-};
-
-/** Logo ou texto citados pelo nome, sem seleção: mover, redimensionar e tirar são camadas. */
-const ruleNamedLayer: Rule = (input, folded) => {
-  const kind = layerKindIn(folded);
-  if (!kind) return null;
-  const target: LayerTarget = { kind };
-  if (mentionsRemove(folded)) return layerOp({ type: 'remove', target });
-  if (mentionsMove(folded)) return layerOp({ type: 'move', target, side: sideIn(folded) });
-  const direction = mentionsResize(folded);
-  if (direction) return layerOp({ type: 'resize', target, direction });
-  // Pedido visual sobre logo ou texto: com área marcada é uma edição da área; sem ela, logo e texto não passam pelo modelo.
-  return markedTarget(input) ? null : { operation: 'needs_region', reason: 'layer_visual' };
-};
-
-/** Mover um item da imagem (sol, nuvem...) não existe sem refazê-lo. */
-const ruleMoveUnavailable: Rule = (_input, folded) =>
-  mentionsMove(folded) ? { operation: 'move_unavailable' } : null;
-
-/** Imagem nova do zero (D-18): só sem marcação (a marcação manda) e fora da confirmação. */
-const ruleNewImage: Rule = (input, folded) => {
-  const marked = Boolean(input.region ?? input.mask ?? input.zone);
-  if (marked || input.confirmGlobal || !wantsNewImage(folded)) return null;
-  return { operation: 'needs_confirmation_new_image' };
-};
-
-/** Integrar uma camada ao fundo: com área marcada é edição local (o planner acha a camada). */
-const ruleIntegrate: Rule = (input, folded) => {
-  const target = markedTarget(input);
-  if (!target || !mentionsIntegrate(folded)) return null;
-  return {
-    operation: 'local_edit',
-    target,
-    instruction: input.content,
-    remove: false,
-    integrate: true,
-  };
-};
-
-const ruleAddElement: Rule = (input, folded) => {
-  const hasArea = Boolean(input.region ?? input.mask ?? input.zone);
-  if (!wantsAddition(folded, hasArea)) return null;
-  const target = markedTarget(input);
-  const subject = additionSubject(input.content);
-  // "no lugar de X": X não se localiza, então sem área não há posição a inventar (correção 4).
-  if (!target && mentionsPlaceOfItem(folded)) {
-    return { operation: 'needs_region', reason: 'place', subject };
-  }
-  return { operation: 'add_element', subject, target };
-};
-
-const ruleMarkedEdit: Rule = (input, folded) => {
-  const target = markedTarget(input);
-  if (!target) return null;
-  return {
-    operation: 'local_edit',
-    target,
-    instruction: input.content,
-    remove: mentionsRemove(folded),
-  };
-};
-
-const ruleConfirmedGlobal: Rule = (input) => {
-  if (!input.confirmGlobal) return null;
-  return input.confirmKind === 'new_image'
-    ? { operation: 'new_image', instruction: input.content }
-    : { operation: 'global_regenerate', instruction: input.content };
-};
-
-/** Sem item citado e sem área: ajuste geral (pede confirmação); citando um item sem área, pede a marcação. */
-const ruleUnmarked: Rule = (_input, folded) =>
-  citesImageItem(folded)
-    ? { operation: 'needs_region', reason: 'item' }
-    : { operation: 'needs_confirmation_global' };
-
-const RULES: Rule[] = [
-  ruleGenerate,
-  ruleLogoAttachment,
-  ruleQuotedText,
-  ruleSelectedElement,
-  ruleNewImage,
-  ruleNamedLayer,
-  ruleMoveUnavailable,
-  ruleIntegrate,
-  ruleAddElement,
-  ruleMarkedEdit,
-  ruleConfirmedGlobal,
-  ruleUnmarked,
-];
+}
 
 /**
- * Classifica a mensagem por regra, sem chamada de modelo. A primeira regra que casa decide:
- * sem versão → `generate`; anexo de logo e texto entre aspas → camadas exatas; elemento
- * selecionado; logo/texto citados; mover item da imagem → indisponível; "adicionar"; marcação ou zona
- * → edição local; confirmação do ajuste geral; o resto pede confirmação global ou a marcação da área.
+ * Classifica a mensagem pelos sinais estruturados, sem texto livre e sem modelo (D-19): sem versão
+ * pronta → `generate`; anexo de logo → camadas exatas; elemento selecionado → o alvo é ele. Devolve
+ * `null` quando a intenção depende do texto: aí roda o modelo de intenção (`planFromIntent`). A
+ * confirmação segue o plano guardado na pergunta e nunca passa por aqui.
  */
-export function classifySceneRequest(input: ClassifierInput): SceneClassification {
+export function classifySceneRequest(input: ClassifierInput): SceneClassification | null {
+  if (!input.hasReadyVersion) return { operation: 'generate' };
   const folded = fold(input.content);
-  for (const rule of RULES) {
-    const result = rule(input, folded);
-    if (result) return result;
-  }
-  return { operation: 'needs_confirmation_global' };
+  return logoAttachment(input, folded) ?? selectedElement(input, folded);
 }

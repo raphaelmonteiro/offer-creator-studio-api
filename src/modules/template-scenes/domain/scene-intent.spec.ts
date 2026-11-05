@@ -122,10 +122,12 @@ describe('prompt', () => {
 });
 
 describe('conjunto de avaliação (scene-intent.eval.json)', () => {
-  it('tem ids únicos, os três grupos e cerca de 150 frases', () => {
+  it('tem ids únicos, os quatro grupos e mais de 150 frases', () => {
     expect(new Set(CASES.map((c) => c.id)).size).toBe(CASES.length);
-    expect(new Set(CASES.map((c) => c.group))).toEqual(new Set(['dono', 'tabela', 'rodada3']));
-    expect(CASES.length).toBeGreaterThanOrEqual(140);
+    expect(new Set(CASES.map((c) => c.group))).toEqual(
+      new Set(['dono', 'tabela', 'rodada3', 'spec']),
+    );
+    expect(CASES.length).toBeGreaterThanOrEqual(150);
   });
 
   it.each(CASES.map((c) => [c.id, c] as const))(

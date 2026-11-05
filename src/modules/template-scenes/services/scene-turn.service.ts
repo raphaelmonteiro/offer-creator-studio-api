@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
@@ -19,6 +19,8 @@ import { SceneClassification } from '../domain/scene-operation.classifier';
 import { publishSceneEvent } from './scene-events';
 import { isBusyIndexViolation, publishQueued, TurnInput } from './scene-turn-helpers';
 import { assertSingleTarget, JobPlan, planMessage, ReplyPlan } from './scene-message-planner';
+import { intentCostFields, logLostIntent, recognizeIntent } from './scene-intent-turn';
+import { SceneIntentService } from './scene-intent.service';
 import { addAssistantMessage, settleUserMessage } from './scene-messages';
 import {
   assertExpectedRevision,
@@ -54,35 +56,41 @@ export interface CancelVersionResult {
 /** Turno do chat: mensagem + versão `queued` + job (mesma transação) e o cancelamento. */
 @Injectable()
 export class SceneTurnService {
+  private readonly logger = new Logger(SceneTurnService.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly locks: SceneLockService,
     private readonly queue: AnimationQueueService,
+    private readonly intent: SceneIntentService,
   ) {}
 
   /**
-   * Classifica a mensagem por regra (sem modelo) sob o lock da cena e: enfileira o job (versão
-   * `queued`, `retryLimit: 0`: chamada paga nunca é repetida pela fila) ou responde na hora, sem job
-   * (versão `rejected`, custo 0), nos casos de pedir a área, mover item da imagem e confirmar o
-   * ajuste geral.
+   * Reconhece a intenção (modelo de texto, D-19) ANTES do lock, e então, sob o lock da cena e com a
+   * conferência refeita: enfileira o job (versão `queued`, `retryLimit: 0`: chamada paga nunca é
+   * repetida pela fila) ou responde na hora, sem job (versão `rejected`, sem chamada de imagem), nos
+   * casos de pedir a área, mover item da imagem e perguntar antes de gastar. O custo da intenção soma
+   * na versão e na cena; um conflito na segunda conferência responde o erro normal, e o custo fica só no log.
    */
   async sendMessage(
     sceneId: string,
     dto: SendMessageDto,
     userId: string | null,
   ): Promise<SendMessageResult> {
+    const intent = await recognizeIntent(this.dataSource, this.intent, sceneId, dto);
     try {
       return await this.locks.run(sceneId, async ({ manager, scene }) => {
         assertExpectedRevision(scene, dto.expectedRevision);
         await assertSceneIdle(manager, sceneId);
         assertSingleTarget(dto); // 400 antes de qualquer consulta: o corpo inválido vence o 422 do anexo
         await this.assertAttachmentsInScene(manager, sceneId, dto);
-        const plan = await planMessage(manager, scene, dto);
+        const plan = await planMessage(manager, scene, dto, intent);
         if (plan.kind === 'reply') return this.recordReply(manager, scene, { dto, userId }, plan);
         await closeOpenManual(manager, sceneId);
         return this.enqueueJob(manager, scene, { dto, userId }, plan);
       });
     } catch (error) {
+      logLostIntent(this.logger, sceneId, intent);
       if (isBusyIndexViolation(error)) throw sceneBusy();
       throw error;
     }
@@ -114,6 +122,7 @@ export class SceneTurnService {
     plan: JobPlan,
   ): Promise<SendMessageResult> {
     const { userId } = input;
+    const paid = intentCostFields(scene, plan.intent);
     const version = await manager.save(
       manager.create(TemplateSceneVersion, {
         sceneId: scene.id,
@@ -124,7 +133,8 @@ export class SceneTurnService {
         requestedRegion: plan.requestedRegion,
         requestedMask: plan.requestedMask,
         targetElementId: plan.targetElementId,
-        metrics: { plan: plan.classification },
+        providerCostUsd: paid.providerCostUsd,
+        metrics: { plan: plan.classification, ...paid.metrics },
         correlationId: randomUUID(),
         createdByUserId: userId,
       }),
@@ -160,6 +170,7 @@ export class SceneTurnService {
     plan: ReplyPlan,
   ): Promise<SendMessageResult> {
     const { userId } = input;
+    const paid = intentCostFields(scene, plan.intent);
     const version = await manager.save(
       manager.create(TemplateSceneVersion, {
         sceneId: scene.id,
@@ -167,8 +178,10 @@ export class SceneTurnService {
         number: await nextVersionNumber(manager, scene.id),
         operation: plan.operation,
         status: 'rejected',
+        providerCostUsd: paid.providerCostUsd,
         metrics: {
           plan: plan.classification,
+          ...paid.metrics,
           ...(plan.pendingConfirmation ? { pendingConfirmation: plan.pendingConfirmation } : {}),
         },
         correlationId: randomUUID(),

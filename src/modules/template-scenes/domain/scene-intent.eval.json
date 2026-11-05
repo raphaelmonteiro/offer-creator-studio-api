@@ -2695,5 +2695,229 @@
       "layer": null,
       "text": null
     }
+  },
+  {
+    "id": "r29-integra-ao-fundo",
+    "group": "rodada3",
+    "message": "integra ao fundo",
+    "marked": false,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "integrar ao fundo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r29-integra-ela",
+    "group": "rodada3",
+    "message": "integra ela ao fundo",
+    "marked": false,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "integrar ao fundo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "r29-mescla-fundo",
+    "group": "rodada3",
+    "message": "mescla com o fundo",
+    "marked": false,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "mesclar com o fundo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-segunda-imagem",
+    "group": "spec",
+    "message": "gere uma segunda imagem",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-mude-tudo",
+    "group": "spec",
+    "message": "quero que mude tudo",
+    "marked": false,
+    "expect": {
+      "action": "new_image",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": null,
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-integra-cesta-com",
+    "group": "spec",
+    "message": "integra a cesta ao fundo",
+    "marked": true,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": "a cesta",
+      "subject": null,
+      "imagePrompt": "integrar a cesta ao fundo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-integra-cesta-sem",
+    "group": "spec",
+    "message": "integra a cesta ao fundo",
+    "marked": false,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": "a cesta",
+      "subject": null,
+      "imagePrompt": "integrar a cesta ao fundo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-integra-isso",
+    "group": "spec",
+    "message": "integra isso ao fundo",
+    "marked": true,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "integrar ao fundo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-integre-cesta-cenario",
+    "group": "spec",
+    "message": "integre esta cesta ao cenário",
+    "marked": false,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": "esta cesta",
+      "subject": null,
+      "imagePrompt": "integrar a cesta ao cenário",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-integre-coisa",
+    "group": "spec",
+    "message": "integre esta coisa ao cenário",
+    "marked": false,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": "esta coisa",
+      "subject": null,
+      "imagePrompt": "integrar ao cenário",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-integre-cesta-fundo",
+    "group": "spec",
+    "message": "integre esta cesta ao cenário de fundo",
+    "marked": false,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": "esta cesta",
+      "subject": null,
+      "imagePrompt": "integrar a cesta ao cenário de fundo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-integra-logo",
+    "group": "spec",
+    "message": "integra a logo ao fundo",
+    "marked": true,
+    "expect": {
+      "action": "integrate",
+      "zone": null,
+      "object": "a logo",
+      "subject": null,
+      "imagePrompt": "integrar a logo ao fundo",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-adiciona-cesta",
+    "group": "spec",
+    "message": "adiciona uma cesta de ovos",
+    "marked": false,
+    "expect": {
+      "action": "add_element",
+      "zone": null,
+      "object": null,
+      "subject": "cesta de ovos",
+      "imagePrompt": "uma cesta de ovos",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
+  },
+  {
+    "id": "spec-sol-laranja",
+    "group": "spec",
+    "message": "deixa o sol laranja",
+    "marked": true,
+    "expect": {
+      "action": "edit",
+      "zone": null,
+      "object": null,
+      "subject": null,
+      "imagePrompt": "sol laranja",
+      "relativePlace": false,
+      "layer": null,
+      "text": null
+    }
   }
 ]

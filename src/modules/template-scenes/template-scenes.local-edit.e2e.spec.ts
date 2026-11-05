@@ -124,6 +124,22 @@ describeIfSceneDb('Cena de template: edição local (e2e, banco chroma_x_e2e)', 
     ).toBe(0);
   });
 
+  it('falha do modelo de intenção: pede a área, sem job e sem chamada de imagem', async () => {
+    const first = await generatedScene('E2E Falha da intenção');
+
+    const failed = await post(`/${first.id}/messages`, {
+      content: 'deixa mais bonito #falha-intencao',
+      expectedRevision: first.revision,
+    });
+
+    expect(failed.status).toBe(202);
+    expect(failed.body.data).toMatchObject({ jobId: null, operation: 'needs_region' });
+    expect(failed.body.data.assistantMessage.content).toContain('Não entendi o pedido');
+    const after = (await get(`/${first.id}`)).body.data;
+    expect(after.currentVersion.number).toBe(1);
+    expect(after.totalCostUsd).toBe(first.totalCostUsd);
+  });
+
   it('item sem área e "mover o sol": respondem na hora, sem job e sem custo', async () => {
     const first = await generatedScene('E2E Sem job');
 

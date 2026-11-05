@@ -71,6 +71,7 @@ export class SceneEditHandler implements TurnHandler {
     const prompt = buildEditPrompt({
       request: plan.instruction,
       remove: plan.remove,
+      object: plan.object,
       knownElements: knownElementNames(ctx, ctx.requestedRegion),
       integrateLayer: plan.integrateLayer?.name,
     });

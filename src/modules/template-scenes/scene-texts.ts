@@ -26,6 +26,16 @@ export const NEW_IMAGE_CONFIRM_REPLY =
 export const CHOOSE_LAYER_REPLY =
   'Há mais de uma camada possível. Selecione na prévia a camada que quer integrar ao fundo. Nada foi alterado.';
 
+export const SELECT_LAYER_REPLY = 'Selecione na prévia a camada que quer mudar. Nada foi alterado.';
+
+/** O modelo de intenção falhou, sem marcação (D-19): pede a área, sem gastar imagem. */
+export const NOT_UNDERSTOOD_REPLY =
+  'Não entendi o pedido. Marque a área na prévia ou descreva de outro jeito. Nada foi alterado.';
+
+/** O modelo de intenção falhou, com marcação (D-19): pergunta antes de editar a área marcada. */
+export const EDIT_CONFIRM_REPLY =
+  'Não consegui entender o pedido agora. Quer que eu edite a área marcada com esse pedido?';
+
 export const needsPlaceReply = (subject: string): string =>
   `Marque onde quer "${subject}" e envie de novo. Nada foi alterado.`;
 

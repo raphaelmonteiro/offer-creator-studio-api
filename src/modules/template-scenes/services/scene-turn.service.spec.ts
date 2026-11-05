@@ -9,6 +9,7 @@ import {
   insertScene,
   insertVersion,
 } from '../testing/scene-fixtures';
+import { mockIntentService } from '../testing/scene-intent-fixtures';
 import { errorOf } from '../testing/scene-test-helpers';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
 import { SceneLockService } from './scene-lock.service';
@@ -31,9 +32,12 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
       publishedInTransaction.push(Boolean(options?.manager?.queryRunner?.isTransactionActive));
       return `job-${publish.mock.calls.length}`;
     });
-    service = new SceneTurnService(dataSource, new SceneLockService(dataSource), {
-      publish,
-    } as unknown as AnimationQueueService);
+    service = new SceneTurnService(
+      dataSource,
+      new SceneLockService(dataSource),
+      { publish } as unknown as AnimationQueueService,
+      mockIntentService(),
+    );
   });
 
   afterAll(async () => {

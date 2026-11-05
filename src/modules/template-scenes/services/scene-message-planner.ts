@@ -1,8 +1,8 @@
 import { EntityManager } from 'typeorm';
 import { SendMessageDto } from '../dto/send-message.dto';
 import { maskBounds, MIN_SHAPE_AREA_RATIO } from '../domain/scene-mask-shape';
+import { planFromIntent } from '../domain/scene-intent-plan';
 import {
-  ClassifierTargetElement,
   classifySceneRequest,
   LocalTarget,
   SceneClassification,
@@ -12,23 +12,14 @@ import { MaskShape, Rect, SceneElement, SceneVersionOperation } from '../domain/
 import { sceneZonesFor } from '../domain/scene-formats';
 import { resolveIntegration } from './scene-integrate';
 import { TemplateScene } from '../entities/template-scene.entity';
-import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import {
-  confirmationNotPending,
-  invalidBody,
-  regionTooSmall,
-  targetElementNotFound,
-} from '../scene.errors';
-import {
-  GLOBAL_CONFIRM_REPLY,
-  MOVE_UNAVAILABLE_REPLY,
-  NEW_IMAGE_CONFIRM_REPLY,
-  NEEDS_REGION_LAYER_REPLY,
-  NEEDS_REGION_REPLY,
-  CHOOSE_LAYER_REPLY,
-  needsPlaceReply,
-} from '../scene-texts';
+import { invalidBody, regionTooSmall } from '../scene.errors';
+import { ConfirmationKind, consumeConfirmation, planOfConfirmation } from './scene-confirmation';
+import { currentElements, markedTargetOf, selectedElement } from './scene-plan-context';
+import { OPERATION_OF, REPLY_OPERATIONS, replyFor } from './scene-plan-replies';
+import { IntentMetrics, IntentOutcome } from './scene-intent.service';
+
+export type { ConfirmationKind, PendingConfirmation } from './scene-confirmation';
 
 /** A mensagem vira um job pago/assíncrono (versão `queued`). */
 export interface JobPlan {
@@ -38,33 +29,26 @@ export interface JobPlan {
   requestedRegion: Rect | null;
   requestedMask: MaskShape | null;
   targetElementId: string | null;
+  /** Saída do modelo de intenção desta mensagem (D-19); `null` quando nenhum modelo rodou. */
+  intent: IntentMetrics | null;
 }
 
-/** A mensagem é respondida na hora, sem job (versão `rejected`, custo 0). */
+/** A mensagem é respondida na hora, sem job (versão `rejected`, sem chamada de imagem). */
 export interface ReplyPlan {
   kind: 'reply';
   operation: SceneVersionOperation;
   classification: SceneClassification;
   reply: string;
-  /** Ajuste geral perguntado: o pedido original fica guardado para a confirmação. */
-  pendingConfirmation: { request: string; kind: ConfirmationKind } | null;
+  /** Pergunta feita: o pedido original (e o alvo, na edição) ficam guardados para a confirmação. */
+  pendingConfirmation: { request: string; kind: ConfirmationKind; target?: LocalTarget } | null;
+  intent: IntentMetrics | null;
 }
 
 export type MessagePlan = JobPlan | ReplyPlan;
 
-/** Marca na versão `rejected` que a pergunta do ajuste geral já foi respondida. */
-export type ConfirmationKind = 'global' | 'new_image';
-
-export interface PendingConfirmation {
-  request: string;
-  /** Tipo da pergunta (D-18); perguntas gravadas antes dele são do ajuste geral. */
-  kind?: ConfirmationKind;
-  consumedByMessageId?: string;
-}
-
 const TARGET_KEYS = ['region', 'mask', 'zone', 'targetElementId'] as const;
 
-/** A confirmação do ajuste geral vem sozinha: com alvo ou anexo é 400, e a pergunta segue pendente. */
+/** A confirmação vem sozinha: com alvo ou anexo é 400, e a pergunta segue pendente. */
 function assertConfirmationAlone(dto: SendMessageDto, given: readonly string[]): void {
   if (!dto.confirmGlobal) return;
   if (!dto.replyToMessageId) {
@@ -93,7 +77,10 @@ export function assertSingleTarget(dto: SendMessageDto): void {
 }
 
 /** Área da forma acima de 0,1% da cena; o retângulo é conferido na conta, o pincel e o laço rasterizados. */
-async function assertShapeBigEnough(dto: SendMessageDto, scene: TemplateScene): Promise<void> {
+export async function assertShapeBigEnough(
+  dto: SendMessageDto,
+  scene: TemplateScene,
+): Promise<void> {
   if (dto.region) {
     if (dto.region.w * dto.region.h < MIN_SHAPE_AREA_RATIO) throw regionTooSmall();
     return;
@@ -103,55 +90,6 @@ async function assertShapeBigEnough(dto: SendMessageDto, scene: TemplateScene): 
   const height = Math.max(1, Math.round((width * scene.heightPx) / scene.widthPx));
   const shape = await rasterizeRegion(dto.mask, width, height);
   if (shapeAreaRatio(shape) < MIN_SHAPE_AREA_RATIO) throw regionTooSmall();
-}
-
-async function currentElements(
-  manager: EntityManager,
-  scene: TemplateScene,
-): Promise<SceneElement[]> {
-  if (!scene.currentVersionId) return [];
-  const current = await manager.findOne(TemplateSceneVersion, {
-    where: { id: scene.currentVersionId },
-  });
-  return current?.elements ?? [];
-}
-
-async function selectedElement(
-  manager: EntityManager,
-  scene: TemplateScene,
-  elementId: string | undefined,
-): Promise<ClassifierTargetElement | undefined> {
-  if (!elementId) return undefined;
-  const element = (await currentElements(manager, scene)).find((e) => e.id === elementId);
-  if (!element) throw targetElementNotFound(elementId);
-  return { id: element.id, kind: element.kind };
-}
-
-/**
- * Resposta do assistente à pergunta do ajuste geral que se confirma: acha a mensagem, confere que a
- * pergunta ainda está pendente e a marca como respondida (mesma transação do envio).
- */
-async function consumeConfirmation(
-  manager: EntityManager,
-  scene: TemplateScene,
-  dto: SendMessageDto,
-): Promise<{ request: string; kind: ConfirmationKind }> {
-  const reply = await manager.findOne(TemplateSceneMessage, {
-    where: { id: dto.replyToMessageId, sceneId: scene.id, role: 'assistant' },
-  });
-  const version = reply?.versionId
-    ? await manager.findOne(TemplateSceneVersion, { where: { id: reply.versionId } })
-    : null;
-  const pending = version?.metrics.pendingConfirmation as PendingConfirmation | undefined;
-  if (!version || version.status !== 'rejected' || !pending || pending.consumedByMessageId) {
-    throw confirmationNotPending();
-  }
-  version.metrics = {
-    ...version.metrics,
-    pendingConfirmation: { ...pending, consumedByMessageId: reply!.id },
-  };
-  await manager.save(version);
-  return { request: pending.request, kind: pending.kind ?? 'global' };
 }
 
 /** Alvo da edição: zona vira o retângulo do formato; a forma guarda a caixa; o elemento, o id. */
@@ -172,59 +110,39 @@ function requestedTarget(
   };
 }
 
-const replyFor = (classification: SceneClassification): string => {
-  if (classification.operation === 'move_unavailable') return MOVE_UNAVAILABLE_REPLY;
-  if (classification.operation === 'needs_confirmation_global') return GLOBAL_CONFIRM_REPLY;
-  if (classification.operation === 'needs_confirmation_new_image') return NEW_IMAGE_CONFIRM_REPLY;
-  if (classification.operation !== 'needs_region') return NEEDS_REGION_REPLY;
-  if (classification.reason === 'layer_visual') return NEEDS_REGION_LAYER_REPLY;
-  if (classification.reason === 'place') return needsPlaceReply(classification.subject ?? '');
-  return classification.reason === 'choose_layer' ? CHOOSE_LAYER_REPLY : NEEDS_REGION_REPLY;
-};
-
-/** Operação gravada na versão (as respostas imediatas usam a mais próxima do pedido). */
-const OPERATION_OF: Record<SceneClassification['operation'], SceneVersionOperation> = {
-  generate: 'generate',
-  global_regenerate: 'generate',
-  new_image: 'generate',
-  needs_confirmation_new_image: 'generate',
-  needs_confirmation_global: 'generate',
-  local_edit: 'local_edit',
-  needs_region: 'local_edit',
-  move_unavailable: 'local_edit',
-  add_element: 'add_element',
-  set_layer: 'set_layer',
-};
-
+/** A pergunta guarda o pedido (e o alvo, quando a confirmação não o traz de novo). */
 function pendingOf(
   classification: SceneClassification,
   request: string,
+  marked: LocalTarget | null,
 ): ReplyPlan['pendingConfirmation'] {
-  if (classification.operation === 'needs_confirmation_global') return { request, kind: 'global' };
-  if (classification.operation === 'needs_confirmation_new_image') {
-    return { request, kind: 'new_image' };
+  switch (classification.operation) {
+    case 'needs_confirmation_global':
+      return { request, kind: 'global' };
+    case 'needs_confirmation_new_image':
+      return { request, kind: 'new_image' };
+    case 'needs_confirmation_edit':
+      return { request, kind: 'edit', ...(marked ? { target: marked } : {}) };
+    default:
+      return null;
   }
-  return null;
 }
 
 function toPlan(
-  classification: SceneClassification,
+  turn: { classification: SceneClassification; intent: IntentMetrics | null },
   scene: TemplateScene,
   dto: SendMessageDto,
 ): MessagePlan {
+  const { classification, intent } = turn;
   const operation = OPERATION_OF[classification.operation];
-  if (
-    classification.operation === 'needs_region' ||
-    classification.operation === 'move_unavailable' ||
-    classification.operation === 'needs_confirmation_global' ||
-    classification.operation === 'needs_confirmation_new_image'
-  ) {
+  if (REPLY_OPERATIONS.has(classification.operation)) {
     return {
       kind: 'reply',
       operation,
       classification,
       reply: replyFor(classification),
-      pendingConfirmation: pendingOf(classification, dto.content),
+      pendingConfirmation: pendingOf(classification, dto.content, markedTargetOf(dto)),
+      intent,
     };
   }
   const target =
@@ -237,14 +155,34 @@ function toPlan(
     classification,
     ...requestedTarget(target, scene),
     targetElementId: target?.kind === 'element' ? target.elementId : null,
+    intent,
   };
 }
 
-/** Decide o que fazer com a mensagem (sob o lock da cena): job pago/assíncrono ou resposta imediata. */
+/**
+ * Sem sinal estruturado, a intenção vem do modelo. Falha do modelo (ou ausência dele, só se o estado
+ * mudou entre a conferência e o lock): sem marcação pede a área; com marcação, pergunta se edita.
+ */
+function classifyByIntent(
+  intent: IntentOutcome | null,
+  input: { content: string; marked: LocalTarget | null; layers: SceneElement[] },
+): SceneClassification {
+  if (intent?.status === 'ok') return planFromIntent(intent.intent, input);
+  return input.marked
+    ? { operation: 'needs_confirmation_edit' }
+    : { operation: 'needs_region', reason: 'not_understood' };
+}
+
+/**
+ * Decide o que fazer com a mensagem (sob o lock da cena): job pago/assíncrono ou resposta imediata.
+ * Ordem: a confirmação segue o plano guardado; depois os sinais estruturados (sem versão, anexo,
+ * elemento selecionado); o resto vem da intenção reconhecida antes do lock (`intent`).
+ */
 export async function planMessage(
   manager: EntityManager,
   scene: TemplateScene,
   dto: SendMessageDto,
+  intent: IntentOutcome | null,
 ): Promise<MessagePlan> {
   assertSingleTarget(dto);
   const hasReadyVersion = await manager.exists(TemplateSceneVersion, {
@@ -255,25 +193,31 @@ export async function planMessage(
     ? await selectedElement(manager, scene, dto.targetElementId)
     : undefined;
   const confirmed = dto.confirmGlobal ? await consumeConfirmation(manager, scene, dto) : null;
-  const classification = classifySceneRequest({
+  if (confirmed) {
+    return toPlan({ classification: planOfConfirmation(confirmed), intent: null }, scene, dto);
+  }
+  const layers = hasReadyVersion ? await currentElements(manager, scene) : [];
+  const structural = classifySceneRequest({
     hasReadyVersion,
-    content: confirmed?.request ?? dto.content,
-    confirmKind: confirmed?.kind,
-    region: dto.region,
-    mask: dto.mask,
-    zone: dto.zone,
+    content: dto.content,
     targetElement,
     attachments: dto.attachments,
-    confirmGlobal: dto.confirmGlobal,
   });
+  const classification =
+    structural ??
+    classifyByIntent(intent, { content: dto.content, marked: markedTargetOf(dto), layers });
   const resolved = await resolveIntegration(classification, {
-    content: confirmed?.request ?? dto.content,
-    layers: hasReadyVersion ? await currentElements(manager, scene) : [],
+    content: dto.content,
+    layers,
     scene: {
       widthPx: scene.widthPx,
       heightPx: scene.heightPx,
       zones: sceneZonesFor(scene.formatId),
     },
   });
-  return toPlan(resolved, scene, dto);
+  return toPlan(
+    { classification: resolved, intent: structural ? null : (intent?.metrics ?? null) },
+    scene,
+    dto,
+  );
 }
