@@ -6,7 +6,12 @@
  * mesmo vídeo (o piso evita linha de base degenerada em clipe quase parado).
  */
 
+import { ssimGray } from '../../../shared/image/ssim';
+import { percentile } from '../../../shared/image/stats';
 import { ASSEMBLY_FPS } from './mc-assembly-graph';
+
+// `ssimGray` e `percentile` vivem em `shared/image` (DT-10); reexportados para quem já importa daqui.
+export { percentile, ssimGray };
 
 /** Fator sobre o P95 e piso do critério (D14). */
 export const MC_JUMP_FACTOR = 2;
@@ -14,67 +19,9 @@ export const MC_JUMP_FLOOR = 0.01;
 /** Quadros de cada lado de cada fronteira excluídos da linha de base. */
 export const MC_JUMP_BASELINE_GUARD_FRAMES = 3;
 
-const C1 = (0.01 * 255) ** 2;
-const C2 = (0.03 * 255) ** 2;
-
-/** SSIM médio em janelas 8×8 sem sobreposição de dois quadros cinza do mesmo tamanho. */
-export function ssimGray(
-  a: Uint8Array,
-  b: Uint8Array,
-  width: number,
-  height: number,
-  win = 8,
-): number {
-  let sum = 0;
-  let count = 0;
-  for (let y = 0; y + win <= height; y += win) {
-    for (let x = 0; x + win <= width; x += win) {
-      let ma = 0;
-      let mb = 0;
-      for (let j = 0; j < win; j += 1) {
-        for (let i = 0; i < win; i += 1) {
-          const k = (y + j) * width + x + i;
-          ma += a[k];
-          mb += b[k];
-        }
-      }
-      const n = win * win;
-      ma /= n;
-      mb /= n;
-      let va = 0;
-      let vb = 0;
-      let cov = 0;
-      for (let j = 0; j < win; j += 1) {
-        for (let i = 0; i < win; i += 1) {
-          const k = (y + j) * width + x + i;
-          va += (a[k] - ma) ** 2;
-          vb += (b[k] - mb) ** 2;
-          cov += (a[k] - ma) * (b[k] - mb);
-        }
-      }
-      va /= n - 1;
-      vb /= n - 1;
-      cov /= n - 1;
-      sum += ((2 * ma * mb + C1) * (2 * cov + C2)) / ((ma * ma + mb * mb + C1) * (va + vb + C2));
-      count += 1;
-    }
-  }
-  return count === 0 ? 1 : sum / count;
-}
-
 /** Salto entre dois quadros vizinhos: 0 = idênticos, → 1 = nada em comum. */
 export function jumpBetween(a: Uint8Array, b: Uint8Array, width: number, height: number): number {
   return Math.max(0, 1 - ssimGray(a, b, width, height));
-}
-
-/** Percentil (interpolação linear) de uma lista; vazia → 0. */
-export function percentile(values: number[], p: number): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((x, y) => x - y);
-  const position = (sorted.length - 1) * p;
-  const low = Math.floor(position);
-  const high = Math.ceil(position);
-  return sorted[low] + (sorted[high] - sorted[low]) * (position - low);
 }
 
 export interface JumpVerdict {
