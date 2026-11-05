@@ -98,7 +98,7 @@ export class SceneGenerateHandler implements TurnHandler {
       run: () =>
         this.provider.edit({
           model: this.support.model(),
-          prompt: buildGlobalPrompt({ request: instruction, zones: ctx.zones }),
+          prompt: buildGlobalPrompt({ request: instruction }),
           size,
           quality: this.support.editQuality(),
           correlationId: ctx.correlationId,

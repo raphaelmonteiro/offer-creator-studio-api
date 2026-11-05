@@ -44,7 +44,7 @@ describeIfSceneDb('SceneTurnProcessor: ajuste geral (banco chroma_x_e2e)', () =>
       expect(input.mask).toBeUndefined();
       expect(input.size).toBe('1024x2048');
       expect(input.prompt).toContain('"deixa tudo mais quente"');
-      expect(input.prompt).toContain('Mantenha a composição');
+      expect(input.prompt).toContain('única e contínua');
       const done = await h.versionOf(version.id);
       expect(done).toMatchObject({
         status: 'ready',

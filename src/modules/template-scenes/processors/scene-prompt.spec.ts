@@ -1,11 +1,13 @@
-import { computeSceneZones, findSceneFormat, SCENE_FORMATS } from '../domain/scene-formats';
+import { findSceneFormat, SCENE_FORMATS } from '../domain/scene-formats';
 import { nativeSizeOfFormat } from '../domain/scene-format-size';
 import {
   buildEditPrompt,
   buildGeneratePrompt,
   buildGlobalPrompt,
   buildTransparentPrompt,
+  LESS_DETAIL_AT_CENTER_HINT,
   REMOVE_INSTRUCTION,
+  SUGGEST_LESS_DETAIL_AT_CENTER,
 } from './scene-prompt';
 
 const format = findSceneFormat('folheto-27x54')!;
@@ -15,11 +17,12 @@ const base = {
   artHeightCm: format.artHeightCm,
   widthPx: 1920,
   heightPx: 3840,
-  zones: computeSceneZones(format),
 };
-const pct = (fraction: number) => `${Math.round(fraction * 100)}%`;
 
-describe('buildGeneratePrompt', () => {
+/** Palavras de composição por faixas que nenhum prompt sem pedido do cliente pode trazer (D-16). */
+const BANNED = [/cabeçalho/i, /miolo/i, /rodapé/i, /sem objetos/i, /\d+%/];
+
+describe('Composição do prompt só a pedido do cliente: buildGeneratePrompt', () => {
   it('traz o pedido literal, o formato em cm, a proporção e o tamanho em px', () => {
     const prompt = buildGeneratePrompt(base);
     expect(prompt).toContain('"campo verde com sol à direita"');
@@ -28,31 +31,11 @@ describe('buildGeneratePrompt', () => {
     expect(prompt).toContain('1920 x 3840 px');
   });
 
-  it('descreve as faixas e o miolo em porcentagem da altura (folheto 27x54: 11%, 81%, 7%)', () => {
+  it('diz que a imagem é única e contínua, salvo pedido em contrário', () => {
     const prompt = buildGeneratePrompt(base);
-    expect(prompt).toContain('cabeçalho (faixa superior de 11% da altura)');
-    expect(prompt).toContain('miolo (81% da altura)');
-    expect(prompt).toContain('rodapé (faixa inferior de 7% da altura)');
-  });
-
-  it('põe os elementos da cena nas faixas de cabeçalho e rodapé e deixa o miolo calmo, sem objetos', () => {
-    const lines = buildGeneratePrompt(base).split('\n');
-    const header = lines.find((line) => line.startsWith('- cabeçalho'))!;
-    const body = lines.find((line) => line.startsWith('- miolo'))!;
-    const footer = lines.find((line) => line.startsWith('- rodapé'))!;
-    expect(header).toContain('aqui ficam os elementos da cena');
-    expect(footer).toContain('aqui também ficam elementos da cena');
-    expect(body).toContain('calmo');
-    expect(body).toContain('SEM objetos');
-    expect(body).toContain('cards de produtos e preços ficam por cima');
-    expect(buildGeneratePrompt(base)).toContain('Nenhum elemento da cena pode invadir o miolo.');
-  });
-
-  it('as faixas deixam de ser "área limpa" (a instrução antiga sai)', () => {
-    const prompt = buildGeneratePrompt(base);
-    expect(prompt).not.toContain('área limpa');
-    expect(prompt).not.toContain('para o título e o logo');
-    expect(prompt).not.toContain('para o endereço e as informações da loja');
+    expect(prompt).toContain(
+      'Salvo se o pedido acima disser outra coisa, a imagem é única e contínua, sem divisões, faixas ou molduras.',
+    );
   });
 
   it('traz as regras fixas', () => {
@@ -62,6 +45,24 @@ describe('buildGeneratePrompt', () => {
     expect(prompt).toContain('sem preços');
   });
 
+  it('a sugestão de menos detalhe no centro (D-17) está desligada por padrão', () => {
+    expect(SUGGEST_LESS_DETAIL_AT_CENTER).toBe(false);
+    expect(buildGeneratePrompt(base)).not.toContain('menos detalhe');
+  });
+
+  it('ligada, a sugestão entra sem criar composição por faixas', () => {
+    const prompt = buildGeneratePrompt(base, { lessDetailAtCenter: true });
+    expect(prompt).toContain(LESS_DETAIL_AT_CENTER_HINT);
+    for (const banned of BANNED) expect(prompt).not.toMatch(banned);
+  });
+
+  it('o cliente pode pedir divisão: o pedido vai literal e a regra só vale "salvo pedido"', () => {
+    const request = 'divide a imagem em duas partes, azul em cima e verde embaixo';
+    const prompt = buildGeneratePrompt({ ...base, request });
+    expect(prompt).toContain(`"${request}"`);
+    expect(prompt).toContain('Salvo se o pedido acima disser outra coisa');
+  });
+
   it('mantém o pedido literal, com marcadores, e limpa controle e espaços', () => {
     const prompt = buildGeneratePrompt({ ...base, request: '  campo\n\n  verde \t #falha-quota ' });
     expect(prompt).toContain('"campo verde #falha-quota"');
@@ -69,28 +70,26 @@ describe('buildGeneratePrompt', () => {
 
   describe.each(Object.keys(SCENE_FORMATS))('formato %s', (formatId) => {
     const spec = findSceneFormat(formatId)!;
-    const zones = computeSceneZones(spec);
     const size = nativeSizeOfFormat(spec)!;
     const prompt = buildGeneratePrompt({
-      request: 'pascoa 2k27',
+      request: 'template de páscoa com ovos e um coelho',
       artWidthCm: spec.artWidthCm,
       artHeightCm: spec.artHeightCm,
       widthPx: size.width,
       heightPx: size.height,
-      zones,
     });
 
-    it('usa as porcentagens das zonas daquele formato', () => {
-      expect(prompt).toContain(`cabeçalho (faixa superior de ${pct(zones.header.h)} da altura)`);
-      expect(prompt).toContain(`miolo (${pct(zones.body.h)} da altura)`);
-      expect(prompt).toContain(`rodapé (faixa inferior de ${pct(zones.footer.h)} da altura)`);
-    });
-
-    it('pede o miolo sem objetos e mantém as regras fixas', () => {
-      expect(prompt).toContain('SEM objetos');
+    it('traz o pedido, o formato, a imagem contínua e as regras fixas', () => {
+      expect(prompt).toContain('template de páscoa com ovos e um coelho');
+      expect(prompt).toContain(`${size.width} x ${size.height} px`);
+      expect(prompt).toContain('única e contínua');
       expect(prompt).toContain('sem texto legível');
       expect(prompt).toContain('sem logotipos');
       expect(prompt).toContain('sem preços');
+    });
+
+    it('não traz porcentagem de zona, cabeçalho, miolo, rodapé nem "sem objetos"', () => {
+      for (const banned of BANNED) expect(prompt).not.toMatch(banned);
     });
   });
 });
@@ -124,12 +123,12 @@ describe('buildEditPrompt', () => {
 });
 
 describe('buildGlobalPrompt e buildTransparentPrompt', () => {
-  it('o ajuste geral mantém a composição e as zonas', () => {
-    const prompt = buildGlobalPrompt({ request: 'deixa tudo mais quente', zones: base.zones });
+  it('Prompt do ajuste geral: sem composição por faixas nem porcentagens de zona', () => {
+    const prompt = buildGlobalPrompt({ request: 'deixa tudo mais quente' });
     expect(prompt).toContain('"deixa tudo mais quente"');
-    expect(prompt).toContain('Mantenha a composição');
-    expect(prompt).toContain('cabeçalho de 11%, miolo de 81%');
+    expect(prompt).toContain('única e contínua');
     expect(prompt).toContain('sem texto legível');
+    for (const banned of BANNED) expect(prompt).not.toMatch(banned);
   });
 
   it('o "adicionar" pede o item isolado com fundo transparente', () => {

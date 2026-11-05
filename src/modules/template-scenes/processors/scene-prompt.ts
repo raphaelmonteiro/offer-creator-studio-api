@@ -1,5 +1,3 @@
-import { SceneZones } from '../domain/scene.types';
-
 export interface ScenePromptInput {
   /** Pedido literal do cliente, em português. */
   request: string;
@@ -7,10 +5,8 @@ export interface ScenePromptInput {
   artHeightCm: number;
   widthPx: number;
   heightPx: number;
-  zones: SceneZones;
 }
 
-const percent = (fraction: number): string => `${Math.round(fraction * 100)}%`;
 const cm = (value: number): string => String(value).replace('.', ',');
 
 const isControl = (char: string): boolean => {
@@ -28,25 +24,38 @@ function cleanRequest(request: string): string {
 }
 
 /**
- * Prompt da primeira geração: o pedido literal, o formato em cm e a proporção, a composição por
- * faixas e as regras fixas (sem texto legível, sem logotipos, sem preços). Composição (aprovada em
- * 2026-11-05, depois da passada real do estágio 3): os elementos da cena ficam nas faixas do
- * cabeçalho e do rodapé, com as alturas do formato, e o miolo fica calmo e sem objetos, porque os
- * cards de produtos e preços entram por cima dele.
+ * D-17: sugestão de menos detalhe no centro. Desligada até o dono ver as imagens com e sem ela (task
+ * 1.37); ligar é trocar esta constante (ou passar `lessDetailAtCenter` no teste real).
  */
-export function buildGeneratePrompt(input: ScenePromptInput): string {
-  const { zones } = input;
+export const SUGGEST_LESS_DETAIL_AT_CENTER = false;
+
+export const LESS_DETAIL_AT_CENTER_HINT =
+  'Se o pedido não disser outra coisa, deixe a parte central da imagem com menos detalhe, sem criar divisão nem faixa.';
+
+/** D-16: a composição só entra se o cliente pedir; o resto é uma imagem única e contínua. */
+export const CONTINUOUS_IMAGE_RULE =
+  'Salvo se o pedido acima disser outra coisa, a imagem é única e contínua, sem divisões, faixas ou molduras.';
+
+export const FIXED_RULES =
+  'Regras: sem texto legível, sem letras ou números, sem logotipos, sem preços, sem produtos de marcas reais e sem pessoas identificáveis.';
+
+/**
+ * Prompt da geração (primeira, e imagem nova da D-18): o pedido literal, o formato em cm e a
+ * proporção, a imagem única e contínua (D-16) e as regras fixas. Sem composição por faixas ou zonas.
+ */
+export function buildGeneratePrompt(
+  input: ScenePromptInput,
+  options: { lessDetailAtCenter?: boolean } = {},
+): string {
   const ratio = (input.artWidthCm / input.artHeightCm).toFixed(2).replace('.', ',');
+  const lessDetail = options.lessDetailAtCenter ?? SUGGEST_LESS_DETAIL_AT_CENTER;
   return [
     'Crie a imagem de fundo de um encarte de ofertas de supermercado, para impressão.',
     `Pedido do cliente: "${cleanRequest(input.request)}".`,
     `Formato: ${cm(input.artWidthCm)} x ${cm(input.artHeightCm)} cm (proporção largura/altura ${ratio}), imagem de ${input.widthPx} x ${input.heightPx} px, ocupando toda a área, sem bordas nem molduras.`,
-    'Composição, de cima para baixo:',
-    `- cabeçalho (faixa superior de ${percent(zones.header.h)} da altura): aqui ficam os elementos da cena (por exemplo o sol, as nuvens e a decoração do tema), inteiros e dentro da faixa;`,
-    `- miolo (${percent(zones.body.h)} da altura): fundo calmo e suave, SEM objetos nem personagens, porque os cards de produtos e preços ficam por cima dele;`,
-    `- rodapé (faixa inferior de ${percent(zones.footer.h)} da altura): aqui também ficam elementos da cena, inteiros e dentro da faixa.`,
-    'Nenhum elemento da cena pode invadir o miolo.',
-    'Regras: sem texto legível, sem letras ou números, sem logotipos, sem preços, sem produtos de marcas reais e sem pessoas identificáveis.',
+    CONTINUOUS_IMAGE_RULE,
+    ...(lessDetail ? [LESS_DETAIL_AT_CENTER_HINT] : []),
+    FIXED_RULES,
   ].join('\n');
 }
 
@@ -70,12 +79,11 @@ export function buildEditPrompt(input: {
   return `Na área marcada${names}: ${instruction}. Altere somente a área indicada pela máscara. ${KEEP_REST}`;
 }
 
-/** Prompt do ajuste geral: a imagem atual entra como referência e a composição é mantida. */
-export function buildGlobalPrompt(input: { request: string; zones: SceneZones }): string {
-  const { zones } = input;
+/** Prompt do ajuste geral: a imagem atual entra como referência; sem composição por faixas (D-16). */
+export function buildGlobalPrompt(input: { request: string }): string {
   return [
     `Ajuste esta imagem de fundo de encarte conforme o pedido do cliente: "${cleanRequest(input.request)}".`,
-    `Mantenha a composição: cabeçalho de ${percent(zones.header.h)}, miolo de ${percent(zones.body.h)} (calmo, sem objetos) e rodapé de ${percent(zones.footer.h)}, com os elementos nos mesmos lugares.`,
+    CONTINUOUS_IMAGE_RULE,
     'Regras: sem texto legível, sem letras ou números, sem logotipos e sem preços.',
   ].join('\n');
 }
