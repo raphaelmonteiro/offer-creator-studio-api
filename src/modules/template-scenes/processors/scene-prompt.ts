@@ -41,7 +41,7 @@ export function buildGeneratePrompt(input: ScenePromptInput): string {
   return [
     'Crie a imagem de fundo de um encarte de ofertas de supermercado, para impressão.',
     `Pedido do cliente: "${cleanRequest(input.request)}".`,
-    `Formato: ${cm(input.artWidthCm)} x ${cm(input.artHeightCm)} cm (proporção largura/altura ${ratio}), imagem de ${input.widthPx} x ${input.heightPx} px, ocupando toda a área, sem bordas nem molduras.`,
+    `Formato: ${cm(input.artWidthCm)} x ${cm(input.artHeightCm)} cm (proporção largura/altura ${ratio}), imagem de ${input.widthPx} x ${input.heightPx} px, ocupando toda a área.`,
     CONTINUOUS_IMAGE_RULE,
     FIXED_RULES,
   ].join('\n');

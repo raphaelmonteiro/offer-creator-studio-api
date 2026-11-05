@@ -37,6 +37,13 @@ describe('Composição do prompt só a pedido do cliente: buildGeneratePrompt', 
     );
   });
 
+  it('R31: a linha do formato não impõe "sem bordas nem molduras" antes da ressalva da D-16', () => {
+    const prompt = buildGeneratePrompt({ ...base, request: 'pascoa com moldura dourada' });
+    expect(prompt).not.toMatch(/sem bordas|bordas nem molduras/i);
+    expect(prompt.match(/molduras/g)).toHaveLength(1);
+    expect(prompt).toContain('ocupando toda a área.');
+  });
+
   it('traz as regras fixas', () => {
     const prompt = buildGeneratePrompt(base);
     expect(prompt).toContain('sem texto legível');
