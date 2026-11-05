@@ -300,6 +300,47 @@
     }
   },
   {
+    "id": "por-efeito-de-luz-com-area",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "põe um efeito de luz",
+      "region": { "x": 0.3, "y": 0.1, "w": 0.2, "h": 0.2 }
+    },
+    "expect": { "operation": "local_edit", "target": { "kind": "rect" } }
+  },
+  {
+    "id": "por-rosto-com-area",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "põe um rosto",
+      "region": { "x": 0.3, "y": 0.1, "w": 0.2, "h": 0.2 }
+    },
+    "expect": { "operation": "local_edit", "target": { "kind": "rect" } }
+  },
+  {
+    "id": "colocar-balao-com-area",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "coloca um balão de ar quente",
+      "region": { "x": 0.3, "y": 0.1, "w": 0.2, "h": 0.2 }
+    },
+    "expect": { "operation": "local_edit", "target": { "kind": "rect" } }
+  },
+  {
+    "id": "colocar-balao-com-zona-pelo-campo",
+    "input": { "hasReadyVersion": true, "content": "coloca um balão", "zone": "header" },
+    "expect": { "operation": "local_edit", "target": { "kind": "zone", "zone": "header" } }
+  },
+  {
+    "id": "adicionar-balao-com-area-explicito",
+    "input": {
+      "hasReadyVersion": true,
+      "content": "adiciona um balão de ar quente",
+      "region": { "x": 0.3, "y": 0.1, "w": 0.2, "h": 0.2 }
+    },
+    "expect": { "operation": "add_element", "target": { "kind": "rect" } }
+  },
+  {
     "id": "colocar-um-sem-item",
     "input": { "hasReadyVersion": true, "content": "coloca um balão de ar quente" },
     "expect": { "operation": "add_element", "subject": "balão de ar quente" }

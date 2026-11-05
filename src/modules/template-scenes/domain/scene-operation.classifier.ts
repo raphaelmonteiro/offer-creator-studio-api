@@ -144,7 +144,8 @@ const ruleMoveUnavailable: Rule = (_input, folded) =>
   mentionsMove(folded) ? { operation: 'move_unavailable' } : null;
 
 const ruleAddElement: Rule = (input, folded) => {
-  if (!wantsAddition(folded)) return null;
+  const hasArea = Boolean(input.region ?? input.mask ?? input.zone);
+  if (!wantsAddition(folded, hasArea)) return null;
   return {
     operation: 'add_element',
     subject: additionSubject(input.content),

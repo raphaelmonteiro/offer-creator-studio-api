@@ -123,11 +123,15 @@ export function citesImageItem(folded: string): boolean {
   return false;
 }
 
-/** "Adicionar X": verbo forte, ou "colocar um(a) X" sem trocar e sem citar um item que já existe. */
-export function wantsAddition(folded: string): boolean {
+/**
+ * "Adicionar X": verbo forte, ou "colocar um(a) X" sem trocar, sem citar um item que já existe e
+ * sem área marcada (D-15: com área, "colocar/pôr" é edição local).
+ */
+export function wantsAddition(folded: string, hasArea = false): boolean {
   if (SWAP_WORDS.test(folded)) return false;
   if (ADD_STRONG.test(folded)) return true;
   return (
+    !hasArea &&
     ADD_SOFT.test(folded) &&
     INDEFINITE.test(folded) &&
     !/\b(no|na|nos|nas)\s+[a-z]{3,}/.test(folded)
