@@ -26,6 +26,32 @@ describeIfSceneDb('SceneTurnProcessor: adicionar (banco chroma_x_e2e)', () => {
       target,
     });
 
+    it('No lugar de um item, com área: o elemento nasce na área marcada, com o nome "Cesta de ovos"', async () => {
+      const { scene } = await h.readyScene();
+      const rect = { x: 0.4, y: 0.7, w: 0.3, h: 0.15 };
+      const version = await h.queueTurn(scene, {
+        plan: {
+          operation: 'add_element',
+          subject: 'cesta de ovos',
+          target: { kind: 'rect', rect },
+        },
+        request: 'Adicione uma cesta de ovos no lugar da cerca removida',
+        operation: 'add_element',
+      });
+      const { provider, generateTransparent } = h.fakeProvider(() => h.okResult(), {
+        transparent: async (input) => h.mock().generateTransparent(input),
+      });
+
+      await h.processorWith(provider).process(h.job(scene.id, version.id));
+
+      expect(generateTransparent.mock.calls[0][0].prompt).toContain('cesta de ovos');
+      expect(generateTransparent.mock.calls[0][0].prompt).not.toContain('cerca');
+      const added = (await h.versionOf(version.id)).elements[0];
+      expect(added.name).toBe('Cesta de ovos');
+      expect(added.x).toBeCloseTo(0.55);
+      expect(added.y).toBeCloseTo(0.775);
+    });
+
     it('cria um elemento generated com o PNG recortado na área marcada; o fundo não muda', async () => {
       const { scene, masterAsset } = await h.readyScene({ elements: [logoEl] });
       const rect = { x: 0.1, y: 0.1, w: 0.3, h: 0.15 };
