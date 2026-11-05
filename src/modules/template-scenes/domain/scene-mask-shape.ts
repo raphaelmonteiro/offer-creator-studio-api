@@ -14,28 +14,50 @@ const isPoint = (value: unknown): value is Pt => {
   return typeof p === 'object' && p !== null && isUnit(p.x) && isUnit(p.y);
 };
 
-function brushProblem(shape: Record<string, unknown>): string | null {
-  const { strokes, radius } = shape;
-  if (typeof radius !== 'number' || !(radius > 0 && radius <= MAX_BRUSH_RADIUS)) {
-    return `o raio do pincel precisa estar entre 0 e ${MAX_BRUSH_RADIUS}`;
-  }
+const POINT_KEYS = ['x', 'y'];
+const LASSO_KEYS = ['kind', 'points'];
+const BRUSH_KEYS = ['kind', 'strokes', 'radius'];
+
+/** Só as chaves do contrato: a forma é gravada inteira e volta na `VersionView` (campo extra é recusado). */
+const hasOnlyKeys = (value: object, allowed: string[]): boolean =>
+  Object.keys(value).every((key) => allowed.includes(key));
+
+const isCleanPoint = (value: unknown): boolean => isPoint(value) && hasOnlyKeys(value, POINT_KEYS);
+
+const POINT_PROBLEM = 'os pontos precisam ter só x e y, entre 0 e 1';
+
+function brushRadiusProblem(radius: unknown): string | null {
+  return typeof radius === 'number' && radius > 0 && radius <= MAX_BRUSH_RADIUS
+    ? null
+    : `o raio do pincel precisa estar entre 0 e ${MAX_BRUSH_RADIUS}`;
+}
+
+function strokesProblem(strokes: unknown): string | null {
   if (!Array.isArray(strokes) || strokes.length === 0)
     return 'o pincel precisa de ao menos um traço';
+  if (strokes.length > MAX_MASK_POINTS) return `a forma passa de ${MAX_MASK_POINTS} traços`;
   let total = 0;
   for (const stroke of strokes) {
-    if (!Array.isArray(stroke)) return 'cada traço do pincel é uma lista de pontos';
+    if (!Array.isArray(stroke) || stroke.length === 0)
+      return 'cada traço do pincel é uma lista com ao menos um ponto';
     total += stroke.length;
-    if (!stroke.every(isPoint)) return 'os pontos precisam ter x e y entre 0 e 1';
+    if (total > MAX_MASK_POINTS) return `a forma passa de ${MAX_MASK_POINTS} pontos`;
+    if (!stroke.every(isCleanPoint)) return POINT_PROBLEM;
   }
-  if (total === 0) return 'o pincel precisa de ao menos um ponto';
-  return total > MAX_MASK_POINTS ? `a forma passa de ${MAX_MASK_POINTS} pontos` : null;
+  return null;
+}
+
+function brushProblem(shape: Record<string, unknown>): string | null {
+  if (!hasOnlyKeys(shape, BRUSH_KEYS)) return 'a máscara tem campos que o contrato não aceita';
+  return brushRadiusProblem(shape.radius) ?? strokesProblem(shape.strokes);
 }
 
 function lassoProblem(shape: Record<string, unknown>): string | null {
+  if (!hasOnlyKeys(shape, LASSO_KEYS)) return 'a máscara tem campos que o contrato não aceita';
   const { points } = shape;
   if (!Array.isArray(points) || points.length < 3) return 'o laço precisa de ao menos 3 pontos';
   if (points.length > MAX_MASK_POINTS) return `a forma passa de ${MAX_MASK_POINTS} pontos`;
-  return points.every(isPoint) ? null : 'os pontos precisam ter x e y entre 0 e 1';
+  return points.every(isCleanPoint) ? null : POINT_PROBLEM;
 }
 
 /** Motivo da recusa da forma (em pt-BR), ou `null` quando é válida. */

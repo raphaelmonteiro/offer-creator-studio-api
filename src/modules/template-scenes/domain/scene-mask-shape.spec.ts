@@ -21,6 +21,33 @@ describe('maskShapeProblem', () => {
     ).toBeNull();
   });
 
+  it('recusa campo desconhecido na forma e nos pontos, e traços vazios ou em excesso (R2)', () => {
+    const tri = [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 0.5, y: 1 },
+    ];
+    expect(maskShapeProblem({ kind: 'lasso', points: tri, imageUrl: 'http://x' })).toMatch(
+      /campos/,
+    );
+    expect(maskShapeProblem({ ...brush(3), url: 'http://x' })).toMatch(/campos/);
+    expect(
+      maskShapeProblem({
+        kind: 'lasso',
+        points: [{ ...tri[0], blob: 'x'.repeat(1000) }, tri[1], tri[2]],
+      }),
+    ).toMatch(/só x e y/);
+    expect(
+      maskShapeProblem({ kind: 'brush', radius: 0.02, strokes: [[{ x: 0, y: 0, z: 1 }]] }),
+    ).toMatch(/só x e y/);
+    const empties = Array.from({ length: 100_000 }, () => []);
+    expect(
+      maskShapeProblem({ kind: 'brush', radius: 0.02, strokes: [[{ x: 0, y: 0 }], ...empties] }),
+    ).toMatch(/traços/);
+    const many = Array.from({ length: MAX_MASK_POINTS + 1 }, () => [{ x: 0, y: 0 }]);
+    expect(maskShapeProblem({ kind: 'brush', radius: 0.02, strokes: many })).toMatch(/traços/);
+  });
+
   it('aceita exatamente 2000 pontos e recusa 2001', () => {
     expect(maskShapeProblem(brush(MAX_MASK_POINTS))).toBeNull();
     expect(maskShapeProblem(brush(MAX_MASK_POINTS + 1))).toMatch(/2000/);

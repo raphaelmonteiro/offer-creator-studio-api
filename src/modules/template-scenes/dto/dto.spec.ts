@@ -107,6 +107,34 @@ describe('DTOs da cena', () => {
         expect(confirm.confirmGlobal).toBe(true);
       });
 
+      it('recusa campo desconhecido, ponto com carga extra e traços vazios no mask (R2)', async () => {
+        const tri = [
+          { x: 0, y: 0 },
+          { x: 1, y: 0 },
+          { x: 0.5, y: 1 },
+        ];
+        await expect(
+          send({ mask: { kind: 'lasso', points: tri, imageUrl: 'http://x' } }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        await expect(
+          send({
+            mask: {
+              kind: 'lasso',
+              points: [{ ...tri[0], blob: 'x'.repeat(1_000_000) }, tri[1], tri[2]],
+            },
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        await expect(
+          send({
+            mask: {
+              kind: 'brush',
+              radius: 0.02,
+              strokes: [[{ x: 0, y: 0 }], ...Array.from({ length: 100_000 }, () => [])],
+            },
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+
       it('recusa repositionGenerated (D-13): campo desconhecido', async () => {
         await expect(send({ repositionGenerated: true })).rejects.toBeInstanceOf(
           BadRequestException,
