@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { LocalTarget } from '../domain/scene-operation.classifier';
+import { LocalTarget, SceneClassification } from '../domain/scene-operation.classifier';
 import { RegionSpec } from '../domain/scene-shapes';
+import { elementRect } from '../domain/scene-element-rect';
 import { Rect, SceneElement } from '../domain/scene.types';
 import { SCENE_IMAGE_PROVIDER, SceneImageProvider } from '../providers/scene-image-provider';
 import { CROP_TOO_SMALL_REPLY, editReply, NO_CHANGE_REPLY } from '../scene-texts';
@@ -12,17 +13,6 @@ import { buildEditPrompt } from './scene-prompt';
 import { TurnHandler } from './scene-turn-handler';
 import { SceneTurnSupport } from './scene-turn-support';
 import { TurnContext } from './scene-turn-state';
-
-/** Retângulo normalizado de um elemento (centro, largura e proporção), preso à cena. */
-export function elementRect(
-  el: SceneElement,
-  ctx: Pick<TurnContext, 'widthPx' | 'heightPx'>,
-): Rect {
-  const h = (el.w * ctx.widthPx) / el.aspect / ctx.heightPx;
-  const x = Math.max(0, el.x - el.w / 2);
-  const y = Math.max(0, el.y - h / 2);
-  return { x, y, w: Math.min(el.w, 1 - x), h: Math.min(h, 1 - y) };
-}
 
 /** Forma que o servidor rasteriza: o retângulo, a zona, a máscara do pincel/laço ou a caixa do elemento. */
 export function regionSpecOf(target: LocalTarget, ctx: TurnContext): RegionSpec | null {
@@ -81,6 +71,7 @@ export class SceneEditHandler implements TurnHandler {
       request: plan.instruction,
       remove: plan.remove,
       knownElements: knownElementNames(ctx, ctx.requestedRegion),
+      integrateLayer: plan.integrateLayer?.name,
     });
     const raw = await this.callModel(ctx, prepared, prompt);
     if (!raw) return;
@@ -88,7 +79,7 @@ export class SceneEditHandler implements TurnHandler {
     const edit = await this.recompose(ctx, prepared, raw);
     if (!edit) return;
     if (!(await state.advance(ctx, 'checking'))) return;
-    await this.respond(ctx, edit, plan.instruction);
+    await this.respond(ctx, edit, plan);
   }
 
   private async callModel(
@@ -135,7 +126,12 @@ export class SceneEditHandler implements TurnHandler {
   }
 
   /** Resposta pela visão (se sobrar chamada e o modelo não devolveu a mesma área); senão pelas métricas. */
-  private async respond(ctx: TurnContext, edit: EditResult, request: string): Promise<void> {
+  private async respond(
+    ctx: TurnContext,
+    edit: EditResult,
+    plan: Extract<SceneClassification, { operation: 'local_edit' }>,
+  ): Promise<void> {
+    const request = plan.instruction;
     let facts: { changed: string; satisfied: 'sim' | 'parcial' | 'nao' } | null = null;
     if (!edit.noChange) {
       const call = await this.calls.visionCall(ctx, {
@@ -154,6 +150,7 @@ export class SceneEditHandler implements TurnHandler {
     await this.support.finishWithImage(ctx, edit.finalPng, {
       reply: edit.noChange ? NO_CHANGE_REPLY : editReply(facts),
       ...(facts?.satisfied === 'nao' ? { notApplied: { changed: facts.changed } } : {}),
+      ...this.withoutIntegratedLayer(ctx, plan, edit.noChange),
       metrics: {
         ...edit.metrics,
         noChange: edit.noChange,
@@ -163,6 +160,17 @@ export class SceneEditHandler implements TurnHandler {
       // Elemento selecionado: a região alterada é a caixa dele (rect, zona e forma já a gravam ao enfileirar).
       ...(ctx.requestedRegion ? {} : { requestedRegion: this.elementBox(ctx) }),
     });
+  }
+
+  /** Integrada ao fundo, a camada sai da versão (não se `noChange`: nada foi pintado). */
+  private withoutIntegratedLayer(
+    ctx: TurnContext,
+    plan: Extract<SceneClassification, { operation: 'local_edit' }>,
+    noChange: boolean,
+  ): { elements?: SceneElement[] } {
+    if (!plan.integrateLayer || noChange) return {};
+    const { elementId } = plan.integrateLayer;
+    return { elements: (ctx.parent?.elements ?? []).filter((e) => e.id !== elementId) };
   }
 
   private elementBox(ctx: TurnContext): Rect | null {

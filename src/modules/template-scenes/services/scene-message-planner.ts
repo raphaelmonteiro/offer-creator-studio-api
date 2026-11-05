@@ -10,6 +10,7 @@ import {
 import { rasterizeRegion, shapeAreaRatio } from '../domain/scene-shapes';
 import { MaskShape, Rect, SceneElement, SceneVersionOperation } from '../domain/scene.types';
 import { sceneZonesFor } from '../domain/scene-formats';
+import { resolveIntegration } from './scene-integrate';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
@@ -265,5 +266,14 @@ export async function planMessage(
     attachments: dto.attachments,
     confirmGlobal: dto.confirmGlobal,
   });
-  return toPlan(classification, scene, dto);
+  const resolved = await resolveIntegration(classification, {
+    content: confirmed?.request ?? dto.content,
+    layers: hasReadyVersion ? await currentElements(manager, scene) : [],
+    scene: {
+      widthPx: scene.widthPx,
+      heightPx: scene.heightPx,
+      zones: sceneZonesFor(scene.formatId),
+    },
+  });
+  return toPlan(resolved, scene, dto);
 }

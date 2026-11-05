@@ -7,6 +7,7 @@ import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { editPlan, goodVision, pricedProviderOf, RECT } from '../testing/scene-edit-fixtures';
 import { useProcessorHarness } from '../testing/scene-processor-harness';
 import { describeIfSceneDb } from '../testing/scene-test-db';
+import { genEl, logoEl } from '../testing/scene-operation-fixtures';
 import { SceneTurnState } from './scene-turn-state';
 
 describeIfSceneDb('SceneTurnProcessor: edição local (banco chroma_x_e2e)', () => {
@@ -247,6 +248,66 @@ describeIfSceneDb('SceneTurnProcessor: edição local (banco chroma_x_e2e)', () 
       await h.processorWith(h.mock(), {}, broken).process(h.job(scene.id, version.id));
 
       expect((await h.sceneOf(scene.id)).currentVersionId).toBe(version.id);
+    });
+  });
+
+  describe('integrar uma camada ao fundo (correção 5)', () => {
+    const basket = { ...genEl, id: 'cesta-1', name: 'Cesta de ovos' };
+    const integratePlan = () =>
+      editPlan(
+        { kind: 'rect', rect: RECT },
+        {
+          instruction: 'integre esta cesta ao cenário',
+          integrate: true,
+          integrateLayer: { elementId: 'cesta-1', name: 'Cesta de ovos' },
+        },
+      );
+    const run = async (answer: 'sim' | 'nao', request = 'x') => {
+      const { scene } = await h.readyScene({ elements: [logoEl, basket] });
+      const version = await h.queueTurn(scene, { plan: integratePlan(), request });
+      const { provider, edit } = pricedProvider();
+      const vision = {
+        compare: jest.fn(async () => ({
+          text: JSON.stringify({ mudou: 'A cesta está no gramado.', atendeu: answer }),
+          usage: null,
+          requestId: 'req_v',
+          latencyMs: 1,
+        })),
+      };
+      await h.processorWith(provider, {}, vision).process(h.job(scene.id, version.id));
+      return { scene, version, edit };
+    };
+
+    it('aplicada: o prompt leva o nome da camada e a versão nova não tem mais a camada', async () => {
+      const { scene, version, edit } = await run('sim');
+
+      expect(edit.mock.calls[0][0].prompt).toContain('"Cesta de ovos" integrado ao fundo');
+      const done = await h.versionOf(version.id);
+      expect(done.elements.map((e) => e.id)).toEqual(['logo-1']);
+      expect((await h.sceneOf(scene.id)).currentVersionId).toBe(version.id);
+    });
+
+    it('Integração não atendida: a imagem atual e a camada ficam como estão', async () => {
+      const { scene, version } = await run('nao');
+
+      expect((await h.sceneOf(scene.id)).currentVersionId).toBe(scene.currentVersionId);
+      const current = await h.versionOf(scene.currentVersionId as string);
+      expect(current.elements.map((e) => e.id)).toEqual(['logo-1', 'cesta-1']);
+      expect((await h.versionOf(version.id)).metrics.notApplied).toBe(true);
+    });
+
+    it('sem mudança: a camada continua, porque nada foi pintado', async () => {
+      const { scene } = await h.readyScene({ elements: [basket] });
+      const version = await h.queueTurn(scene, {
+        plan: { ...integratePlan(), instruction: 'integre #sem-mudanca' } as never,
+        request: 'integre #sem-mudanca',
+      });
+
+      await h.processorWith(h.mock()).process(h.job(scene.id, version.id));
+
+      const done = await h.versionOf(version.id);
+      expect(done.metrics.noChange).toBe(true);
+      expect(done.elements.map((e) => e.id)).toEqual(['cesta-1']);
     });
   });
 });

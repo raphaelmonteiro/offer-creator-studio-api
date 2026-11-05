@@ -80,13 +80,18 @@ export function buildEditPrompt(input: {
   request: string;
   remove: boolean;
   knownElements: string[];
+  /** Camada `generated` a integrar ao fundo (correção 5): o modelo a pinta no fundo, sem recebê-la. */
+  integrateLayer?: string;
 }): string {
   const names = input.knownElements.length > 0 ? ` (${input.knownElements.join(', ')})` : '';
   const literal = cleanRequest(input.request);
   const pointsOnly = input.remove && !namesObject(fold(literal));
   const instruction = pointsOnly ? REMOVE_INSTRUCTION : literal.replace(/[.!]+$/, '');
   const removal = input.remove && !pointsOnly ? ` ${CONTINUE_BACKGROUND}` : '';
-  return `Na área marcada${names}: ${instruction}.${removal} Altere somente a área indicada pela máscara. ${KEEP_REST}`;
+  const integrate = input.integrateLayer
+    ? ` Pinte "${input.integrateLayer}" integrado ao fundo, como se já fizesse parte da cena, com a mesma luz e as mesmas cores.`
+    : '';
+  return `Na área marcada${names}: ${instruction}.${removal}${integrate} Altere somente a área indicada pela máscara. ${KEEP_REST}`;
 }
 
 /** Prompt do ajuste geral: a imagem atual entra como referência; sem composição por faixas (D-16). */
