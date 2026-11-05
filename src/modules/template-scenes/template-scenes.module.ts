@@ -5,20 +5,30 @@ import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queu
 import { SharedModule } from '../../shared/shared.module';
 import { AiModule } from '../ai/ai.module';
 import { OpenAiImageService } from '../ai/openai-image.service';
+import { OpenAiVisionService } from '../ai/openai-vision.service';
 import { TemplateScene } from './entities/template-scene.entity';
 import { TemplateSceneAsset } from './entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from './entities/template-scene-message.entity';
 import { TemplateSceneVersion } from './entities/template-scene-version.entity';
+import { SceneAddElementHandler } from './processors/scene-add-element.handler';
+import { SceneCallRunner } from './processors/scene-call-runner';
+import { SceneEditHandler } from './processors/scene-edit.handler';
+import { SceneGenerateHandler } from './processors/scene-generate.handler';
+import { SceneLayerHandler } from './processors/scene-layer.handler';
 import { SceneTurnJob, SceneTurnProcessor } from './processors/scene-turn.processor';
+import { SceneTurnSupport } from './processors/scene-turn-support';
 import { SceneTurnState } from './processors/scene-turn-state';
 import { createSceneImageProvider } from './providers/scene-image-provider.factory';
 import { SCENE_IMAGE_PROVIDER } from './providers/scene-image-provider';
+import { createSceneVisionClient, SCENE_VISION_CLIENT } from './providers/scene-vision-client';
 import { SceneFilesService } from './services/scene-files.service';
+import { SceneImageService } from './services/scene-image.service';
 import { SceneLockService } from './services/scene-lock.service';
 import { SceneLogoService } from './services/scene-logo.service';
 import { SceneReadService } from './services/scene-read.service';
 import { SceneReconcilerService } from './services/scene-reconciler.service';
 import { SceneTurnService } from './services/scene-turn.service';
+import { SceneVisionService } from './services/scene-vision.service';
 import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
@@ -56,12 +66,25 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneLogoService,
     SceneTurnService,
     SceneTurnState,
+    SceneTurnSupport,
+    SceneCallRunner,
+    SceneImageService,
+    SceneVisionService,
+    SceneGenerateHandler,
+    SceneEditHandler,
+    SceneLayerHandler,
+    SceneAddElementHandler,
     SceneTurnProcessor,
     SceneReconcilerService,
     {
       provide: SCENE_IMAGE_PROVIDER,
       inject: [ConfigService, OpenAiImageService],
       useFactory: createSceneImageProvider,
+    },
+    {
+      provide: SCENE_VISION_CLIENT,
+      inject: [ConfigService, OpenAiVisionService],
+      useFactory: createSceneVisionClient,
     },
   ],
 })

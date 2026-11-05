@@ -62,6 +62,11 @@ export class SceneFilesService {
     return { url, bytes: buffer.length };
   }
 
+  /** Lê o arquivo da cena pela URL relativa (a master de onde a edição parte). */
+  async read(url: string): Promise<Buffer> {
+    return fs.readFile(this.absolutePath(url));
+  }
+
   /** Apaga o arquivo (best effort: ausente não é erro). */
   async remove(url: string): Promise<void> {
     await fs.rm(this.absolutePath(url), { force: true });

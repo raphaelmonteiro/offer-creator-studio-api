@@ -20,6 +20,42 @@ export const MOVE_UNAVAILABLE_REPLY =
 export const GLOBAL_CONFIRM_REPLY =
   'Isso cria uma nova versão do fundo inteiro. Logo e texto não mudam.';
 
+export const NO_CHANGE_REPLY =
+  'Não vi mudança na área marcada. Quer tentar de novo? Marque a área de novo ou descreva de outro jeito.';
+
+const RETRY_HINT = 'Se não ficou como queria, marque a área de novo ou descreva de outro jeito.';
+
+/** Fatos da visão que entram na resposta (a visão é opcional: sem ela, a resposta sai das métricas). */
+export interface VisionFacts {
+  changed: string;
+  satisfied: 'sim' | 'parcial' | 'nao';
+}
+
+const endSentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
+
+/** Resposta de uma edição local (ou do ajuste geral): descreve o que mudou pela visão, ou pelas métricas. */
+export function editReply(vision: VisionFacts | null, scope: 'area' | 'scene' = 'area'): string {
+  const tail = scope === 'area' ? 'O resto da imagem foi preservado.' : 'Logo e texto não mudaram.';
+  if (!vision) {
+    return scope === 'area'
+      ? `Pronto! Editei a área marcada. ${tail}`
+      : `Pronto! Criei uma nova versão do fundo. ${tail}`;
+  }
+  const changed = endSentence(vision.changed);
+  if (vision.satisfied === 'nao') return `${changed} ${RETRY_HINT}`;
+  if (vision.satisfied === 'parcial') return `${changed} Atendi o pedido em parte. ${RETRY_HINT}`;
+  return `Pronto! ${changed} ${tail}`;
+}
+
+export const addElementReply = (subject: string, where: 'area' | 'center'): string =>
+  `Pronto! Adicionei "${subject}" ${where === 'area' ? 'na área marcada' : 'no centro do miolo'}. É uma camada: arraste para onde quiser. O fundo não mudou.`;
+
+export const layerReply = (changed: string[]): string =>
+  `Alterado apenas: ${changed.map((name) => name.toLowerCase()).join(', ')}. A imagem de fundo não mudou.`;
+
+export const CROP_TOO_SMALL_REPLY =
+  'A área marcada é pequena demais para este formato. Marque uma área maior. Nada foi alterado.';
+
 const FAILURE_REPLIES: Record<SceneFailureCode, string> = {
   PROVIDER_QUOTA: 'O serviço de imagem está sem saldo. Avise o administrador.',
   PROVIDER_CONTENT_POLICY:

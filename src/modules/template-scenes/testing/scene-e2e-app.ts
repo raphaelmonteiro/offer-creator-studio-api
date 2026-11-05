@@ -17,10 +17,20 @@ import { AnimationEventsService } from '../../../shared/events/animation-events.
 import { TemplateScenesGcRunner } from '../../../shared/gc/template-scenes-gc.runner';
 import { UploadsGcService } from '../../../shared/gc/uploads-gc.service';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
+import { SceneAddElementHandler } from '../processors/scene-add-element.handler';
+import { SceneCallRunner } from '../processors/scene-call-runner';
+import { SceneEditHandler } from '../processors/scene-edit.handler';
+import { SceneGenerateHandler } from '../processors/scene-generate.handler';
+import { SceneLayerHandler } from '../processors/scene-layer.handler';
 import { SceneTurnProcessor } from '../processors/scene-turn.processor';
+import { SceneTurnSupport } from '../processors/scene-turn-support';
 import { SceneTurnState } from '../processors/scene-turn-state';
 import { MockSceneImageProvider } from '../providers/mock-scene-image.provider';
 import { SCENE_IMAGE_PROVIDER } from '../providers/scene-image-provider';
+import { MockSceneVisionClient } from '../providers/mock-scene-vision.client';
+import { SCENE_VISION_CLIENT } from '../providers/scene-vision-client';
+import { SceneImageService } from '../services/scene-image.service';
+import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
 import { SceneLogoService } from '../services/scene-logo.service';
@@ -97,7 +107,16 @@ export async function createSceneE2eApp(
       SceneTurnService,
       TemplateScenesService,
       SceneTurnState,
+      SceneTurnSupport,
+      SceneCallRunner,
+      SceneImageService,
+      SceneVisionService,
+      SceneGenerateHandler,
+      SceneEditHandler,
+      SceneLayerHandler,
+      SceneAddElementHandler,
       SceneTurnProcessor,
+      { provide: SCENE_VISION_CLIENT, useValue: new MockSceneVisionClient() },
       SceneReconcilerService,
       TemplateScenesGcRunner,
       UploadsGcService,
