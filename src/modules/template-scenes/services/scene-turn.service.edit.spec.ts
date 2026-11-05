@@ -1,57 +1,14 @@
-import { DataSource } from 'typeorm';
-import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
-import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
-import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { insertReadyVersion, insertScene } from '../testing/scene-fixtures';
 import { errorOf } from '../testing/scene-test-helpers';
-import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
+import { describeIfSceneDb } from '../testing/scene-test-db';
+import { useTurnServiceHarness } from '../testing/scene-turn-service-harness';
 import { SceneReadService } from './scene-read.service';
-import { SceneLockService } from './scene-lock.service';
-import { SceneTurnService } from './scene-turn.service';
 
 const RECT = { x: 0.6, y: 0.05, w: 0.3, h: 0.15 };
 
 describeIfSceneDb('SceneTurnService: classificação do pedido (banco chroma_x_e2e)', () => {
-  let dataSource: DataSource;
-  let service: SceneTurnService;
-  let publish: jest.Mock;
-  const createdScenes: string[] = [];
-
-  beforeAll(async () => {
-    dataSource = await openSceneTestDb();
-  });
-
-  beforeEach(() => {
-    publish = jest.fn(async () => `job-${publish.mock.calls.length}`);
-    service = new SceneTurnService(dataSource, new SceneLockService(dataSource), {
-      publish,
-    } as unknown as AnimationQueueService);
-  });
-
-  afterAll(async () => {
-    await deleteTestScenes(dataSource, createdScenes);
-    await dataSource.destroy();
-  });
-
-  /** Cena com a versão 1 pronta (revisão 0). */
-  async function readyScene(name: string, elements: TemplateSceneVersion['elements'] = []) {
-    const scene = await insertScene(dataSource, { name });
-    createdScenes.push(scene.id);
-    const { version } = await insertReadyVersion(dataSource, scene, 1, { elements });
-    scene.currentVersionId = version.id;
-    await dataSource.manager.save(scene);
-    return scene;
-  }
-  const send = (sceneId: string, body: Record<string, unknown>, revision = 0) =>
-    service.sendMessage(
-      sceneId,
-      { content: 'x', expectedRevision: revision, ...body } as never,
-      null,
-    );
-  const versionsOf = (sceneId: string) =>
-    dataSource.manager.find(TemplateSceneVersion, { where: { sceneId }, order: { number: 'ASC' } });
-  const sceneOf = (id: string) => dataSource.manager.findOneByOrFail(TemplateScene, { id });
+  const h = useTurnServiceHarness();
+  const { readyScene, send, versionsOf, sceneOf } = h;
 
   it('item citado sem área: responde "marque a área", sem job, versão rejected e custo intacto', async () => {
     const scene = await readyScene('Cls item');
@@ -59,11 +16,11 @@ describeIfSceneDb('SceneTurnService: classificação do pedido (banco chroma_x_e
 
     expect(result).toMatchObject({ jobId: null, operation: 'needs_region', revision: 1 });
     expect(result.assistantMessage?.content).toContain('Marque a área');
-    expect(publish).not.toHaveBeenCalled();
+    expect(h.publish).not.toHaveBeenCalled();
     const [, rejected] = await versionsOf(scene.id);
     expect(rejected).toMatchObject({ status: 'rejected', providerCostUsd: 0, number: 2 });
     expect((await sceneOf(scene.id)).totalCostUsd).toBe(0);
-    const messages = await dataSource.manager.find(TemplateSceneMessage, {
+    const messages = await h.dataSource.manager.find(TemplateSceneMessage, {
       where: { versionId: rejected.id },
       order: { createdAt: 'ASC' },
     });
@@ -83,7 +40,7 @@ describeIfSceneDb('SceneTurnService: classificação do pedido (banco chroma_x_e
       revision = result.revision;
     }
 
-    const detail = await new SceneReadService(dataSource).loadDetail(scene.id);
+    const detail = await new SceneReadService(h.dataSource).loadDetail(scene.id);
     expect(detail.messages.map((m) => m.role)).toEqual([
       'user',
       'assistant',
@@ -100,7 +57,7 @@ describeIfSceneDb('SceneTurnService: classificação do pedido (banco chroma_x_e
     const result = await send(scene.id, { content: 'troca o sol de lado' });
     expect(result).toMatchObject({ jobId: null, operation: 'move_unavailable' });
     expect(result.assistantMessage?.content).toContain('sem refazê-lo');
-    expect(publish).not.toHaveBeenCalled();
+    expect(h.publish).not.toHaveBeenCalled();
   });
 
   it('zona citada no texto: edição local com o retângulo do cabeçalho do formato', async () => {
@@ -175,7 +132,7 @@ describeIfSceneDb('SceneTurnService: classificação do pedido (banco chroma_x_e
       ).toEqual({ status: 400, code: 'BAD_REQUEST' });
       expect(await versionsOf(scene.id)).toHaveLength(1);
       expect((await sceneOf(scene.id)).revision).toBe(0);
-      expect(publish).not.toHaveBeenCalled();
+      expect(h.publish).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -247,124 +204,8 @@ describeIfSceneDb('SceneTurnService: classificação do pedido (banco chroma_x_e
     });
   });
 
-  describe('ajuste geral com confirmação', () => {
-    it('pergunta primeiro (sem job) e só depois da confirmação enfileira o ajuste', async () => {
-      const scene = await readyScene('Cls global');
-      const asked = await send(scene.id, { content: 'deixa tudo mais quente' });
-      expect(asked).toMatchObject({ jobId: null, operation: 'needs_confirmation_global' });
-      expect(asked.assistantMessage?.content).toContain('fundo inteiro');
-      expect(publish).not.toHaveBeenCalled();
-
-      const confirmed = await send(
-        scene.id,
-        { content: 'Confirmar', confirmGlobal: true, replyToMessageId: asked.assistantMessage!.id },
-        asked.revision,
-      );
-
-      expect(confirmed).toMatchObject({ operation: 'global_regenerate', jobId: 'job-1' });
-      const versions = await versionsOf(scene.id);
-      expect(versions[2]).toMatchObject({ operation: 'generate', status: 'queued' });
-      expect(versions[2].metrics.plan).toMatchObject({
-        operation: 'global_regenerate',
-        instruction: 'deixa tudo mais quente',
-      });
-    });
-
-    it('repetir a confirmação não duplica o ajuste: 409 CONFIRMATION_NOT_PENDING', async () => {
-      const scene = await readyScene('Cls global repetida');
-      const asked = await send(scene.id, { content: 'deixa tudo mais quente' });
-      const confirm = (revision: number) =>
-        send(
-          scene.id,
-          { content: 'sim', confirmGlobal: true, replyToMessageId: asked.assistantMessage!.id },
-          revision,
-        );
-      const first = await confirm(asked.revision);
-      // a versão em curso termina (simula o worker) e a mesma confirmação chega de novo
-      await dataSource.manager.update(
-        TemplateSceneVersion,
-        { id: first.versionId },
-        { status: 'failed' },
-      );
-      expect(await errorOf(confirm(first.revision))).toEqual({
-        status: 409,
-        code: 'CONFIRMATION_NOT_PENDING',
-      });
-      expect(publish).toHaveBeenCalledTimes(1);
-    });
-
-    it.each([
-      ['region', { region: RECT }],
-      [
-        'mask',
-        {
-          mask: {
-            kind: 'lasso',
-            points: [
-              { x: 0.1, y: 0.1 },
-              { x: 0.4, y: 0.1 },
-              { x: 0.2, y: 0.4 },
-            ],
-          },
-        },
-      ],
-      ['zone', { zone: 'header' }],
-      ['targetElementId', { targetElementId: 'logo-1' }],
-      ['attachments', { attachments: [{ assetId: '11111111-1111-4111-8111-111111111111' }] }],
-    ])(
-      'confirmação com %s: 400, nada gravado, e a confirmação válida seguinte é aceita',
-      async (_name, extra) => {
-        const scene = await readyScene(`Cls confirma alvo ${_name}`);
-        const asked = await send(scene.id, { content: 'deixa tudo mais quente' });
-        const reply = asked.assistantMessage!.id;
-        const versionsBefore = (await versionsOf(scene.id)).length;
-        const messagesBefore = await dataSource.manager.count(TemplateSceneMessage, {
-          where: { sceneId: scene.id },
-        });
-
-        const error = await errorOf(
-          send(
-            scene.id,
-            { content: 'sim', confirmGlobal: true, replyToMessageId: reply, ...extra },
-            asked.revision,
-          ),
-        );
-
-        expect(error).toEqual({ status: 400, code: 'BAD_REQUEST' });
-        expect(publish).not.toHaveBeenCalled();
-        expect(await versionsOf(scene.id)).toHaveLength(versionsBefore);
-        expect(
-          await dataSource.manager.count(TemplateSceneMessage, { where: { sceneId: scene.id } }),
-        ).toBe(messagesBefore);
-        expect((await sceneOf(scene.id)).revision).toBe(asked.revision);
-        const ok = await send(
-          scene.id,
-          { content: 'sim', confirmGlobal: true, replyToMessageId: reply },
-          asked.revision,
-        );
-        expect(ok).toMatchObject({ operation: 'global_regenerate', jobId: 'job-1' });
-      },
-    );
-
-    it('confirmar sem replyToMessageId: 400; resposta a mensagem que não é pergunta: 409', async () => {
-      const scene = await readyScene('Cls global inválida');
-      expect((await errorOf(send(scene.id, { confirmGlobal: true }))).status).toBe(400);
-      const answered = await send(scene.id, { content: 'troca o sol de lado' });
-      expect(
-        await errorOf(
-          send(
-            scene.id,
-            { confirmGlobal: true, replyToMessageId: answered.assistantMessage!.id },
-            answered.revision,
-          ),
-        ),
-      ).toEqual({ status: 409, code: 'CONFIRMATION_NOT_PENDING' });
-    });
-  });
-
   it('a primeira mensagem de uma cena sem versão pronta continua sendo a geração', async () => {
-    const scene = await insertScene(dataSource, { name: 'Cls primeira' });
-    createdScenes.push(scene.id);
+    const scene = await h.newScene('Cls primeira');
     const result = await send(scene.id, { content: 'campo verde com sol' });
     expect(result.operation).toBe('generate');
     const [version] = await versionsOf(scene.id);
