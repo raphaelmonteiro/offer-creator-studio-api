@@ -1,4 +1,6 @@
 import {
+  MaskShape,
+  Rect,
   SceneElement,
   SceneFailureCode,
   SceneAssetRole,
@@ -26,6 +28,19 @@ export interface SceneAssetView {
 
 export type RestorableReason = 'not_ready' | 'master_purged';
 
+/** Métricas públicas de uma edição (o que o front mostra: chip "preservou X%" e o aviso de sem mudança). */
+export interface SceneMetricsView {
+  insideMaskDiffRatio: number | null;
+  /** `null` sem pixels na faixa da margem (o chip não aparece). */
+  marginDiffRatio: number | null;
+  seamSsim: number | null;
+  maskAreaRatio: number | null;
+  /** O modelo devolveu praticamente a mesma área (a versão fica `ready` com aviso). */
+  noChange: boolean;
+  /** Resultado da visão antes/depois; `null` quando ela não rodou ou falhou. */
+  vision: { satisfied: 'sim' | 'parcial' | 'nao' } | null;
+}
+
 export interface SceneVersionView {
   id: string;
   number: number;
@@ -48,6 +63,12 @@ export interface SceneVersionView {
   restorableReason: RestorableReason | null;
   /** Nulo quando a prévia foi apagada ou a versão não tem imagem. */
   previewUrl: string | null;
+  /** Área alterada (retângulo, zona ou caixa da forma), para o destaque de 2 s na prévia. */
+  requestedRegion: Rect | null;
+  requestedMask: MaskShape | null;
+  targetElementId: string | null;
+  /** Só nas edições locais; `null` nas demais versões. */
+  metrics: SceneMetricsView | null;
 }
 
 export interface SceneCurrentVersionView extends SceneVersionView {
@@ -125,6 +146,26 @@ export function restorableState(
 
 const iso = (date: Date | null): string | null => (date ? date.toISOString() : null);
 
+const numberOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+/** Só as métricas de edição que o front usa; `calls`, `plan` e diagnósticos ficam no servidor. */
+export function toMetricsView(
+  version: Pick<TemplateSceneVersion, 'metrics'>,
+): SceneMetricsView | null {
+  const m = version.metrics ?? {};
+  if (typeof m.noChange !== 'boolean') return null;
+  const vision = m.vision as { satisfied?: 'sim' | 'parcial' | 'nao' } | null | undefined;
+  return {
+    insideMaskDiffRatio: numberOrNull(m.insideMaskDiffRatio),
+    marginDiffRatio: numberOrNull(m.marginDiffRatio),
+    seamSsim: numberOrNull(m.seamSsim),
+    maskAreaRatio: numberOrNull(m.maskAreaRatio),
+    noChange: m.noChange,
+    vision: vision?.satisfied ? { satisfied: vision.satisfied } : null,
+  };
+}
+
 export function toAssetView(asset: TemplateSceneAsset): SceneAssetView {
   return {
     id: asset.id,
@@ -162,6 +203,10 @@ export function toVersionView(
     restorable: state.restorable,
     restorableReason: state.reason,
     previewUrl: preview && !preview.purgedAt ? preview.url : null,
+    requestedRegion: version.requestedRegion,
+    requestedMask: version.requestedMask,
+    targetElementId: version.targetElementId,
+    metrics: toMetricsView(version),
   };
 }
 

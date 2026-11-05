@@ -1,6 +1,6 @@
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { restorableState, toCurrentVersionView, toVersionView } from './scene-views';
+import { restorableState, toCurrentVersionView, toMetricsView, toVersionView } from './scene-views';
 
 const asset = (id: string, extra: Partial<TemplateSceneAsset> = {}): TemplateSceneAsset =>
   ({
@@ -33,6 +33,10 @@ const version = (extra: Partial<TemplateSceneVersion> = {}): TemplateSceneVersio
     masterAssetId: 'm1',
     previewAssetId: 'p1',
     elements: [],
+    metrics: {},
+    requestedRegion: null,
+    requestedMask: null,
+    targetElementId: null,
     ...extra,
   }) as TemplateSceneVersion;
 
@@ -146,5 +150,59 @@ describe('toCurrentVersionView', () => {
     expect(view.assets.map((a) => a.id).sort()).toEqual(['l1', 'm1', 'p1']);
     expect(view.master?.id).toBe('m1');
     expect(view.elements).toHaveLength(2);
+  });
+});
+
+describe('métricas e alvo da edição na versão', () => {
+  it('versão sem edição local: metrics null e alvo vazio', () => {
+    const view = toVersionView(version(), new Map());
+    expect(view).toMatchObject({
+      metrics: null,
+      requestedRegion: null,
+      requestedMask: null,
+      targetElementId: null,
+    });
+  });
+
+  it('edição local: só as métricas públicas, sem calls nem diagnóstico', () => {
+    const metrics = {
+      plan: { operation: 'local_edit' },
+      calls: [],
+      insideMaskDiffRatio: 0.91,
+      marginDiffRatio: 0.12,
+      seamSsim: 0.98,
+      maskAreaRatio: 0.04,
+      outsideMaskDiffRatio: 1,
+      noChange: false,
+      vision: { satisfied: 'sim' },
+    };
+    const region = { x: 0.1, y: 0.1, w: 0.2, h: 0.2 };
+    const view = toVersionView(
+      version({ metrics, requestedRegion: region, targetElementId: null }),
+      new Map(),
+    );
+    expect(view.requestedRegion).toEqual(region);
+    expect(view.metrics).toEqual({
+      insideMaskDiffRatio: 0.91,
+      marginDiffRatio: 0.12,
+      seamSsim: 0.98,
+      maskAreaRatio: 0.04,
+      noChange: false,
+      vision: { satisfied: 'sim' },
+    });
+  });
+
+  it('sem amostra a métrica vai como null (o chip "preservou X%" não aparece); visão que falhou vira null', () => {
+    const view = toMetricsView({
+      metrics: { noChange: true, marginDiffRatio: null, seamSsim: null, vision: null },
+    });
+    expect(view).toEqual({
+      insideMaskDiffRatio: null,
+      marginDiffRatio: null,
+      seamSsim: null,
+      maskAreaRatio: null,
+      noChange: true,
+      vision: null,
+    });
   });
 });
