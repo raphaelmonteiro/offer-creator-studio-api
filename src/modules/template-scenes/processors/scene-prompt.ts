@@ -1,3 +1,5 @@
+import { fold, namesObject } from '../domain/scene-request-text';
+
 export interface ScenePromptInput {
   /** Pedido literal do cliente, em português. */
   request: string;
@@ -62,12 +64,17 @@ export function buildGeneratePrompt(
 const KEEP_REST =
   'Preserve todo o resto da imagem exatamente como está, sem mudar estilo, cor ou composição fora da região.';
 
+/** Remoção sem objeto nomeado ("remove isso", "tira essa área"): só aponta a marcação. */
 export const REMOVE_INSTRUCTION = 'remova o que está na área marcada e continue o fundo ao redor';
+
+/** Remoção com objeto nomeado: a frase do cliente vale, e o fundo continua ao redor. */
+export const CONTINUE_BACKGROUND = 'Continue o fundo ao redor, sem deixar marca do que saiu.';
 
 /**
  * Prompt da edição local: a instrução literal do cliente em português, precedida de "Na área
  * marcada" (com o nome dos elementos conhecidos na região, se houver) e das frases de preservação
- * medidas no spike. `remove` troca a instrução pela remoção com continuação do fundo.
+ * medidas no spike. Remover (correção 2): com objeto nomeado vai a frase literal do cliente mais "continue
+ * o fundo ao redor"; só com pronome ("remove isso"), a instrução fixa `REMOVE_INSTRUCTION`.
  */
 export function buildEditPrompt(input: {
   request: string;
@@ -75,8 +82,11 @@ export function buildEditPrompt(input: {
   knownElements: string[];
 }): string {
   const names = input.knownElements.length > 0 ? ` (${input.knownElements.join(', ')})` : '';
-  const instruction = input.remove ? REMOVE_INSTRUCTION : cleanRequest(input.request);
-  return `Na área marcada${names}: ${instruction}. Altere somente a área indicada pela máscara. ${KEEP_REST}`;
+  const literal = cleanRequest(input.request);
+  const pointsOnly = input.remove && !namesObject(fold(literal));
+  const instruction = pointsOnly ? REMOVE_INSTRUCTION : literal.replace(/[.!]+$/, '');
+  const removal = input.remove && !pointsOnly ? ` ${CONTINUE_BACKGROUND}` : '';
+  return `Na área marcada${names}: ${instruction}.${removal} Altere somente a área indicada pela máscara. ${KEEP_REST}`;
 }
 
 /** Prompt do ajuste geral: a imagem atual entra como referência; sem composição por faixas (D-16). */

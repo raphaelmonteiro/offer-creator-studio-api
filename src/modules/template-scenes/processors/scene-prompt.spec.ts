@@ -5,6 +5,7 @@ import {
   buildGeneratePrompt,
   buildGlobalPrompt,
   buildTransparentPrompt,
+  CONTINUE_BACKGROUND,
   LESS_DETAIL_AT_CENTER_HINT,
   REMOVE_INSTRUCTION,
   SUGGEST_LESS_DETAIL_AT_CENTER,
@@ -115,11 +116,32 @@ describe('buildEditPrompt', () => {
     expect(prompt.startsWith('Na área marcada (Sol, Nuvem): mais brilho.')).toBe(true);
   });
 
-  it('remover troca a instrução pela remoção com continuação do fundo', () => {
-    const prompt = buildEditPrompt({ request: 'remover o sol', remove: true, knownElements: [] });
-    expect(prompt).toContain(REMOVE_INSTRUCTION);
-    expect(prompt).not.toContain('remover o sol');
+  it('Remover com objeto nomeado: a frase do cliente e a continuação do fundo', () => {
+    const request =
+      'ta a imagem ta melhor mas remove para mim da parte de baixo os ovos a direita.';
+    const prompt = buildEditPrompt({ request, remove: true, knownElements: [] });
+    expect(prompt).toContain(`Na área marcada: ${request}`);
+    expect(prompt).toContain('Continue o fundo ao redor');
+    expect(prompt).not.toContain(REMOVE_INSTRUCTION);
   });
+
+  it('Remover com objeto nomeado: a área marcada citada no texto não troca a frase', () => {
+    const prompt = buildEditPrompt({
+      request: 'remova os ovos da area marcada',
+      remove: true,
+      knownElements: [],
+    });
+    expect(prompt).toContain('remova os ovos da area marcada');
+    expect(prompt).toContain(CONTINUE_BACKGROUND);
+  });
+
+  it.each(['remove isso', 'tira essa área', 'apaga o que está aqui'])(
+    'Remover sem objeto nomeado (%s): pede para remover o que está na área e continuar o fundo',
+    (request) => {
+      const prompt = buildEditPrompt({ request, remove: true, knownElements: [] });
+      expect(prompt).toContain(`Na área marcada: ${REMOVE_INSTRUCTION}.`);
+    },
+  );
 });
 
 describe('buildGlobalPrompt e buildTransparentPrompt', () => {

@@ -184,6 +184,31 @@ export function citesImageItem(folded: string): boolean {
   return false;
 }
 
+/** Palavras que apontam a marcação, e não um objeto ("remove essa área", "tira o que está aqui"). */
+const POINTER_WORDS = new Set([
+  'area',
+  'regiao',
+  'marcada',
+  'marcacao',
+  'selecao',
+  'selecionada',
+  'coisa',
+  'item',
+  'objeto',
+  'trecho',
+  'que',
+  'aqui',
+  'ali',
+]);
+
+/** O pedido de remover nomeia o que sai ("os ovos"), ou só aponta ("isso", "essa área")? */
+export function namesObject(folded: string): boolean {
+  for (const match of folded.matchAll(ARTICLE_NOUN)) {
+    if (!GLOBAL_WORDS.has(match[2]) && !POINTER_WORDS.has(match[2])) return true;
+  }
+  return false;
+}
+
 /**
  * "Adicionar X": verbo forte, ou "colocar um(a) X" sem trocar, sem citar um item que já existe e
  * sem área marcada (D-15: com área, "colocar/pôr" é edição local).

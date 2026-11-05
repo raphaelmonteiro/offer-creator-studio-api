@@ -125,7 +125,7 @@ describeIfSceneDb('SceneTurnProcessor: edição local (banco chroma_x_e2e)', () 
     expect(outsideDifferent(before.data, after.data, authorized)).toBe(0);
   });
 
-  it('remover: o prompt pede para tirar o item e continuar o fundo, sem repetir o pedido', async () => {
+  it('remover: o prompt leva a frase do cliente e a instrução de continuar o fundo', async () => {
     const { scene } = await h.readyScene();
     const version = await h.queueTurn(scene, {
       plan: editPlan(undefined, { remove: true, instruction: 'remover o sol' }),
@@ -135,9 +135,9 @@ describeIfSceneDb('SceneTurnProcessor: edição local (banco chroma_x_e2e)', () 
 
     await h.processorWith(provider, {}, goodVision()).process(h.job(scene.id, version.id));
 
-    expect(edit.mock.calls[0][0].prompt).toContain(
-      'remova o que está na área marcada e continue o fundo ao redor',
-    );
+    const prompt = edit.mock.calls[0][0].prompt;
+    expect(prompt).toContain('remover o sol');
+    expect(prompt).toContain('Continue o fundo ao redor');
     expect((await h.versionOf(version.id)).status).toBe('ready');
   });
 
