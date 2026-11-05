@@ -80,6 +80,28 @@ const GLOBAL_WORDS = new Set([
   'seguinte',
   'novo',
   'nova',
+  // zonas e palavras de composição: falam da imagem, não de um item dela (correção 1)
+  'cabecalho',
+  'header',
+  'topo',
+  'miolo',
+  'corpo',
+  'meio',
+  'body',
+  'rodape',
+  'footer',
+  'base',
+  'divisao',
+  'transicao',
+  'harmonia',
+  'diferente',
+  'diferentes',
+  'igual',
+  'iguais',
+  'parecido',
+  'parecida',
+  'estranho',
+  'errado',
 ]);
 const ARTICLE_NOUN =
   /\b(o|a|os|as|um|uma|uns|umas|do|da|dos|das|no|na|nos|nas|ao|aos|pelo|pela|esse|essa|esses|essas|este|esta|aquele|aquela)\s+([a-z]{3,})/g;
@@ -106,13 +128,52 @@ export function sideIn(folded: string): Side {
   return 'toggle';
 }
 
-/** Zona nomeada do encarte, pelos sinônimos de `detectZone` do protótipo. */
+const ZONE_WORDS: Record<SceneZoneName, string> = {
+  header: 'cabecalho|header|topo',
+  body: 'miolo|corpo|meio|body',
+  footer: 'rodape|footer|base',
+};
+
+/** Zona nomeada do encarte, pelos sinônimos de `detectZone` do protótipo (em qualquer posição do texto). */
 export function detectZone(text: string): SceneZoneName | null {
   const f = fold(text);
-  if (/(cabecalho|header|\btopo\b)/.test(f)) return 'header';
-  if (/(miolo|\bcorpo\b|\bmeio\b)/.test(f)) return 'body';
-  if (/(rodape|footer|\bbase\b)/.test(f)) return 'footer';
+  for (const zone of ['header', 'body', 'footer'] as const) {
+    if (new RegExp(`\\b(${ZONE_WORDS[zone]})\\b`).test(f)) return zone;
+  }
   return null;
+}
+
+const ZONE_AS_PLACE = new RegExp(
+  `\\b(no|na|nos|nas|em|ao|para|do|da|dos|das)\\s+(?:(?:o|a|os|as)\\s+)?(${Object.values(ZONE_WORDS).join('|')})\\b`,
+  'g',
+);
+/** Zona como objeto de um pedido no imperativo ("deixa o rodapé mais escuro"); o passado é reclamação. */
+const ZONE_AFTER_COMMAND = new RegExp(
+  `\\b(deix(?:a|e|ar)|faz|fa[cz]a|fazer|mud(?:a|e|ar)|troc(?:a|ue|ar)|escurec(?:e|a|er)|clare(?:ia|ie|ar)|ilumin(?:a|e|ar)|suaviz(?:a|e|ar)|limp(?:a|e|ar))\\s+(?:(?:o|a|os|as)\\s+)?(${Object.values(ZONE_WORDS).join('|')})\\b`,
+);
+
+/** "diferente do body", "igual ao header": a zona é termo de comparação, não o lugar do pedido. */
+const COMPARISON_WORDS =
+  /^(diferente|diferentes|igual|iguais|parecido|parecida|parecidos|parecidas)$/;
+
+/**
+ * Zona citada no texto **como lugar** (correção 1): precedida de "no/na/nos/nas/em/ao/para o/para a",
+ * ou de "do/da" (salvo depois de "diferente", "igual" ou "parecido"). Sujeito de reclamação ("o header
+ * está", "mudou o cabeçalho") não vale. O campo `zone` do pedido continua valendo sempre.
+ */
+export function zoneAsPlace(text: string): SceneZoneName | null {
+  const f = fold(text);
+  for (const match of f.matchAll(ZONE_AS_PLACE)) {
+    const before = f.slice(0, match.index).trim().split(/\s+/).pop() ?? '';
+    if (!COMPARISON_WORDS.test(before)) return zoneOfWord(match[2]);
+  }
+  const command = f.match(ZONE_AFTER_COMMAND);
+  return command ? zoneOfWord(command[2]) : null;
+}
+
+function zoneOfWord(word: string): SceneZoneName | null {
+  const zones = ['header', 'body', 'footer'] as const;
+  return zones.find((zone) => new RegExp(`^(${ZONE_WORDS[zone]})$`).test(word)) ?? null;
 }
 
 /** O pedido cita um item da imagem (artigo + substantivo que não seja da imagem inteira)? */
@@ -138,6 +199,43 @@ export function wantsAddition(folded: string, hasArea = false): boolean {
   );
 }
 
+const NEW_IMAGE_QUALIFIER =
+  /\b(ger\w*|cri\w*|faz\w*|fac\w+|mont\w+)\b.{0,40}\b(outra|outro|nova|novo|segunda|terceira|mais uma)\s+(imagem|arte|fundo|versao|cena|template|opcao|variacao)\b/;
+const NEW_IMAGE_GENERATE = /\b(ger(a|e|ar)|cri(a|e|ar))\s+(outra|nova|mais uma)\b/;
+const NEW_IMAGE_FROM_ZERO =
+  /\b(refaz\w*|refaca|comec\w+|recomec\w+)\b.{0,30}\b(zero|inicio|tudo)\b/;
+const NEW_IMAGE_REPLACE = /\bsubstitu\w+\s+(essa|esta)\s*(imagem|arte|cena|,|\.|$|pois|porque|que)/;
+const CHANGE_ALL_UNSPECIFIED =
+  /\b(mud\w+|troc\w+|refac\w+|refaz\w*|alter\w+)\s+tudo\b(?!\s+(para|pra|em|de|com|por|tons?|cores?|mais|menos))/;
+
+/**
+ * Pede outra imagem do zero (D-18): "gerar/criar/fazer" com "outra/nova/segunda/mais uma", "refazer ou
+ * começar do zero", "substituir essa", ou "mude/troque/refaça tudo" sem dizer como.
+ */
+export function wantsNewImage(folded: string): boolean {
+  return (
+    NEW_IMAGE_QUALIFIER.test(folded) ||
+    NEW_IMAGE_GENERATE.test(folded) ||
+    NEW_IMAGE_FROM_ZERO.test(folded) ||
+    NEW_IMAGE_REPLACE.test(folded) ||
+    CHANGE_ALL_UNSPECIFIED.test(folded)
+  );
+}
+
+const INTEGRATE_WORDS = /\b(integr\w+|incorpor\w+|fund(a|ir|e)|mescl\w+)\b/;
+
+/** "Integrar" uma camada ao fundo (correção 5). */
+export const mentionsIntegrate = (folded: string): boolean => INTEGRATE_WORDS.test(folded);
+
+const PLACE_OF_ITEM =
+  /\b(no lugar d[aoe]s?|em vez d[aoe]s?|ao inves d[aoe]s?|onde (estava|ficava|tinha))\b/;
+
+/** "no lugar de X", "em vez de X", "onde estava X": X não se localiza, então não há posição a inventar. */
+export const mentionsPlaceOfItem = (folded: string): boolean => PLACE_OF_ITEM.test(folded);
+
+const PLACE_OF_ITEM_TAIL =
+  /\s+(?:no lugar|em vez|ao inv[eé]s|onde\s+(?:estava|ficava|tinha))\b.*$/i;
+
 /** "no cabeçalho", "na base da imagem": a citação da zona não faz parte do assunto (D-14). */
 const ZONE_PHRASE =
   /\s+(?:n[oa]s?|em|ao|para\s+[oa])\s+(?:[oa]\s+)?(?:cabe[cç]alho|header|topo|miolo|corpo|meio|rodap[eé]|footer|base)(?![a-zà-ÿ])(?:\s+d[aoe]s?\s+(?:imagem|arte|encarte|cena|folheto))?/i;
@@ -152,6 +250,7 @@ export function additionSubject(original: string): string {
     .replace(/^(um|uma|uns|umas|o|a)\s+/i, '')
     .trim();
   const subject = cleaned
+    .replace(PLACE_OF_ITEM_TAIL, '')
     .replace(ZONE_PHRASE, '')
     .replace(/[.!]+$/, '')
     .trim();

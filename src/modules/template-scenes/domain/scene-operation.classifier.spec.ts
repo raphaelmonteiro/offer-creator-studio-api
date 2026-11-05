@@ -8,6 +8,8 @@ import {
   fold,
   mentionsMove,
   parseText,
+  wantsNewImage,
+  zoneAsPlace,
 } from './scene-request-text';
 
 interface Case {
@@ -113,5 +115,67 @@ describe('texto do pedido', () => {
     });
     expect(parseText('sem texto nenhum')).toBeNull();
     expect(parseText('escreve ""')).toBeNull();
+  });
+});
+
+describe('Fronteira entre zona, ajuste geral e imagem nova (correção 1)', () => {
+  it('Reclamação que cita a zona: não é edição local e nada é pago sem confirmação', () => {
+    for (const content of ['o header está diferente', 'você só mudou o cabeçalho']) {
+      const result = classifySceneRequest({ hasReadyVersion: true, content });
+      expect(result.operation).not.toBe('local_edit');
+      expect(result.operation).toBe('needs_confirmation_global');
+    }
+  });
+
+  it('Zona como lugar: preposição antes da zona, ou "do/da", salvo comparação', () => {
+    expect(zoneAsPlace('coloca mais luz no cabeçalho')).toBe('header');
+    expect(zoneAsPlace('deixa o céu do cabeçalho mais limpo')).toBe('header');
+    expect(zoneAsPlace('põe uma flor para o rodapé')).toBe('footer');
+    expect(zoneAsPlace('o header está diferente do body')).toBeNull();
+    expect(zoneAsPlace('deixa igual ao rodapé')).toBeNull();
+    expect(zoneAsPlace('mudou o cabeçalho')).toBeNull();
+    expect(zoneAsPlace('deixa o rodapé mais escuro')).toBe('footer');
+  });
+
+  it('Zona citada no texto: guarda de onde veio (campo ou texto)', () => {
+    const byText = classifySceneRequest({ hasReadyVersion: true, content: 'mais luz no topo' });
+    const byField = classifySceneRequest({
+      hasReadyVersion: true,
+      content: 'mais luz',
+      zone: 'footer',
+    });
+    expect(byText).toMatchObject({ target: { kind: 'zone', zone: 'header', from: 'text' } });
+    expect(byField).toMatchObject({ target: { kind: 'zone', zone: 'footer', from: 'field' } });
+  });
+
+  it('Ajuste que diz como mudar não é imagem nova', () => {
+    expect(wantsNewImage(fold('deixa tudo mais quente'))).toBe(false);
+    expect(wantsNewImage(fold('muda tudo para tons de azul'))).toBe(false);
+    expect(wantsNewImage(fold('quero que mude tudo'))).toBe(true);
+    expect(wantsNewImage(fold('faz o sol do outro lado'))).toBe(false);
+    expect(wantsNewImage(fold('crie uma nova imagem'))).toBe(true);
+  });
+
+  it('Pedido de imagem nova com área marcada: a marcação manda', () => {
+    const result = classifySceneRequest({
+      hasReadyVersion: true,
+      content: 'gere outra imagem',
+      mask: {
+        kind: 'lasso',
+        points: [
+          { x: 0.1, y: 0.1 },
+          { x: 0.3, y: 0.1 },
+          { x: 0.2, y: 0.3 },
+        ],
+      },
+    });
+    expect(result.operation).toBe('local_edit');
+  });
+
+  it('"no lugar de X" sai do assunto', () => {
+    expect(additionSubject('Adicione uma cesta de ovos no lugar da cerca removida')).toBe(
+      'cesta de ovos',
+    );
+    expect(additionSubject('adiciona um balão em vez da nuvem')).toBe('balão');
   });
 });

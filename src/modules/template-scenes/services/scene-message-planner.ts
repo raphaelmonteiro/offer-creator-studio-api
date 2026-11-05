@@ -176,6 +176,8 @@ const replyFor = (classification: SceneClassification): string => {
 const OPERATION_OF: Record<SceneClassification['operation'], SceneVersionOperation> = {
   generate: 'generate',
   global_regenerate: 'generate',
+  new_image: 'generate',
+  needs_confirmation_new_image: 'generate',
   needs_confirmation_global: 'generate',
   local_edit: 'local_edit',
   needs_region: 'local_edit',
