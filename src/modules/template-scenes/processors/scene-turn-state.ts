@@ -59,7 +59,6 @@ export interface TurnContext {
   requestedRegion: Rect | null;
   requestedMask: MaskShape | null;
   targetElementId: string | null;
-  repositionGenerated: boolean;
   parent: TurnParent | null;
   attachmentAssets: TurnAttachmentAsset[];
 }
@@ -129,7 +128,6 @@ export class SceneTurnState {
         requestedRegion: version.requestedRegion,
         requestedMask: version.requestedMask,
         targetElementId: version.targetElementId,
-        repositionGenerated: version.metrics.repositionGenerated === true,
         parent: await this.loadParent(manager, scene),
         attachmentAssets: await this.loadAttachments(manager, scene.id, message),
       };

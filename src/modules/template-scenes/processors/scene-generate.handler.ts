@@ -98,7 +98,6 @@ export class SceneGenerateHandler implements TurnHandler {
       reply: editReply(facts, 'scene'),
       metrics: {
         globalInstruction: instruction,
-        repositionGenerated: ctx.repositionGenerated,
         vision: facts ? { satisfied: facts.satisfied } : null,
       },
     });

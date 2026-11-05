@@ -126,17 +126,16 @@ describeIfSceneDb(
         expect(await lastReply(scene.id)).toContain('Logo e texto não mudaram');
       });
 
-      it('registra a opção de reposicionar os elementos adicionados, que nunca são regenerados', async () => {
+      it('elementos adicionados ficam onde estão, com a mesma posição e a mesma imagem', async () => {
         const { scene } = await h.readyScene({ elements: [genEl] });
         const version = await h.queueTurn(scene, {
           plan: globalPlan,
           request: 'Confirmar',
           operation: 'generate',
-          overrides: { metrics: { plan: globalPlan, repositionGenerated: true } },
         });
         await h.processorWith(h.mock()).process(h.job(scene.id, version.id));
         const done = await h.versionOf(version.id);
-        expect(done.metrics.repositionGenerated).toBe(true);
+        expect(done.status).toBe('ready');
         expect(done.elements).toEqual([genEl]);
       });
 

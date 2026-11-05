@@ -34,7 +34,6 @@ export interface JobPlan {
   requestedRegion: Rect | null;
   requestedMask: MaskShape | null;
   targetElementId: string | null;
-  repositionGenerated: boolean;
 }
 
 /** A mensagem é respondida na hora, sem job (versão `rejected`, custo 0). */
@@ -204,7 +203,6 @@ function toPlan(
     classification,
     ...requestedTarget(target, scene),
     targetElementId: target?.kind === 'element' ? target.elementId : null,
-    repositionGenerated: dto.repositionGenerated === true,
   };
 }
 

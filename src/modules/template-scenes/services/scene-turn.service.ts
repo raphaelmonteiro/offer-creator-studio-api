@@ -125,10 +125,7 @@ export class SceneTurnService {
         requestedRegion: plan.requestedRegion,
         requestedMask: plan.requestedMask,
         targetElementId: plan.targetElementId,
-        metrics: {
-          plan: plan.classification,
-          ...(plan.repositionGenerated ? { repositionGenerated: true } : {}),
-        },
+        metrics: { plan: plan.classification },
         correlationId: randomUUID(),
         createdByUserId: userId,
       }),

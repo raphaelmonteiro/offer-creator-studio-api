@@ -103,9 +103,14 @@ describe('DTOs da cena', () => {
         const confirm = await send({
           confirmGlobal: true,
           replyToMessageId: '11111111-1111-4111-8111-111111111111',
-          repositionGenerated: true,
         });
         expect(confirm.confirmGlobal).toBe(true);
+      });
+
+      it('recusa repositionGenerated (D-13): campo desconhecido', async () => {
+        await expect(send({ repositionGenerated: true })).rejects.toBeInstanceOf(
+          BadRequestException,
+        );
       });
 
       it('aceita 2000 pontos e recusa 2001', async () => {

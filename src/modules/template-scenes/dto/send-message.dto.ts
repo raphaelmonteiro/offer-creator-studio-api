@@ -135,11 +135,4 @@ export class SendMessageDto {
   @IsOptional()
   @IsUUID()
   replyToMessageId?: string;
-
-  @ApiPropertyOptional({
-    description: 'Ajuste geral: reposiciona os elementos adicionados (nunca os regenera)',
-  })
-  @IsOptional()
-  @IsBoolean()
-  repositionGenerated?: boolean;
 }
