@@ -55,7 +55,9 @@ function addPlan(intent: SceneIntent, input: IntentPlanInput): Plan {
 
 /** `integrate`: o alvo (selecionado, nome citado, área) é resolvido por `resolveIntegration`. */
 function integratePlan(intent: SceneIntent, input: IntentPlanInput): Plan {
-  if (!input.marked) return { operation: 'needs_region', reason: 'integrate' };
+  if (!input.marked) {
+    return { operation: 'needs_region', reason: 'integrate', subject: intent.object ?? undefined };
+  }
   return {
     operation: 'local_edit',
     target: input.marked,

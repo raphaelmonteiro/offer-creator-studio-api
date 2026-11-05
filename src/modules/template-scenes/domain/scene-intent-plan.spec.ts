@@ -110,7 +110,7 @@ describe('planFromIntent: da intenção ao plano (D-19)', () => {
     });
 
     it('sem marcação, fica para o resolvedor (nunca vira ajuste geral, R29)', () => {
-      expect(plan({ action: 'integrate' })).toEqual({
+      expect(plan({ action: 'integrate' })).toMatchObject({
         operation: 'needs_region',
         reason: 'integrate',
       });

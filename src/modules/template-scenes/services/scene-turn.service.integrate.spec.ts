@@ -92,17 +92,74 @@ describeIfSceneDb('SceneTurnService: integrar uma camada ao fundo (banco chroma_
     expect((await h.versionsOf(scene.id))[1].targetElementId).toBe('cesta-1');
   });
 
+  it('Nome citado com menos de metade na área: a camada é o alvo e a área continua a marcada (D-21)', async () => {
+    const scene = await h.readyScene('Integra nome fora da área', [basket, second]);
+    const far = { x: 0.05, y: 0.05, w: 0.2, h: 0.1 };
+
+    const result = await h.send(scene.id, { content: 'integra a cesta ao fundo', region: far });
+
+    expect(result).toMatchObject({ operation: 'local_edit', jobId: 'job-1' });
+    const queued = (await h.versionsOf(scene.id))[1];
+    expect(queued.requestedRegion).toEqual(far);
+    expect(queued.metrics.plan).toMatchObject({
+      target: { kind: 'rect', rect: far },
+      integrate: true,
+      integrateLayer: { elementId: 'cesta-1', name: 'Cesta de ovos' },
+    });
+  });
+
+  it.each([
+    ['com área marcada', { region: AREA }],
+    ['sem marcação', {}],
+  ])(
+    'Nome citado ambíguo, %s: pede para selecionar a camada, sem job e sem imagem',
+    async (_l, target) => {
+      const palha: SceneElement = {
+        ...basket,
+        id: 'cesta-2',
+        name: 'Cesta de palha',
+        x: 0.2,
+        y: 0.2,
+      };
+      const scene = await h.readyScene('Integra nome ambíguo', [basket, palha]);
+
+      const result = await h.send(scene.id, { content: 'integra a cesta ao fundo', ...target });
+
+      expect(result).toMatchObject({ jobId: null, operation: 'needs_region' });
+      expect(result.assistantMessage?.content).toContain('Selecione na prévia');
+      expect(h.publish).not.toHaveBeenCalled();
+      expect((await h.versionsOf(scene.id))[1].metrics.plan).toMatchObject({
+        reason: 'choose_layer',
+      });
+    },
+  );
+
+  it('R29: integrar sem alvo e sem marcação pede a área, nunca o ajuste geral', async () => {
+    const scene = await h.readyScene('Integra sem alvo', [basket, second]);
+
+    for (const [i, content] of [
+      'integra ao fundo',
+      'integra ela ao fundo',
+      'mescla com o fundo',
+    ].entries()) {
+      const result = await h.send(scene.id, { content }, i);
+      expect(result).toMatchObject({ jobId: null, operation: 'needs_region' });
+      expect(result.assistantMessage?.content).toContain('Marque a área');
+    }
+    expect(h.publish).not.toHaveBeenCalled();
+  });
+
   it('sem marcação e sem camada citada: pede a marcação, sem job', async () => {
     const scene = await h.readyScene('Integra sem camada', [basket]);
     const result = await h.send(scene.id, { content: 'integre esta coisa ao cenário' });
     expect(result).toMatchObject({ jobId: null, operation: 'needs_region' });
   });
 
-  it('nenhuma camada na área: edição local comum, sem integração', async () => {
+  it('nenhuma camada na área e nenhum nome citado: edição local comum, sem integração', async () => {
     const scene = await h.readyScene('Integra nenhuma', [basket]);
     const far = { x: 0.05, y: 0.05, w: 0.2, h: 0.1 };
 
-    const result = await h.send(scene.id, { content: PHRASE, region: far });
+    const result = await h.send(scene.id, { content: 'integra isso ao fundo', region: far });
 
     expect(result.operation).toBe('local_edit');
     const plan = (await h.versionsOf(scene.id))[1].metrics.plan as Record<string, unknown>;

@@ -59,11 +59,11 @@ function onLayerBox(content: string, layer: SceneElement): LocalEditPlan {
   };
 }
 
-/** Com área marcada: as camadas com metade da caixa dentro; com mais de uma, o nome citado desempata. */
+/** Com área marcada e sem nome citado: as camadas com metade da caixa dentro; mais de uma pede a escolha. */
 async function resolveInArea(
   plan: LocalEditPlan,
   layers: SceneElement[],
-  ctx: { spec: RegionSpec | null; scene: IntegrateScene; folded: string },
+  ctx: { spec: RegionSpec | null; scene: IntegrateScene },
 ): Promise<SceneClassification> {
   if (!ctx.spec) return plan;
   const inside: SceneElement[] = [];
@@ -71,9 +71,8 @@ async function resolveInArea(
     if ((await insideRatio(layer, ctx.spec, ctx.scene)) >= MIN_INSIDE_RATIO) inside.push(layer);
   }
   if (inside.length === 0) return { ...plan, integrate: false };
-  const named = inside.length === 1 ? inside : inside.filter((l) => namedIn(l, ctx.folded));
-  if (named.length === 1) return { ...plan, integrateLayer: layerRef(named[0]) };
-  return { operation: 'needs_region', reason: 'choose_layer' };
+  if (inside.length === 1) return { ...plan, integrateLayer: layerRef(inside[0]) };
+  return CHOOSE_LAYER;
 }
 
 function specOf(plan: LocalEditPlan): RegionSpec | null {
@@ -84,33 +83,40 @@ function specOf(plan: LocalEditPlan): RegionSpec | null {
   return null;
 }
 
+const CHOOSE_LAYER: SceneClassification = { operation: 'needs_region', reason: 'choose_layer' };
+
 /**
- * Acha a camada `generated` a integrar. Selecionada: ela. Com área: as camadas com pelo menos metade
- * da caixa dentro dela (uma só é o alvo; duas ou mais, o nome citado desempata, senão pede para
- * selecionar; nenhuma: edição local comum). Sem marcação: uma única camada cujo nome o texto cita,
- * com a caixa dela; senão a resposta pede a marcação. Logo e texto nunca entram.
+ * Acha a camada `generated` a integrar (D-21), nesta ordem: 1. a selecionada; 2. o nome citado (uma
+ * palavra de 4 letras ou mais do nome da camada, no `object` ou na mensagem) que aponta para uma só
+ * camada, mesmo com menos de 50% dentro da área (a área de edição continua a marcada; sem marcação, é a
+ * caixa da camada); 3. o nome que aponta para duas ou mais: pede a escolha; 4. com área e sem nome, a
+ * regra de 50% do PV-35, e mais de uma pede a escolha; 5. nada disso: com marcação, edição local comum;
+ * sem marcação, `needs_region` (R29, nunca o ajuste geral). Logo e texto nunca entram.
  */
 export async function resolveIntegration(
   classification: SceneClassification,
   input: { content: string; layers: SceneElement[]; scene: IntegrateScene },
 ): Promise<SceneClassification> {
-  const folded = fold(input.content);
+  const unmarked =
+    classification.operation === 'needs_region' && classification.reason === 'integrate';
+  const plan =
+    classification.operation === 'local_edit' && classification.integrate ? classification : null;
+  if (!unmarked && !plan) return classification;
   const layers = input.layers.filter((layer) => layer.kind === 'generated');
-  if (classification.operation === 'needs_region' && classification.reason === 'integrate') {
-    const named = layers.filter((layer) => namedIn(layer, folded));
-    return named.length === 1
-      ? onLayerBox(input.content, named[0])
-      : { operation: 'needs_region', reason: 'item' };
-  }
-  if (classification.operation !== 'local_edit' || !classification.integrate) return classification;
-  if (classification.target.kind === 'element') {
-    const { elementId } = classification.target;
+  if (plan?.target.kind === 'element') {
+    const { elementId } = plan.target;
     const layer = layers.find((candidate) => candidate.id === elementId);
-    return layer ? { ...classification, integrateLayer: layerRef(layer) } : classification;
+    return layer ? { ...plan, integrateLayer: layerRef(layer) } : plan;
   }
-  return resolveInArea(classification, layers, {
-    spec: specOf(classification),
-    scene: input.scene,
-    folded,
-  });
+  const hint = plan ? plan.object : (classification as { subject?: string }).subject;
+  const folded = fold(`${hint ?? ''} ${input.content}`);
+  const named = layers.filter((layer) => namedIn(layer, folded));
+  if (named.length > 1) return CHOOSE_LAYER;
+  if (named.length === 1) {
+    return plan
+      ? { ...plan, integrateLayer: layerRef(named[0]) }
+      : onLayerBox(input.content, named[0]);
+  }
+  if (!plan) return { operation: 'needs_region', reason: 'item' };
+  return resolveInArea(plan, layers, { spec: specOf(plan), scene: input.scene });
 }
