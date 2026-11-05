@@ -85,6 +85,15 @@ export class SceneAddElementHandler implements TurnHandler {
     if (!trimmed) return;
     if (await state.isCancelRequested(ctx)) return state.cancel(ctx);
     if (!(await state.advance(ctx, 'saving'))) return;
+    await this.saveElement(ctx, plan, trimmed);
+  }
+
+  /** Guarda o PNG, cria o elemento no lugar pedido e fecha a versão; se não fechou, apaga o arquivo. */
+  private async saveElement(
+    ctx: TurnContext,
+    plan: { subject: string; target: LocalTarget | null },
+    trimmed: NonNullable<Awaited<ReturnType<typeof trimToAlpha>>>,
+  ): Promise<void> {
     const box = markedBox(plan.target, ctx);
     const zone = box ? null : citedZone(plan.target);
     const file = await this.support.storeElement(ctx, trimmed.png, trimmed);
@@ -95,10 +104,10 @@ export class SceneAddElementHandler implements TurnHandler {
       box,
       zone,
     });
-    const outcome = await state.completeReusingImage(
+    const outcome = await this.support.state.completeReusingImage(
       ctx,
       {
-        elements: [...(ctx.parent.elements ?? []), element],
+        elements: [...(ctx.parent?.elements ?? []), element],
         reply: addElementReply(plan.subject, box ? 'area' : (zone ?? 'center')),
         metrics: { addedElementId: element.id },
       },
