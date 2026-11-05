@@ -36,7 +36,7 @@ interface WithResponseResult {
   request_id?: string | null;
 }
 
-type SdkImageCall = (
+export type SdkImageCall = (
   request: unknown,
   options: unknown,
 ) => { withResponse(): Promise<WithResponseResult> };

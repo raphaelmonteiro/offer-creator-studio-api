@@ -63,7 +63,7 @@ export class OpenAiVisionService {
       ],
       response_format: { type: 'json_object' },
       ...(input.model.startsWith('gpt-6') ? { reasoning_effort: 'low' } : {}),
-    } as any;
+    } as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
     const { data, response } = await withAiLogging(
       this.logger,
       {

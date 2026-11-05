@@ -11,6 +11,7 @@ import {
   SceneCallOptions,
   SceneCallResponse,
   SceneRequestExtras,
+  SdkImageCall,
 } from './openai-image-scene-call';
 import { buildMaskedEditBody, MaskedEditInput } from './openai-image-masked-edit';
 import {
@@ -130,7 +131,7 @@ function sceneCallResult(
 
 /** `client.post` do SDK (a 6.x não tipa `mask` por JSON em `images.edit`). */
 interface OpenAiJsonClient {
-  post(path: string, options: object): { withResponse(): Promise<any> };
+  post(path: string, options: object): ReturnType<SdkImageCall>;
 }
 
 interface RetryContext {
@@ -371,7 +372,7 @@ export class OpenAiImageService {
     /** Fundo transparente e máscara conferidos pela tabela de capacidades (só no modo `sceneCall`). */
     extras?: SceneRequestExtras;
     /** Chamada própria no lugar de `images[method]` (edição com máscara por JSON). */
-    invoke?: (request: unknown, sdkOptions: unknown) => { withResponse(): Promise<any> };
+    invoke?: SdkImageCall;
   }): Promise<ImageCallResponse> {
     const { method, request, feature, model, sceneCall } = args;
     const endpoint = `images.${method}`;
