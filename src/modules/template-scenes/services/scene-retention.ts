@@ -4,25 +4,32 @@ import {
   sceneGcConfigFromEnv,
   selectProtectedSceneAssets,
 } from '../../../shared/gc/template-scenes-gc.rules';
+import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 
 /**
  * Poda de master e prévia (D-12, PV-5): marca `expiresAt = agora` nas que saíram do conjunto
- * protegido (as N versões `ready` mais recentes e as aprovadas) e limpa a marca das que voltaram.
+ * protegido (as N versões `ready` mais recentes, incluídas as tentativas não aplicadas, as aprovadas e a
+ * atual, D-20) e limpa a marca das que voltaram.
  * Roda no `manager` da transação, sob o lock da cena, em todo caminho que cria versão `ready`
  * (processor, `PATCH elements` e `restore`). Quem apaga o arquivo é o GC.
  */
 export async function pruneSceneAssets(
   manager: EntityManager,
-  sceneId: string,
+  scene: Pick<TemplateScene, 'id' | 'currentVersionId'>,
   now: Date = new Date(),
 ): Promise<void> {
+  const sceneId = scene.id;
   const versions = await manager.find(TemplateSceneVersion, {
     where: { sceneId },
     select: ['id', 'number', 'status', 'masterAssetId', 'previewAssetId', 'approvedAt'],
   });
-  const protectedIds = selectProtectedSceneAssets(versions, sceneGcConfigFromEnv().mastersKept);
+  const protectedIds = selectProtectedSceneAssets(
+    versions,
+    sceneGcConfigFromEnv().mastersKept,
+    scene.currentVersionId,
+  );
   const assets = await manager.find(TemplateSceneAsset, {
     where: { sceneId, role: In([...SCENE_PROTECTABLE_ROLES]) as never },
   });

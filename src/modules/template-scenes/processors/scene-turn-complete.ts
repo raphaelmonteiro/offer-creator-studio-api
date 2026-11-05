@@ -105,7 +105,7 @@ export async function readyVersion(
   if (extra.requestedRegion !== undefined) version.requestedRegion = extra.requestedRegion;
   await manager.save(version);
   if (!extra.notApplied) scene.currentVersionId = version.id;
-  await pruneSceneAssets(manager, scene.id);
+  await pruneSceneAssets(manager, scene);
   await settleUserMessage(manager, version.id, 'done');
   await addAssistantMessage(manager, {
     sceneId: scene.id,

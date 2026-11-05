@@ -106,7 +106,9 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
   }
 
   const prune = (sceneId: string) =>
-    dataSource.transaction((manager) => pruneSceneAssets(manager, sceneId));
+    dataSource.transaction(async (manager) =>
+      pruneSceneAssets(manager, await manager.findOneByOrFail(TemplateScene, { id: sceneId })),
+    );
   const purge = (sceneId: string, dryRun = false) =>
     gc.run({ dryRun, now: later(), onlySceneIds: [sceneId] });
   const assetRow = (id: string) => dataSource.manager.findOneByOrFail(TemplateSceneAsset, { id });
@@ -144,6 +146,55 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
 
     expect(await exists(ready[0].master.url)).toBe(false);
     expect(await exists(ready[4].master.url)).toBe(true);
+  });
+
+  it('Tentativas ocupam as vagas da retenção: 5 tentativas seguidas, a atual e a aprovada intactas (D-20, R22)', async () => {
+    const { scene, ready } = await sceneWith('GC tentativas', 2);
+    await dataSource.manager.update(
+      TemplateSceneVersion,
+      { id: ready[1].version.id },
+      { approvedAt: new Date() },
+    );
+    await dataSource.manager.update(
+      TemplateScene,
+      { id: scene.id },
+      { currentVersionId: ready[0].version.id },
+    );
+    const attempts = [];
+    for (let number = 3; number <= 7; number++) {
+      attempts.push(await addReadyOnDisk(scene, number, { metrics: { notApplied: true } }));
+    }
+
+    await prune(scene.id);
+    const summary = await purge(scene.id);
+
+    expect(summary.selected).toBe(0);
+    for (const item of [...ready, ...attempts]) {
+      expect(await exists(item.master.url)).toBe(true);
+      expect(await exists(item.preview.url)).toBe(true);
+      expect((await assetRow(item.master.id)).expiresAt).toBeNull();
+    }
+  });
+
+  it('a atual fora das 5 vagas e sem aprovação também fica protegida; a sexta tentativa poda a mais antiga', async () => {
+    const { scene, ready } = await sceneWith('GC atual fora das vagas', 1);
+    await dataSource.manager.update(
+      TemplateScene,
+      { id: scene.id },
+      { currentVersionId: ready[0].version.id },
+    );
+    const attempts = [];
+    for (let number = 2; number <= 7; number++) {
+      attempts.push(await addReadyOnDisk(scene, number, { metrics: { notApplied: true } }));
+    }
+
+    await prune(scene.id);
+    await purge(scene.id);
+
+    expect(await exists(ready[0].master.url)).toBe(true);
+    expect(await exists(ready[0].preview.url)).toBe(true);
+    expect(await exists(attempts[0].master.url)).toBe(false);
+    expect(await exists(attempts[5].master.url)).toBe(true);
   });
 
   it('versão aprovada continua protegida mesmo com 7 versões depois dela', async () => {

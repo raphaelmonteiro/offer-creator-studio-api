@@ -41,6 +41,7 @@ export interface TemplateScenesGcSummary {
 
 interface SceneRow {
   deletedAt: Date | null;
+  currentVersionId: string | null;
 }
 
 /**
@@ -121,6 +122,7 @@ export class TemplateScenesGcRunner {
         assets,
         versions,
         sceneDeletedAt: scene.deletedAt,
+        currentVersionId: scene.currentVersionId,
         now,
         config,
       });
@@ -152,7 +154,8 @@ export class TemplateScenesGcRunner {
 
   private async lockScene(manager: EntityManager, sceneId: string): Promise<SceneRow | null> {
     const rows: SceneRow[] = await manager.query(
-      `SELECT "deletedAt" FROM template_scenes WHERE id = $1 FOR UPDATE`,
+      `SELECT "deletedAt", "currentVersionId"::text AS "currentVersionId"
+         FROM template_scenes WHERE id = $1 FOR UPDATE`,
       [sceneId],
     );
     return rows[0] ?? null;

@@ -155,7 +155,7 @@ export class SceneVersionsService {
     version: TemplateSceneVersion,
   ): Promise<SceneDetailView> {
     scene.currentVersionId = version.id;
-    await pruneSceneAssets(manager, scene.id);
+    await pruneSceneAssets(manager, scene);
     const revision = await bumpRevision(manager, scene);
     await publishSceneEvent(manager, {
       sceneId: scene.id,
