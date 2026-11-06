@@ -5,17 +5,12 @@ import { SceneTurnService } from '../services/scene-turn.service';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { insertReadyVersion, insertScene } from './scene-fixtures';
-import { MockSceneIntentClient } from '../providers/mock-scene-intent.client';
-import { SceneIntentCall } from '../providers/scene-intent-client';
-import { mockIntentService } from './scene-intent-fixtures';
 import { deleteTestScenes, openSceneTestDb } from './scene-test-db';
 
 export interface TurnServiceHarness {
   dataSource: DataSource;
   service: SceneTurnService;
   publish: jest.Mock;
-  /** Chamadas ao modelo de intenção; por padrão delega ao `mock`, e cada teste pode trocar a resposta. */
-  intentClassify: jest.Mock;
   locks: SceneLockService;
   /** Cena sem versão. */
   newScene(name: string): Promise<TemplateScene>;
@@ -40,15 +35,10 @@ export function useTurnServiceHarness(): TurnServiceHarness {
   });
   beforeEach(() => {
     h.publish = jest.fn(async () => `job-${h.publish.mock.calls.length}`);
-    const intentMock = new MockSceneIntentClient();
-    h.intentClassify = jest.fn((input: SceneIntentCall) => intentMock.classify(input));
     h.locks = new SceneLockService(h.dataSource);
-    h.service = new SceneTurnService(
-      h.dataSource,
-      h.locks,
-      { publish: h.publish } as unknown as AnimationQueueService,
-      mockIntentService({ classify: h.intentClassify }),
-    );
+    h.service = new SceneTurnService(h.dataSource, h.locks, {
+      publish: h.publish,
+    } as unknown as AnimationQueueService);
   });
   afterAll(async () => {
     await deleteTestScenes(h.dataSource, createdScenes);

@@ -1,4 +1,6 @@
+import { Client } from 'pg';
 import { DataSource } from 'typeorm';
+import { TEMPLATE_SCENE_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
@@ -9,9 +11,13 @@ import {
   insertScene,
   insertVersion,
 } from '../testing/scene-fixtures';
-import { mockIntentService } from '../testing/scene-intent-fixtures';
 import { errorOf } from '../testing/scene-test-helpers';
-import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
+import {
+  deleteTestScenes,
+  describeIfSceneDb,
+  openSceneTestDb,
+  SCENE_DB_URL,
+} from '../testing/scene-test-db';
 import { SceneLockService } from './scene-lock.service';
 import { SceneTurnService } from './scene-turn.service';
 
@@ -32,12 +38,9 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
       publishedInTransaction.push(Boolean(options?.manager?.queryRunner?.isTransactionActive));
       return `job-${publish.mock.calls.length}`;
     });
-    service = new SceneTurnService(
-      dataSource,
-      new SceneLockService(dataSource),
-      { publish } as unknown as AnimationQueueService,
-      mockIntentService(),
-    );
+    service = new SceneTurnService(dataSource, new SceneLockService(dataSource), {
+      publish,
+    } as unknown as AnimationQueueService);
   });
 
   afterAll(async () => {
@@ -50,6 +53,14 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
     createdScenes.push(scene.id);
     return scene;
   };
+  /** Cena com a versão 1 pronta (revisão 0) e, opcionalmente, camadas. */
+  const readyScene = async (name: string, elements: TemplateSceneVersion['elements'] = []) => {
+    const scene = await newScene(name);
+    const { version } = await insertReadyVersion(dataSource, scene, 1, { elements });
+    scene.currentVersionId = version.id;
+    await dataSource.manager.save(scene);
+    return scene;
+  };
   const message = (content = 'campo verde com sol', expectedRevision = 0) => ({
     content,
     expectedRevision,
@@ -60,19 +71,30 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
     (await dataSource.manager.findOneByOrFail(TemplateScene, { id: sceneId })).revision;
 
   describe('sendMessage', () => {
-    it('grava a mensagem e a versão queued e publica o job (retryLimit 0) na mesma transação', async () => {
+    it('Mensagem aparece na hora: grava a mensagem e a versão queued no step reading e publica o job do Diretor (retryLimit 0) na mesma transação', async () => {
       const scene = await newScene('Turno primeira');
 
       const result = await service.sendMessage(scene.id, message(), null);
 
-      expect(result).toMatchObject({ jobId: 'job-1', revision: 1 });
+      expect(result).toEqual({
+        messageId: expect.any(String),
+        versionId: expect.any(String),
+        jobId: 'job-1',
+        revision: 1,
+      });
+      expect(result).not.toHaveProperty('assistantMessage');
+      expect(result).not.toHaveProperty('operation');
       const [version] = await versionsOf(scene.id);
       expect(version).toMatchObject({
         id: result.versionId,
         number: 1,
         operation: 'generate',
         status: 'queued',
+        step: 'reading',
         parentVersionId: null,
+        requestedRegion: null,
+        requestedMask: null,
+        targetElementId: null,
       });
       const stored = await dataSource.manager.findOneByOrFail(TemplateSceneMessage, {
         id: result.messageId,
@@ -85,13 +107,52 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
       });
       expect(publish).toHaveBeenCalledTimes(1);
       const [queue, data, options] = publish.mock.calls[0];
-      expect(queue).toBe(QUEUES.TEMPLATE_SCENE_TURN);
+      expect(queue).toBe(QUEUES.TEMPLATE_SCENE_DIRECTOR);
       expect(data).toEqual({ sceneId: scene.id, versionId: version.id });
-      expect(options).toMatchObject({ retryLimit: 0, expireInSeconds: 900 });
+      expect(options).toMatchObject({ retryLimit: 0, expireInSeconds: 180 });
+      expect(options.startAfterSeconds).toBeUndefined();
       expect(publishedInTransaction).toEqual([true]);
     });
 
-    it('segunda mensagem durante a geração: 409 SCENE_BUSY e nenhum job novo', async () => {
+    it('emite version.step com reading e status queued, depois de bumpRevision, na mesma transação', async () => {
+      const scene = await newScene('Turno evento');
+      const client = new Client({ connectionString: SCENE_DB_URL });
+      await client.connect();
+      const events: Array<Record<string, unknown>> = [];
+      client.on('notification', (n) => events.push(JSON.parse(n.payload ?? '{}')));
+      await client.query(`LISTEN ${TEMPLATE_SCENE_EVENTS_CHANNEL}`);
+      try {
+        const result = await service.sendMessage(scene.id, message(), null);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const mine = events.filter((event) => event.sceneId === scene.id);
+        expect(mine).toEqual([
+          expect.objectContaining({
+            kind: 'version.step',
+            step: 'reading',
+            status: 'queued',
+            versionId: result.versionId,
+            revision: 1,
+          }),
+        ]);
+      } finally {
+        await client.end();
+      }
+    });
+
+    it('em cena com imagem a operação inicial é redraw, filha da versão atual', async () => {
+      const scene = await readyScene('Turno redraw');
+      const result = await service.sendMessage(scene.id, message('tira o coelho', 0), null);
+      const versions = await versionsOf(scene.id);
+      expect(versions[1]).toMatchObject({
+        id: result.versionId,
+        operation: 'redraw',
+        status: 'queued',
+        step: 'reading',
+        parentVersionId: versions[0].id,
+      });
+    });
+
+    it('Segunda mensagem durante a leitura: 409 SCENE_BUSY, nenhum job novo e nenhuma chamada ao Diretor', async () => {
       const scene = await newScene('Turno ocupada');
       await service.sendMessage(scene.id, message(), null);
 
@@ -113,7 +174,7 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
       expect(publish).not.toHaveBeenCalled();
     });
 
-    it('duas mensagens ao mesmo tempo com a mesma revisão: uma 202, a outra 409, uma só versão queued', async () => {
+    it('Duas abas com a mesma revisão: uma 202, a outra 409, uma só versão queued e um só job do Diretor', async () => {
       const scene = await newScene('Turno corrida');
       await dataSource.manager.update(TemplateScene, { id: scene.id }, { revision: 2 });
 
@@ -205,6 +266,118 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
       expect(
         await errorOf(service.sendMessage('00000000-0000-4000-8000-000000000000', message(), null)),
       ).toEqual({ status: 404, code: 'SCENE_NOT_FOUND' });
+    });
+  });
+
+  describe('alvo da mensagem', () => {
+    const rect = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
+
+    it('retângulo, zona e forma ficam gravados na versão; o elemento é só dica de camada', async () => {
+      const scene = await readyScene('Alvo grava', [
+        {
+          id: 'logo-1',
+          kind: 'logo',
+          name: 'Logo 1',
+          x: 0.5,
+          y: 0.1,
+          w: 0.3,
+          aspect: 2,
+          rotation: 0,
+          z: 1,
+        },
+      ]);
+      let revision = 0;
+      const send = async (extra: Record<string, unknown>) => {
+        const result = await service.sendMessage(
+          scene.id,
+          { ...message('tira isso', revision), ...extra } as never,
+          null,
+        );
+        revision = result.revision;
+        const version = (await versionsOf(scene.id)).find((v) => v.id === result.versionId);
+        // libera a cena para a próxima mensagem
+        await dataSource.manager.update(
+          TemplateSceneVersion,
+          { id: result.versionId },
+          { status: 'rejected' },
+        );
+        return version as TemplateSceneVersion;
+      };
+
+      const byRegion = await send({ region: rect });
+      expect(byRegion).toMatchObject({
+        requestedRegion: rect,
+        requestedMask: null,
+        targetElementId: null,
+      });
+
+      const byZone = await send({ zone: 'footer' });
+      expect(byZone.requestedMask).toBeNull();
+      expect(byZone.requestedRegion).toMatchObject({ x: 0, w: 1 });
+      expect(byZone.requestedRegion?.y).toBeGreaterThan(0.5);
+
+      const lasso = {
+        kind: 'lasso',
+        points: [
+          { x: 0.2, y: 0.2 },
+          { x: 0.6, y: 0.2 },
+          { x: 0.4, y: 0.5 },
+        ],
+      };
+      const byMask = await send({ mask: lasso });
+      expect(byMask.requestedMask).toEqual(lasso);
+      expect(byMask.requestedRegion).toMatchObject({ x: 0.2, y: 0.2 });
+
+      const byElement = await send({ targetElementId: 'logo-1' });
+      expect(byElement).toMatchObject({
+        targetElementId: 'logo-1',
+        requestedRegion: null,
+        requestedMask: null,
+      });
+    });
+
+    it('Marcação pequena demais: 422 REGION_TOO_SMALL, sem Diretor, sem versão e sem mensagem', async () => {
+      const scene = await readyScene('Alvo pequeno');
+      const body = { ...message('tira isso'), region: { x: 0.1, y: 0.1, w: 0.02, h: 0.02 } };
+      expect(await errorOf(service.sendMessage(scene.id, body as never, null))).toEqual({
+        status: 422,
+        code: 'REGION_TOO_SMALL',
+      });
+      expect(publish).not.toHaveBeenCalled();
+      expect(await versionsOf(scene.id)).toHaveLength(1);
+      expect(await dataSource.manager.countBy(TemplateSceneMessage, { sceneId: scene.id })).toBe(0);
+    });
+
+    it('Dois alvos: 400 e nada é gravado', async () => {
+      const scene = await readyScene('Alvo dois');
+      const body = {
+        ...message('tira isso'),
+        region: rect,
+        mask: {
+          kind: 'lasso',
+          points: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 0.5, y: 1 },
+          ],
+        },
+      };
+      expect(await errorOf(service.sendMessage(scene.id, body as never, null))).toEqual({
+        status: 400,
+        code: 'BAD_REQUEST',
+      });
+      expect(publish).not.toHaveBeenCalled();
+      expect(await versionsOf(scene.id)).toHaveLength(1);
+    });
+
+    it('elemento que não existe na versão atual: 422 TARGET_ELEMENT_NOT_FOUND', async () => {
+      const scene = await readyScene('Alvo elemento');
+      const body = { ...message('tira isso'), targetElementId: 'fantasma' };
+      expect(await errorOf(service.sendMessage(scene.id, body as never, null))).toEqual({
+        status: 422,
+        code: 'TARGET_ELEMENT_NOT_FOUND',
+      });
+      expect(publish).not.toHaveBeenCalled();
     });
   });
 

@@ -3,7 +3,6 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -74,8 +73,8 @@ export class MessageAttachmentDto {
 
 /**
  * Mensagem do chat. O alvo da edição é um só: `region`, `mask`, `zone` e `targetElementId` são
- * mutuamente exclusivos (400, conferido no service). `confirmGlobal` responde à pergunta do ajuste
- * geral (com `replyToMessageId`).
+ * mutuamente exclusivos (400, conferido no service). `targetElementId` é só uma dica de camada ao Diretor, não é
+ * marcação. Campo fora desta lista (`confirmGlobal`, `replyToMessageId`) é 400 pelo `forbidNonWhitelisted`.
  */
 export class SendMessageDto {
   @ApiProperty({
@@ -125,14 +124,4 @@ export class SendMessageDto {
   @IsString()
   @MaxLength(64)
   targetElementId?: string;
-
-  @ApiPropertyOptional({ description: 'Confirma o ajuste geral perguntado antes' })
-  @IsOptional()
-  @IsBoolean()
-  confirmGlobal?: boolean;
-
-  @ApiPropertyOptional({ description: 'Mensagem do assistente com a pergunta que se responde' })
-  @IsOptional()
-  @IsUUID()
-  replyToMessageId?: string;
 }

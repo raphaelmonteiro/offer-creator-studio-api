@@ -95,16 +95,11 @@ describe('DTOs da cena', () => {
         points: Array.from({ length: n }, (_v, i) => ({ x: (i % 100) / 100, y: 0.5 })),
       });
 
-      it('aceita região, forma, zona, elemento e confirmação', async () => {
+      it('aceita região, forma, zona e elemento', async () => {
         expect((await send({ region: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } })).region?.w).toBe(0.2);
         expect((await send({ mask: lasso(10) })).mask?.kind).toBe('lasso');
         expect((await send({ zone: 'body' })).zone).toBe('body');
         expect((await send({ targetElementId: 'logo-1' })).targetElementId).toBe('logo-1');
-        const confirm = await send({
-          confirmGlobal: true,
-          replyToMessageId: '11111111-1111-4111-8111-111111111111',
-        });
-        expect(confirm.confirmGlobal).toBe(true);
       });
 
       it('recusa campo desconhecido, ponto com carga extra e traços vazios no mask (R2)', async () => {
@@ -156,7 +151,9 @@ describe('DTOs da cena', () => {
         [{ mask: 'x' }],
         [{ zone: 'meio' }],
         [{ targetElementId: 'x'.repeat(65) }],
+        [{ confirmGlobal: true }],
         [{ confirmGlobal: 'sim' }],
+        [{ replyToMessageId: '11111111-1111-4111-8111-111111111111' }],
         [{ replyToMessageId: 'abc' }],
       ])('recusa %j', async (extra) => {
         await expect(send(extra)).rejects.toBeInstanceOf(BadRequestException);

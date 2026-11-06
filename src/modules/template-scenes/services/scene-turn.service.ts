@@ -15,13 +15,14 @@ import {
   versionNotFound,
 } from '../scene.errors';
 import { CANCELLED_REPLY } from '../scene-texts';
-import { SceneClassification } from '../domain/scene-operation.classifier';
 import { publishSceneEvent } from './scene-events';
 import { isBusyIndexViolation, publishQueued, TurnInput } from './scene-turn-helpers';
-import { JobPlan, planMessage, ReplyPlan } from './scene-message-planner';
-import { assertSingleTarget } from './scene-message-target';
-import { intentCostFields, logLostIntent, recognizeIntent } from './scene-intent-turn';
-import { SceneIntentService } from './scene-intent.service';
+import {
+  assertShapeBigEnough,
+  assertSingleTarget,
+  assertTargetElementExists,
+  requestedTargetOf,
+} from './scene-message-target';
 import { addAssistantMessage, settleUserMessage } from './scene-messages';
 import {
   assertExpectedRevision,
@@ -32,19 +33,18 @@ import {
   SceneLockService,
 } from './scene-lock.service';
 
-/** Quanto o job da cena pode rodar antes de expirar (a chamada paga tem timeout de 180 s). */
-const TURN_EXPIRE_SECONDS = 900;
+/** Quanto o job da imagem pode rodar antes de expirar (a chamada paga tem timeout de 180 s). */
+export const TURN_EXPIRE_SECONDS = 900;
+/** Quanto o job do Diretor pode rodar: o teto do Diretor é 20 s, e o plano é refeito no máximo uma vez. */
+const DIRECTOR_EXPIRE_SECONDS = 180;
 
+/** Resposta do `POST .../messages` (202): a mensagem e a versão existem antes de o Diretor ler. */
 export interface SendMessageResult {
   messageId: string;
   versionId: string;
-  /** `null` quando a resposta é imediata (sem job): pedir a área, mover item da imagem, confirmar o ajuste geral. */
-  jobId: string | null;
+  /** Sempre presente: toda mensagem vira um job do Diretor. */
+  jobId: string;
   revision: number;
-  /** Como o pedido foi classificado (`generate`, `local_edit`, `needs_region`...). */
-  operation: SceneClassification['operation'];
-  /** Resposta do assistente quando ela já existe na hora do envio. */
-  assistantMessage: { id: string; content: string } | null;
 }
 
 export interface CancelVersionResult {
@@ -54,7 +54,7 @@ export interface CancelVersionResult {
   revision: number;
 }
 
-/** Turno do chat: mensagem + versão `queued` + job (mesma transação) e o cancelamento. */
+/** Turno do chat: mensagem + versão `queued` (lendo) + job do Diretor (mesma transação) e o cancelamento. */
 @Injectable()
 export class SceneTurnService {
   private readonly logger = new Logger(SceneTurnService.name);
@@ -63,152 +63,89 @@ export class SceneTurnService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly locks: SceneLockService,
     private readonly queue: AnimationQueueService,
-    private readonly intent: SceneIntentService,
   ) {}
 
   /**
-   * Reconhece a intenção (modelo de texto, D-19) ANTES do lock, e então, sob o lock da cena e com a
-   * conferência refeita: enfileira o job (versão `queued`, `retryLimit: 0`: chamada paga nunca é
-   * repetida pela fila) ou responde na hora, sem job (versão `rejected`, sem chamada de imagem), nos
-   * casos de pedir a área, mover item da imagem e perguntar antes de gastar. O custo da intenção soma
-   * na versão e na cena; um conflito na segunda conferência responde o erro normal, e o custo fica só no log.
+   * Sob o lock da cena: confere revisão, cena ocupada, corpo e anexos, e então grava a mensagem do cliente, a
+   * versão `queued` no step `reading` e o job do Diretor na MESMA transação (`retryLimit: 0`). Responde 202
+   * sem esperar o Diretor: fechar a aba não perde a mensagem, e o índice `UQ_tsv_scene_busy` garante um só turno,
+   * inclusive durante a leitura. Duas abas com a mesma revisão: uma recebe 202 e a outra 409, e o Diretor é
+   * chamado uma só vez.
    */
   async sendMessage(
     sceneId: string,
     dto: SendMessageDto,
     userId: string | null,
   ): Promise<SendMessageResult> {
-    const intent = await recognizeIntent(this.dataSource, this.intent, sceneId, dto);
     try {
       return await this.locks.run(sceneId, async ({ manager, scene }) => {
         assertExpectedRevision(scene, dto.expectedRevision);
         await assertSceneIdle(manager, sceneId);
         assertSingleTarget(dto); // 400 antes de qualquer consulta: o corpo inválido vence o 422 do anexo
         await this.assertAttachmentsInScene(manager, sceneId, dto);
-        const plan = await planMessage(manager, scene, dto, intent);
-        if (plan.kind === 'reply') return this.recordReply(manager, scene, { dto, userId }, plan);
+        const hasImage = await manager.exists(TemplateSceneVersion, {
+          where: { sceneId, status: 'ready' },
+        });
+        if (hasImage) {
+          await assertShapeBigEnough(dto, scene);
+          await assertTargetElementExists(manager, scene, dto);
+        }
         await closeOpenManual(manager, sceneId);
-        return this.enqueueJob(manager, scene, { dto, userId }, plan);
+        return this.enqueueReading(manager, scene, { dto, userId }, hasImage);
       });
     } catch (error) {
-      logLostIntent(this.logger, sceneId, intent);
       if (isBusyIndexViolation(error)) throw sceneBusy();
       throw error;
     }
   }
 
-  private async saveUserMessage(
+  private async enqueueReading(
     manager: EntityManager,
     scene: TemplateScene,
-    saved: TurnInput & { versionId: string; status: 'queued' | 'done' },
-  ): Promise<TemplateSceneMessage> {
-    const { dto, userId, versionId, status } = saved;
-    return manager.save(
+    input: TurnInput,
+    hasImage: boolean,
+  ): Promise<SendMessageResult> {
+    const { dto, userId } = input;
+    const version = await manager.save(
+      manager.create(TemplateSceneVersion, {
+        sceneId: scene.id,
+        parentVersionId: scene.currentVersionId,
+        number: await nextVersionNumber(manager, scene.id),
+        // Operação inicial; o consumer do Diretor a troca para `set_layer`, `restore` ou `generate` quando é o caso.
+        operation: hasImage ? 'redraw' : 'generate',
+        status: 'queued',
+        step: 'reading',
+        ...requestedTargetOf(dto, scene),
+        metrics: {},
+        correlationId: randomUUID(),
+        createdByUserId: userId,
+      }),
+    );
+    const message = await manager.save(
       manager.create(TemplateSceneMessage, {
         sceneId: scene.id,
-        versionId,
+        versionId: version.id,
         role: 'user',
         content: dto.content,
         attachments: dto.attachments ?? [],
-        status,
-        createdByUserId: userId,
-      }),
-    );
-  }
-
-  private async enqueueJob(
-    manager: EntityManager,
-    scene: TemplateScene,
-    input: TurnInput,
-    plan: JobPlan,
-  ): Promise<SendMessageResult> {
-    const { userId } = input;
-    const paid = intentCostFields(scene, plan.intent);
-    const version = await manager.save(
-      manager.create(TemplateSceneVersion, {
-        sceneId: scene.id,
-        parentVersionId: scene.currentVersionId,
-        number: await nextVersionNumber(manager, scene.id),
-        operation: plan.operation,
         status: 'queued',
-        requestedRegion: plan.requestedRegion,
-        requestedMask: plan.requestedMask,
-        targetElementId: plan.targetElementId,
-        providerCostUsd: paid.providerCostUsd,
-        metrics: { plan: plan.classification, ...paid.metrics },
-        correlationId: randomUUID(),
         createdByUserId: userId,
       }),
     );
-    const message = await this.saveUserMessage(manager, scene, {
-      ...input,
-      versionId: version.id,
-      status: 'queued',
-    });
     const jobId = await this.queue.publish(
-      QUEUES.TEMPLATE_SCENE_TURN,
+      QUEUES.TEMPLATE_SCENE_DIRECTOR,
       { sceneId: scene.id, versionId: version.id },
-      { manager, expireInSeconds: TURN_EXPIRE_SECONDS, retryLimit: 0 },
+      { manager, expireInSeconds: DIRECTOR_EXPIRE_SECONDS, retryLimit: 0 },
     );
-    if (!jobId) throw new Error('A fila não aceitou o job da cena');
+    if (!jobId) throw new Error('A fila não aceitou o job do Diretor');
     const revision = await bumpRevision(manager, scene);
-    await publishQueued(manager, scene.id, version.id, revision);
-    return {
-      messageId: message.id,
-      versionId: version.id,
-      jobId,
-      revision,
-      operation: plan.classification.operation,
-      assistantMessage: null,
-    };
-  }
-
-  /** Resposta imediata: versão `rejected` (custo 0), as duas mensagens do chat e nenhum job. */
-  private async recordReply(
-    manager: EntityManager,
-    scene: TemplateScene,
-    input: TurnInput,
-    plan: ReplyPlan,
-  ): Promise<SendMessageResult> {
-    const { userId } = input;
-    const paid = intentCostFields(scene, plan.intent);
-    const version = await manager.save(
-      manager.create(TemplateSceneVersion, {
-        sceneId: scene.id,
-        parentVersionId: scene.currentVersionId,
-        number: await nextVersionNumber(manager, scene.id),
-        operation: plan.operation,
-        status: 'rejected',
-        providerCostUsd: paid.providerCostUsd,
-        metrics: {
-          plan: plan.classification,
-          ...paid.metrics,
-          ...(plan.pendingConfirmation ? { pendingConfirmation: plan.pendingConfirmation } : {}),
-        },
-        correlationId: randomUUID(),
-        createdByUserId: userId,
-      }),
-    );
-    const message = await this.saveUserMessage(manager, scene, {
-      ...input,
-      versionId: version.id,
-      status: 'done',
-    });
-    const assistant = await addAssistantMessage(manager, {
+    await publishQueued(manager, {
       sceneId: scene.id,
       versionId: version.id,
-      content: plan.reply,
-      status: 'done',
-    });
-    const revision = await bumpRevision(manager, scene);
-    return {
-      messageId: message.id,
-      versionId: version.id,
-      jobId: null,
       revision,
-      operation: plan.classification.operation,
-      assistantMessage: { id: assistant.id, content: assistant.content },
-    };
+      step: 'reading',
+    });
+    return { messageId: message.id, versionId: version.id, jobId, revision };
   }
 
   /**

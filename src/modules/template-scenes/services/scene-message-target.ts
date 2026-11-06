@@ -1,25 +1,16 @@
 import { SendMessageDto } from '../dto/send-message.dto';
-import { MIN_SHAPE_AREA_RATIO } from '../domain/scene-mask-shape';
+import { maskBounds, MIN_SHAPE_AREA_RATIO } from '../domain/scene-mask-shape';
 import { rasterizeRegion, shapeAreaRatio } from '../domain/scene-shapes';
+import { MaskShape, Rect } from '../domain/scene.types';
+import { sceneZonesFor } from '../domain/scene-formats';
+import { EntityManager } from 'typeorm';
 import { TemplateScene } from '../entities/template-scene.entity';
-import { invalidBody, regionTooSmall } from '../scene.errors';
+import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
+import { invalidBody, regionTooSmall, targetElementNotFound } from '../scene.errors';
 
-/** Conferência do alvo da mensagem (400 e 422), antes de qualquer consulta ao banco ou ao Diretor. */
+/** Conferência e leitura do alvo da mensagem (400 e 422), antes de qualquer consulta ao Diretor. */
 
 const TARGET_KEYS = ['region', 'mask', 'zone', 'targetElementId'] as const;
-
-/** A confirmação vem sozinha: com alvo ou anexo é 400, e a pergunta segue pendente. */
-function assertConfirmationAlone(dto: SendMessageDto, given: readonly string[]): void {
-  if (!dto.confirmGlobal) return;
-  if (!dto.replyToMessageId) {
-    throw invalidBody('Para confirmar o ajuste geral, envie também replyToMessageId.');
-  }
-  if (given.length > 0 || (dto.attachments?.length ?? 0) > 0) {
-    throw invalidBody(
-      'Confirmar o ajuste geral não aceita área, zona, elemento nem anexo: envie só a confirmação.',
-    );
-  }
-}
 
 /** Região, máscara, zona e elemento são alvos exclusivos (400, nada é gravado). */
 export function assertSingleTarget(dto: SendMessageDto): void {
@@ -27,7 +18,6 @@ export function assertSingleTarget(dto: SendMessageDto): void {
   if (given.length > 1) {
     throw invalidBody(`Envie um alvo só: ${given.join(', ')} não podem vir juntos.`);
   }
-  assertConfirmationAlone(dto, given);
   if (
     dto.region &&
     (dto.region.x + dto.region.w > 1.0001 || dto.region.y + dto.region.h > 1.0001)
@@ -50,4 +40,48 @@ export async function assertShapeBigEnough(
   const height = Math.max(1, Math.round((width * scene.heightPx) / scene.widthPx));
   const shape = await rasterizeRegion(dto.mask, width, height);
   if (shapeAreaRatio(shape) < MIN_SHAPE_AREA_RATIO) throw regionTooSmall();
+}
+
+/** O que a mensagem grava na versão: a marcação (retângulo, zona ou forma) e a dica de camada. */
+export interface RequestedTarget {
+  requestedRegion: Rect | null;
+  requestedMask: MaskShape | null;
+  targetElementId: string | null;
+}
+
+/**
+ * Marcação gravada na versão: retângulo e zona viram o retângulo (a zona é o retângulo do formato), a forma
+ * guarda a forma e a caixa dela. `targetElementId` é só dica de camada: não é marcação e não gera `markup`.
+ */
+export function requestedTargetOf(dto: SendMessageDto, scene: TemplateScene): RequestedTarget {
+  const none: RequestedTarget = {
+    requestedRegion: null,
+    requestedMask: null,
+    targetElementId: null,
+  };
+  if (dto.region) return { ...none, requestedRegion: dto.region };
+  if (dto.zone) return { ...none, requestedRegion: sceneZonesFor(scene.formatId)[dto.zone] };
+  if (dto.mask) {
+    return {
+      ...none,
+      requestedMask: dto.mask,
+      requestedRegion: maskBounds(dto.mask, scene.heightPx / scene.widthPx),
+    };
+  }
+  return { ...none, targetElementId: dto.targetElementId ?? null };
+}
+
+/** `targetElementId` precisa ser uma camada da versão atual (404 `TARGET_ELEMENT_NOT_FOUND`). */
+export async function assertTargetElementExists(
+  manager: EntityManager,
+  scene: TemplateScene,
+  dto: SendMessageDto,
+): Promise<void> {
+  if (!dto.targetElementId) return;
+  const current = scene.currentVersionId
+    ? await manager.findOne(TemplateSceneVersion, { where: { id: scene.currentVersionId } })
+    : null;
+  if (!current?.elements.some((element) => element.id === dto.targetElementId)) {
+    throw targetElementNotFound(dto.targetElementId);
+  }
 }

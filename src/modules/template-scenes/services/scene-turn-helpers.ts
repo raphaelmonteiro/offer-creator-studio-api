@@ -1,21 +1,21 @@
 import { EntityManager, QueryFailedError } from 'typeorm';
+import { SceneStep } from '../domain/scene.types';
 import { SendMessageDto } from '../dto/send-message.dto';
 import { publishSceneEvent } from './scene-events';
 
 const BUSY_INDEX = 'UQ_tsv_scene_busy';
 
-/** Evento `version.step` da versão recém-enfileirada. */
+/** Evento `version.step` da versão recém-enfileirada (`reading` no POST; `null` quando o anúncio e a janela estão gravados). */
 export function publishQueued(
   manager: EntityManager,
-  sceneId: string,
-  versionId: string,
-  revision: number,
+  event: { sceneId: string; versionId: string; revision: number; step: SceneStep | null },
 ): Promise<void> {
+  const { sceneId, versionId, revision, step } = event;
   return publishSceneEvent(manager, {
     sceneId,
     versionId,
     kind: 'version.step',
-    step: null,
+    step,
     status: 'queued',
     cancelRequested: false,
     costUsd: 0,

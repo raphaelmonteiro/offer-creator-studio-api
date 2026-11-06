@@ -6,7 +6,6 @@ import { SharedModule } from '../../shared/shared.module';
 import { AiModule } from '../ai/ai.module';
 import { OpenAiDirectorService } from '../ai/openai-director.service';
 import { OpenAiImageService } from '../ai/openai-image.service';
-import { OpenAiIntentService } from '../ai/openai-intent.service';
 import { OpenAiVisionService } from '../ai/openai-vision.service';
 import { TemplateScene } from './entities/template-scene.entity';
 import { TemplateSceneAsset } from './entities/template-scene-asset.entity';
@@ -26,13 +25,11 @@ import {
 } from './providers/scene-director-client';
 import { createSceneImageProvider } from './providers/scene-image-provider.factory';
 import { SCENE_IMAGE_PROVIDER } from './providers/scene-image-provider';
-import { createSceneIntentClient, SCENE_INTENT_CLIENT } from './providers/scene-intent-client';
 import { createSceneVisionClient, SCENE_VISION_CLIENT } from './providers/scene-vision-client';
 import { SceneDirectorContextService } from './services/scene-director-context';
 import { SceneDirectorService } from './services/scene-director.service';
 import { SceneFilesService } from './services/scene-files.service';
 import { SceneImageService } from './services/scene-image.service';
-import { SceneIntentService } from './services/scene-intent.service';
 import { SceneLockService } from './services/scene-lock.service';
 import { SceneLogoService } from './services/scene-logo.service';
 import { SceneReadService } from './services/scene-read.service';
@@ -80,7 +77,6 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneCallRunner,
     SceneImageService,
     SceneVisionService,
-    SceneIntentService,
     SceneDirectorService,
     SceneDirectorContextService,
     SceneGenerateHandler,
@@ -93,11 +89,6 @@ import { TemplateScenesController } from './template-scenes.controller';
       provide: SCENE_IMAGE_PROVIDER,
       inject: [ConfigService, OpenAiImageService],
       useFactory: createSceneImageProvider,
-    },
-    {
-      provide: SCENE_INTENT_CLIENT,
-      inject: [ConfigService, OpenAiIntentService],
-      useFactory: createSceneIntentClient,
     },
     {
       provide: SCENE_DIRECTOR_CLIENT,
