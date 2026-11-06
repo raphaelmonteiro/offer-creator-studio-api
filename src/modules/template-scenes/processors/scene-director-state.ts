@@ -13,13 +13,8 @@ import { TemplateSceneMessage } from '../entities/template-scene-message.entity'
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import {
   askedAboutImageReply,
-  compositionQuestion,
-  droppedNote,
-  NO_INSTRUCTION_REPLY,
   NO_OPEN_REQUEST_REPLY,
   whichToForgetReply,
-  NUMBER_QUESTION,
-  PAINTED_QUESTION,
   currentVersionReply,
   PAINTED_REFUSAL_REPLIES,
 } from '../scene-texts';
@@ -29,6 +24,7 @@ import { SceneLockService } from '../services/scene-lock.service';
 import { addDirectorCost, DirectorCallRecord, summarizeDirectorCalls } from './scene-director-cost';
 import { DirectorRunResult } from './scene-director-run';
 import { cancelVersion, failVersion } from './scene-turn-finish';
+import { droppedNoteOf, questionReply } from './scene-director-outcome-reply';
 import { applyLayersEffect } from './scene-director-layer-effect';
 import { queueImageEffect } from './scene-director-image-effect';
 import { DirectorTarget, rejectTarget } from './scene-director-target';
@@ -153,20 +149,8 @@ export class SceneDirectorState {
       await failVersion(manager, scene, version, code);
       return;
     }
-    if (outcome.kind === 'composition_question') {
-      await this.reject(target, compositionQuestion(outcome.labels));
-      return;
-    }
-    if (outcome.kind === 'number_question') {
-      await this.reject(target, NUMBER_QUESTION);
-      return;
-    }
-    if (outcome.kind === 'painted_question') {
-      await this.reject(target, PAINTED_QUESTION);
-      return;
-    }
-    if (outcome.kind === 'instruction_question') {
-      await this.reject(target, NO_INSTRUCTION_REPLY);
+    if (outcome.kind !== 'plan') {
+      await this.reject(target, questionReply(outcome) as string);
       return;
     }
     const dropped = resolveGenericDrops(outcome.plan, scene.brief ?? []);
@@ -195,7 +179,7 @@ export class SceneDirectorState {
         ? undefined
         : await this.updateBrief(manager, scene, version, plan);
     version.metrics = { ...version.metrics, director: { ...director, brief } };
-    const note = this.droppedNote(scene, brief);
+    const note = droppedNoteOf(scene, brief);
     await this.run(target, { decision, plan, context, note });
   }
 
@@ -235,14 +219,6 @@ export class SceneDirectorState {
     });
     scene.brief = applied.brief;
     return applied.changes;
-  }
-
-  /** "Tirei da lista: X.": o que este turno desistiu, para o pedido não sumir em silêncio (G9). */
-  private droppedNote(scene: TemplateScene, changes: BriefChanges | undefined): string {
-    const texts = (changes?.dropped ?? [])
-      .map((id) => (scene.brief ?? []).find((item) => item.id === id)?.text)
-      .filter((text): text is string => Boolean(text));
-    return texts.length ? droppedNote(texts) : '';
   }
 
   private reject(target: DirectorTarget, reply: string): Promise<void> {

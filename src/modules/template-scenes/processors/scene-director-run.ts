@@ -103,6 +103,35 @@ function validate(text: string, context: DirectorContext, final: boolean): Check
     : { plan: written.plan };
 }
 
+/** A chamada que falhou antes de haver resposta: custo desconhecido, sem repetir. */
+const failedCall = (attempt: number, problem: string): DirectorCallRecord => ({
+  attempt,
+  status: 'failed',
+  costUsd: null,
+  requestId: null,
+  latencyMs: null,
+  problem,
+});
+
+/** Por que a tentativa não serviu, para `metrics.director.calls[].problem`. */
+function problemLabel(problem: Problem): string {
+  if (problem.groups) return 'composition';
+  if (problem.number) return 'number';
+  if (problem.instruction) return 'instruction';
+  if (problem.painted) return 'painted';
+  return 'invalid';
+}
+
+/** O desfecho de uma tentativa que serviu: a pergunta ao cliente ou o plano. */
+function acceptedOutcome(checked: Extract<Checked, { question: string } | { plan: DirectorPlan }>) {
+  if ('question' in checked) return { kind: QUESTION_OUTCOMES[checked.question] } as const;
+  return {
+    kind: 'plan',
+    plan: checked.plan,
+    ...(checked.patches ? { patches: checked.patches } : {}),
+  } as const;
+}
+
 /**
  * Chama o Diretor até duas vezes: falha de chamada (tempo esgotado, erro, quota, modelo sem preço) não se
  * repete; saída que não passa nas validações refaz uma vez com o motivo. Nunca lança. O custo de cada
@@ -124,14 +153,7 @@ export async function runDirector(
       correlationId,
     });
     if (run.ok === false) {
-      calls.push({
-        attempt,
-        status: 'failed',
-        costUsd: null,
-        requestId: null,
-        latencyMs: null,
-        problem: run.reason,
-      });
+      calls.push(failedCall(attempt, run.reason));
       return { outcome: { kind: 'unavailable', reason: run.reason }, calls };
     }
     const checked = validate(run.text, context, attempt === DIRECTOR_MAX_ATTEMPTS);
@@ -141,37 +163,15 @@ export async function runDirector(
       requestId: run.requestId,
       latencyMs: run.latencyMs,
     };
-    if ('question' in checked) {
+    if ('question' in checked || 'plan' in checked) {
       calls.push({ ...record, status: 'done' });
-      return {
-        outcome: { kind: QUESTION_OUTCOMES[checked.question] },
-        calls,
-      };
-    }
-    if ('plan' in checked) {
-      calls.push({ ...record, status: 'done' });
-      return {
-        outcome: {
-          kind: 'plan',
-          plan: checked.plan,
-          ...(checked.patches ? { patches: checked.patches } : {}),
-        },
-        calls,
-      };
+      return { outcome: acceptedOutcome(checked), calls };
     }
     last = checked;
     calls.push({
       ...record,
       status: 'failed',
-      problem: checked.groups
-        ? 'composition'
-        : checked.number
-          ? 'number'
-          : checked.instruction
-            ? 'instruction'
-            : checked.painted
-              ? 'painted'
-              : 'invalid',
+      problem: problemLabel(checked),
       reason: checked.reason.slice(0, 300),
     });
   }
