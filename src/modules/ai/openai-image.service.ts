@@ -14,6 +14,7 @@ import {
   SdkImageCall,
 } from './openai-image-scene-call';
 import { buildMaskedEditBody, MaskedEditInput } from './openai-image-masked-edit';
+import { assertMarkupMatchesImage, MarkupInput } from './openai-image-markup';
 import {
   MaterializedImage,
   OpenAiImageSize,
@@ -83,6 +84,11 @@ export interface EditOpenAiImageOptions {
    * corpo JSON (`images` + `mask`, sem `markup`). Exige `sceneCall`; sem ela, o caminho multipart de sempre.
    */
   mask?: MaskedEditInput;
+  /**
+   * Edição da cena com marcação: PNG transparente do tamanho da imagem, enviado em multipart ao lado de
+   * `image`, sem `mask`. Exige `sceneCall`; sem `markup` o corpo da requisição não muda.
+   */
+  markup?: MarkupInput;
 }
 
 export interface OpenAiImageResult {
@@ -223,7 +229,11 @@ export class OpenAiImageService {
 
   async editImage(options: EditOpenAiImageOptions): Promise<OpenAiImageResult> {
     if (!this.openai) throw new Error('OpenAI não configurada');
+    if (options.mask && options.markup) {
+      throw new Error('markup e mask não se combinam na mesma edição');
+    }
     if (options.mask) return this.editImageWithMask(options);
+    const markup = await this.resolveMarkup(options);
 
     const assetKind = options.assetKind ?? 'template';
     // Public endpoints still default to final. Internal callers can opt into preview
@@ -253,6 +263,7 @@ export class OpenAiImageService {
       outputCompression,
       inputFidelity,
     });
+    if (markup) request.markup = markup;
 
     const response = await this.dispatchImageCall({
       method: 'edit',
@@ -264,6 +275,7 @@ export class OpenAiImageService {
       mode,
       inputFidelity: supportsConfigurableInputFidelity(model) ? inputFidelity : undefined,
       sceneCall: options.sceneCall,
+      extras: markup ? { markup: true } : undefined,
     });
 
     const image = await this.materialize(response, preset.fallbackMimeType, options.sceneCall);
@@ -280,6 +292,18 @@ export class OpenAiImageService {
       mode,
       ...sceneCallResult(options.sceneCall, response),
     };
+  }
+
+  /**
+   * `markup` por multipart (o `images.edit` do SDK serializa toda chave do corpo; só a tipagem não a conhece).
+   * Só no modo `sceneCall`, sem `mask`, e com a camada do tamanho da imagem, tudo conferido antes da rede.
+   */
+  private async resolveMarkup(options: EditOpenAiImageOptions): Promise<unknown | undefined> {
+    if (!options.markup) return undefined;
+    if (!options.sceneCall) throw new Error('A edição com markup só existe no modo sceneCall');
+    const image = options.images?.[0]?.buffer ?? options.imageBuffer;
+    await assertMarkupMatchesImage({ image, markup: options.markup, size: options.size });
+    return toFile(options.markup.buffer, 'markup.png', { type: 'image/png' });
   }
 
   /**

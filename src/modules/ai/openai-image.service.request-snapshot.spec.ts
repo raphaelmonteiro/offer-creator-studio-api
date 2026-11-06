@@ -168,6 +168,25 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       expect(edit.mock.calls[0]).toHaveLength(1);
     });
 
+    it('Corpo da requisição social igual: sem markup, a edição não ganha chave nem segundo argumento', async () => {
+      const { service, edit } = buildService();
+      await service.editImage({ ...base, assetKind: 'background' });
+      expect(edit.mock.calls[0]).toEqual([
+        {
+          model: 'gpt-image-2.5-sunburst',
+          image: expect.anything(),
+          prompt: 'edite',
+          size: '1024x1536',
+          quality: 'high',
+          n: 1,
+          background: 'opaque',
+          output_format: 'jpeg',
+          output_compression: 85,
+        },
+      ]);
+      expect(edit.mock.calls[0][0]).not.toHaveProperty('markup');
+    });
+
     it('preset transparente', async () => {
       const { service, edit } = buildService();
       await service.editImage({ ...base, assetKind: 'transparent' });
