@@ -178,7 +178,7 @@ export class SceneDirectorState {
       plan,
       marked: context.script.marked,
       hasImage: context.script.hasImage,
-      openRequests: openItems(opened).length,
+      openRequests: openItems(opened).map((item) => item.text),
     });
   }
 
@@ -354,6 +354,14 @@ export class SceneDirectorState {
     const windowSeconds = decision.window ? this.windowSeconds() : 0;
     version.operation = decision.operation;
     version.step = null;
+    if (decision.planPatch) {
+      // O Diretor não deu a instrução do "marquei": o plano gravado (e o prompt) passam a ter a dos pedidos em aberto.
+      version.metrics = {
+        ...version.metrics,
+        plan: { ...(version.metrics.plan as DirectorPlan), ...decision.planPatch },
+        planPatched: true,
+      };
+    }
     if (decision.window) {
       version.metrics = {
         ...version.metrics,

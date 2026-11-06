@@ -96,6 +96,7 @@ export async function runDirector(
       ...record,
       status: 'failed',
       problem: checked.groups ? 'composition' : 'invalid',
+      reason: checked.reason.slice(0, 300),
     });
   }
   const labels = last.groups?.map((group) => COMPOSITION_LABELS[group]);

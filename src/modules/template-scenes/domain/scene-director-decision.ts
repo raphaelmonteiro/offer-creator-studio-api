@@ -13,9 +13,11 @@ export interface DecisionInput {
   marked: boolean;
   /** A cena já tem uma versão `ready` com imagem. */
   hasImage: boolean;
-  /** Quantos itens da lista do que o cliente pediu estão em aberto, contando os que o plano abre agora. */
-  openRequests: number;
+  /** Os itens da lista do que o cliente pediu em aberto, contando os que o plano abre agora (só o texto). */
+  openRequests: string[];
 }
+
+type ImageDecision = Extract<TurnDecision, { kind: 'image' }>;
 
 export type TurnDecision =
   | { kind: 'refuse'; refusal: PaintedRefusal }
@@ -31,6 +33,11 @@ export type TurnDecision =
       /** Imagem nova com marcação: a marcação é descartada, e o anúncio avisa. */
       discardMarking: boolean;
       announcement: string;
+      /**
+       * "Marquei" com pedido em aberto, mas o plano do Diretor veio sem instrução (só uma pergunta): o código monta a
+       * instrução a partir dos pedidos em aberto, e o plano gravado recebe estes campos por cima.
+       */
+      planPatch?: { will_change_image: true; what_to_change: string };
       /** Aviso do redesenho só vale em edição: a primeira imagem e a imagem nova não contam (D-35). */
       isEdit: boolean;
     };
@@ -48,7 +55,7 @@ function changesImage(input: DecisionInput): boolean {
   if (CHANGES_IMAGE.has(plan.turn_kind)) return true;
   if (plan.turn_kind === 'reclamacao') return plan.will_change_image;
   // "Marquei" executa o pedido em aberto na marcação; sem pedido em aberto, é pergunta.
-  if (plan.turn_kind === 'marcacao_sem_pedido') return marked && openRequests > 0;
+  if (plan.turn_kind === 'marcacao_sem_pedido') return marked && openRequests.length > 0;
   return false;
 }
 
@@ -63,9 +70,35 @@ export function windowApplies(kind: DirectorPlan['turn_kind'], marked: boolean):
   return !marked;
 }
 
+/** Cabe no campo `what_to_change` do schema (400 caracteres) e no anúncio (260). */
+const joinRequests = (texts: string[], max: number): string =>
+  texts
+    .map((text) =>
+      text
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/[.!]+$/, ''),
+    )
+    .join('; ')
+    .slice(0, max);
+
+/** "Marquei" executa o que ficou em aberto; se o plano não traz a instrução, o código a monta dos pedidos. */
+function markedPatch(
+  input: DecisionInput,
+): Pick<ImageDecision, 'announcement' | 'planPatch'> | null {
+  const { plan, openRequests } = input;
+  if (plan.turn_kind !== 'marcacao_sem_pedido') return null;
+  if (plan.will_change_image && plan.what_to_change?.trim()) return null;
+  return {
+    announcement: `Vou fazer na área marcada o que você pediu antes: ${joinRequests(openRequests, 190)}.`,
+    planPatch: { will_change_image: true, what_to_change: joinRequests(openRequests, 400) },
+  };
+}
+
 function imageDecision(input: DecisionInput): TurnDecision {
   const { plan, marked, hasImage } = input;
   const isNewImage = !hasImage || plan.turn_kind === 'imagem_nova';
+  const patch = markedPatch(input);
   return {
     kind: 'image',
     operation: isNewImage ? 'generate' : 'redraw',
@@ -74,6 +107,7 @@ function imageDecision(input: DecisionInput): TurnDecision {
     discardMarking: isNewImage && hasImage && marked,
     announcement: safeReply({ reply: plan.reply, will_change_image: true }),
     isEdit: hasImage && !isNewImage,
+    ...patch,
   };
 }
 

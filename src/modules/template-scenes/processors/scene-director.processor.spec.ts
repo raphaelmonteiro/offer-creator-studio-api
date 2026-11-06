@@ -99,6 +99,38 @@ describeIfSceneDb('SceneDirectorProcessor (banco chroma_x_e2e)', () => {
       expect(imageJobs()[0][2]).not.toHaveProperty('startAfterSeconds');
     });
 
+    it('"Marquei" com pedido em aberto, mas o Diretor só perguntou: o código executa o pedido em aberto, com anúncio e instrução dos pedidos', async () => {
+      const brief: TemplateScene['brief'] = [
+        {
+          id: 'p1',
+          text: 'coloca ovos no rodapé',
+          status: 'open',
+          sourceMessageId: 'm0',
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+      const { version, scene } = await turn(
+        'marquei',
+        {
+          turn_kind: 'marcacao_sem_pedido',
+          will_change_image: false,
+          reply: 'O que você gostaria de alterar?',
+        },
+        { brief, extra: { region: { x: 0.1, y: 0.7, w: 0.4, h: 0.2 } } },
+      );
+      expect(version).toMatchObject({ status: 'queued', step: null, operation: 'redraw' });
+      expect(version.metrics.plan).toMatchObject({
+        will_change_image: true,
+        what_to_change: 'coloca ovos no rodapé',
+      });
+      expect(version.metrics.planPatched).toBe(true);
+      expect(imageJobs()).toHaveLength(1);
+      expect(imageJobs()[0][2]).not.toHaveProperty('startAfterSeconds');
+      expect((await lastAssistant(scene.id))?.content).toContain(
+        'Vou fazer na área marcada o que você pediu antes: coloca ovos no rodapé.',
+      );
+    });
+
     it('"Marquei" sem pedido: uma pergunta, sem chamada de imagem', async () => {
       const { scene, version } = await turn(
         'marquei',
@@ -184,6 +216,11 @@ describeIfSceneDb('SceneDirectorProcessor (banco chroma_x_e2e)', () => {
       );
       expect(plan).toHaveBeenCalledTimes(2);
       expect(plan.mock.calls[1][0].text).toContain('A resposta anterior foi recusada');
+      const director = version.metrics.director as {
+        calls: Array<{ problem?: string; reason?: string }>;
+      };
+      expect(director.calls[0]).toMatchObject({ problem: 'composition' });
+      expect(director.calls[0].reason).toContain('faixa');
       expect(version).toMatchObject({ status: 'queued', step: null });
       expect((version.metrics.plan as { what_to_put: string }).what_to_put).toBe('ovos espalhados');
       expect(imageJobs()).toHaveLength(1);

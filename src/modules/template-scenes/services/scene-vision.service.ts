@@ -68,7 +68,7 @@ export function buildVisionPrompt(input: JudgePromptInput): string {
     items.map((item) => `- ${item.id}: ${oneLine(item.text)}`).join('\n');
   const items = input.openItems.length ? list(input.openItems) : 'nenhum';
   const done = input.doneItems?.length
-    ? `\nPedidos que já pareciam atendidos (id: texto); diga em "vistos" ou "nao_vistos" se ainda aparecem na imagem DEPOIS:\n${list(input.doneItems)}`
+    ? `\nPedidos que já pareciam atendidos (id: texto); diga em "vistos" ou "nao_vistos" se o resultado ainda aparece na imagem DEPOIS:\n${list(input.doneItems)}`
     : '';
   return [
     input.hasBefore
@@ -78,7 +78,7 @@ export function buildVisionPrompt(input: JudgePromptInput): string {
     `Plano do sistema (pode estar errado: confira contra a MENSAGEM DO CLIENTE, não contra o plano): ${plan || 'sem plano'}.`,
     `Pedidos do cliente ainda em aberto (id: texto):\n${items}${done}`,
     'Responda só com JSON no formato {"atendeu": "sim"|"parcial"|"nao", "mudou": string, "vistos": string[], "nao_vistos": string[], "texto_na_imagem": boolean}.',
-    '"atendeu" diz se a mensagem do cliente foi atendida. "mudou" descreve em uma frase curta, em português, o que mudou em relação ao pedido (e não qualquer diferença). "vistos" lista os ids dos pedidos em aberto que você VÊ na imagem DEPOIS, e "nao_vistos" os que você NÃO vê. "texto_na_imagem" é true se há texto, letras ou números legíveis pintados na imagem DEPOIS. Não afirme nada sobre o resto da imagem.',
+    '"atendeu" diz se a mensagem do cliente foi atendida. "mudou" descreve em uma frase curta, em português, o que mudou em relação ao pedido (e não qualquer diferença). "vistos" lista os ids dos pedidos em aberto cujo RESULTADO você VÊ na imagem DEPOIS (num pedido de tirar algo, o item não aparece mais; num pedido de colocar ou mudar, o resultado aparece), e "nao_vistos" os ids cujo resultado você NÃO vê (por exemplo, o item que devia sair continua lá). "texto_na_imagem" é true se há texto, letras ou números legíveis pintados na imagem DEPOIS. Não afirme nada sobre o resto da imagem.',
   ].join('\n');
 }
 

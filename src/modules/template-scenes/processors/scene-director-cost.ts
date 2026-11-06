@@ -19,6 +19,8 @@ export interface DirectorCallRecord {
   latencyMs: number | null;
   /** Por que a chamada não serviu: `invalid`, `composition`, `timeout`, `error`, `quota`, `unpriced`. */
   problem?: string;
+  /** O motivo dito ao Diretor na nova tentativa (auditoria): o que a validação não aceitou. */
+  reason?: string;
 }
 
 export interface DirectorMetrics {

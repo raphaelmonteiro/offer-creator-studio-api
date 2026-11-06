@@ -180,6 +180,8 @@ describe('visionCostUsd e buildVisionPrompt', () => {
       expect(prompt).toContain('"vistos"');
       expect(prompt).toContain('"nao_vistos"');
       expect(prompt).toContain('"texto_na_imagem"');
+      expect(prompt).toContain('cujo RESULTADO você VÊ');
+      expect(prompt).toContain('num pedido de tirar algo, o item não aparece mais');
       expect(prompt).toContain('Não afirme nada sobre o resto da imagem');
       expect(prompt).toContain('ANTES');
     });
