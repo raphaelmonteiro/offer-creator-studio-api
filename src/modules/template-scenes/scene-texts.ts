@@ -59,12 +59,24 @@ export interface JudgeFacts {
   /** Itens do que o cliente pediu que o juiz não viu na imagem nova. */
   missing: string[];
   textInImage: boolean;
+  /** O juiz viu emenda ou objeto flutuando (D-44); a descrição já passou pelo filtro de frases proibidas. */
+  seam: boolean;
+  seamDescription: string;
 }
 
 const sentence = (text: string): string => {
   const clean = text.trim();
   return /[.!?]$/.test(clean) ? clean : `${clean}.`;
 };
+
+/**
+ * Aviso de emenda (D-44). Sem emenda, o texto nunca diz que a imagem está sem emenda (G8): o silêncio do juiz não
+ * prova nada. Descrição vazia ou barrada: a frase sai sem ela.
+ */
+function seamNote(description: string): string {
+  const detail = description.trim().replace(/[.!]+$/, '');
+  return `Na conferência, vi o que parece uma emenda ou um objeto flutuando${detail ? `: ${detail}` : ''}. Diga o que ajustar ou peça para voltar.`;
+}
 
 /**
  * Resposta depois da imagem (G8): montada pelo código a partir do que o juiz conferiu. O resultado já foi aplicado
@@ -90,6 +102,7 @@ export function afterImageReply(facts: JudgeFacts | null): string {
   if (facts.textInImage) {
     notes.push('Vi texto na imagem nova; se quiser texto, ele fica melhor como camada.');
   }
+  if (facts.seam) notes.push(seamNote(facts.seamDescription));
   return [head, ...notes].join(' ');
 }
 

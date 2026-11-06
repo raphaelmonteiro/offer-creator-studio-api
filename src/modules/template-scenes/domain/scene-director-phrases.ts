@@ -58,3 +58,9 @@ export function safeChanged(changed: string): string {
   const text = changed.trim();
   return text && !promisesPreservation(text) ? text : FIXED_CHANGED;
 }
+
+/** A descrição de emenda do juiz passa pelo mesmo filtro de `mudou`; barrada ou vazia, sai sem descrição. */
+export function safeSeamDescription(description: string): string {
+  const text = description.trim();
+  return text && !promisesPreservation(text) ? text : '';
+}

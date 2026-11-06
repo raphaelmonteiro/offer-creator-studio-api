@@ -162,7 +162,7 @@ export function toAssetView(asset: TemplateSceneAsset): SceneAssetView {
 
 const JUDGE_VERDICTS: readonly string[] = ['sim', 'parcial', 'nao'];
 
-function judgeOf(version: Pick<TemplateSceneVersion, 'metrics'>): JudgeVerdictView | null {
+export function judgeOf(version: Pick<TemplateSceneVersion, 'metrics'>): JudgeVerdictView | null {
   const judge = version.metrics?.judge as { satisfied?: string } | undefined;
   return judge?.satisfied && JUDGE_VERDICTS.includes(judge.satisfied)
     ? (judge.satisfied as JudgeVerdictView)

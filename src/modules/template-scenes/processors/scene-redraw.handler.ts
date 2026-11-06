@@ -7,7 +7,7 @@ import {
   SceneImageProvider,
 } from '../providers/scene-image-provider';
 import { promptableTexts } from '../domain/scene-director-painted';
-import { safeChanged } from '../domain/scene-director-phrases';
+import { safeChanged, safeSeamDescription } from '../domain/scene-director-phrases';
 import { JudgeBriefVerdict } from '../domain/scene-brief';
 import { afterImageReply, JudgeFacts } from '../scene-texts';
 import { SceneVisionService } from '../services/scene-vision.service';
@@ -196,6 +196,8 @@ export class SceneRedrawHandler implements TurnHandler {
         changed: safeChanged(assessment.changed),
         missing: assessment.notSeen.map((id) => labelOf.get(id) as string).filter(Boolean),
         textInImage: assessment.textInImage,
+        seam: assessment.seam,
+        seamDescription: safeSeamDescription(assessment.seamDescription),
       },
       verdict: { seen: assessment.seen, notSeen: assessment.notSeen },
       record: {
@@ -205,6 +207,8 @@ export class SceneRedrawHandler implements TurnHandler {
         seen: assessment.seen,
         notSeen: assessment.notSeen,
         textInImage: assessment.textInImage,
+        seam: assessment.seam,
+        seamDescription: assessment.seamDescription,
       },
     };
   }

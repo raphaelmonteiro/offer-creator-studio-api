@@ -11,6 +11,8 @@ export const MOCK_VISION_MARKERS = {
   partial: '#juiz-parcial',
   /** O juiz vê texto pintado na imagem nova. */
   text: '#juiz-texto',
+  /** O juiz vê emenda ou objeto flutuando (D-44): o chat avisa, sem refazer e sem mudar o veredito. */
+  seam: '#juiz-emenda',
 } as const;
 
 /** Ids da lista do que o cliente pediu que vêm no prompt do juiz (`- p1: texto`). */
@@ -20,7 +22,7 @@ function openIds(prompt: string): string[] {
 
 /**
  * Juiz de desenvolvimento: sem rede e sem custo. Responde `sim` e diz que viu todos os pedidos em aberto, e os
- * marcadores `#juiz-nao`, `#juiz-parcial`, `#juiz-texto`, `#juiz-falha` e `#juiz-invalido` exercitam as saídas e as
+ * marcadores `#juiz-nao`, `#juiz-parcial`, `#juiz-texto`, `#juiz-emenda`, `#juiz-falha` e `#juiz-invalido` exercitam as saídas e as
  * falhas. O marcador vem da mensagem do cliente, que o prompt traz literal.
  */
 export class MockSceneVisionClient {
@@ -52,6 +54,10 @@ export class MockSceneVisionClient {
       vistos: missed ? [] : ids,
       nao_vistos: missed ? ids : [],
       texto_na_imagem: has(MOCK_VISION_MARKERS.text),
+      emenda: has(MOCK_VISION_MARKERS.seam),
+      emenda_descricao: has(MOCK_VISION_MARKERS.seam)
+        ? 'grupo sobre uma faixa de grama flutuando'
+        : '',
     });
   }
 }

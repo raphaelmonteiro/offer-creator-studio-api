@@ -31,6 +31,8 @@ const verdict = (extra: object = {}) =>
     vistos: ['p1'],
     nao_vistos: ['p2'],
     texto_na_imagem: false,
+    emenda: false,
+    emenda_descricao: '',
     ...extra,
   });
 const ok = (text: string, usage: object | null = { prompt_tokens: 3000, completion_tokens: 200 }) =>
@@ -49,6 +51,8 @@ describe('SceneVisionService (o juiz)', () => {
       seen: ['p1'],
       notSeen: ['p2'],
       textInImage: false,
+      seam: false,
+      seamDescription: '',
       costUsd: 0.0004,
       requestId: 'req_v',
       latencyMs: 900,
@@ -85,6 +89,16 @@ describe('SceneVisionService (o juiz)', () => {
     [verdict({ atendeu: 'talvez' })],
     [verdict({ mudou: '  ' })],
     [verdict({ texto_na_imagem: 'sim' })],
+    [verdict({ emenda: 'sim' })],
+    [
+      JSON.stringify({
+        atendeu: 'sim',
+        mudou: 'x',
+        vistos: [],
+        nao_vistos: [],
+        texto_na_imagem: false,
+      }),
+    ],
   ])('JSON fora do esquema (%s) vira invalid_json e guarda o custo', async (text) => {
     const result = await build({ compare: ok(text) }).assess(input());
     expect(result).toMatchObject({ ok: false, reason: 'invalid_json', costUsd: 0.0004 });
@@ -106,7 +120,7 @@ describe('SceneVisionService (o juiz)', () => {
     expect(slow).toMatchObject({ ok: false, reason: 'timeout', costUsd: null });
   });
 
-  it('o cliente mock: sim por padrão, e os marcadores #juiz-nao, #juiz-parcial, #juiz-texto, #juiz-falha e #juiz-invalido', async () => {
+  it('o cliente mock: sim por padrão, e os marcadores #juiz-nao, #juiz-parcial, #juiz-texto, #juiz-emenda, #juiz-falha e #juiz-invalido', async () => {
     const service = build(new MockSceneVisionClient());
     expect(await service.assess(input())).toMatchObject({
       ok: true,
@@ -127,6 +141,11 @@ describe('SceneVisionService (o juiz)', () => {
     expect(await service.assess(input(`x ${MOCK_VISION_MARKERS.text}`))).toMatchObject({
       satisfied: 'sim',
       textInImage: true,
+    });
+    expect(await service.assess(input(`x ${MOCK_VISION_MARKERS.seam}`))).toMatchObject({
+      satisfied: 'sim',
+      seam: true,
+      seamDescription: 'grupo sobre uma faixa de grama flutuando',
     });
     expect(await service.assess(input(`x ${MOCK_VISION_MARKERS.fail}`))).toMatchObject({
       ok: false,
@@ -172,6 +191,20 @@ describe('visionCostUsd e buildVisionPrompt', () => {
       expect(prompt).toContain('pode estar errado');
       expect(prompt).toContain('confira contra a MENSAGEM DO CLIENTE');
       expect(prompt).toContain('remover o coelho; gramado');
+    });
+
+    it('Juiz não cobra o ano de contexto: o prompt avisa que ano citado é contexto, e pergunta de emenda', () => {
+      const withYear = buildVisionPrompt({
+        message: 'template de pascoa para 2027',
+        plan: { what_to_change: 'criar o template', what_to_put: 'ovos e um coelho' },
+        openItems: [],
+        hasBefore: false,
+      });
+      expect(withYear).toContain('Ano, data ou número citado na mensagem do cliente é contexto');
+      expect(withYear).toContain('não cobre como faltando');
+      expect(withYear).toContain('"emenda"');
+      expect(withYear).toContain('objeto ou grupo de objetos flutuando');
+      expect(withYear).toContain('"emenda" não muda "atendeu"');
     });
 
     it('lista os itens em aberto com id, e pede só o que o juiz vê sobre o pedido', () => {

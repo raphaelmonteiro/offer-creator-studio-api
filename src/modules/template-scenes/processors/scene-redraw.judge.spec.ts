@@ -2,6 +2,7 @@ import { SceneVisionClient } from '../providers/scene-vision-client';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { directorPlan } from '../testing/scene-director-fixtures';
+import { judgeOf } from '../services/scene-views';
 import { useProcessorHarness } from '../testing/scene-processor-harness';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 
@@ -11,6 +12,8 @@ const verdict = (extra: Record<string, unknown> = {}) => ({
   vistos: [],
   nao_vistos: [],
   texto_na_imagem: false,
+  emenda: false,
+  emenda_descricao: '',
   ...extra,
 });
 const judgeReturning = (
@@ -186,6 +189,71 @@ describeIfSceneDb('O juiz confere e o resultado é sempre aplicado (banco chroma
       const { reply } = await run(judge);
       expect(reply).toContain('o pedido não aparece atendido');
       expect(reply).not.toMatch(/acertei|conferi a imagem nova: /i);
+    });
+
+    it('Juiz vê emenda: a versão vira a atual, o chat dá o aviso com a descrição e nenhuma outra imagem é chamada', async () => {
+      const judge = judgeReturning(
+        verdict({ emenda: true, emenda_descricao: 'grupo sobre uma faixa de grama flutuando' }),
+      );
+      const { scene, queued, edit, version, reply } = await run(judge);
+      expect(version.status).toBe('ready');
+      expect((await h.sceneOf(scene.id)).currentVersionId).toBe(queued.id);
+      expect(reply).toBe(
+        'Conferi a imagem nova: O coelho da direita saiu. Na conferência, vi o que parece uma emenda ou um objeto flutuando: grupo sobre uma faixa de grama flutuando. Diga o que ajustar ou peça para voltar.',
+      );
+      expect(edit).toHaveBeenCalledTimes(1);
+      expect(version.metrics.judge).toMatchObject({ seam: true });
+    });
+
+    it('Emenda na primeira imagem: só há o DEPOIS, e o chat dá o mesmo aviso', async () => {
+      const { scene } = await h.readyScene();
+      const fresh = await h.sceneOf(scene.id);
+      const queued = await h.queueRedraw(fresh, {
+        plan,
+        request: 'gera um template de pascoa',
+        operation: 'generate',
+        overrides: { parentVersionId: null },
+      });
+      const judge = judgeReturning(
+        verdict({ emenda: true, emenda_descricao: 'corte brusco no meio' }),
+      );
+      const { provider } = h.fakeProvider(() => h.okResult(0.06));
+      await h.processorWith(provider, undefined, judge.client).process(h.job(scene.id, queued.id));
+      const messages = await h.dataSource.manager.find(TemplateSceneMessage, {
+        where: { sceneId: scene.id, versionId: queued.id, role: 'assistant' },
+      });
+      expect((await h.versionOf(queued.id)).status).toBe('ready');
+      expect(messages[0].content).toContain(
+        'Na conferência, vi o que parece uma emenda ou um objeto flutuando: corte brusco no meio. Diga o que ajustar ou peça para voltar.',
+      );
+    });
+
+    it('Juiz não vê emenda: o chat não fala de emenda nem afirma que a imagem está sem emenda', async () => {
+      const { reply } = await run(judgeReturning(verdict({ emenda: false })));
+      expect(reply).not.toMatch(/emenda|flutuando/i);
+    });
+
+    it('Descrição de emenda barrada: o chat dá o aviso sem a descrição', async () => {
+      const { reply } = await run(
+        judgeReturning(verdict({ emenda: true, emenda_descricao: 'o resto foi preservado' })),
+      );
+      expect(reply).toContain(
+        'Na conferência, vi o que parece uma emenda ou um objeto flutuando. Diga o que ajustar ou peça para voltar.',
+      );
+      expect(reply).not.toContain('preservado');
+    });
+
+    it('Descrição de emenda vazia: o aviso sai sem a descrição', async () => {
+      const { reply } = await run(judgeReturning(verdict({ emenda: true, emenda_descricao: '' })));
+      expect(reply).toContain('um objeto flutuando. Diga o que ajustar');
+    });
+
+    it('Emenda não muda o veredito: o juiz diz sim com emenda, e a versão guarda sim', async () => {
+      const { version } = await run(
+        judgeReturning(verdict({ emenda: true, emenda_descricao: 'x' })),
+      );
+      expect(version.metrics.judge).toMatchObject({ satisfied: 'sim', seam: true });
+      expect(judgeOf(version)).toBe('sim');
     });
 
     it('Texto na imagem: o chat relata que viu texto e que fica melhor como camada', async () => {

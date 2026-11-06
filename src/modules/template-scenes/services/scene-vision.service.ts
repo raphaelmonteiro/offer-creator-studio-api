@@ -21,6 +21,9 @@ export type VisionAssessment =
       notSeen: string[];
       /** O juiz viu texto legível pintado na imagem nova. */
       textInImage: boolean;
+      /** O juiz viu emenda, corte brusco ou objeto flutuando sobre ilha ou faixa (D-44); não muda o veredito. */
+      seam: boolean;
+      seamDescription: string;
       costUsd: number | null;
       requestId: string | null;
       latencyMs: number;
@@ -77,8 +80,9 @@ export function buildVisionPrompt(input: JudgePromptInput): string {
     `Mensagem do cliente: "${oneLine(input.message)}".`,
     `Plano do sistema (pode estar errado: confira contra a MENSAGEM DO CLIENTE, não contra o plano): ${plan || 'sem plano'}.`,
     `Pedidos do cliente ainda em aberto (id: texto):\n${items}${done}`,
-    'Responda só com JSON no formato {"atendeu": "sim"|"parcial"|"nao", "mudou": string, "vistos": string[], "nao_vistos": string[], "texto_na_imagem": boolean}.',
-    '"atendeu" diz se a mensagem do cliente foi atendida. "mudou" descreve em uma frase curta, em português, o que mudou em relação ao pedido (e não qualquer diferença). "vistos" lista os ids dos pedidos em aberto cujo RESULTADO você VÊ na imagem DEPOIS (num pedido de tirar algo, o item não aparece mais; num pedido de colocar ou mudar, o resultado aparece), e "nao_vistos" os ids cujo resultado você NÃO vê (por exemplo, o item que devia sair continua lá). "texto_na_imagem" é true se há texto, letras ou números legíveis pintados na imagem DEPOIS. Não afirme nada sobre o resto da imagem.',
+    'Ano, data ou número citado na mensagem do cliente é contexto, não pedido de imagem: não cobre como faltando e não diga em "mudou" que o ano ou o número não aparece.',
+    'Responda só com JSON no formato {"atendeu": "sim"|"parcial"|"nao", "mudou": string, "vistos": string[], "nao_vistos": string[], "texto_na_imagem": boolean, "emenda": boolean, "emenda_descricao": string}.',
+    '"atendeu" diz se a mensagem do cliente foi atendida. "mudou" descreve em uma frase curta, em português, o que mudou em relação ao pedido (e não qualquer diferença). "vistos" lista os ids dos pedidos em aberto cujo RESULTADO você VÊ na imagem DEPOIS (num pedido de tirar algo, o item não aparece mais; num pedido de colocar ou mudar, o resultado aparece), e "nao_vistos" os ids cujo resultado você NÃO vê (por exemplo, o item que devia sair continua lá). "texto_na_imagem" é true se há texto, letras ou números legíveis pintados na imagem DEPOIS (ano pintado também conta aqui, sem mudar "atendeu"). "emenda" é true se a imagem DEPOIS tem emenda, corte brusco ou transição abrupta entre uma parte e outra, ou objeto ou grupo de objetos flutuando, apoiado em ilha, faixa ou pedaço de terreno separado do resto da cena; "emenda_descricao" diz isso em uma frase curta (vazia se "emenda" for false). "emenda" não muda "atendeu". Não afirme nada sobre o resto da imagem.',
   ].join('\n');
 }
 
@@ -93,6 +97,8 @@ interface Parsed {
   seen: string[];
   notSeen: string[];
   textInImage: boolean;
+  seam: boolean;
+  seamDescription: string;
 }
 
 function parseAssessment(text: string, openIds: string[]): Parsed | null {
@@ -102,6 +108,7 @@ function parseAssessment(text: string, openIds: string[]): Parsed | null {
     if (typeof json.mudou !== 'string' || !json.mudou.trim()) return null;
     if (satisfied !== 'sim' && satisfied !== 'parcial' && satisfied !== 'nao') return null;
     if (typeof json.texto_na_imagem !== 'boolean') return null;
+    if (typeof json.emenda !== 'boolean') return null;
     const known = new Set(openIds);
     const seen = ids(json.vistos, known);
     return {
@@ -110,6 +117,9 @@ function parseAssessment(text: string, openIds: string[]): Parsed | null {
       seen,
       notSeen: ids(json.nao_vistos, known).filter((id) => !seen.includes(id)),
       textInImage: json.texto_na_imagem,
+      seam: json.emenda,
+      seamDescription:
+        typeof json.emenda_descricao === 'string' ? json.emenda_descricao.trim().slice(0, 300) : '',
     };
   } catch {
     return null;
