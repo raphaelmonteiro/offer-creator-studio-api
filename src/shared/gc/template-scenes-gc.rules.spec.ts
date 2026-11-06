@@ -220,9 +220,9 @@ describe('selectSceneAssetsToPurge', () => {
 });
 
 describe('sceneGcConfigFromEnv', () => {
-  it('usa os padrões 5, 7 e 30', () => {
+  it('usa os padrões 20, 7 e 30 (D-34: 20 imagens por cena)', () => {
     expect(sceneGcConfigFromEnv({})).toEqual({
-      mastersKept: 5,
+      mastersKept: 20,
       intermediateTtlMs: 7 * DAY_MS,
       deletedRetentionMs: 30 * DAY_MS,
     });

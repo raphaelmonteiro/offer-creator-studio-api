@@ -50,7 +50,7 @@ const positiveInt = (raw: string | undefined, fallback: number): number => {
 
 export function sceneGcConfigFromEnv(env: NodeJS.ProcessEnv = process.env): SceneGcConfig {
   return {
-    mastersKept: positiveInt(env.TEMPLATE_SCENE_MASTERS_KEPT, 5),
+    mastersKept: positiveInt(env.TEMPLATE_SCENE_MASTERS_KEPT, 20),
     intermediateTtlMs: positiveInt(env.TEMPLATE_SCENE_ASSET_TTL_DAYS, 7) * DAY_MS,
     deletedRetentionMs: positiveInt(env.TEMPLATE_SCENE_DELETED_RETENTION_DAYS, 30) * DAY_MS,
   };

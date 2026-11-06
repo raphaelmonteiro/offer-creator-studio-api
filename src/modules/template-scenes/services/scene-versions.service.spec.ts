@@ -121,7 +121,7 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
       );
       const body = await errorBodyOf(service.restore(scene.id, ready[0].version.id, null));
       expect(body.details).toEqual({ reason: 'master_purged' });
-      expect(String(body.message)).toContain('5 versões mais recentes');
+      expect(String(body.message)).toContain('20 versões mais recentes');
     });
 
     it('com versão em curso: 409 SCENE_BUSY', async () => {

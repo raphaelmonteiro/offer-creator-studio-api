@@ -47,7 +47,7 @@ export const versionNotRestorable = () =>
   sceneError(
     HttpStatus.GONE,
     'VERSION_NOT_RESTORABLE',
-    'Esta versão é antiga demais: guardamos a imagem só das 5 versões mais recentes e das aprovadas.',
+    'Esta versão é antiga demais: guardamos a imagem só das 20 versões mais recentes, das aprovadas e da atual.',
     { reason: 'master_purged' },
   );
 
