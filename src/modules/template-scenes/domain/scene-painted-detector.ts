@@ -25,7 +25,7 @@ const NONE: PaintedVerdict = { level: 'none', kind: null };
 
 const PRICE_FORM =
   /r\$\s*\d|\b\d+[.,]\d{2}\b|\d+\s*reais\b|\d\s*%\s*(?:off|de desconto|desconto)|%\s*off\b/;
-const WRITE_VERB = /\b(?:escrev\w*|escrit\w*|dizendo)\b/;
+const WRITE_VERB = /\b(?:escrev\w*|escrit[oa]s?|dizendo)\b/;
 const WRITE_OBJECT =
   /\b(?:com|colocar|coloca|coloque|poe|ponha|pinta|pintar|adiciona|adicionar)\s+(?:(?:a|o|as|os|uma|um)\s+)?(?:frase|palavra|texto|dizeres)\b/;
 const QUOTED = /"[^"]+"|“[^”]+”|«[^»]+»/g;
@@ -36,7 +36,14 @@ const NAME_CUE = /^(?:estilo|tipo|como|igual|chamad\w*|camada)$/;
 const REMOVAL_VERB = /^(?:tir\w*|retir\w*|remov\w*|apag\w*|elimin\w*|sem)$/;
 const SWAP_VERB = /^(?:troc\w*|substitu\w*)$/;
 /** Para a máscara de remoção: `para` abre outro pedido, e a referência de lugar fica de fora do que sai. */
-const STOP_WORD = /^(?:para|pra|pro|pros|pras|atras|perto|acima|abaixo|junto)$/;
+const STOP_WORD = /^(?:com|para|pra|pro|pros|pras|atras|perto|acima|abaixo|junto)$/;
+/** Verbo de escrita: a máscara de remoção para nele ("placa sem moldura escrita X"), salvo em "o que está escrito". */
+const WRITE_STOP = /^(?:escrev\w*|escrit[oa]s?|dizendo)$/;
+/** O que faz o particípio ficar no objeto: "o que está escrito", "sem nada escrito", "sem texto escrito". */
+const COPULAR =
+  /^(?:esta|estao|estiver|estava|foi|ficou|nada|nenhum|nenhuma|texto|textos|letras|palavra|palavras|frase|frases)$/;
+const ARTICLE_WORD = /^(?:o|a|os|as|um|uma)$/;
+const TRUE_REMOVAL = /^(?:tir\w*|retir\w*|remov\w*|apag\w*|elimin\w*)$/;
 const ACTION_VERB =
   /^(?:escrev\w*|coloc\w*|pint\w*|poe|ponha|bota|adicion\w*|inclu\w*|faz|fazer|faca)$/;
 const PUT_VERB = /^(?:coloc\w*|poe|ponha|bota|adicion\w*|inclu\w*|pint\w*)$/;
@@ -83,7 +90,18 @@ const tokenize = (text: string): Token[] =>
 const isNumeric = (word: string): boolean => /^[\d.,%]+$|^(?:reais|real|off)$/.test(word);
 const opensQuote = (word: string): boolean => /^["“«]/.test(word) && !/["”»]$/.test(word.slice(1));
 
-/** Marca o objeto de remoção: o verbo ou `sem` e até 3 palavras, parando em `para` ou em outro verbo, mais a forma que começou dentro. */
+const isFormToken = (token: Token): boolean =>
+  /\d/.test(token.original) ||
+  /^["“«]/.test(token.original) ||
+  /^r\$$/i.test(token.original) ||
+  /^[A-ZÀ-Ý]{2,}[.,;!?]?$/.test(token.original) ||
+  token.folded === 'off';
+
+/**
+ * Marca o objeto de remoção: o verbo ou `sem` e até 3 palavras, parando em `para`, `com`, em verbo de escrita (salvo
+ * "o que está escrito") e em outro verbo, mais a forma que começou dentro. Com `sem`, a forma só é objeto se vem
+ * logo depois dele: "sem R$ 9,90" passa, e "selo sem borda 50% off" não (R30).
+ */
 function removalMask(tokens: Token[]): boolean[] {
   const masked = tokens.map(() => false);
   tokens.forEach((token, start) => {
@@ -93,9 +111,19 @@ function removalMask(tokens: Token[]): boolean[] {
     let count = 0;
     while (index < tokens.length && count < 3) {
       const word = tokens[index].folded;
-      if (STOP_WORD.test(word) || ACTION_VERB.test(word)) return;
+      const writing = WRITE_STOP.test(word) && !COPULAR.test(tokens[index - 1].folded);
+      if (STOP_WORD.test(word) || ACTION_VERB.test(word) || writing) return;
       masked[index] = true;
       count += 1;
+      index += 1;
+    }
+    // "o que está escrito": o particípio depois de "está" faz parte do objeto, ainda que passe das 3 palavras.
+    if (
+      index < tokens.length &&
+      WRITE_STOP.test(tokens[index].folded) &&
+      COPULAR.test(tokens[index - 1].folded)
+    ) {
+      masked[index] = true;
       index += 1;
     }
     let quoted = tokens.slice(start + 1, index).some((t) => opensQuote(t.original));
@@ -104,8 +132,19 @@ function removalMask(tokens: Token[]): boolean[] {
       if (quoted && /["”»]$/.test(tokens[index].original)) quoted = false;
       index += 1;
     }
+    if (token.folded === 'sem') unmaskLateForm(tokens, masked, start, index);
   });
   return masked;
+}
+
+/** Com `sem`, a forma que não vem logo depois dele (só artigos no meio) não é o objeto: volta ao trecho. */
+function unmaskLateForm(tokens: Token[], masked: boolean[], start: number, end: number): void {
+  for (let j = start + 1; j < end; j += 1) {
+    if (!isFormToken(tokens[j])) continue;
+    const direct = tokens.slice(start + 1, j).every((t) => ARTICLE_WORD.test(t.folded));
+    if (!direct) for (let k = j; k < end; k += 1) masked[k] = false;
+    return;
+  }
 }
 
 function precedingWords(text: string, index: number, count: number): string[] {
@@ -125,6 +164,19 @@ function quotedForm(rest: string, placing: boolean): PaintedLevel {
   return level;
 }
 
+/**
+ * O termo é seguido de um nome ("o título Promoção de Páscoa")? Então dá nome ao que se quer escrever (D-49). Só o fim
+ * do trecho, `atual`, `antigo`, `anterior`, `original`, `removido`, `que` ou posição ("de cima", "do topo", "no alto")
+ * deixam o termo como referência ao que sai.
+ */
+function namedAfter(after: string): boolean {
+  const next = after.replace(/[^a-z0-9\s]/g, ' ').trim();
+  return (
+    next !== '' &&
+    !/^(?:atual|antigo|anterior|original|removido|que|de cima|do topo|no alto)\b/.test(next)
+  );
+}
+
 function looseTerm(rest: string, removed: ReadonlySet<string>): boolean {
   const folded = fold(rest);
   for (const match of folded.matchAll(LOOSE_TERM)) {
@@ -133,7 +185,13 @@ function looseTerm(rest: string, removed: ReadonlySet<string>): boolean {
     if (PLACE_BEFORE.test(before) && !new RegExp(LOOSE_TERM).test(before)) continue;
     // O que o mesmo plano manda tirar não é pedido de escrever: "o título" no `what_to_put`, com o título removido.
     const definite = DEFINITE_BEFORE.test(before) || /^(?:a|o)\s/.test(match[0]);
-    if (definite && removed.has(stemOf(match[0]))) continue;
+    if (
+      definite &&
+      removed.has(stemOf(match[0])) &&
+      !namedAfter(folded.slice((match.index ?? 0) + match[0].length))
+    ) {
+      continue;
+    }
     return true;
   }
   return false;
@@ -156,11 +214,10 @@ function classifyRest(
 }
 
 function classifyClause(
-  clause: string,
+  tokens: Token[],
   field: PaintedField,
   removed: ReadonlySet<string>,
 ): PaintedVerdict {
-  const tokens = tokenize(clause);
   const swap = tokens.findIndex((token) => SWAP_VERB.test(token.folded));
   const by = swap >= 0 ? tokens.findIndex((t, i) => i > swap && t.folded === 'por') : -1;
   if (swap >= 0 && by >= 0) {
@@ -192,9 +249,8 @@ export function classifyPainted(
   removed: ReadonlySet<string> = NO_REMOVED,
 ): PaintedVerdict {
   let worst: PaintedVerdict = NONE;
-  for (const [index, clause] of text.split(CLAUSE_SEPARATOR).entries()) {
-    if (index % 2 === 1) continue;
-    const verdict = classifyClause(clause, field, removed);
+  for (const tokens of clausesOf(text)) {
+    const verdict = classifyClause(tokens, field, removed);
     const better =
       RANK[verdict.level] > RANK[worst.level] ||
       (verdict.level === 'refuse' && worst.level === 'refuse' && verdict.kind === 'painted_price');
@@ -203,15 +259,39 @@ export function classifyPainted(
   return worst;
 }
 
+const hasOwnVerb = (tokens: Token[]): boolean =>
+  tokens.some((t) =>
+    [TRUE_REMOVAL, SWAP_VERB, ACTION_VERB, PUT_VERB, WRITE_STOP].some((verb) =>
+      verb.test(t.folded),
+    ),
+  );
+
+/**
+ * Os trechos do texto, em palavras. O trecho depois de " e " ou de vírgula que não tem verbo próprio herda a remoção
+ * do anterior ("Remover o selo e o preço R$ 9,90"): ganha um verbo de tirar na frente (R31). Escrita tem verbo
+ * próprio, então "tira o coelho e escreve OFERTA" não herda.
+ */
+function clausesOf(text: string): Token[][] {
+  const clauses: Token[][] = [];
+  let removing = false;
+  for (const [index, clause] of text.split(CLAUSE_SEPARATOR).entries()) {
+    if (index % 2 === 1) continue;
+    let tokens = tokenize(clause);
+    const own = hasOwnVerb(tokens);
+    if (removing && !own) tokens = [{ original: 'tira', folded: 'tira' }, ...tokens];
+    removing = tokens.some((t) => TRUE_REMOVAL.test(t.folded)) || (removing && !own);
+    clauses.push(tokens);
+  }
+  return clauses;
+}
+
 /**
  * Os termos soltos que o texto manda tirar ("Remover o título", "troca o título por X"): `titulo`, `preco`... no
  * singular. O `what_to_put` do mesmo plano pode citá-los com artigo definido ("na área onde está o título").
  */
 export function removedTerms(text: string): ReadonlySet<string> {
   const terms = new Set<string>();
-  for (const [index, clause] of text.split(CLAUSE_SEPARATOR).entries()) {
-    if (index % 2 === 1) continue;
-    const tokens = tokenize(clause);
+  for (const tokens of clausesOf(text)) {
     const swap = tokens.findIndex((token) => SWAP_VERB.test(token.folded));
     const by = swap >= 0 ? tokens.findIndex((t, i) => i > swap && t.folded === 'por') : -1;
     const masked =

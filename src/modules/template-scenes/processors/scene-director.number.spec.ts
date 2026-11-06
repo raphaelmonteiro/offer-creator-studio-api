@@ -161,5 +161,19 @@ describeIfSceneDb(
       expect(await lastReply(scene.id)).toContain('Não pinto ano, data nem número');
       expect(imageJobs()).toHaveLength(0);
     });
+
+    it('Número solto: "99 no canto" em what_to_put vira recusa, e "3 coelhos" segue (R34)', async () => {
+      const refused = await h.runTurn(
+        'coloca 99 no canto',
+        item('', { what_to_put: '99 no canto' }),
+      );
+      expect(refused.version.status).toBe('rejected');
+      expect(await lastReply(refused.scene.id)).toContain('Não pinto texto');
+      expect(imageJobs()).toHaveLength(0);
+
+      const kept = await h.runTurn('coloca 3 coelhos', item('', { what_to_put: '3 coelhos' }));
+      expect(kept.version.status).toBe('queued');
+      expect(imageJobs()).toHaveLength(1);
+    });
   },
 );

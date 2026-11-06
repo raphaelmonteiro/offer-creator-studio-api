@@ -50,8 +50,7 @@ export function applyNumberRule(plan: DirectorPlan, options: { final: boolean })
   if (NOT_PAINTED_TURNS.has(cleaned.turn_kind)) return { kind: 'ok', plan: cleaned, patches: [] };
   const putHas = hasWrittenNumber(cleaned.what_to_put);
   const changeHas = hasWrittenNumber(cleaned.what_to_change, { removal: true });
-  if (!putHas && !changeHas) return { kind: 'ok', plan: cleaned, patches: [] };
-  if (putHas && onlyNumberLeft(cleaned.what_to_put)) {
+  if (onlyNumberLeft(cleaned.what_to_put)) {
     return {
       kind: 'ok',
       plan: {
@@ -63,6 +62,7 @@ export function applyNumberRule(plan: DirectorPlan, options: { final: boolean })
       patches: [],
     };
   }
+  if (!putHas && !changeHas) return { kind: 'ok', plan: cleaned, patches: [] };
   if (!options.final) return { kind: 'retry', reason: NUMBER_RETRY_REASON };
   const patches: NumberPatch[] = [];
   const patched = { ...cleaned };

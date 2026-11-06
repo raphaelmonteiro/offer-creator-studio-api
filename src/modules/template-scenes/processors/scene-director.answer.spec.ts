@@ -122,5 +122,57 @@ describeIfSceneDb(
       expect(version.status).toBe('queued');
       expect(imageJobs()).toHaveLength(1);
     });
+
+    describe('Resposta sem imagem não passa por composição nem por número (R32)', () => {
+      it('"Não vejo faixa." com "colocar uma faixa azul" no plano: o Diretor é chamado uma vez e a resposta dele sai', async () => {
+        const { scene, plan, version } = await h.runTurn(
+          'deixa mais bonito',
+          answer({
+            reply: 'Não vejo faixa. Onde ela está?',
+            what_to_change: 'colocar uma faixa azul',
+          }),
+        );
+        expect(plan).toHaveBeenCalledTimes(1);
+        expect(version.status).toBe('rejected');
+        expect(await lastReply(scene.id)).toBe(
+          'Pelo que vejo na imagem: Não vejo faixa. Onde ela está?',
+        );
+      });
+
+      it('número no plano que não chama imagem também não refaz', async () => {
+        const { plan } = await h.runTurn(
+          'coloca 2027',
+          answer({ reply: 'Não vejo onde. Onde fica?', what_to_put: '2027 em cima' }),
+        );
+        expect(plan).toHaveBeenCalledTimes(1);
+      });
+
+      it('o mesmo plano com will_change_image verdadeiro continua passando pela composição', async () => {
+        const { plan } = await h.runTurn(
+          'coloca um coelho',
+          answer({
+            will_change_image: true,
+            reply: 'Vou colocar.',
+            what_to_change: 'colocar uma faixa azul',
+          }),
+        );
+        expect(plan).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    describe('Anúncio sem ação em outra forma verbal (R33)', () => {
+      it.each(['O coelho será removido.', 'Removerei o coelho.', 'Estou removendo o coelho.'])(
+        '"%s" com will_change_image falso: refaz uma vez e, persistindo, o chat diz que não entendeu, sem prometer',
+        async (reply) => {
+          const { scene, plan, version } = await h.runTurn('tira o coelho', answer({ reply }));
+          expect(plan).toHaveBeenCalledTimes(2);
+          expect(version.status).toBe('rejected');
+          const text = await lastReply(scene.id);
+          expect(text).toContain('Não entendi o que mudar');
+          expect(text).not.toContain('removid');
+          expect(imageJobs()).toHaveLength(0);
+        },
+      );
+    });
   },
 );

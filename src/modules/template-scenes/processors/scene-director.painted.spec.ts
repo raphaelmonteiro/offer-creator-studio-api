@@ -181,4 +181,81 @@ describeIfSceneDb('Pintado com três saídas, pelo caminho do Diretor (banco chr
       expect(version.status).toBe('queued');
     });
   });
+
+  describe('Rodada 3: recusa e pergunta só onde cabe (R29 a R31, D-49)', () => {
+    it.each([
+      'um selo com 9,90',
+      'um selo por 9,90',
+      'oferta de 12,50 no canto',
+      'placa sem moldura com OFERTA',
+      'placa sem moldura escrita Feliz Pascoa',
+      'selo sem borda 50% off',
+      'um COELHO grande',
+    ])('Preço sem cifrão e negação que não esconde: "%s" vira recusa, sem imagem', async (put) => {
+      const { version, plan } = await h.runTurn('coloca isso', item({ what_to_put: put }));
+      expect(plan).toHaveBeenCalledTimes(1);
+      expect(version.status).toBe('rejected');
+      expect(imageJobs()).toHaveLength(0);
+    });
+
+    it.each([
+      'Remover o selo e o preço R$ 9,90',
+      'Remover o coelho e o título',
+      'tira a logo e o preço',
+      'tira OFERTA e PROMOCAO',
+      'Remover o que está escrito no ovo',
+    ])(
+      'Remoção de vários objetos e tirar o que está escrito: "%s" segue, sem refazer',
+      async (change) => {
+        const { version, plan } = await h.runTurn(change, item({ what_to_change: change }));
+        expect(plan).toHaveBeenCalledTimes(1);
+        expect(version.status).toBe('queued');
+        expect(imageJobs()).toHaveLength(1);
+      },
+    );
+
+    it('Remoção seguida de escrita: "tira o coelho e escreve OFERTA" vira recusa', async () => {
+      const { version } = await h.runTurn(
+        'tira o coelho e escreve OFERTA',
+        item({ what_to_change: 'tira o coelho e escreve OFERTA' }),
+      );
+      expect(version.status).toBe('rejected');
+      expect(imageJobs()).toHaveLength(0);
+    });
+
+    it('Palavra parecida com escrita: "um escritório ao fundo" segue', async () => {
+      const { version, plan } = await h.runTurn(
+        'coloca um escritório ao fundo',
+        item({ what_to_put: 'um escritório ao fundo' }),
+      );
+      expect(plan).toHaveBeenCalledTimes(1);
+      expect(version.status).toBe('queued');
+    });
+
+    it('Nome depois do título: "o título Promoção de Páscoa" com "Remover o título atual", nas duas chamadas, faz a pergunta fixa', async () => {
+      const { scene, version, plan } = await h.runTurn(
+        'troca o título',
+        item({
+          what_to_change: 'Remover o título atual',
+          what_to_put: 'o título Promoção de Páscoa',
+        }),
+      );
+      expect(plan).toHaveBeenCalledTimes(2);
+      expect(version.status).toBe('rejected');
+      expect(await lastReply(scene.id)).toContain('Não entendi se você quer isso escrito');
+      expect(imageJobs()).toHaveLength(0);
+    });
+
+    it('Troca do título por um objeto continua executando', async () => {
+      const { version, plan } = await h.runTurn(
+        'troca o título por flores',
+        item({
+          what_to_change: 'Remover o título da parte superior',
+          what_to_put: 'Flores na área onde está o título',
+        }),
+      );
+      expect(plan).toHaveBeenCalledTimes(1);
+      expect(version.status).toBe('queued');
+    });
+  });
 });

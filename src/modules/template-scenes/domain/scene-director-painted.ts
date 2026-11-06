@@ -1,4 +1,4 @@
-import { wantsImage } from './scene-director-decision';
+import { callsImage } from './scene-director-decision';
 import { DirectorPlan, PaintedRefusal } from './scene-director-schema';
 import { classifyPainted, removedTerms } from './scene-painted-detector';
 import { hasWrittenNumber } from './scene-written-number';
@@ -19,10 +19,6 @@ const SKIPPED_TURNS: ReadonlySet<DirectorPlan['turn_kind']> = new Set([
   'desfazer',
   'recusa_pintado',
 ]);
-
-/** O plano chama o modelo de imagem (pedido direto, reclamação com ação, ou "marquei")? */
-const callsImage = (plan: DirectorPlan): boolean =>
-  wantsImage(plan) || plan.turn_kind === 'marcacao_sem_pedido';
 
 /** Recusa por forma inequívoca em `what_to_put` ou `what_to_change` (a). */
 function refusalOf(plan: DirectorPlan): PaintedRefusal | null {

@@ -57,8 +57,8 @@ export interface WrittenNumberOptions {
   removal?: boolean;
 }
 
-/** Cláusulas separadas por vírgula, ponto e vírgula, " e " ou ponto seguido de espaço. */
-export const CLAUSE_SEPARATOR = /(\s*[,;]\s*|\s+e\s+|\.\s+)/;
+/** Cláusulas separadas por vírgula, ponto e vírgula, " e " ou ponto seguido de espaço; a vírgula entre dígitos ("9,90") não separa. */
+export const CLAUSE_SEPARATOR = /(\s*(?:(?<!\d),|,(?!\d)|;)\s*|\s+e\s+|\.\s+)/;
 
 const hasNumber = (clause: string, options: WrittenNumberOptions): boolean => {
   const folded = fold(clause);
@@ -87,7 +87,8 @@ export function stripNumberClauses(text: string, options: WrittenNumberOptions =
 
 /** Só sobra o número, posição e palavras de ligação ("2027 em cima"): o cliente pediu o número. */
 export function onlyNumberLeft(text: string): boolean {
-  if (!hasWrittenNumber(text)) return false;
+  // Dígitos soltos contam ('99 no canto'), mesmo sem ser ano nem data (R34); '3 coelhos' tem palavra sobrando.
+  if (!hasWrittenNumber(text) && !/\d/.test(text)) return false;
   const words = fold(text)
     .split(/[^a-z0-9]+/)
     .filter(Boolean)

@@ -343,3 +343,30 @@ describe('decideTurn: o prefixo de leitura só vai quando a primeira frase afirm
     expect(answer('', 'pergunta')).toMatchObject({ aboutImage: false });
   });
 });
+
+describe('decideTurn: anúncio sem ação em outra forma verbal (R33)', () => {
+  const answer = (reply: string) =>
+    decide({ turn_kind: 'pedido_item', will_change_image: false, reply, what_to_change: '' });
+  const FIXED = expect.stringContaining('Não entendi o que mudar');
+
+  it.each([
+    'O coelho será removido.',
+    'Os ovos serão trocados.',
+    'Removerei o coelho.',
+    'Farei a troca agora.',
+    'Estou removendo o coelho.',
+    'Estamos trocando a cesta.',
+  ])('anúncio "%s" não vai ao cliente: texto fixo', (reply) => {
+    expect(answer(reply)).toEqual({ kind: 'reply', reply: FIXED, aboutImage: false });
+  });
+
+  it.each([
+    'Estou vendo vários ovos. Qual deles você quer tirar?',
+    'Não será possível tirar o que não vejo.',
+    'Não removerei o que não existe. Onde ele está?',
+    'Não estou vendo uma cerca nesta imagem.',
+    'Será que você quer o ovo da cesta ou o do gramado?',
+  ])('resposta "%s" não é anúncio e vai ao cliente', (reply) => {
+    expect(answer(reply)).toEqual({ kind: 'reply', reply, aboutImage: expect.any(Boolean) });
+  });
+});

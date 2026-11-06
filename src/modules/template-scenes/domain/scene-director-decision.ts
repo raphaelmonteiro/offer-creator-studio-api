@@ -76,7 +76,17 @@ export function answersWithoutImage(
 }
 
 /** Anunciar ("vou", "irei") sem mudar a imagem quebraria G8: "não vou conseguir" não é anúncio. */
-const ANNOUNCES = /(?<!\bnao\s)(?<!\bnem\s)\b(?:vou|irei|vamos|farei)\b/;
+const ANNOUNCES = new RegExp(
+  [
+    '\\b(?:vou|irei|vamos)\\b',
+    // futuro simples ("removerei", "farei"), "será removido" e "estou removendo" (R33)
+    '\\b\\w{2,}rei\\b',
+    '\\b(?:sera|serao)\\s+\\w+[ai]d[oa]s?\\b',
+    '\\b(?:estou|estamos)\\s+(?!vendo|olhando|observando|notando)\\w+ndo\\b',
+  ]
+    .map((part) => `(?<!\\bnao\\s)(?<!\\bnem\\s)${part}`)
+    .join('|'),
+);
 
 /**
  * O prefixo "Pelo que vejo na imagem:" só vai quando a primeira frase afirma algo sobre a imagem (G8). Quem só
@@ -91,6 +101,11 @@ export function isReading(reply: string): boolean {
 export function unusableAnswer(reply: string): boolean {
   const text = reply.trim();
   return !text || ANNOUNCES.test(fold(text));
+}
+
+/** O plano chama o modelo de imagem (pedido direto, reclamação com ação, ou "marquei")? */
+export function callsImage(plan: Pick<DirectorPlan, 'turn_kind' | 'will_change_image'>): boolean {
+  return wantsImage(plan) || plan.turn_kind === 'marcacao_sem_pedido';
 }
 
 /** O plano muda a imagem? Pedido que a quer, ou "marquei" com pedido em aberto. */

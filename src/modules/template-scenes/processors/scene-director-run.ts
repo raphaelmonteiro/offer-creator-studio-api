@@ -6,6 +6,7 @@ import {
 import { applyNumberRule, NumberPatch } from '../domain/scene-director-number';
 import {
   answersWithoutImage,
+  callsImage,
   hasInstruction,
   unusableAnswer,
   wantsImage,
@@ -80,9 +81,15 @@ function validate(text: string, context: DirectorContext, final: boolean): Check
   if (painted.kind === 'question') return { question: 'painted' };
   const plan = painted.plan;
   if (plan.turn_kind === 'recusa_pintado') return { plan };
-  const composition = checkComposition(plan, context.clientMessages);
+  // Composição e número protegem o prompt de imagem: plano que não chama imagem não passa por eles (R32).
+  const calls = callsImage(plan);
+  const composition = calls
+    ? checkComposition(plan, context.clientMessages)
+    : ({ ok: true } as const);
   if (composition.ok === false) return { reason: composition.reason, groups: composition.groups };
-  const written = applyNumberRule(plan, { final });
+  const written = calls
+    ? applyNumberRule(plan, { final })
+    : ({ kind: 'ok', plan, patches: [] as NumberPatch[] } as const);
   if (written.kind === 'retry') return { reason: written.reason, number: true };
   if (written.kind === 'question') return { question: 'number' };
   const emptyAnswer = answersWithoutImage(written.plan) && unusableAnswer(written.plan.reply);
