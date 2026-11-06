@@ -30,6 +30,7 @@ describeIfSceneDb(
         const running = await waitForScene(
           created.id,
           (s) => s.activeVersion?.step === 'generating',
+          40_000,
         );
 
         const cancel = await post(`/${created.id}/versions/${sent.body.data.versionId}/cancel`);
@@ -47,7 +48,8 @@ describeIfSceneDb(
 
         const done = await waitForScene(created.id, (s) => s.activeVersion === null);
         expect(done.currentVersion).toBeNull();
-        expect(done.versions.items[0]).toMatchObject({ status: 'cancelled', previewUrl: null });
+        // o painel lista só versões com imagem: a cancelada não aparece
+        expect(done.versions).toMatchObject({ total: 0, items: [] });
         expect(done.messages.at(-1).content).toBe('Geração cancelada.');
         const again = await post(`/${created.id}/messages`, {
           content: 'campo verde',
@@ -141,6 +143,7 @@ describeIfSceneDb(
       });
 
       it('restaurar e, depois do GC manual, 410 para a versão podada', async () => {
+        process.env.TEMPLATE_SCENE_MASTERS_KEPT = '5'; // o padrão é 20; este roteiro usa 6 versões
         const scene = await insertScene(h.dataSource, { name: 'E2E Restaurar' });
         h.trackScene(scene.id);
         const files = new SceneFilesService(new ConfigService({ UPLOAD_DEST: h.uploadsDir }));

@@ -36,6 +36,8 @@ describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () =
       expect(sent.status).toBe(202);
       expect(sent.body.data).toMatchObject({ revision: 1 });
       expect(sent.body.data.jobId).toEqual(expect.any(String));
+      expect(sent.body.data).not.toHaveProperty('assistantMessage');
+      expect(sent.body.data).not.toHaveProperty('operation');
 
       const scene = await waitForScene(created.id, isReady);
       expect(scene.currentVersion).toMatchObject({
@@ -45,7 +47,13 @@ describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () =
       });
       expect(scene.currentVersion.master).toMatchObject({ width: 1920, height: 3840 });
       expect(scene.currentVersion.preview.url).toMatch(/preview\.webp$/);
-      expect(scene.messages.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
+      // a mensagem, o anúncio do Diretor (gravado antes da janela) e a resposta depois da imagem
+      expect(scene.messages.map((m: { role: string }) => m.role)).toEqual([
+        'user',
+        'assistant',
+        'assistant',
+      ]);
+      expect(scene.currentVersion).toMatchObject({ displayNumber: 1, judge: 'sim' });
       expect(scene.activeVersion).toBeNull();
 
       const files = new SceneFilesService(new ConfigService({ UPLOAD_DEST: h.uploadsDir }));
@@ -77,11 +85,11 @@ describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () =
       expect(stale.status).toBe(409);
       expect(stale.body.error.code).toBe('REVISION_CONFLICT');
       const edit = await post(`/${created.id}/messages`, {
-        content: 'deixa o sol laranja',
-        expectedRevision: 2,
+        content: 'quantos coelhos tem?',
+        expectedRevision: 3,
       });
       expect(edit.status).toBe(202);
-      expect(edit.body.data).toMatchObject({ jobId: null, operation: 'needs_region' });
+      expect(edit.body.data.jobId).toEqual(expect.any(String));
     });
 
     it('duas mensagens ao mesmo tempo: uma 202, a outra 409, uma só versão', async () => {
@@ -142,9 +150,11 @@ describeIfSceneDb('Cena de template: fluxo base (e2e, banco chroma_x_e2e)', () =
       server.close();
 
       expect(events.map((e) => [e.kind, e.step])).toEqual([
+        ['version.step', 'reading'],
         ['version.step', null],
         ['version.step', 'preparing'],
         ['version.step', 'generating'],
+        ['version.step', 'checking'],
         ['version.step', 'saving'],
         ['version.ready', 'done'],
       ]);

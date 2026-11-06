@@ -28,9 +28,10 @@ const EMPTY: DirectorPlan = {
 };
 
 const has = (folded: string, pattern: RegExp): boolean => pattern.test(folded);
+/** Tira só os marcadores do Diretor e do juiz: os do provedor de imagem (`#lento`, `#falha-*`) seguem no pedido. */
 const clean = (message: string): string =>
   message
-    .replace(/#[\w=-]+/g, '')
+    .replace(/#(?:diretor|plano|juiz)-[\w-]*/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
