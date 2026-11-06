@@ -254,7 +254,7 @@ describe('decideTurn: o Diretor responde em vez de pedir imagem (validação 8, 
         decide({
           turn_kind: kind,
           will_change_image: false,
-          reply: 'Não vejo o preço; onde ele está?',
+          reply: 'Não vejo o preço. Onde ele está?',
           what_to_change: 'remover o preço',
           what_to_put: 'campo limpo',
         }),
@@ -275,7 +275,7 @@ describe('decideTurn: o Diretor responde em vez de pedir imagem (validação 8, 
   });
 
   it('"não vou conseguir" não é anúncio: a resposta vale', () => {
-    const reply = 'Não vou conseguir tirar o que não vejo; pode marcar a área?';
+    const reply = 'Não vou conseguir tirar o que não vejo. Pode marcar a área?';
     expect(decide({ turn_kind: 'pedido_item', will_change_image: false, reply })).toEqual({
       kind: 'reply',
       reply,
@@ -303,5 +303,43 @@ describe('decideTurn: o Diretor responde em vez de pedir imagem (validação 8, 
         { marked: true, openRequests: ['tirar a cerca'] },
       ),
     ).toMatchObject({ kind: 'image' });
+  });
+});
+
+describe('decideTurn: o prefixo de leitura só vai quando a primeira frase afirma (task 1.42)', () => {
+  const answer = (reply: string, kind: 'pedido_item' | 'pergunta' = 'pedido_item') =>
+    decide({ turn_kind: kind, will_change_image: false, reply, what_to_change: '' });
+
+  it('Resposta que só pergunta: sai sem o prefixo', () => {
+    expect(answer('Qual canto você quer deixar livre?')).toEqual({
+      kind: 'reply',
+      reply: 'Qual canto você quer deixar livre?',
+      aboutImage: false,
+    });
+  });
+
+  it('Afirmação seguida de pergunta: a primeira frase afirma, então o prefixo vai', () => {
+    expect(answer('Não vejo uma cerca nesta imagem. Onde coloco a árvore?')).toEqual({
+      kind: 'reply',
+      reply: 'Não vejo uma cerca nesta imagem. Onde coloco a árvore?',
+      aboutImage: true,
+    });
+  });
+
+  it('pergunta sobre a imagem que só pergunta também sai sem o prefixo, e a que afirma leva', () => {
+    expect(answer('Quer saber de qual deles?', 'pergunta')).toMatchObject({ aboutImage: false });
+    expect(answer('Há 3 coelhos.', 'pergunta')).toMatchObject({ aboutImage: true });
+  });
+
+  it('Texto fixo sem prefixo: pergunta sobre a imagem com o reply barrado cai no texto fixo, sem prefixo', () => {
+    expect(answer('Pronto, o resto ficou igual.', 'pergunta')).toEqual({
+      kind: 'reply',
+      reply: expect.stringContaining('Não consegui formular uma resposta confiável'),
+      aboutImage: false,
+    });
+  });
+
+  it('pergunta com o reply vazio também cai no texto fixo, sem prefixo', () => {
+    expect(answer('', 'pergunta')).toMatchObject({ aboutImage: false });
   });
 });

@@ -1,4 +1,5 @@
 import { directorPlan } from '../testing/scene-director-fixtures';
+import { DIRECTOR_JSON_SCHEMA, directorSchema } from './scene-director-schema';
 import { checkPainted, enforcePaintedRefusal, promptableTexts } from './scene-director-painted';
 import { classifyPainted, PaintedField, PaintedLevel } from './scene-painted-detector';
 
@@ -28,6 +29,7 @@ const PUT_TABLE: Row[] = [
   ['escreve FELIZ PASCOA ao lado do logo', 'refuse'],
   ['tira o coelho para escrever FELIZ PASCOA', 'refuse'],
   ['troca o coelho por OFERTA', 'refuse'],
+  ['troca o título por PROMOÇÃO', 'refuse'],
   ['tira para escrever FELIZ PASCOA', 'refuse'],
   ['tira para a OFERTA', 'refuse'],
   ['retira coloca OFERTA em cima', 'refuse'],
@@ -36,6 +38,10 @@ const PUT_TABLE: Row[] = [
   ['titulo Ofertas da Semana', 'doubt'],
   ['a logo da loja sem fundo', 'doubt'],
   ['a logo da loja perto do título', 'doubt'],
+  ['outro título', 'doubt'],
+  ['um novo título', 'doubt'],
+  ['um título', 'doubt'],
+  ['flores no título', 'doubt'],
   ['lugar pro preço perto do título', 'doubt'],
   ['placa com letras', 'doubt'],
   ['uma placa de madeira com letras', 'doubt'],
@@ -59,6 +65,7 @@ const PUT_TABLE: Row[] = [
   // c) segue (remoção, troca e reserva)
   ['tira o preço', 'none'],
   ['tira o preço R$ 9,90', 'none'],
+  ['tira o ano abaixo do título', 'none'],
   ['tira o OFERTA', 'none'],
   ['apaga "Feliz Natal"', 'none'],
   ['sem R$ 9,90', 'none'],
@@ -250,7 +257,6 @@ describe('recusa de pintado por regra (enforcePaintedRefusal)', () => {
     const plan = directorPlan({
       turn_kind,
       what_to_put: 'texto "Ofertas"',
-      written_content: ['Ofertas'],
     });
     expect(enforcePaintedRefusal(plan)).toEqual(plan);
   });
@@ -260,9 +266,9 @@ describe('recusa de pintado por regra (enforcePaintedRefusal)', () => {
     expect(enforcePaintedRefusal(plan)).toBe(plan);
   });
 
-  describe('written_content (D-45, R27)', () => {
-    it('Diretor declara a escrita: em plano que chama imagem vira recusa, sem termo conhecido', () => {
-      const plan = item('uma placa de boas-vindas', { written_content: ['Bem-vindo'] });
+  describe('Diretor recusa a escrita (D-47: só `refusal` e `recusa_pintado` recusam)', () => {
+    it('uma placa de boas-vindas, sem termo conhecido e com refusal painted_text, vira recusa', () => {
+      const plan = item('uma placa de boas-vindas', { refusal: 'painted_text' });
       expect(enforcePaintedRefusal(plan)).toMatchObject({
         turn_kind: 'recusa_pintado',
         refusal: 'painted_text',
@@ -270,33 +276,15 @@ describe('recusa de pintado por regra (enforcePaintedRefusal)', () => {
       });
     });
 
-    it('Resposta sobre texto escrito: pergunta com written_content não vira recusa', () => {
-      const plan = directorPlan({
-        turn_kind: 'pergunta',
-        will_change_image: false,
-        reply: 'Está escrito Feliz Páscoa',
-        written_content: ['Feliz Páscoa'],
-      });
-      expect(enforcePaintedRefusal(plan)).toBe(plan);
-      expect(checkPainted(plan, { final: true })).toEqual({ kind: 'ok', plan });
-    });
-
-    it.each(['agradecimento', 'outro', 'reclamacao'] as const)(
-      '%s sem imagem não é recusado por written_content',
-      (turn_kind) => {
-        const plan = directorPlan({ turn_kind, will_change_image: false, written_content: ['Oi'] });
-        expect(enforcePaintedRefusal(plan)).toBe(plan);
-      },
-    );
-
-    it('"marquei" que chama imagem vale', () => {
-      const plan = directorPlan({ turn_kind: 'marcacao_sem_pedido', written_content: ['Oi'] });
-      expect(enforcePaintedRefusal(plan)).toMatchObject({ turn_kind: 'recusa_pintado' });
-    });
-
-    it('Pedido disfarçado que escapa: written_content vazio segue', () => {
+    it('Pedido disfarçado que escapa: sem refusal e sem forma conhecida, segue (limite aceito de D-46)', () => {
       const plan = item('uma placa de boas-vindas');
       expect(enforcePaintedRefusal(plan)).toBe(plan);
+    });
+
+    it('o campo written_content saiu do schema: saída com ele é inválida', () => {
+      const raw = JSON.stringify({ ...directorPlan(), written_content: ['Feliz Páscoa'] });
+      expect(directorSchema.safeParse(JSON.parse(raw)).success).toBe(false);
+      expect(DIRECTOR_JSON_SCHEMA.schema.properties).not.toHaveProperty('written_content');
     });
   });
 });
@@ -321,5 +309,97 @@ describe('promptableTexts: item que cairia em recusa ou dúvida sai do prompt', 
       'tira esse 2027 do ovo',
       'deixar a imagem 30% mais clara',
     ]);
+  });
+});
+
+describe('Troca de objeto e o que o plano manda tirar (task 1.42)', () => {
+  const plan = (what_to_change: string, what_to_put: string) =>
+    directorPlan({
+      turn_kind: 'pedido_item',
+      will_change_image: true,
+      what_to_change,
+      what_to_put,
+    });
+
+  it.each([
+    ['Remover o título da parte superior', 'Flores na área onde está o título'],
+    ['Remover o título da parte superior central.', 'Flores no lugar do título.'],
+    ['Remover o título no alto da imagem.', 'Flores na parte de cima, onde estava o título'],
+    ['troca o título por flores', 'flores na área do título'],
+    ['Remover o título da parte superior', 'Flores cobrindo o título'],
+  ])('Troca do título por um objeto: "%s" + "%s" segue, sem refazer', (change, put) => {
+    const p = plan(change, put);
+    expect(checkPainted(p, { final: false })).toEqual({ kind: 'ok', plan: p });
+  });
+
+  it.each([
+    ['Remover o título', 'outro título'],
+    ['Remover o título', 'um novo título'],
+    ['Remover o título', 'um título decorativo'],
+    ['Remover o coelho', 'o título'],
+  ])(
+    'Troca do título por outro título: "%s" + "%s" refaz e, persistindo, pergunta',
+    (change, put) => {
+      const p = plan(change, put);
+      expect(checkPainted(p, { final: false })).toMatchObject({ kind: 'retry' });
+      expect(checkPainted(p, { final: true })).toEqual({ kind: 'question' });
+    },
+  );
+
+  it('o termo precisa ser o que sai: remover o coelho não libera "o título" no what_to_put', () => {
+    const p = plan('Remover o coelho', 'Flores com o título');
+    expect(checkPainted(p, { final: true })).toEqual({ kind: 'question' });
+  });
+
+  it('o artigo definido sozinho não basta: "Flores cobrindo o título" sem remover o título é dúvida', () => {
+    const p = plan('Colocar flores no alto', 'Flores cobrindo o título');
+    expect(checkPainted(p, { final: true })).toEqual({ kind: 'question' });
+  });
+
+  it.each([
+    'Flores no lugar do título',
+    'Flores em vez do título',
+    'Flores onde está o título',
+    'Flores na área do título',
+  ])(
+    'lugar novo na referência: "%s" no what_to_put não é pedido de escrita, mesmo sem remover o título',
+    (put) => {
+      const p = plan('Colocar flores no alto', put);
+      expect(checkPainted(p, { final: false })).toEqual({ kind: 'ok', plan: p });
+    },
+  );
+
+  it('só vale para termo solto: "troca o título por PROMOÇÃO" continua recusa', () => {
+    const p = plan('troca o título por PROMOÇÃO', '');
+    expect(checkPainted(p, { final: false })).toMatchObject({
+      kind: 'ok',
+      plan: { turn_kind: 'recusa_pintado' },
+    });
+  });
+
+  it.each([
+    [
+      'Troca de objeto que não é texto',
+      'troca o coelho por um gato',
+      'Um gato sentado no lugar do coelho, no mesmo estilo aquarelado',
+    ],
+    [
+      'Troca de objeto que não é texto',
+      'troca a cesta por uma caixa',
+      'Uma caixa de presente no lugar da cesta',
+    ],
+    [
+      'Troca de objeto que não é texto',
+      'troca o ovo por uma bola',
+      'Uma bola colorida no lugar do ovo',
+    ],
+    [
+      'Troca de objeto que não é texto',
+      'troca a flor por uma folha',
+      'Uma folha verde onde estava a flor',
+    ],
+  ])('%s: "%s" segue, sem recusa e sem pergunta de escrita', (_n, change, put) => {
+    const p = plan(change, put);
+    expect(checkPainted(p, { final: false })).toEqual({ kind: 'ok', plan: p });
   });
 });

@@ -35,7 +35,8 @@ const NAME_CUE = /^(?:estilo|tipo|como|igual|chamad\w*|camada)$/;
 
 const REMOVAL_VERB = /^(?:tir\w*|retir\w*|remov\w*|apag\w*|elimin\w*|sem)$/;
 const SWAP_VERB = /^(?:troc\w*|substitu\w*)$/;
-const STOP_WORD = /^(?:para|pra|pro|pros|pras)$/;
+/** Para a máscara de remoção: `para` abre outro pedido, e a referência de lugar fica de fora do que sai. */
+const STOP_WORD = /^(?:para|pra|pro|pros|pras|atras|perto|acima|abaixo|junto)$/;
 const ACTION_VERB =
   /^(?:escrev\w*|coloc\w*|pint\w*|poe|ponha|bota|adicion\w*|inclu\w*|faz|fazer|faca)$/;
 const PUT_VERB = /^(?:coloc\w*|poe|ponha|bota|adicion\w*|inclu\w*|pint\w*)$/;
@@ -58,8 +59,12 @@ const RESERVE_BEFORE = new RegExp(
   `\\b(?:espaco|area|lugar|local|vaga|livre|reserva\\w*)\\b(?:\\s+\\w+){0,3}?\\s+(?:para|pra|pros?|pras?)\\s+(?:(?:inserir|colocar)\\s+)?${ARTICLE}$`,
 );
 const PLACE_BEFORE = new RegExp(
-  `\\b(?:atras|perto|acima|abaixo|ao lado|em volta)\\b(?:\\s+(?:d[aeo]s?))?\\s+${ARTICLE}$`,
+  `\\b(?:atras|perto|acima|abaixo|ao lado|em volta|no lugar|em vez|onde esta\\w*|na area)\\b(?:\\s+(?:d[aeo]s?))?\\s+${ARTICLE}$`,
 );
+/** Artigo definido logo antes do termo ("o título", "do título", "no título"): refere o que já está na imagem. */
+const DEFINITE_BEFORE = /\b(?:o|a|os|as|do|da|dos|das|no|na|nos|nas|pelo|pela|ao|aos)\s+$/;
+const NO_REMOVED: ReadonlySet<string> = new Set();
+const stemOf = (term: string): string => term.trim().split(/\s+/).pop()!.replace(/s$/, '');
 
 interface Token {
   original: string;
@@ -120,18 +125,25 @@ function quotedForm(rest: string, placing: boolean): PaintedLevel {
   return level;
 }
 
-function looseTerm(rest: string): boolean {
+function looseTerm(rest: string, removed: ReadonlySet<string>): boolean {
   const folded = fold(rest);
   for (const match of folded.matchAll(LOOSE_TERM)) {
     const before = folded.slice(0, match.index ?? 0);
     if (RESERVE_BEFORE.test(before)) continue;
     if (PLACE_BEFORE.test(before) && !new RegExp(LOOSE_TERM).test(before)) continue;
+    // O que o mesmo plano manda tirar não é pedido de escrever: "o título" no `what_to_put`, com o título removido.
+    const definite = DEFINITE_BEFORE.test(before) || /^(?:a|o)\s/.test(match[0]);
+    if (definite && removed.has(stemOf(match[0]))) continue;
     return true;
   }
   return false;
 }
 
-function classifyRest(rest: string, placing: boolean): PaintedVerdict {
+function classifyRest(
+  rest: string,
+  placing: boolean,
+  removed: ReadonlySet<string>,
+): PaintedVerdict {
   const folded = fold(rest);
   if (PRICE_FORM.test(folded)) return { level: 'refuse', kind: 'painted_price' };
   if (WRITE_VERB.test(folded) || WRITE_OBJECT.test(folded)) {
@@ -139,11 +151,15 @@ function classifyRest(rest: string, placing: boolean): PaintedVerdict {
   }
   const form = quotedForm(rest, placing);
   if (form === 'refuse') return { level: 'refuse', kind: 'painted_text' };
-  if (form === 'doubt' || looseTerm(rest)) return { level: 'doubt', kind: null };
+  if (form === 'doubt' || looseTerm(rest, removed)) return { level: 'doubt', kind: null };
   return NONE;
 }
 
-function classifyClause(clause: string, field: PaintedField): PaintedVerdict {
+function classifyClause(
+  clause: string,
+  field: PaintedField,
+  removed: ReadonlySet<string>,
+): PaintedVerdict {
   const tokens = tokenize(clause);
   const swap = tokens.findIndex((token) => SWAP_VERB.test(token.folded));
   const by = swap >= 0 ? tokens.findIndex((t, i) => i > swap && t.folded === 'por') : -1;
@@ -155,6 +171,7 @@ function classifyClause(clause: string, field: PaintedField): PaintedVerdict {
         .map((t) => t.original)
         .join(' '),
       true,
+      removed,
     );
   }
   const masked = removalMask(tokens);
@@ -163,21 +180,49 @@ function classifyClause(clause: string, field: PaintedField): PaintedVerdict {
     .map((t) => t.original)
     .join(' ');
   const placing = field === 'put' || tokens.some((t, i) => !masked[i] && PUT_VERB.test(t.folded));
-  return classifyRest(rest, placing);
+  return classifyRest(rest, placing, removed);
 }
 
 const RANK: Record<PaintedLevel, number> = { none: 0, doubt: 1, refuse: 2 };
 
 /** Classifica o texto: o pior trecho vale. Preço antes de texto na recusa. */
-export function classifyPainted(text: string, field: PaintedField): PaintedVerdict {
+export function classifyPainted(
+  text: string,
+  field: PaintedField,
+  removed: ReadonlySet<string> = NO_REMOVED,
+): PaintedVerdict {
   let worst: PaintedVerdict = NONE;
   for (const [index, clause] of text.split(CLAUSE_SEPARATOR).entries()) {
     if (index % 2 === 1) continue;
-    const verdict = classifyClause(clause, field);
+    const verdict = classifyClause(clause, field, removed);
     const better =
       RANK[verdict.level] > RANK[worst.level] ||
       (verdict.level === 'refuse' && worst.level === 'refuse' && verdict.kind === 'painted_price');
     if (better) worst = verdict;
   }
   return worst;
+}
+
+/**
+ * Os termos soltos que o texto manda tirar ("Remover o título", "troca o título por X"): `titulo`, `preco`... no
+ * singular. O `what_to_put` do mesmo plano pode citá-los com artigo definido ("na área onde está o título").
+ */
+export function removedTerms(text: string): ReadonlySet<string> {
+  const terms = new Set<string>();
+  for (const [index, clause] of text.split(CLAUSE_SEPARATOR).entries()) {
+    if (index % 2 === 1) continue;
+    const tokens = tokenize(clause);
+    const swap = tokens.findIndex((token) => SWAP_VERB.test(token.folded));
+    const by = swap >= 0 ? tokens.findIndex((t, i) => i > swap && t.folded === 'por') : -1;
+    const masked =
+      swap >= 0 && by >= 0 ? tokens.map((_, i) => i >= swap && i < by) : removalMask(tokens);
+    const gone = fold(
+      tokens
+        .filter((_, i) => masked[i])
+        .map((t) => t.original)
+        .join(' '),
+    );
+    for (const match of gone.matchAll(LOOSE_TERM)) terms.add(stemOf(match[0]));
+  }
+  return terms;
 }

@@ -83,9 +83,7 @@ describeIfSceneDb(
         ),
       );
       expect(plan).toHaveBeenCalledTimes(2);
-      expect(await lastReply(scene.id)).toBe(
-        'Pelo que vejo na imagem: Não vejo uma cerca; onde ela está?',
-      );
+      expect(await lastReply(scene.id)).toBe('Não vejo uma cerca; onde ela está?');
     });
 
     it('Resposta barrada sem instrução: "Pronto, removi a cerca." cai no texto fixo, sem refazer e sem prefixo', async () => {

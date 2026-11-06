@@ -120,16 +120,65 @@ describeIfSceneDb('Pintado com três saídas, pelo caminho do Diretor (banco chr
   });
 
   describe('Resposta sobre texto escrito (R27)', () => {
-    it('o Diretor responde "Está escrito Feliz Páscoa" com written_content, e a resposta não é barrada', async () => {
+    it('o Diretor responde "Está escrito Feliz Páscoa", e a resposta não é barrada', async () => {
       const { scene, version } = await h.runTurn('o que está escrito aí?', {
         turn_kind: 'pergunta',
         will_change_image: false,
         reply: 'Está escrito Feliz Páscoa',
-        written_content: ['Feliz Páscoa'],
       });
       expect(version.status).toBe('rejected');
       expect(await lastReply(scene.id)).toBe('Pelo que vejo na imagem: Está escrito Feliz Páscoa');
       expect(imageJobs()).toHaveLength(0);
+    });
+  });
+
+  describe('Troca de objeto (task 1.42)', () => {
+    it.each([
+      [
+        'troca o coelho por um gato',
+        'Remover o coelho sentado à esquerda',
+        'Um gato no lugar do coelho',
+      ],
+      [
+        'troca a cesta por uma caixa',
+        'Remover a cesta de ovos',
+        'Uma caixa de presente no lugar da cesta',
+      ],
+      [
+        'troca o título por flores',
+        'Remover o título da parte superior',
+        'Flores na área onde está o título',
+      ],
+    ])(
+      'Troca de objeto que não é texto: "%s" chama a imagem, sem recusa e sem pergunta de escrita',
+      async (message, change, put) => {
+        const { version, plan } = await h.runTurn(
+          message,
+          item({ what_to_change: change, what_to_put: put }),
+        );
+        expect(plan).toHaveBeenCalledTimes(1);
+        expect(version.status).toBe('queued');
+        expect(imageJobs()).toHaveLength(1);
+      },
+    );
+
+    it('Troca do título por outro título: nas duas chamadas o chat pergunta se quer escrito, sem imagem', async () => {
+      const { scene, version, plan } = await h.runTurn(
+        'troca o título por outro',
+        item({ what_to_change: 'Remover o título', what_to_put: 'outro título' }),
+      );
+      expect(plan).toHaveBeenCalledTimes(2);
+      expect(version.status).toBe('rejected');
+      expect(await lastReply(scene.id)).toContain('Não entendi se você quer isso escrito');
+      expect(imageJobs()).toHaveLength(0);
+    });
+
+    it('Texto listado pelo Diretor não recusa: o plano de remoção com o título existente segue', async () => {
+      const { version } = await h.runTurn(
+        'tira esse 2027 do ovo',
+        item({ what_to_change: 'Remover o ano abaixo do título', will_change_image: true }),
+      );
+      expect(version.status).toBe('queued');
     });
   });
 });

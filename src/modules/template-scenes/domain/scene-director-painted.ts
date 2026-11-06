@@ -1,12 +1,13 @@
 import { wantsImage } from './scene-director-decision';
 import { DirectorPlan, PaintedRefusal } from './scene-director-schema';
-import { classifyPainted } from './scene-painted-detector';
+import { classifyPainted, removedTerms } from './scene-painted-detector';
 import { hasWrittenNumber } from './scene-written-number';
 
 /**
  * Validação 4 (G3, D-45, D-46): texto, preço e logo não são pintados pelo modelo de imagem. O detector
  * (`scene-painted-detector.ts`) tem três saídas, e este arquivo as aplica ao plano:
- * - recusa (a), sem refazer: `what_to_put` e `what_to_change`, mais `written_content` e o `refusal` do Diretor;
+ * - recusa (a), sem refazer: `what_to_put` e `what_to_change`, mais o `refusal` do Diretor (o campo `written_content`
+ *   saiu do schema em D-47: listava até o texto que já existe);
  * - dúvida (b): refaz uma vez, sem dizer "não pinto"; persistindo, o chat pergunta, sem imagem;
  * - o resto segue. `inventory_keep` perde o item em a) ou b), sem refazer.
  * Só vale em plano que chama imagem: resposta e pergunta sobre texto escrito não são recusadas (R27).
@@ -33,24 +34,14 @@ function refusalOf(plan: DirectorPlan): PaintedRefusal | null {
   return refused.find((v) => v.kind === 'painted_price')?.kind ?? refused[0]?.kind ?? null;
 }
 
-/** Tipo da escrita que o Diretor declarou em `written_content`: o do termo, ou texto se for só uma palavra. */
-function declaredKind(plan: DirectorPlan): PaintedRefusal | null {
-  const items = (plan.written_content ?? []).map((item) => item.trim()).filter(Boolean);
-  if (!items.length) return null;
-  const verdict = classifyPainted(items.join(', '), 'put');
-  return verdict.level === 'refuse' ? verdict.kind : 'painted_text';
-}
-
 /**
  * Plano final: o que o Diretor recusou fica recusado (`refusal` preenche `turn_kind`), e o plano que chama imagem
- * com escrita inequívoca ou `written_content` vira recusa. Nenhuma chamada de imagem sai de um plano recusado.
+ * com escrita inequívoca vira recusa. Nenhuma chamada de imagem sai de um plano recusado.
  */
 export function enforcePaintedRefusal(plan: DirectorPlan): DirectorPlan {
   const kind =
     plan.refusal ??
-    (SKIPPED_TURNS.has(plan.turn_kind) || !callsImage(plan)
-      ? null
-      : (refusalOf(plan) ?? declaredKind(plan)));
+    (SKIPPED_TURNS.has(plan.turn_kind) || !callsImage(plan) ? null : refusalOf(plan));
   if (!kind) {
     return plan.turn_kind === 'recusa_pintado'
       ? { ...plan, refusal: 'painted_text', will_change_image: false }
@@ -85,10 +76,10 @@ export function checkPainted(plan: DirectorPlan, options: { final: boolean }): P
     keep.length === enforced.inventory_keep.length
       ? enforced
       : { ...enforced, inventory_keep: keep };
-  const doubt = [cleaned.what_to_put, cleaned.what_to_change].some(
-    (text) =>
-      classifyPainted(text, text === cleaned.what_to_put ? 'put' : 'change').level !== 'none',
-  );
+  const removed = removedTerms(cleaned.what_to_change);
+  const doubt =
+    classifyPainted(cleaned.what_to_put, 'put', removed).level !== 'none' ||
+    classifyPainted(cleaned.what_to_change, 'change').level !== 'none';
   if (!doubt) return { kind: 'ok', plan: cleaned };
   return options.final ? { kind: 'question' } : { kind: 'retry', reason: PAINTED_RETRY_REASON };
 }

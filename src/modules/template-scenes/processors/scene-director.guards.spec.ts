@@ -84,10 +84,10 @@ describeIfSceneDb(
         expect((version.metrics.plan as DirectorPlan).inventory_keep).toEqual(['coelho']);
       });
 
-      it('Diretor declara a escrita: written_content preenchido vira recusa, sem termo conhecido', async () => {
+      it('Diretor recusa a escrita: refusal painted_text numa placa sem termo conhecido vira recusa, sem imagem', async () => {
         const { version } = await h.runTurn(
           'coloca uma placa de boas-vindas',
-          item({ what_to_put: 'uma placa de boas-vindas', written_content: ['Bem-vindo'] }),
+          item({ what_to_put: 'uma placa de boas-vindas', refusal: 'painted_text' }),
         );
         expect(version.status).toBe('rejected');
         expect(imageJobs()).toHaveLength(0);

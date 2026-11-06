@@ -26,13 +26,12 @@ const FIELDS = [
   'will_change_image: true só se este turno vai chamar o modelo de imagem. Reclamação com ação clara muda a imagem; reclamação sem o que fazer não muda.',
   `reply: uma frase em português do Brasil, até ${DIRECTOR_LIMITS.reply} caracteres. Se muda a imagem, é um ANÚNCIO NO FUTURO do que será feito ("Vou tirar o coelho da direita"). Se não muda, é a resposta ou a pergunta ao cliente. Nunca afirme que algo já foi feito, nunca diga que o resto foi preservado e nunca prometa texto escrito na imagem. Não comece com "Pelo que vejo na imagem": o sistema acrescenta isso.`,
   `what_to_change: o que muda na imagem, olhando a imagem e o histórico; vazio se nada muda (até ${DIRECTOR_LIMITS.field} caracteres).`,
-  `what_to_put: o que deve ficar no lugar; vazio se nada (até ${DIRECTOR_LIMITS.field} caracteres). Nunca preço, texto, letras escritas, logo ou marca.`,
+  `what_to_put: o que deve ficar no lugar; vazio se nada (até ${DIRECTOR_LIMITS.field} caracteres). Nunca preço, texto, letras escritas, logo ou marca. Escreva só o que entra, sem citar o que sai (o que sai vai em what_to_change).`,
   `inventory_keep: até ${DIRECTOR_LIMITS.keepItems} elementos visíveis que precisam continuar como estão (nomes curtos). Só liste o que você viu na imagem.`,
   `what_i_see: uma frase sobre o que você vê na região relevante (até ${DIRECTOR_LIMITS.seen} caracteres). Fica só para auditoria.`,
   'undo_target: em "desfazer", "previous" para a versão anterior ou o número exibido da versão pedida; senão null.',
   'layer_ops: em "camada", as operações exatas (move, resize, remove, set_text, add_logo). O texto de set_text é copiado LITERALMENTE da mensagem do cliente. add_logo só vale se há logo anexada. Senão, lista vazia.',
   'requests: o que o cliente pediu e ainda não está resolvido. Cada item tem id (o id de um item da lista de pedidos em aberto, ou null para um pedido novo), text (as palavras do cliente), action ("open", ou "drop" só se o cliente desistiu) e quote (para "drop", o trecho LITERAL da mensagem atual em que ele desiste; senão null). Se o cliente cita como existente algo que a imagem não tem (por exemplo "o rio" numa imagem sem rio), abra o pedido para incluir o item e diga no reply que você não o vê.',
-  'written_content: as palavras, números ou marcas que o plano deixaria LEGÍVEIS na imagem (o texto de uma placa, o título, o preço); lista vazia se nenhuma. Tirar algo da imagem não conta. Liste mesmo quando o cliente pediu: o sistema recusa a escrita e oferece a camada.',
   'refusal: "painted_text", "painted_price" ou "painted_logo" se o cliente pede isso pintado na imagem; senão null. Oferecer a camada é papel do sistema.',
 ] as const;
 

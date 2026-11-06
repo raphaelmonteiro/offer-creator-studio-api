@@ -1,6 +1,6 @@
 import { DirectorLayerOp, DirectorPlan, PaintedRefusal } from './scene-director-schema';
 import { NO_IMAGE_REPLY, NO_INSTRUCTION_REPLY } from '../scene-texts';
-import { replyIsForbidden, safeReply } from './scene-director-phrases';
+import { FIXED_ANSWER, replyIsForbidden, safeReply } from './scene-director-phrases';
 import { fold } from '../../../shared/text/fold';
 
 /**
@@ -77,6 +77,15 @@ export function answersWithoutImage(
 
 /** Anunciar ("vou", "irei") sem mudar a imagem quebraria G8: "não vou conseguir" não é anúncio. */
 const ANNOUNCES = /(?<!\bnao\s)(?<!\bnem\s)\b(?:vou|irei|vamos|farei)\b/;
+
+/**
+ * O prefixo "Pelo que vejo na imagem:" só vai quando a primeira frase afirma algo sobre a imagem (G8). Quem só
+ * pergunta ("Qual canto você quer deixar livre?") não leu nada para apresentar como leitura.
+ */
+export function isReading(reply: string): boolean {
+  const first = reply.trim().match(/^[^.!?]*[.!?]?/)?.[0] ?? '';
+  return !first.trimEnd().endsWith('?');
+}
 
 /** A resposta de um plano que não muda a imagem não serve: vazia ou anunciando uma ação. Refaz uma vez. */
 export function unusableAnswer(reply: string): boolean {
@@ -174,11 +183,14 @@ export function decideTurn(input: DecisionInput): TurnDecision {
     const text = plan.reply.trim();
     return unusableAnswer(text) || replyIsForbidden(text, false)
       ? { kind: 'reply', reply: NO_INSTRUCTION_REPLY, aboutImage: false }
-      : { kind: 'reply', reply: text, aboutImage: hasImage };
+      : { kind: 'reply', reply: text, aboutImage: hasImage && isReading(text) };
   }
+  const reply = safeReply({ ...plan, will_change_image: false });
+  // Texto fixo (resposta vazia ou barrada) não é leitura: sai sem o prefixo.
+  const fixed = reply === FIXED_ANSWER;
   return {
     kind: 'reply',
-    reply: safeReply({ ...plan, will_change_image: false }),
-    aboutImage: plan.turn_kind === 'pergunta' && hasImage,
+    reply,
+    aboutImage: plan.turn_kind === 'pergunta' && hasImage && !fixed && isReading(reply),
   };
 }

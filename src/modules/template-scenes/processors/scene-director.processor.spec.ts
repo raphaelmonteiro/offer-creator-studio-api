@@ -65,9 +65,7 @@ describeIfSceneDb('SceneDirectorProcessor (banco chroma_x_e2e)', () => {
         reply: 'O que devo corrigir?',
       });
       expect(version.status).toBe('rejected');
-      expect((await lastAssistant(scene.id))?.content).toBe(
-        'Pelo que vejo na imagem: O que devo corrigir?',
-      );
+      expect((await lastAssistant(scene.id))?.content).toBe('O que devo corrigir?');
       expect(imageJobs()).toHaveLength(0);
     });
 
@@ -185,7 +183,7 @@ describeIfSceneDb('SceneDirectorProcessor (banco chroma_x_e2e)', () => {
       expect(version.status).toBe('rejected');
       expect(imageJobs()).toHaveLength(0);
       expect((await lastAssistant(scene.id))?.content).toBe(
-        'Pelo que vejo na imagem: Não vejo um coelho na imagem; pode marcar a área?',
+        'Não vejo um coelho na imagem; pode marcar a área?',
       );
     });
   });
