@@ -27,7 +27,7 @@ const REMOVAL =
   /\b(?:tir(?:a|ar|e|em|ei)|retir(?:a|ar|e|em)|remov(?:a|e|er|em)|apag(?:a|ar|ue|uem)|elimin(?:a|ar|e|em))\b/;
 const NEGATION = /\bsem\b/;
 const RESERVE =
-  /\b(?:espaco|area|lugar|local|vaga|campo|reservar|reserva\w*)\b.*\b(?:para|pra|pro|pros|pras)\b/;
+  /\b(?:espaco|area|lugar|local|vaga|campo|reservar|reserva\w*|adequad\w*|apropriad\w*|ideal|pront[oa]s?|livre|disponivel|vazi[oa]s?|limp[oa]s?)\b.*\b(?:para|pra|pro|pros|pras)\b/;
 const PLACE_REFERENCE = new RegExp(
   `\\b(?:atras|perto|acima|abaixo|ao lado|em volta|ao redor|embaixo|junto|proximo|diante|frente)\\b(?:\\s+\\w+){0,3}?\\s+${ALL_TERMS}`,
 );

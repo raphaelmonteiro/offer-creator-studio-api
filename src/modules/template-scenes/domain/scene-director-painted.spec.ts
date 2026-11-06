@@ -172,6 +172,7 @@ describe('G3 em todo campo que vai ao modelo (R2, R3, D-45)', () => {
     'tira o preço',
     'preciso de lugar pros preços',
     'reservar uma área livre para o título',
+    'adequada para inserir preços depois',
   ])('Mencionar não é pedir escrita: "%s" não é recusado nem refeito', (text) => {
     expect(paintedKindOf(text)).toBeNull();
     const plan = change(text);
