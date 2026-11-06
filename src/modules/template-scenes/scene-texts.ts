@@ -111,6 +111,7 @@ const FAILURE_REPLIES: Record<SceneFailureCode, string> = {
     'Atingi o limite de chamadas ao serviço de imagem para este pedido. Tente de novo com um pedido mais simples.',
   RECOMPOSE_MISMATCH:
     'Não consegui aplicar a edição sem alterar o resto da imagem, então descartei o resultado. Tente de novo.',
+  DIRECTOR_UNAVAILABLE: 'Não consegui ler seu pedido agora. Nada foi alterado.',
 };
 
 export function failureReply(code: SceneFailureCode): string {

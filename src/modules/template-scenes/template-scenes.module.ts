@@ -28,6 +28,7 @@ import { createSceneImageProvider } from './providers/scene-image-provider.facto
 import { SCENE_IMAGE_PROVIDER } from './providers/scene-image-provider';
 import { createSceneIntentClient, SCENE_INTENT_CLIENT } from './providers/scene-intent-client';
 import { createSceneVisionClient, SCENE_VISION_CLIENT } from './providers/scene-vision-client';
+import { SceneDirectorContextService } from './services/scene-director-context';
 import { SceneDirectorService } from './services/scene-director.service';
 import { SceneFilesService } from './services/scene-files.service';
 import { SceneImageService } from './services/scene-image.service';
@@ -81,6 +82,7 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneVisionService,
     SceneIntentService,
     SceneDirectorService,
+    SceneDirectorContextService,
     SceneGenerateHandler,
     SceneEditHandler,
     SceneLayerHandler,

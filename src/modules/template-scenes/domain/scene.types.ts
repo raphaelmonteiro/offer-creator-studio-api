@@ -5,6 +5,8 @@
 
 export const SCENE_VERSION_OPERATIONS = [
   'generate',
+  /** Redesenho da imagem inteira a partir da versão atual (change add-template-scene-conversation). */
+  'redraw',
   'local_edit',
   'add_element',
   'set_layer',
@@ -40,9 +42,12 @@ export const SCENE_FINAL_STATUSES = [
 ] as const satisfies readonly SceneVersionStatus[];
 
 export const SCENE_STEPS = [
+  /** O Diretor está lendo a mensagem (versão `queued`, sem imagem ainda). */
+  'reading',
   'preparing',
   'generating',
   'editing',
+  // Não é mais emitido (sem recomposição); fica no tipo para ler as linhas antigas.
   'blending',
   'checking',
   'saving',
@@ -73,6 +78,8 @@ export const SCENE_FAILURE_CODES = [
   'JOB_EXPIRED',
   'PAID_CALL_LIMIT',
   'RECOMPOSE_MISMATCH',
+  /** O Diretor não respondeu, estourou o tempo ou devolveu saída inválida duas vezes. */
+  'DIRECTOR_UNAVAILABLE',
 ] as const;
 export type SceneFailureCode = (typeof SCENE_FAILURE_CODES)[number];
 
