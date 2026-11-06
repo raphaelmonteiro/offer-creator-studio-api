@@ -632,7 +632,7 @@ roda no worker com a flag da cena, independente de animações e comerciais.
 `displayNumber`, a imagem atual em JPEG até 1.536 px com `detail: high`, a marcação, as camadas). A saída é um plano em schema fechado
 (`domain/scene-director-schema.ts`); o **código valida e executa** (`SceneDirectorProcessor` e `SceneDirectorState`): schema, texto exato
 de camada e pedidos (1 a 3), recusa de texto, preço e logo pintados (4), composição só do cliente, sem cortar frase (5), frases
-proibidas (6), refazendo o Diretor no máximo uma vez. O efeito vem de uma tabela do código sobre `turn_kind`
+proibidas (6), ano, data e número escrito (7), refazendo o Diretor no máximo uma vez. O efeito vem de uma tabela do código sobre `turn_kind`
 (`domain/scene-director-decision.ts`): resposta e recusa terminam `rejected`; **camadas** (`domain/scene-director-layers.ts` e
 `applyLayerActions`) e **desfazer** (`restoreInto`, `services/scene-undo.ts`) viram `ready` sob o lock, sem fila e sem imagem; **imagem**
 grava o anúncio e o plano e publica `template_scene.turn` com `startAfterSeconds` (a **janela de 5 s**, só em pedido sem marcação,
@@ -644,6 +644,18 @@ reclamação e imagem nova; "Parar" é o `cancel` de uma versão `queued`). O cu
   código (`processors/scene-prompt.ts`), com a regra de texto em todos os casos e a linha de itens em aberto fora da primeira imagem (D-38).
 - Juiz (`SceneVisionService`): imagens inteiras antes e depois, mensagem, plano e itens em aberto; o resultado é **sempre aplicado**
   (D-26), o texto ao cliente sai do que ele conferiu (`afterImageReply`), e só o juiz fecha ou reabre um item da lista (G9).
+- **Ano, data e número escrito (D-42):** nenhum prompt de imagem os pede, nem o da primeira imagem. O detector é único
+  (`domain/scene-written-number.ts`) e a regra é do código (`domain/scene-director-number.ts`, validação 7): `inventory_keep` e `requests`
+  com número perdem o item; `what_to_put` em que só sobra o número vira `recusa_pintado`; nos demais casos o Diretor é refeito uma vez e,
+  persistindo, o código corta só o trecho (`metrics.planPatched` e `metrics.numberPatches`); campo que esvazia vira pergunta. `promptableTexts`
+  usa o mesmo detector. O ano citado pelo cliente segue como contexto (o prompt do Diretor e o do juiz dizem isso). "Tira o 2027" e "3 coelhos"
+  não disparam. Limite: "2000 ovos" é lido como ano.
+- **Frase de continuidade (D-43):** só no `folheto-27x54` (`CONTINUITY_FORMAT_IDS`), na primeira imagem, na imagem nova e em `pedido_composicao`
+  (`RedrawKind` `composition`, separado de `global`, o ajuste geral); fora de item e marcação. Sai quando alguma mensagem do cliente pede moldura,
+  faixa ou divisão (`clientAsksForSplit`). `TurnContext.clientMessages` leva as mensagens ao handler.
+- **Juiz e emenda (D-44):** o juiz devolve também `emenda` e `emenda_descricao` (falta de `emenda` invalida a saída). Não muda `atendeu` nem `judge`:
+  o chat só acrescenta o aviso (`seamNote`), com a descrição passando pelo filtro de frases proibidas, e nunca afirma que não há emenda (G8).
+  Na medida da task 1.35 o juiz acertou 2 de 3 emendas e deu 1 falso alarme em 21 imagens: é um aviso, não garantia.
 - Aviso do redesenho (D-35) uma vez por cena, na primeira edição (`metrics.notice`). `GET /:id/messages` pagina o histórico.
 - Camadas, marcação por pincel e laço, `markup`: a tabela de capacidades (`openai-image-capabilities`, com `markup` e preço do 2.6) e os
   códigos do modo `sceneCall` estão em `src/shared/` (DT-12). Morfologia e SSIM têm implementação única em `src/shared/image/` (DT-10),
