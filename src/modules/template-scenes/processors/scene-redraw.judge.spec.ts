@@ -191,6 +191,23 @@ describeIfSceneDb('O juiz confere e o resultado é sempre aplicado (banco chroma
       expect(reply).not.toMatch(/acertei|conferi a imagem nova: /i);
     });
 
+    it.each([
+      [
+        'nao',
+        'Apliquei a imagem nova, mas na conferência o pedido não aparece atendido. Diga o que ajustar',
+      ],
+      ['parcial', 'Conferi a imagem nova e o pedido foi atendido em parte. Diga o que ajustar'],
+    ])(
+      'R6: com mudou barrado e veredito %s, o chat não diz "O pedido aparece atendido"',
+      async (atendeu, expected) => {
+        const { reply } = await run(
+          judgeReturning(verdict({ atendeu, mudou: 'tudo foi preservado exceto o coelho' })),
+        );
+        expect(reply).toContain(expected);
+        expect(reply).not.toContain('O pedido aparece atendido');
+      },
+    );
+
     it('Juiz vê emenda: a versão vira a atual, o chat dá o aviso com a descrição e nenhuma outra imagem é chamada', async () => {
       const judge = judgeReturning(
         verdict({ emenda: true, emenda_descricao: 'grupo sobre uma faixa de grama flutuando' }),

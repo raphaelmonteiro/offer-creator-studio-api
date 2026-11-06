@@ -22,7 +22,20 @@ const PRESERVATION = [
   'preserv',
   'identic',
   'exatamente como',
+  'intacto',
+  'inalterad',
+  'mais nada',
 ];
+
+/**
+ * Afirmação sobre o resto da imagem (R7): "resto", "restante" ou "demais" junto de "igual", "mant*", "sem mexer",
+ * "sem alterar" ou "sem mudar", nas duas ordens. Citar um item ("mantendo o coelho") não é promessa.
+ */
+const REST_WORD = '(?:resto|restante|demais)';
+const REST_CLAIM = '(?:igual|iguais|mant\\w*|sem mexer|sem alterar|sem mudar)';
+const REST_PROMISE = new RegExp(
+  `\\b${REST_WORD}\\b.{0,40}\\b${REST_CLAIM}|\\b${REST_CLAIM}\\b.{0,40}\\b${REST_WORD}\\b`,
+);
 
 /** Verbos de conclusão: o anúncio é intenção, e quem conclui é o juiz. */
 const COMPLETION =
@@ -35,7 +48,7 @@ const PAINTED_PROMISE =
 /** O texto traz promessa de preservação ("fora da área nada mudou", "preservado", "idêntico")? */
 export function promisesPreservation(text: string): boolean {
   const folded = fold(text);
-  return PRESERVATION.some((phrase) => folded.includes(phrase));
+  return PRESERVATION.some((phrase) => folded.includes(phrase)) || REST_PROMISE.test(folded);
 }
 
 /** O `reply` do Diretor é barrado: preservação, conclusão e, só em anúncio de imagem, promessa de texto pintado. */
@@ -53,10 +66,13 @@ export function safeReply(plan: Pick<DirectorPlan, 'reply' | 'will_change_image'
   return plan.will_change_image ? FIXED_ANNOUNCEMENT : FIXED_ANSWER;
 }
 
-/** O `mudou` do juiz: o dele, ou o texto fixo se trouxer promessa de preservação ou vier vazio. */
+/**
+ * O `mudou` do juiz que pode ir ao cliente, ou vazio se vier vazio ou com promessa de preservação. O texto fixo
+ * depende do veredito (`afterImageReply`): "O pedido aparece atendido" só cabe em `sim` (R6).
+ */
 export function safeChanged(changed: string): string {
   const text = changed.trim();
-  return text && !promisesPreservation(text) ? text : FIXED_CHANGED;
+  return text && !promisesPreservation(text) ? text : '';
 }
 
 /** A descrição de emenda do juiz passa pelo mesmo filtro de `mudou`; barrada ou vazia, sai sem descrição. */

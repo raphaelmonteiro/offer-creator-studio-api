@@ -81,13 +81,13 @@ describe('Placa com letras', () => {
 
 describe('Juiz escreve frase proibida', () => {
   it('"tudo foi preservado exceto o coelho" cai no texto fixo', () => {
-    expect(safeChanged('tudo foi preservado exceto o coelho')).toBe(FIXED_CHANGED);
+    expect(safeChanged('tudo foi preservado exceto o coelho')).toBe('');
     expect(FIXED_CHANGED).toBe('O pedido aparece atendido.');
   });
 
   it('o resumo do que mudou, sem promessa, passa; vazio cai no fixo', () => {
     expect(safeChanged('O coelho da direita saiu.')).toBe('O coelho da direita saiu.');
-    expect(safeChanged('   ')).toBe(FIXED_CHANGED);
+    expect(safeChanged('   ')).toBe('');
   });
 
   it('a conclusão do juiz não é barrada: quem conclui é ele', () => {
@@ -122,5 +122,31 @@ describe('prompt do Diretor', () => {
     expect(DIRECTOR_INSTRUCTIONS).toContain('LITERAL');
     expect(DIRECTOR_INSTRUCTIONS).toContain('ANÚNCIO NO FUTURO');
     expect(DIRECTOR_INSTRUCTIONS).toContain('o rio');
+  });
+});
+
+describe('Afirmação sobre o resto da imagem (R7)', () => {
+  it.each([
+    'Vou tirar o coelho e manter o resto igual.',
+    'Vou tirar o coelho sem mexer no resto da imagem.',
+    'o restante continua intacto',
+    'o resto ficou igual',
+    'sem alterar mais nada',
+    'os demais elementos ficam inalterados',
+    'mantendo o restante da cena',
+  ])('"%s" é barrada no reply, no mudou e na descrição da emenda', (text) => {
+    expect(promisesPreservation(text)).toBe(true);
+    expect(replyIsForbidden(text)).toBe(true);
+    expect(safeReply({ reply: text, will_change_image: true })).toBe(FIXED_ANNOUNCEMENT);
+    expect(safeChanged(text)).toBe('');
+  });
+
+  it.each([
+    'Vou tirar os ovos, mantendo o coelho.',
+    'Vou deixar o fundo mais quente.',
+    'Vou trocar os demais ovos por flores.',
+  ])('citar um item não é promessa: "%s" passa', (text) => {
+    expect(promisesPreservation(text)).toBe(false);
+    expect(safeReply({ reply: text, will_change_image: true })).toBe(text);
   });
 });

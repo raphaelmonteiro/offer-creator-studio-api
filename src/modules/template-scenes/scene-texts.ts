@@ -1,3 +1,4 @@
+import { FIXED_CHANGED } from './domain/scene-director-phrases';
 import { SceneFailureCode } from './domain/scene.types';
 
 /** Mensagens do assistente no chat da cena (pt-BR). */
@@ -58,7 +59,7 @@ export const REDRAW_NOTICE =
 /** O que o juiz conferiu, em fatos; o texto ao cliente sai disto, nunca do modelo de imagem nem do Diretor. */
 export interface JudgeFacts {
   satisfied: 'sim' | 'parcial' | 'nao';
-  /** O que mudou, já sem promessa de preservação. */
+  /** O que mudou, já sem promessa de preservação; vazio se o juiz não disse ou foi barrado. */
   changed: string;
   /** Itens do que o cliente pediu que o juiz não viu na imagem nova. */
   missing: string[];
@@ -90,13 +91,14 @@ export function afterImageReply(facts: JudgeFacts | null): string {
   if (!facts) {
     return 'Apliquei a imagem nova, mas não consegui conferir o resultado. Veja se ficou como pediu.';
   }
-  const changed = sentence(facts.changed);
+  // `changed` vazio (vazio ou barrado pelo filtro): o texto fixo acompanha o veredito e nunca o contradiz (R6).
+  const changed = facts.changed.trim() ? ` ${sentence(facts.changed)}` : '';
   const head =
     facts.satisfied === 'sim'
-      ? `Conferi a imagem nova: ${changed}`
+      ? `Conferi a imagem nova: ${changed ? changed.trim() : FIXED_CHANGED}`
       : facts.satisfied === 'parcial'
-        ? `Conferi a imagem nova e o pedido foi atendido em parte: ${changed} Diga o que ajustar ou peça para voltar.`
-        : `Apliquei a imagem nova, mas na conferência o pedido não aparece atendido: ${changed} Diga o que ajustar ou use "Voltar para a anterior".`;
+        ? `Conferi a imagem nova e o pedido foi atendido em parte${changed ? `:${changed}` : '.'} Diga o que ajustar ou peça para voltar.`
+        : `Apliquei a imagem nova, mas na conferência o pedido não aparece atendido${changed ? `:${changed}` : '.'} Diga o que ajustar ou use "Voltar para a anterior".`;
   const notes: string[] = [];
   if (facts.missing.length) {
     notes.push(

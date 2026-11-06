@@ -45,3 +45,29 @@ describe('afterImageReply: emenda (D-44)', () => {
     expect(reply).toBe('Conferi a imagem nova: O sol mudou.');
   });
 });
+
+describe('afterImageReply: texto fixo acompanha o veredito (R6)', () => {
+  const base = { missing: [], textInImage: false, seam: false, seamDescription: '', changed: '' };
+
+  it('sim com mudou barrado: "O pedido aparece atendido"', () => {
+    expect(afterImageReply({ ...base, satisfied: 'sim' })).toBe(
+      'Conferi a imagem nova: O pedido aparece atendido.',
+    );
+  });
+
+  it('parcial com mudou barrado: atendido em parte, sem a frase de atendido', () => {
+    const reply = afterImageReply({ ...base, satisfied: 'parcial' });
+    expect(reply).toBe(
+      'Conferi a imagem nova e o pedido foi atendido em parte. Diga o que ajustar ou peça para voltar.',
+    );
+    expect(reply).not.toContain('aparece atendido');
+  });
+
+  it('nao com mudou barrado: não aparece atendido, e nunca "O pedido aparece atendido"', () => {
+    const reply = afterImageReply({ ...base, satisfied: 'nao' });
+    expect(reply).toBe(
+      'Apliquei a imagem nova, mas na conferência o pedido não aparece atendido. Diga o que ajustar ou use "Voltar para a anterior".',
+    );
+    expect(reply).not.toContain('O pedido aparece atendido');
+  });
+});
