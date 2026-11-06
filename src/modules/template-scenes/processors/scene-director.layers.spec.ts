@@ -262,4 +262,26 @@ describeIfSceneDb('Camadas pelo chat, no consumer do Diretor (banco chroma_x_e2e
     });
     expect((await h.sceneOf(scene.id)).currentVersionId).not.toBe(sent.versionId);
   });
+
+  it('Camada não abre pedido: o plano de camada com requests não muda a lista, e o chat nunca diz "Ainda não vi"', async () => {
+    const { scene } = await h.readyScene({ elements: [LOGO] });
+    const sent = await h.post(scene.id, 'passa a logo para a direita');
+    const { client } = h.directorClient(async () =>
+      directorAnswer(
+        directorPlan({
+          turn_kind: 'camada',
+          reply: 'Vou ajustar as camadas.',
+          layer_ops: [op({ layer: { kind: 'logo', name: null, side: 'right', direction: null } })],
+          requests: [
+            { id: null, text: 'passar a logo para a direita', action: 'open', quote: null },
+          ],
+        }),
+      ),
+    );
+    await h.directorProcessor(client).process({ sceneId: scene.id, versionId: sent.versionId });
+
+    expect((await h.versionOf(sent.versionId)).status).toBe('ready');
+    expect((await h.sceneOf(scene.id)).brief).toEqual([]);
+    expect(await lastReply(scene.id)).not.toContain('Ainda não vi');
+  });
 });

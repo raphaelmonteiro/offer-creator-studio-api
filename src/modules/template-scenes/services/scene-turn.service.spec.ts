@@ -370,7 +370,7 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
       expect(await versionsOf(scene.id)).toHaveLength(1);
     });
 
-    it('elemento que não existe na versão atual: 422 TARGET_ELEMENT_NOT_FOUND', async () => {
+    it('Elemento selecionado que não existe mais: 422 TARGET_ELEMENT_NOT_FOUND', async () => {
       const scene = await readyScene('Alvo elemento');
       const body = { ...message('tira isso'), targetElementId: 'fantasma' };
       expect(await errorOf(service.sendMessage(scene.id, body as never, null))).toEqual({

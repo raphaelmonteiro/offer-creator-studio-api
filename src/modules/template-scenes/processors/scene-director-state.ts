@@ -4,6 +4,7 @@ import { EntityManager } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { applyDirectorRequests, BriefChanges, openItems } from '../domain/scene-brief';
 import { layerOpsToActions } from '../domain/scene-director-layers';
+import { promptableTexts } from '../domain/scene-director-painted';
 import { DirectorLayerOp, DirectorPlan } from '../domain/scene-director-schema';
 import { sceneZonesFor } from '../domain/scene-formats';
 import { decideTurn, TurnDecision } from '../domain/scene-director-decision';
@@ -159,7 +160,11 @@ export class SceneDirectorState {
       await this.reject(target, PAINTED_REFUSAL_REPLIES[decision.refusal]);
       return;
     }
-    const brief = await this.updateBrief(manager, scene, version, plan);
+    // Camada não abre pedido (C-3): o juiz só olha a imagem e relataria "Ainda não vi" sobre a logo.
+    const brief =
+      plan.turn_kind === 'camada'
+        ? undefined
+        : await this.updateBrief(manager, scene, version, plan);
     version.metrics = { ...version.metrics, director: { ...director, brief } };
     await this.run(target, { decision, plan, context });
   }
@@ -178,7 +183,7 @@ export class SceneDirectorState {
       plan,
       marked: context.script.marked,
       hasImage: context.script.hasImage,
-      openRequests: openItems(opened).map((item) => item.text),
+      openRequests: promptableTexts(openItems(opened).map((item) => item.text)),
     });
   }
 

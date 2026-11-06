@@ -38,16 +38,18 @@ export function promisesPreservation(text: string): boolean {
   return PRESERVATION.some((phrase) => folded.includes(phrase));
 }
 
-/** O `reply` do Diretor é barrado: preservação, conclusão ou promessa de texto pintado. */
-export function replyIsForbidden(reply: string): boolean {
+/** O `reply` do Diretor é barrado: preservação, conclusão e, só em anúncio de imagem, promessa de texto pintado. */
+export function replyIsForbidden(reply: string, announcesChange = true): boolean {
   const folded = fold(reply);
-  return promisesPreservation(reply) || COMPLETION.test(folded) || PAINTED_PROMISE.test(folded);
+  // A promessa de texto pintado só importa no anúncio de uma imagem: "está escrito Feliz Páscoa" é resposta (C-1).
+  const paintedPromise = announcesChange && PAINTED_PROMISE.test(folded);
+  return promisesPreservation(reply) || COMPLETION.test(folded) || paintedPromise;
 }
 
 /** `reply` seguro para o cliente: o do Diretor, ou o texto fixo (anúncio ou resposta) se ele for barrado. */
 export function safeReply(plan: Pick<DirectorPlan, 'reply' | 'will_change_image'>): string {
   const reply = plan.reply.trim();
-  if (reply && !replyIsForbidden(reply)) return reply;
+  if (reply && !replyIsForbidden(reply, plan.will_change_image)) return reply;
   return plan.will_change_image ? FIXED_ANNOUNCEMENT : FIXED_ANSWER;
 }
 

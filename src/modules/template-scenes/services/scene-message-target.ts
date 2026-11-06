@@ -71,7 +71,7 @@ export function requestedTargetOf(dto: SendMessageDto, scene: TemplateScene): Re
   return { ...none, targetElementId: dto.targetElementId ?? null };
 }
 
-/** `targetElementId` precisa ser uma camada da versão atual (404 `TARGET_ELEMENT_NOT_FOUND`). */
+/** `targetElementId` precisa ser uma camada da versão atual (422 `TARGET_ELEMENT_NOT_FOUND`). */
 export async function assertTargetElementExists(
   manager: EntityManager,
   scene: TemplateScene,

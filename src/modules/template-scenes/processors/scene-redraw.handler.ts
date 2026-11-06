@@ -6,6 +6,7 @@ import {
   SceneGenerateResult,
   SceneImageProvider,
 } from '../providers/scene-image-provider';
+import { promptableTexts } from '../domain/scene-director-painted';
 import { safeChanged } from '../domain/scene-director-phrases';
 import { JudgeBriefVerdict } from '../domain/scene-brief';
 import { afterImageReply, JudgeFacts } from '../scene-texts';
@@ -56,7 +57,9 @@ export class SceneRedrawHandler implements TurnHandler {
     if (!(await state.advance(ctx, 'generating'))) return;
     const size = `${ctx.widthPx}x${ctx.heightPx}`;
     // A primeira imagem da cena não leva a linha de pedidos em aberto (D-38): o prompt julgado excelente não muda.
-    const openItems = ctx.parent ? ctx.openItems.map((item) => item.text) : undefined;
+    const openItems = ctx.parent
+      ? promptableTexts(ctx.openItems.map((item) => item.text))
+      : undefined;
     const prompt = buildGeneratePrompt({
       request: planRequest(plan),
       artWidthCm: ctx.artWidthCm,
@@ -104,7 +107,7 @@ export class SceneRedrawHandler implements TurnHandler {
     const prompt = buildRedrawPrompt({
       kind,
       plan,
-      openItems: ctx.openItems.map((item) => item.text),
+      openItems: promptableTexts(ctx.openItems.map((item) => item.text)),
     });
     const result = await this.calls.imageCall(ctx, {
       kind: 'edit',

@@ -43,3 +43,12 @@ export function enforcePaintedRefusal(plan: DirectorPlan): DirectorPlan {
   }
   return { ...plan, turn_kind: 'recusa_pintado', refusal: kind, will_change_image: false };
 }
+
+/**
+ * Textos de pedidos em aberto que podem ir ao modelo de imagem (G3). Um item que fala em texto, preço ou logo
+ * continua na lista, mas não entra no prompt nem na instrução do "marquei": "tirar o preço" é pedido válido, então
+ * o plano não é recusado por isso, só o item deixa de chegar ao gerador.
+ */
+export function promptableTexts(texts: string[]): string[] {
+  return texts.filter((text) => paintedKindOf(text) === null);
+}

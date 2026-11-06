@@ -1,5 +1,5 @@
 import { directorPlan } from '../testing/scene-director-fixtures';
-import { enforcePaintedRefusal, paintedKindOf } from './scene-director-painted';
+import { enforcePaintedRefusal, paintedKindOf, promptableTexts } from './scene-director-painted';
 
 const item = (what_to_put: string, what_to_change = '') =>
   directorPlan({ turn_kind: 'pedido_item', will_change_image: true, what_to_put, what_to_change });
@@ -97,5 +97,20 @@ describe('recusa de pintado por regra', () => {
       const plan = item('mais flores no campo', 'tirar o coelho da direita');
       expect(enforcePaintedRefusal(plan)).toBe(plan);
     });
+  });
+});
+
+describe('Item em aberto com conteúdo pintado (C-2)', () => {
+  it('o item que fala em texto, preço ou logo sai das saídas ao modelo, e o resto fica', () => {
+    expect(
+      promptableTexts([
+        'um rio no meio',
+        'escreve FELIZ PASCOA',
+        'o preço R$ 9,90 no canto',
+        'a logo no rodapé',
+        'coloca um coelho',
+      ]),
+    ).toEqual(['um rio no meio', 'coloca um coelho']);
+    expect(promptableTexts([])).toEqual([]);
   });
 });

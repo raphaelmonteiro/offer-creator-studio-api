@@ -310,6 +310,44 @@ describeIfSceneDb('SceneRedrawHandler: o redesenho da imagem inteira (banco chro
       expect(lines[2]).toBe('Pedidos do cliente ainda em aberto: um rio no meio.');
     });
 
+    it('Item em aberto com conteúdo pintado: o prompt leva o rio e não leva "escreve FELIZ PASCOA"', async () => {
+      const { scene } = await sceneOf(FORMAT);
+      await h.dataSource.manager.update(
+        TemplateScene,
+        { id: scene.id },
+        {
+          brief: [
+            {
+              id: 'p1',
+              text: 'um rio no meio',
+              status: 'open',
+              sourceMessageId: 'm',
+              updatedAt: 'x',
+            },
+            {
+              id: 'p2',
+              text: 'escreve FELIZ PASCOA',
+              status: 'open',
+              sourceMessageId: 'm',
+              updatedAt: 'x',
+            },
+          ],
+        },
+      );
+      const queued = await h.queueRedraw(scene, {
+        plan: itemPlan('mais flores'),
+        request: 'mais flores',
+      });
+      const { provider, edit } = h.fakeProvider(() => h.okResult());
+
+      await h.processorWith(provider).process(h.job(scene.id, queued.id));
+
+      const prompt = edit.mock.calls[0][0].prompt;
+      expect(prompt).toContain('Pedidos do cliente ainda em aberto: um rio no meio.');
+      expect(prompt).not.toContain('FELIZ');
+      expect((await h.sceneOf(scene.id)).brief).toHaveLength(2);
+    });
+
     it('Primeira imagem: mesmo com o pedido da mensagem em aberto na lista, o prompt não traz a linha', async () => {
       const scene = await insertSceneRow();
       await h.dataSource.manager.update(

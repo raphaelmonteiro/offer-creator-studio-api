@@ -51,6 +51,34 @@ describe('Modelo afirma o que não pode', () => {
   });
 });
 
+describe('Resposta sobre texto escrito (C-1)', () => {
+  it('a resposta sobre o título pintado não é barrada, porque o plano não muda a imagem', () => {
+    const plan = { reply: 'Está escrito Feliz Páscoa na parte de cima.', will_change_image: false };
+    expect(replyIsForbidden(plan.reply, false)).toBe(false);
+    expect(safeReply(plan)).toBe('Está escrito Feliz Páscoa na parte de cima.');
+  });
+
+  it('o mesmo texto como anúncio de imagem é barrado: promete texto escrito', () => {
+    const plan = { reply: 'Vou escrever Feliz Páscoa na parte de cima.', will_change_image: true };
+    expect(safeReply(plan)).toBe(FIXED_ANNOUNCEMENT);
+  });
+
+  it('preservação e conclusão continuam barradas também na resposta', () => {
+    expect(safeReply({ reply: 'Tudo foi preservado.', will_change_image: false })).toBe(
+      FIXED_ANSWER,
+    );
+    expect(safeReply({ reply: 'Pronto, já removi.', will_change_image: false })).toBe(FIXED_ANSWER);
+  });
+});
+
+describe('Placa com letras', () => {
+  it('o anúncio de "uma placa com letras" não promete letras', () => {
+    expect(safeReply({ reply: 'Vou colocar uma placa com letras.', will_change_image: true })).toBe(
+      FIXED_ANNOUNCEMENT,
+    );
+  });
+});
+
 describe('Juiz escreve frase proibida', () => {
   it('"tudo foi preservado exceto o coelho" cai no texto fixo', () => {
     expect(safeChanged('tudo foi preservado exceto o coelho')).toBe(FIXED_CHANGED);

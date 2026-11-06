@@ -131,6 +131,30 @@ describeIfSceneDb('SceneDirectorProcessor (banco chroma_x_e2e)', () => {
       );
     });
 
+    it('Item em aberto com conteúdo pintado: "marquei" com só esse item vira pergunta, sem chamada de imagem, e o item continua na lista', async () => {
+      const brief: TemplateScene['brief'] = [
+        {
+          id: 'p1',
+          text: 'escreve FELIZ PASCOA',
+          status: 'open',
+          sourceMessageId: 'm0',
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+      const { version, scene } = await turn(
+        'marquei',
+        {
+          turn_kind: 'marcacao_sem_pedido',
+          will_change_image: false,
+          reply: 'O que você quer fazer aí?',
+        },
+        { brief, extra: { region: { x: 0.1, y: 0.7, w: 0.4, h: 0.2 } } },
+      );
+      expect(version.status).toBe('rejected');
+      expect(imageJobs()).toHaveLength(0);
+      expect((await h.sceneOf(scene.id)).brief[0]).toMatchObject({ id: 'p1', status: 'open' });
+    });
+
     it('"Marquei" sem pedido: uma pergunta, sem chamada de imagem', async () => {
       const { scene, version } = await turn(
         'marquei',

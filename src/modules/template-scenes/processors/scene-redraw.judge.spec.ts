@@ -225,12 +225,14 @@ describeIfSceneDb('O juiz confere e o resultado é sempre aplicado (banco chroma
       );
     });
 
-    it('item feito que o juiz não vê mais depois do redesenho reabre, e o chat relata', async () => {
-      const { scene, reply } = await run(judgeReturning(verdict({ nao_vistos: ['p1'] })), {
+    it('Item feito some da imagem: o juiz não vê mais o rio, o item reabre, o chat relata e nenhuma imagem é refeita sozinha', async () => {
+      const { scene, reply, edit } = await run(judgeReturning(verdict({ nao_vistos: ['p1'] })), {
         brief: [rio('done')],
       });
       expect((await h.sceneOf(scene.id)).brief[0].status).toBe('open');
       expect(reply).toContain('Ainda não vi na imagem: um rio no meio.');
+      // nenhuma chamada de imagem é refeita sozinha: a única é a do próprio turno
+      expect(edit).toHaveBeenCalledTimes(1);
     });
 
     it('juiz indisponível: a lista não muda, ninguém fecha item', async () => {
