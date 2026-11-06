@@ -48,6 +48,8 @@ export const DIRECTOR_LIMITS = {
   requests: 8,
   requestText: 200,
   quote: 200,
+  writtenItems: 8,
+  writtenItem: 60,
 } as const;
 
 const layerOpSchema = z
@@ -87,6 +89,9 @@ export const directorSchema = z
     layer_ops: z.array(layerOpSchema).max(DIRECTOR_LIMITS.layerOps),
     requests: z.array(requestSchema).max(DIRECTOR_LIMITS.requests),
     refusal: z.enum(REFUSALS).nullable(),
+    written_content: z
+      .array(z.string().max(DIRECTOR_LIMITS.writtenItem))
+      .max(DIRECTOR_LIMITS.writtenItems),
   })
   .strict();
 
@@ -152,6 +157,7 @@ export const DIRECTOR_JSON_SCHEMA: { name: string; schema: Record<string, unknow
       'layer_ops',
       'requests',
       'refusal',
+      'written_content',
     ],
     properties: {
       turn_kind: { type: 'string', enum: [...TURN_KINDS] },
@@ -171,6 +177,11 @@ export const DIRECTOR_JSON_SCHEMA: { name: string; schema: Record<string, unknow
       layer_ops: { type: 'array', maxItems: DIRECTOR_LIMITS.layerOps, items: layerOpJsonSchema },
       requests: { type: 'array', maxItems: DIRECTOR_LIMITS.requests, items: requestJsonSchema },
       refusal: { type: ['string', 'null'], enum: [...REFUSALS, null] },
+      written_content: {
+        type: 'array',
+        maxItems: DIRECTOR_LIMITS.writtenItems,
+        items: str(DIRECTOR_LIMITS.writtenItem),
+      },
     },
   },
 };

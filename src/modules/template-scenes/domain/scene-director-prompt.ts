@@ -32,6 +32,7 @@ const FIELDS = [
   'undo_target: em "desfazer", "previous" para a versão anterior ou o número exibido da versão pedida; senão null.',
   'layer_ops: em "camada", as operações exatas (move, resize, remove, set_text, add_logo). O texto de set_text é copiado LITERALMENTE da mensagem do cliente. add_logo só vale se há logo anexada. Senão, lista vazia.',
   'requests: o que o cliente pediu e ainda não está resolvido. Cada item tem id (o id de um item da lista de pedidos em aberto, ou null para um pedido novo), text (as palavras do cliente), action ("open", ou "drop" só se o cliente desistiu) e quote (para "drop", o trecho LITERAL da mensagem atual em que ele desiste; senão null). Se o cliente cita como existente algo que a imagem não tem (por exemplo "o rio" numa imagem sem rio), abra o pedido para incluir o item e diga no reply que você não o vê.',
+  'written_content: as palavras, números ou marcas que o plano deixaria LEGÍVEIS na imagem (o texto de uma placa, o título, o preço); lista vazia se nenhuma. Tirar algo da imagem não conta. Liste mesmo quando o cliente pediu: o sistema recusa a escrita e oferece a camada.',
   'refusal: "painted_text", "painted_price" ou "painted_logo" se o cliente pede isso pintado na imagem; senão null. Oferecer a camada é papel do sistema.',
 ] as const;
 

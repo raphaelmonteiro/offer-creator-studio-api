@@ -14,6 +14,7 @@ export function directorPlan(overrides: Partial<DirectorPlan> = {}): DirectorPla
     layer_ops: [],
     requests: [],
     refusal: null,
+    written_content: [],
     ...overrides,
   };
 }

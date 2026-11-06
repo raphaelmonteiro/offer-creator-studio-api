@@ -4,7 +4,8 @@ import {
   CompositionGroup,
 } from '../domain/scene-director-composition';
 import { applyNumberRule, NumberPatch } from '../domain/scene-director-number';
-import { enforcePaintedRefusal } from '../domain/scene-director-painted';
+import { hasInstruction, wantsImage } from '../domain/scene-director-decision';
+import { checkPainted } from '../domain/scene-director-painted';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { parseDirector } from '../domain/scene-director';
 import { DirectorContext } from '../services/scene-director-context';
@@ -19,6 +20,8 @@ export type DirectorOutcome =
   | { kind: 'plan'; plan: DirectorPlan; patches?: NumberPatch[] }
   /** O plano só tinha o ano como pedido e o corte esvaziou o campo: pergunta ao cliente, sem imagem. */
   | { kind: 'number_question' }
+  /** O plano chamaria a imagem sem instrução, duas vezes: pergunta o que mudar, sem imagem (G2). */
+  | { kind: 'instruction_question' }
   /** O plano pediu composição que o cliente não pediu, duas vezes: vira pergunta, sem imagem. */
   | { kind: 'composition_question'; labels: string[] }
   /** Falha, tempo esgotado, quota ou saída inválida duas vezes. */
@@ -36,9 +39,16 @@ interface Problem {
   reason: string;
   groups?: CompositionGroup[];
   number?: boolean;
+  instruction?: boolean;
 }
 
-type Checked = { plan: DirectorPlan; patches?: NumberPatch[] } | Problem | { question: true };
+const INSTRUCTION_RETRY_REASON =
+  'o plano chama a imagem sem dizer o que mudar: preencha what_to_change ou what_to_put com o pedido do cliente';
+
+type Checked =
+  | { plan: DirectorPlan; patches?: NumberPatch[] }
+  | Problem
+  | { question: 'number' | 'instruction' };
 
 /** Valida o texto do Diretor: schema, texto e pedidos (1 a 3), recusa de pintado (4), composição (5) e número (7). */
 function validate(text: string, context: DirectorContext, final: boolean): Checked {
@@ -48,13 +58,20 @@ function validate(text: string, context: DirectorContext, final: boolean): Check
     briefIds: context.briefIds,
   });
   if (parsed.ok === false) return { reason: parsed.reason };
-  const plan = enforcePaintedRefusal(parsed.plan);
+  const painted = checkPainted(parsed.plan, { final });
+  if (painted.kind === 'retry') return { reason: painted.reason };
+  const plan = painted.plan;
   if (plan.turn_kind === 'recusa_pintado') return { plan };
   const composition = checkComposition(plan, context.clientMessages);
   if (composition.ok === false) return { reason: composition.reason, groups: composition.groups };
   const written = applyNumberRule(plan, { final });
   if (written.kind === 'retry') return { reason: written.reason, number: true };
-  if (written.kind === 'question') return { question: true };
+  if (written.kind === 'question') return { question: 'number' };
+  if (wantsImage(written.plan) && !hasInstruction(written.plan)) {
+    return final
+      ? { question: 'instruction' }
+      : { reason: INSTRUCTION_RETRY_REASON, instruction: true };
+  }
   return written.patches.length
     ? { plan: written.plan, patches: written.patches }
     : { plan: written.plan };
@@ -100,7 +117,12 @@ export async function runDirector(
     };
     if ('question' in checked) {
       calls.push({ ...record, status: 'done' });
-      return { outcome: { kind: 'number_question' }, calls };
+      return {
+        outcome: {
+          kind: checked.question === 'number' ? 'number_question' : 'instruction_question',
+        },
+        calls,
+      };
     }
     if ('plan' in checked) {
       calls.push({ ...record, status: 'done' });
@@ -117,7 +139,13 @@ export async function runDirector(
     calls.push({
       ...record,
       status: 'failed',
-      problem: checked.groups ? 'composition' : checked.number ? 'number' : 'invalid',
+      problem: checked.groups
+        ? 'composition'
+        : checked.number
+          ? 'number'
+          : checked.instruction
+            ? 'instruction'
+            : 'invalid',
       reason: checked.reason.slice(0, 300),
     });
   }

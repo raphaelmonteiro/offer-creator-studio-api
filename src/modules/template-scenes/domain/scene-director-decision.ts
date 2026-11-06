@@ -1,5 +1,5 @@
 import { DirectorLayerOp, DirectorPlan, PaintedRefusal } from './scene-director-schema';
-import { NO_IMAGE_REPLY } from '../scene-texts';
+import { NO_IMAGE_REPLY, NO_INSTRUCTION_REPLY } from '../scene-texts';
 import { safeReply } from './scene-director-phrases';
 
 /**
@@ -48,6 +48,24 @@ const CHANGES_IMAGE = new Set<DirectorPlan['turn_kind']>([
   'pedido_composicao',
   'imagem_nova',
 ]);
+
+/**
+ * O plano diz o que fazer na imagem? Sem `what_to_change` e `what_to_put` o prompt sairia vazio (G2). O "marquei"
+ * monta a instrução dos pedidos em aberto (`markedPatch`) e por isso não conta aqui.
+ */
+export function hasInstruction(
+  plan: Pick<DirectorPlan, 'what_to_change' | 'what_to_put' | 'turn_kind'>,
+): boolean {
+  if (plan.turn_kind === 'marcacao_sem_pedido') return true;
+  return Boolean(plan.what_to_change?.trim() || plan.what_to_put?.trim());
+}
+
+/** O plano pede imagem por si (pedido direto, ou reclamação com ação)? "Marquei" tem regra própria. */
+export function wantsImage(plan: Pick<DirectorPlan, 'turn_kind' | 'will_change_image'>): boolean {
+  return (
+    CHANGES_IMAGE.has(plan.turn_kind) || (plan.turn_kind === 'reclamacao' && plan.will_change_image)
+  );
+}
 
 /** O plano muda a imagem? Pedido direto sempre; reclamação e "marquei" por regra própria. */
 function changesImage(input: DecisionInput): boolean {
@@ -129,7 +147,11 @@ export function decideTurn(input: DecisionInput): TurnDecision {
   if (plan.turn_kind === 'desfazer') {
     return { kind: 'undo', target: plan.undo_target ?? 'previous' };
   }
-  if (changesImage(input)) return imageDecision(input);
+  if (changesImage(input)) {
+    return hasInstruction(plan)
+      ? imageDecision(input)
+      : { kind: 'reply', reply: NO_INSTRUCTION_REPLY, aboutImage: false };
+  }
   return {
     kind: 'reply',
     reply: safeReply({ ...plan, will_change_image: false }),

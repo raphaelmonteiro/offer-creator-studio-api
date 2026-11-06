@@ -65,9 +65,15 @@ export type CompositionCheck =
   | { ok: true }
   | { ok: false; groups: CompositionGroup[]; reason: string };
 
-/** Campos do plano que vão ao prompt de imagem. */
+/** Campos do plano que vão ao prompt de imagem, inclusive `requests` abertos. */
 const planText = (plan: DirectorPlan): string =>
-  [plan.what_to_change, plan.what_to_put, ...plan.inventory_keep].join(' \n ');
+  [
+    plan.what_to_change,
+    plan.what_to_put,
+    ...plan.inventory_keep,
+    // Pedido em aberto também chega ao prompt (linha de pedidos e instrução do "marquei"): R4.
+    ...plan.requests.filter((request) => request.action === 'open').map((request) => request.text),
+  ].join(' \n ');
 
 /** Os termos de composição que o plano traz sem o cliente ter pedido. Não altera o plano. */
 export function checkComposition(plan: DirectorPlan, clientMessages: string[]): CompositionCheck {

@@ -15,6 +15,7 @@ import { TemplateSceneVersion } from '../entities/template-scene-version.entity'
 import {
   askedAboutImageReply,
   compositionQuestion,
+  NO_INSTRUCTION_REPLY,
   NUMBER_QUESTION,
   currentVersionReply,
   layerReply,
@@ -156,6 +157,10 @@ export class SceneDirectorState {
     }
     if (outcome.kind === 'number_question') {
       await this.reject(target, NUMBER_QUESTION);
+      return;
+    }
+    if (outcome.kind === 'instruction_question') {
+      await this.reject(target, NO_INSTRUCTION_REPLY);
       return;
     }
     const { plan } = outcome;

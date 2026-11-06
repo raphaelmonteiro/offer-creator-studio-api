@@ -27,6 +27,7 @@ const EMPTY: DirectorPlan = {
   layer_ops: [],
   requests: [],
   refusal: null,
+  written_content: [],
 };
 
 const has = (folded: string, pattern: RegExp): boolean => pattern.test(folded);

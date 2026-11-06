@@ -13,7 +13,13 @@ import { afterImageReply, JudgeFacts } from '../scene-texts';
 import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneCallRunner } from './scene-call-runner';
 import { markupFor, MarkupInfo } from './scene-redraw-markup';
-import { buildGeneratePrompt, buildRedrawPrompt, planRequest, RedrawKind } from './scene-prompt';
+import {
+  buildGeneratePrompt,
+  buildRedrawPrompt,
+  planInstruction,
+  planRequest,
+  RedrawKind,
+} from './scene-prompt';
 import { TurnHandler } from './scene-turn-handler';
 import { SceneTurnSupport } from './scene-turn-support';
 import { TurnContext } from './scene-turn-state';
@@ -45,6 +51,14 @@ export class SceneRedrawHandler implements TurnHandler {
   async run(ctx: TurnContext): Promise<void> {
     if (!ctx.plan) {
       this.logger.error(`Versão ${ctx.versionId} sem plano do Diretor: nenhuma imagem é pedida`);
+      await this.support.state.fail(ctx, 'PROVIDER_ERROR');
+      return;
+    }
+    // Plano no formato antigo (job `generate` publicado antes da conversa) ou sem instrução: nenhuma chamada paga.
+    if (typeof ctx.plan.turn_kind !== 'string' || !planInstruction(ctx.plan)) {
+      this.logger.error(
+        `Versão ${ctx.versionId} com plano sem formato ou sem instrução: nenhuma imagem é pedida`,
+      );
       await this.support.state.fail(ctx, 'PROVIDER_ERROR');
       return;
     }

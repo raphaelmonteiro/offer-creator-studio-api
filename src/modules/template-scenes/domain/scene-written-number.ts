@@ -58,7 +58,7 @@ export interface WrittenNumberOptions {
 }
 
 /** Cláusulas separadas por vírgula, ponto e vírgula, " e " ou ponto seguido de espaço. */
-const CLAUSE_SEPARATOR = /(\s*[,;]\s*|\s+e\s+|\.\s+)/;
+export const CLAUSE_SEPARATOR = /(\s*[,;]\s*|\s+e\s+|\.\s+)/;
 
 const hasNumber = (clause: string, options: WrittenNumberOptions): boolean => {
   const folded = fold(clause);

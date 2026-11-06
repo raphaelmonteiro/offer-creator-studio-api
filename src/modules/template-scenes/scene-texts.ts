@@ -25,6 +25,10 @@ export const compositionQuestion = (labels: string[]): string =>
 export const NUMBER_QUESTION =
   'Não pinto ano, data nem número na imagem: o modelo de imagem erra números. Me diga o que mudar na imagem; se quiser o número, me diga o texto entre aspas e onde colocar, e eu o coloco como camada. Nada foi alterado.';
 
+/** O plano chamaria a imagem sem dizer o que mudar (G2): vira pergunta, sem imagem. */
+export const NO_INSTRUCTION_REPLY =
+  'Não entendi o que mudar na imagem. Me diga o que você quer que eu faça. Nada foi alterado.';
+
 /** Camada ou desfazer numa cena sem imagem. */
 export const NO_IMAGE_REPLY =
   'Ainda não há imagem na cena. Descreva a imagem que quer gerar. Nada foi alterado.';

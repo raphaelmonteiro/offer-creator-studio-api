@@ -103,3 +103,30 @@ describe('clientAsksForSplit (D-43)', () => {
     expect(clientAsksForSplit(['quero um template', message])).toBe(expected);
   });
 });
+
+describe('checkComposition em requests (R4)', () => {
+  const withRequest = (text: string, action: 'open' | 'drop' = 'open') =>
+    directorPlan({
+      turn_kind: 'pedido_item',
+      will_change_image: true,
+      what_to_change: 'colocar um coelho',
+      requests: [{ id: null, text, action, quote: action === 'drop' ? 'x' : null }],
+    });
+
+  it('moldura que ninguém pediu em requests aberto é recusada, como nos outros campos', () => {
+    const check = checkComposition(withRequest('coelho com moldura dourada'), ['coloca um coelho']);
+    expect(check).toMatchObject({ ok: false, groups: ['moldura'] });
+  });
+
+  it('o cliente que pediu a moldura autoriza o pedido', () => {
+    const check = checkComposition(withRequest('coelho com moldura dourada'), [
+      'coloca um coelho com moldura dourada',
+    ]);
+    expect(check).toEqual({ ok: true });
+  });
+
+  it('requests com drop não vai ao prompt e não é conferido', () => {
+    const check = checkComposition(withRequest('moldura', 'drop'), ['esquece a moldura']);
+    expect(check).toEqual({ ok: true });
+  });
+});
