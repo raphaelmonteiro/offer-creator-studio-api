@@ -15,16 +15,20 @@ import {
   currentVersionReply,
   MARKING_DISCARDED_NOTE,
   PAINTED_REFUSAL_REPLIES,
+  versionRestoredReply,
 } from '../scene-texts';
 import { DirectorContext } from '../services/scene-director-context';
 import { displayNumbersOf } from '../services/scene-display-number';
 import { bumpRevision, SceneLockService } from '../services/scene-lock.service';
-import { addAssistantMessage } from '../services/scene-messages';
+import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
+import { restoreInto } from '../services/scene-restore';
+import { pruneSceneAssets } from '../services/scene-retention';
+import { resolveUndo } from '../services/scene-undo';
 import { publishQueued } from '../services/scene-turn-helpers';
 import { TURN_EXPIRE_SECONDS } from '../services/scene-turn.service';
 import { addDirectorCost, summarizeDirectorCalls } from './scene-director-cost';
 import { DirectorRunResult } from './scene-director-run';
-import { cancelVersion, failVersion } from './scene-turn-finish';
+import { cancelVersion, emitVersionEvent, failVersion } from './scene-turn-finish';
 import { rejectVersion } from './scene-turn-complete';
 
 export const DEFAULT_WINDOW_SECONDS = 5;
@@ -217,10 +221,42 @@ export class SceneDirectorState {
       case 'image':
         await this.queueImage(target, decision);
         return;
+      case 'undo':
+        await this.undo(target, decision.target);
+        return;
       default:
-        // Camadas (1.28) e desfazer (1.15) entram nas próximas tasks.
+        // Camadas entram na task 1.28.
         await this.reject(target, 'Esta ação ainda não está disponível.');
     }
+  }
+
+  /**
+   * Desfazer sem chamar o modelo de imagem: a versão de leitura vira a restauração (sem segunda versão), sob o
+   * mesmo lock. Sem como voltar, termina `rejected` com a resposta.
+   */
+  private async undo(
+    target: { manager: EntityManager; scene: TemplateScene; version: TemplateSceneVersion },
+    undoTarget: 'previous' | number,
+  ): Promise<void> {
+    const { manager, scene, version } = target;
+    const resolution = await resolveUndo(manager, scene, undoTarget);
+    if (resolution.kind === 'reply') {
+      await this.reject(target, resolution.reply);
+      return;
+    }
+    await restoreInto(manager, scene, resolution.source, { reading: version });
+    scene.currentVersionId = version.id;
+    await pruneSceneAssets(manager, scene);
+    await settleUserMessage(manager, version.id, 'done');
+    const shown = (await displayNumbersOf(manager, scene.id)).get(version.id) ?? 0;
+    await addAssistantMessage(manager, {
+      sceneId: scene.id,
+      versionId: version.id,
+      content: versionRestoredReply(resolution.sourceDisplayNumber, shown),
+      status: 'done',
+    });
+    await bumpRevision(manager, scene);
+    await emitVersionEvent(manager, scene, version, 'version.ready');
   }
 
   /** Fato do próprio sistema (a versão atual), que vem do código e nunca do modelo. */

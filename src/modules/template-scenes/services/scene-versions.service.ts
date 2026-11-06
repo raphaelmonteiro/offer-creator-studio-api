@@ -12,9 +12,9 @@ import {
   noCurrentVersion,
   versionNotFound,
   versionNotReady,
-  versionNotRestorable,
 } from '../scene.errors';
 import { publishSceneEvent } from './scene-events';
+import { assertMasterOnDisk, restoreInto } from './scene-restore';
 import {
   assertExpectedRevision,
   assertSceneIdle,
@@ -56,23 +56,10 @@ export class SceneVersionsService {
       });
       if (!source) throw versionNotFound();
       if (source.status !== 'ready') throw versionNotReady();
-      await this.assertMasterOnDisk(manager, source);
+      await assertMasterOnDisk(manager, source);
 
       await closeOpenManual(manager, sceneId);
-      const restored = await manager.save(
-        manager.create(TemplateSceneVersion, {
-          sceneId,
-          parentVersionId: source.id,
-          number: await nextVersionNumber(manager, sceneId),
-          operation: 'restore',
-          status: 'ready',
-          masterAssetId: source.masterAssetId,
-          previewAssetId: source.previewAssetId,
-          elements: structuredClone(source.elements),
-          correlationId: randomUUID(),
-          createdByUserId: userId,
-        }),
-      );
+      const restored = await restoreInto(manager, scene, source, { userId });
       return this.finishReadyVersion(manager, scene, restored);
     });
   }
@@ -118,16 +105,6 @@ export class SceneVersionsService {
           );
       return this.finishReadyVersion(manager, scene, manual);
     });
-  }
-
-  private async assertMasterOnDisk(
-    manager: EntityManager,
-    version: TemplateSceneVersion,
-  ): Promise<void> {
-    const master = version.masterAssetId
-      ? await manager.findOne(TemplateSceneAsset, { where: { id: version.masterAssetId } })
-      : null;
-    if (!master || master.purgedAt) throw versionNotRestorable();
   }
 
   /** Elementos só referenciam assets de logo/elemento da própria cena e ainda em disco. */

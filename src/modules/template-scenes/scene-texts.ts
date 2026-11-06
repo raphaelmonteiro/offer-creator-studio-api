@@ -25,6 +25,24 @@ export const compositionQuestion = (labels: string[]): string =>
 export const NO_IMAGE_REPLY =
   'Ainda não há imagem na cena. Descreva a imagem que quer gerar. Nada foi alterado.';
 
+/** Desfazer (G5): a restauração é do código, sem chamar o modelo de imagem. */
+export const FIRST_IMAGE_REPLY = 'Essa já é a primeira imagem, não há versão anterior para voltar.';
+
+const availableText = (numbers: number[]): string =>
+  numbers.length ? ` Disponíveis: ${numbers.join(', ')}.` : ' Não há versão disponível.';
+
+export const versionRestoredReply = (source: number, created: number): string =>
+  `Voltei para a imagem da versão ${source}. Ela agora é a versão ${created}.`;
+
+export const versionIsCurrentReply = (displayNumber: number): string =>
+  `A versão ${displayNumber} já é a atual. Nada foi alterado.`;
+
+export const versionMissingReply = (requested: number, available: number[]): string =>
+  `Não existe a versão ${requested}.${availableText(available)} Nada foi alterado.`;
+
+export const versionPurgedReply = (available: number[]): string =>
+  `Essa imagem não está mais disponível: guardamos só as versões mais recentes, as aprovadas e a atual.${availableText(available)} Nada foi alterado.`;
+
 /** Fato do sistema, não do modelo: a versão atual (D-23: o número exibido). */
 export const currentVersionReply = (displayNumber: number): string =>
   `A versão atual é a ${displayNumber}.`;
