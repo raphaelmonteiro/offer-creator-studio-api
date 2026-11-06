@@ -19,6 +19,9 @@ describeIfSceneDb(
   'SceneTurnProcessor: geração, falhas, custo, poda e eventos (banco chroma_x_e2e)',
   () => {
     const h = useProcessorHarness();
+    afterEach(() => {
+      delete process.env.TEMPLATE_SCENE_MASTERS_KEPT;
+    });
     const {
       mock,
       processorWith,
@@ -214,7 +217,8 @@ describeIfSceneDb(
       expect(await h.dataSource.manager.countBy(TemplateSceneAsset, { sceneId: scene.id })).toBe(0);
     });
 
-    it('ao ficar ready, poda a master mais antiga (conjunto protegido de 5)', async () => {
+    it('ao ficar ready, poda a master mais antiga (conjunto protegido configurado em 5)', async () => {
+      process.env.TEMPLATE_SCENE_MASTERS_KEPT = '5'; // o padrão é 20 (D-34); a regra é paramétrica
       const scene = await insertScene(h.dataSource, { name: 'Processor poda' });
       trackScene(scene.id);
       const ready = [];
