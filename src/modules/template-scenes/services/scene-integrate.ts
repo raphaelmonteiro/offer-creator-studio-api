@@ -1,4 +1,4 @@
-import { fold } from '../domain/scene-request-text';
+import { fold } from '../../../shared/text/fold';
 import { layerNamedIn } from '../domain/scene-layer-name';
 import { elementRect } from '../domain/scene-element-rect';
 import { SceneClassification } from '../domain/scene-operation.classifier';

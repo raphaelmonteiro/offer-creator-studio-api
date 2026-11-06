@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { IntentCompletionResult } from '../../ai/openai-intent.service';
 import type { SceneIntent } from '../domain/scene-intent';
-import { fold } from '../domain/scene-request-text';
+import { fold } from '../../../shared/text/fold';
 import type { SceneIntentCall } from './scene-intent-client';
 
 /** Marcadores no pedido que simulam o modelo de intenção. */

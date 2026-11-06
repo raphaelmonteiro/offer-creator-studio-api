@@ -1,15 +1,14 @@
 import { MaskShape, Rect, SceneZoneName } from './scene.types';
+import { fold } from '../../../shared/text/fold';
+import { LayerAction, LayerTarget } from './scene-layer.types';
 import {
-  fold,
-  LayerKind,
   mentionsIntegrate,
   mentionsMove,
   mentionsRemove,
   mentionsResize,
-  Side,
   sideIn,
 } from './scene-request-text';
-import { LogoPosition, logoPositionIn, ParsedText, parseText } from './scene-request-parse';
+import { logoPositionIn, parseText } from './scene-request-parse';
 
 /** Elemento selecionado na prévia como alvo do pedido. */
 export interface ClassifierTargetElement {
@@ -31,17 +30,6 @@ export type LocalTarget =
   | { kind: 'mask'; mask: MaskShape }
   | { kind: 'zone'; zone: SceneZoneName; from?: 'field' | 'text' }
   | { kind: 'element'; elementId: string };
-
-/** Mudança exata numa camada (logo, texto, elemento adicionado), sem IA. */
-export type LayerAction =
-  | ({ type: 'add_logo'; assetId: string } & LogoPosition)
-  | ({ type: 'set_text'; elementId?: string } & ParsedText)
-  | { type: 'move'; target: LayerTarget; side: Side }
-  | { type: 'resize'; target: LayerTarget; direction: 'bigger' | 'smaller' }
-  | { type: 'remove'; target: LayerTarget };
-
-/** Elemento escolhido por seleção (`elementId`) ou pelo tipo citado (`kind`). */
-export type LayerTarget = { elementId: string } | { kind: LayerKind };
 
 export type SceneClassification =
   | { operation: 'generate' }

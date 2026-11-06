@@ -7,7 +7,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { fold } from '../src/modules/template-scenes/domain/scene-request-text';
+import { fold } from '../src/shared/text/fold';
 
 interface Intent {
   action: string;

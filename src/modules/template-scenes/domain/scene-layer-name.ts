@@ -1,4 +1,4 @@
-import { fold } from './scene-request-text';
+import { fold } from '../../../shared/text/fold';
 import { SceneElement } from './scene.types';
 
 const STOP_WORDS = new Set(['de', 'da', 'do', 'das', 'dos', 'com', 'para', 'uma', 'um']);

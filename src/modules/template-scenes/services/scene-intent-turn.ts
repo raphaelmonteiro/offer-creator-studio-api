@@ -5,7 +5,7 @@ import { SendMessageDto } from '../dto/send-message.dto';
 import { classifySceneRequest } from '../domain/scene-operation.classifier';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { assertShapeBigEnough, assertSingleTarget } from './scene-message-planner';
+import { assertShapeBigEnough, assertSingleTarget } from './scene-message-target';
 import { currentElements, markedTargetOf, selectedElement } from './scene-plan-context';
 import { assertExpectedRevision, assertSceneIdle } from './scene-lock.service';
 import { IntentMetrics, IntentOutcome, SceneIntentService } from './scene-intent.service';

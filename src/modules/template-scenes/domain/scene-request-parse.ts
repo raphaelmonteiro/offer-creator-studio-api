@@ -1,18 +1,12 @@
-import { detectZone, fold } from './scene-request-text';
-import { SceneZoneName } from './scene.types';
+import { fold } from '../../../shared/text/fold';
+import { LogoPosition, ParsedText } from './scene-layer.types';
+import { detectZone } from './scene-request-text';
 
 /** Texto entre aspas, texto depois de "escreve" e posição da logo no pedido (camadas exatas). */
 
 const TEXT_VERB =
   /(escrev\w*|muda\w* o texto para|alter\w* o texto para|troc\w* o texto para|coloc\w* o texto|texto para|texto:)\s+/;
 const PLACEMENT_TAIL = /\s+(embaixo|abaixo|em baixo|no rodape|em cima|acima|no topo)\b.*$/;
-
-export interface ParsedText {
-  text: string;
-  placement: 'below-logo' | 'top' | 'bottom' | 'none';
-  /** "muda o texto para ...": troca o texto existente em vez de criar outro. */
-  replace: boolean;
-}
 
 function placementOf(tail: string): ParsedText['placement'] {
   if (/(embaixo|abaixo|em baixo)/.test(tail) && /(logo|dela|dele)/.test(tail)) return 'below-logo';
@@ -62,11 +56,6 @@ export function parseText(original: string): ParsedText | null {
   if (!text) return null;
   const replace = !quoted && /(muda|alter|troc|texto para|texto:)/.test(verb?.[0] ?? '');
   return { text, placement: placementOf(tailSource), replace };
-}
-
-export interface LogoPosition {
-  side: 'left' | 'center' | 'right';
-  zone: SceneZoneName;
 }
 
 /** Posição pedida para a logo ("à esquerda no cabeçalho"); padrão: cabeçalho, à esquerda. */

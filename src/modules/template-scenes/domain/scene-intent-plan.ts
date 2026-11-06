@@ -1,12 +1,8 @@
 import { IntentAction, SceneIntent } from './scene-intent';
 import { layerNamedIn } from './scene-layer-name';
-import {
-  LayerAction,
-  LayerTarget,
-  LocalTarget,
-  SceneClassification,
-} from './scene-operation.classifier';
-import { fold } from './scene-request-text';
+import { LayerAction, LayerTarget } from './scene-layer.types';
+import { LocalTarget, SceneClassification } from './scene-operation.classifier';
+import { fold } from '../../../shared/text/fold';
 import { SceneElement } from './scene.types';
 
 /** O que o código sabe da mensagem além da intenção: a marcação e as camadas da imagem atual. */

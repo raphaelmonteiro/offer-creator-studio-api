@@ -1,7 +1,7 @@
 import { classifySceneRequest, ClassifierInput } from './scene-operation.classifier';
+import { fold } from '../../../shared/text/fold';
 import {
   detectZone,
-  fold,
   mentionsIntegrate,
   mentionsMove,
   mentionsRemove,

@@ -1,3 +1,5 @@
+import { fold } from '../../../shared/text/fold';
+import { Side } from './scene-layer.types';
 import { SceneZoneName } from './scene.types';
 
 /**
@@ -7,15 +9,6 @@ import { SceneZoneName } from './scene.types';
  * sem acento, mesmo comprimento do original). Verbos valem por palavra inteira: "remover" nunca casa
  * com "mover", e "integral" nunca casa com "integrar".
  */
-
-/** Minúsculo e sem acento, caractere a caractere (o comprimento não muda). */
-export const fold = (text: string): string =>
-  Array.from(text.normalize('NFC'))
-    .map((ch) => ch.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase())
-    .join('');
-
-export type LayerKind = 'logo' | 'text';
-export type Side = 'left' | 'right' | 'toggle';
 
 const MOVE_WORDS = /\b(mov(er|e|a|am|endo)|desloc\w+|movimenta\w*)\b/;
 const MOVE_SIDE =

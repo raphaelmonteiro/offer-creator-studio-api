@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { LayerAction, LayerTarget } from '../domain/scene-operation.classifier';
+import { LayerAction, LayerTarget } from '../domain/scene-layer.types';
 import { SceneElement, SceneElementKind, SceneZones } from '../domain/scene.types';
 import { TurnAttachmentAsset } from './scene-turn-state';
 

@@ -1,4 +1,4 @@
-import { LayerAction } from '../domain/scene-operation.classifier';
+import { LayerAction } from '../domain/scene-layer.types';
 import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
 import { SceneElement } from '../domain/scene.types';
 import { applyLayerActions, LayerContext } from './scene-layer-actions';

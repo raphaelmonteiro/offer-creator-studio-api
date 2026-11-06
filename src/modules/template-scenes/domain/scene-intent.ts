@@ -1,5 +1,15 @@
 import { z } from 'zod';
-import { fold } from './scene-request-text';
+import { fold } from '../../../shared/text/fold';
+import {
+  LAYER_OBJECT_JSON_SCHEMA,
+  LAYER_ZONES,
+  layerIntentSchema,
+  nullableEnum,
+  nullableString,
+  optionalText,
+  TEXT_OBJECT_JSON_SCHEMA,
+  textIntentSchema,
+} from './scene-layer.types';
 
 /**
  * Intenção reconhecida pelo modelo (D-19): o modelo decide o que o cliente quer; o código valida a saída
@@ -22,18 +32,7 @@ export const INTENT_ACTIONS = [
 ] as const;
 export type IntentAction = (typeof INTENT_ACTIONS)[number];
 
-const ZONES = ['header', 'body', 'footer'] as const;
-const LAYER_KINDS = ['logo', 'text', 'generated'] as const;
-const SIDES = ['left', 'right', 'toggle'] as const;
-const DIRECTIONS = ['bigger', 'smaller'] as const;
-const PLACEMENTS = ['below-logo', 'top', 'bottom', 'none'] as const;
-
-/** Texto vazio vale como ausente: o modelo às vezes devolve "" no lugar de `null`. */
-const optionalText = (max: number) =>
-  z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
-    z.string().max(max).nullable(),
-  );
+const ZONES = LAYER_ZONES;
 
 const intentSchema = z
   .object({
@@ -43,30 +42,12 @@ const intentSchema = z
     subject: optionalText(80),
     imagePrompt: optionalText(500),
     relativePlace: z.boolean(),
-    layer: z
-      .object({
-        kind: z.enum(LAYER_KINDS),
-        name: optionalText(80),
-        side: z.enum(SIDES).nullable(),
-        direction: z.enum(DIRECTIONS).nullable(),
-      })
-      .strict()
-      .nullable(),
-    text: z
-      .object({ value: z.string().min(1).max(200), placement: z.enum(PLACEMENTS) })
-      .strict()
-      .nullable(),
+    layer: layerIntentSchema.nullable(),
+    text: textIntentSchema.nullable(),
   })
   .strict();
 
 export type SceneIntent = z.infer<typeof intentSchema>;
-export type IntentLayer = NonNullable<SceneIntent['layer']>;
-
-const nullableEnum = (values: readonly string[]) => ({
-  type: ['string', 'null'],
-  enum: [...values, null],
-});
-const nullableString = { type: ['string', 'null'] };
 
 /** Schema do `response_format` (strict: todos os campos presentes, `null` quando não valem). */
 export const INTENT_JSON_SCHEMA: { name: string; schema: Record<string, unknown> } = {
@@ -91,36 +72,8 @@ export const INTENT_JSON_SCHEMA: { name: string; schema: Record<string, unknown>
       subject: nullableString,
       imagePrompt: nullableString,
       relativePlace: { type: 'boolean' },
-      layer: {
-        anyOf: [
-          { type: 'null' },
-          {
-            type: 'object',
-            additionalProperties: false,
-            required: ['kind', 'name', 'side', 'direction'],
-            properties: {
-              kind: { type: 'string', enum: [...LAYER_KINDS] },
-              name: nullableString,
-              side: nullableEnum(SIDES),
-              direction: nullableEnum(DIRECTIONS),
-            },
-          },
-        ],
-      },
-      text: {
-        anyOf: [
-          { type: 'null' },
-          {
-            type: 'object',
-            additionalProperties: false,
-            required: ['value', 'placement'],
-            properties: {
-              value: { type: 'string' },
-              placement: { type: 'string', enum: [...PLACEMENTS] },
-            },
-          },
-        ],
-      },
+      layer: { anyOf: [{ type: 'null' }, LAYER_OBJECT_JSON_SCHEMA] },
+      text: { anyOf: [{ type: 'null' }, TEXT_OBJECT_JSON_SCHEMA] },
     },
   },
 };

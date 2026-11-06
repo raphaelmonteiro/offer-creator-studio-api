@@ -1,4 +1,4 @@
-import { fold } from '../domain/scene-request-text';
+import { fold } from '../../../shared/text/fold';
 
 export interface ScenePromptInput {
   /** Pedido literal do cliente, em português. */
