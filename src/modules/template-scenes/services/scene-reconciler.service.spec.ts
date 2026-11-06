@@ -12,7 +12,12 @@ import {
 } from '../testing/scene-fixtures';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
 import { SceneLockService } from './scene-lock.service';
-import { SceneReconcilerService, STALE_AFTER_MS } from './scene-reconciler.service';
+import {
+  READING_STALE_AFTER_MS,
+  RECONCILE_INTERVAL_MS,
+  SceneReconcilerService,
+  STALE_AFTER_MS,
+} from './scene-reconciler.service';
 
 describeIfSceneDb('SceneReconcilerService (banco chroma_x_e2e)', () => {
   let dataSource: DataSource;
@@ -138,7 +143,74 @@ describeIfSceneDb('SceneReconcilerService (banco chroma_x_e2e)', () => {
     expect((await versionOf(version.id)).errorCode).toBe('JOB_EXPIRED');
   });
 
-  it('o limite é de 16 minutos', () => {
+  it('o limite é de 16 minutos, e o da leitura é de 2, com a varredura a cada minuto', () => {
     expect(STALE_AFTER_MS).toBe(16 * 60 * 1000);
+    expect(READING_STALE_AFTER_MS).toBe(2 * 60 * 1000);
+    expect(RECONCILE_INTERVAL_MS).toBe(60 * 1000);
+  });
+
+  describe('a leitura do Diretor tem limite próprio', () => {
+    it('Worker reiniciado durante a leitura: a versão em reading há 3 min fica failed, o chat diz que foi interrompido e o envio volta', async () => {
+      const { scene, version } = await sceneWith(
+        'Recon leitura',
+        { status: 'queued', step: 'reading' },
+        3,
+      );
+
+      await reconciler.reconcile();
+
+      expect(await versionOf(version.id)).toMatchObject({
+        status: 'failed',
+        errorCode: 'JOB_EXPIRED',
+      });
+      const messages = await dataSource.manager.find(TemplateSceneMessage, {
+        where: { sceneId: scene.id },
+        order: { createdAt: 'ASC' },
+      });
+      expect(messages[0].status).toBe('failed');
+      expect(messages[1].content).toContain('interrompido');
+      const next = await insertVersion(dataSource, scene.id, { number: 2, status: 'queued' });
+      expect(next.status).toBe('queued');
+    });
+
+    it('Imagem esperando vaga não expira como leitura: queued com step nulo há 3 min continua queued', async () => {
+      const { version } = await sceneWith('Recon vaga', { status: 'queued', step: null }, 3);
+      await reconciler.reconcile();
+      expect((await versionOf(version.id)).status).toBe('queued');
+    });
+
+    it('a leitura recente (1 min) não é tocada', async () => {
+      const { version } = await sceneWith(
+        'Recon leitura recente',
+        { status: 'queued', step: 'reading' },
+        1,
+      );
+      await reconciler.reconcile();
+      expect(await versionOf(version.id)).toMatchObject({ status: 'queued', step: 'reading' });
+    });
+
+    it('imagem rodando há 10 min também segue nos 16', async () => {
+      const { version } = await sceneWith(
+        'Recon rodando',
+        { status: 'running', step: 'generating' },
+        10,
+      );
+      await reconciler.reconcile();
+      expect((await versionOf(version.id)).status).toBe('running');
+    });
+
+    it('trocar o step ao publicar o job de imagem atualiza updatedAt: a versão que acabou de sair da leitura não cai no limite curto', async () => {
+      const { version } = await sceneWith(
+        'Recon saiu da leitura',
+        { status: 'queued', step: 'reading' },
+        3,
+      );
+      await dataSource.manager.update(TemplateSceneVersion, { id: version.id }, { step: null });
+      expect((await versionOf(version.id)).updatedAt.getTime()).toBeGreaterThan(
+        minutesAgo(1).getTime(),
+      );
+      await reconciler.reconcile();
+      expect((await versionOf(version.id)).status).toBe('queued');
+    });
   });
 });

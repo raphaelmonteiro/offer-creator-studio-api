@@ -5,14 +5,20 @@ import { SceneTurnState } from '../processors/scene-turn-state';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { SceneLockService } from './scene-lock.service';
 
-/** Intervalo da varredura e tempo sem atividade para dar a versão por presa (PV-6). */
-export const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+/**
+ * Intervalo da varredura e tempo sem atividade para dar a versão por presa (PV-6). A leitura do Diretor tem limite
+ * próprio de 2 minutos (o teto do Diretor é 20 s, duas vezes): por isso a varredura roda a cada minuto, e não a cada 5.
+ */
+export const RECONCILE_INTERVAL_MS = 60 * 1000;
 export const STALE_AFTER_MS = 16 * 60 * 1000;
+export const READING_STALE_AFTER_MS = 2 * 60 * 1000;
 
 /**
- * Com `retryLimit: 0` um job que expira (worker reiniciado no meio) não volta. O reconciliador
- * marca `failed` com `JOB_EXPIRED` a versão `queued`/`running` sem atividade há mais de 16 minutos
- * (o job expira em 15) e deixa a mensagem de interrupção no chat. Nenhuma chamada paga é repetida.
+ * Com `retryLimit: 0` um job que expira (worker reiniciado no meio) não volta. O reconciliador marca `failed`
+ * com `JOB_EXPIRED` a versão `queued`/`running` sem atividade há mais de 16 minutos (o job expira em 15) e a
+ * versão em leitura (`step = 'reading'`) sem atividade há mais de 2 minutos, e deixa a mensagem de interrupção
+ * no chat. Imagem esperando vaga ou janela não expira como leitura: o `step` sai de `reading` ao publicar o job
+ * (e `updatedAt` muda), então ela segue nos 16 minutos. Nenhuma chamada paga é repetida.
  */
 @Injectable()
 export class SceneReconcilerService implements OnModuleDestroy {
@@ -48,27 +54,39 @@ export class SceneReconcilerService implements OnModuleDestroy {
 
   /** Quantas versões foram marcadas `JOB_EXPIRED` nesta passada. */
   async reconcile(now: Date = new Date()): Promise<number> {
-    const cutoff = new Date(now.getTime() - STALE_AFTER_MS);
+    const cutoffs = {
+      general: new Date(now.getTime() - STALE_AFTER_MS),
+      reading: new Date(now.getTime() - READING_STALE_AFTER_MS),
+    };
     const stale = await this.dataSource
       .getRepository(TemplateSceneVersion)
       .createQueryBuilder('version')
       .select(['version.id', 'version.sceneId'])
       .where('version.status IN (:...busy)', { busy: ['queued', 'running'] })
-      .andWhere('version.updatedAt < :cutoff', { cutoff })
+      .andWhere(
+        `(version.updatedAt < :general OR (version.step = 'reading' AND version.updatedAt < :reading))`,
+        cutoffs,
+      )
       .getMany();
     let expired = 0;
     for (const { id, sceneId } of stale) {
-      if (await this.expire(sceneId, id, cutoff)) expired += 1;
+      if (await this.expire(sceneId, id, cutoffs)) expired += 1;
     }
     return expired;
   }
 
-  private expire(sceneId: string, versionId: string, cutoff: Date): Promise<boolean> {
+  private expire(
+    sceneId: string,
+    versionId: string,
+    cutoffs: { general: Date; reading: Date },
+  ): Promise<boolean> {
     return this.locks.run(
       sceneId,
       async ({ manager, scene }) => {
         const version = await manager.findOneBy(TemplateSceneVersion, { id: versionId });
         const busy = version?.status === 'queued' || version?.status === 'running';
+        // A leitura tem o limite curto; o resto, os 16 minutos. Relido sob o lock: a versão pode ter andado.
+        const cutoff = version?.step === 'reading' ? cutoffs.reading : cutoffs.general;
         if (!version || !busy || version.updatedAt >= cutoff) return false;
         version.metrics = {
           ...version.metrics,
