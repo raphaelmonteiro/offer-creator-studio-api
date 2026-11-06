@@ -1,10 +1,4 @@
-import {
-  applyDirectorRequests,
-  applyJudgeVerdict,
-  BriefItem,
-  openItems,
-  stillMissing,
-} from './scene-brief';
+import { applyDirectorRequests, applyJudgeVerdict, BriefItem, openItems } from './scene-brief';
 import { DirectorRequest } from './scene-director-schema';
 
 const NOW = new Date('2026-11-06T12:00:00.000Z');
@@ -210,9 +204,6 @@ describe('scene-brief', () => {
       expect(brief.map((item) => item.status)).toEqual(['done', 'open']);
       expect(changes.closed).toEqual(['p1']);
       expect(openItems(brief).map((item) => item.id)).toEqual(['p2']);
-      expect(
-        stillMissing(brief, { seen: ['p1'], notSeen: ['p2'] }).map((item) => item.text),
-      ).toEqual(['ovos no rodapé']);
     });
 
     it('item feito que o juiz não vê mais depois de um redesenho reabre', () => {

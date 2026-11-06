@@ -11,8 +11,8 @@ export interface SceneTurnJob {
 
 /**
  * Consumer de `template_scene.turn`. Escolhe o tratador pela operação gravada na versão:
- * `generate` (primeira geração e ajuste geral), `local_edit`, `set_layer` e `add_element`. Regras
- * comuns a todos:
+ * `generate` e `redraw` (a imagem pedida pelo Diretor). Qualquer outra operação publicada antes da
+ * conversa (`local_edit`, `add_element`) falha sem chamada paga. Regras comuns:
  * - a tentativa é gravada ANTES da chamada paga (R10) e fechada depois com o custo do `usage`;
  * - nunca lança depois de uma chamada paga: qualquer erro vira `failed` com o código e o custo, e o
  *   job termina com sucesso (a fila não repete chamada paga);

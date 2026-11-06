@@ -3,7 +3,7 @@ import { AddBriefToTemplateScenes1767300000000 } from '../../../migrations/17673
 import { TemplateScene } from '../entities/template-scene.entity';
 import { insertScene } from '../testing/scene-fixtures';
 import { describeIfSceneDb, deleteTestScenes, openSceneTestDb } from '../testing/scene-test-db';
-import { applyDirectorRequests, applyJudgeVerdict, openItems, stillMissing } from './scene-brief';
+import { applyDirectorRequests, applyJudgeVerdict, openItems } from './scene-brief';
 import { DirectorRequest } from './scene-director-schema';
 
 const NOW = new Date('2026-11-06T12:00:00.000Z');
@@ -74,7 +74,6 @@ describeIfSceneDb('scene-brief com banco (chroma_x_e2e)', () => {
 
     const next = await reload(scene.id);
     expect(openItems(next.brief).map((item) => item.id)).toEqual(['p1']);
-    expect(stillMissing(next.brief, verdict).map((item) => item.text)).toEqual(['rio']);
   });
 
   it('Fecha pelo juiz: o item fica feito e o próximo turno não o traz como aberto', async () => {

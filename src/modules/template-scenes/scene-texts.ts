@@ -3,9 +3,6 @@ import { SceneFailureCode } from './domain/scene.types';
 
 /** Mensagens do assistente no chat da cena (pt-BR). */
 
-export const READY_REPLY =
-  'Pronto! Gerei a cena no tamanho do formato. Veja a prévia ao lado e use as camadas para o texto e o logo.';
-
 export const CANCELLED_REPLY = 'Geração cancelada.';
 
 /** Recusa de texto, preço e logo pintados (G3): a camada é o caminho exato. */

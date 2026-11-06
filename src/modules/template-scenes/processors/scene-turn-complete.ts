@@ -8,7 +8,6 @@ import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
 import { cancelVersion, emitVersionEvent } from './scene-turn-finish';
-import { READY_REPLY } from '../scene-texts';
 import { applyJudgeVerdict, JudgeBriefVerdict } from '../domain/scene-brief';
 
 export interface StoredFile {
@@ -20,7 +19,8 @@ export interface StoredFile {
 
 /** O que muda na versão `ready` além da imagem: resposta, camadas, métricas e a região alterada. */
 export interface CompleteExtra {
-  reply?: string;
+  /** Resposta do chat, montada pelo código a partir do que o juiz conferiu (G8). */
+  reply: string;
   /** Camadas da versão; sem isto, herda as da versão de onde saiu. */
   elements?: SceneElement[];
   /** Mesclado em `metrics` (as chamadas já gravadas ficam). */
@@ -76,9 +76,9 @@ export async function readyVersion(
   manager: EntityManager,
   scene: TemplateScene,
   version: TemplateSceneVersion,
-  completion: { target: CompleteTarget; image: CompleteImage; extra?: CompleteExtra },
+  completion: { target: CompleteTarget; image: CompleteImage; extra: CompleteExtra },
 ): Promise<'ready' | 'cancelled'> {
-  const { target, image, extra = {} } = completion;
+  const { target, image, extra } = completion;
   if (scene.deletedAt || version.cancelRequestedAt) {
     await cancelVersion(manager, scene, version);
     return 'cancelled';
@@ -104,7 +104,7 @@ export async function readyVersion(
   await addAssistantMessage(manager, {
     sceneId: scene.id,
     versionId: version.id,
-    content: extra.reply ?? READY_REPLY,
+    content: extra.reply,
     status: 'done',
   });
   await bumpRevision(manager, scene);

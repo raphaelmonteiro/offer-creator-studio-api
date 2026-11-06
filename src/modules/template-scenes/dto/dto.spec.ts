@@ -79,6 +79,15 @@ describe('DTOs da cena', () => {
       await expect(body(payload, SendMessageDto)).rejects.toBeInstanceOf(BadRequestException);
     });
 
+    it.each([
+      ['confirmGlobal', true],
+      ['replyToMessageId', '11111111-1111-4111-8111-111111111111'],
+    ])('campos antigos recusados: %s dá 400 (R20, saiu do e2e)', async (field, value) => {
+      await expect(
+        body({ content: 'campo verde', expectedRevision: 0, [field]: value }, SendMessageDto),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
     it.each(['imageUrl', 'target', 'maskUploadId', 'url'])(
       'recusa o campo %s (a API recebe dados, nunca URL)',
       async (field) => {

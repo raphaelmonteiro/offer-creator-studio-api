@@ -10,7 +10,7 @@ const DEFAULT_MAX_PAID_CALLS = 4;
 
 /** O que uma chamada de imagem precisa para ser reservada, executada e gravada. */
 export interface ImageCallSpec {
-  kind: Extract<SceneCallRecord['kind'], 'generate' | 'edit' | 'transparent'>;
+  kind: Extract<SceneCallRecord['kind'], 'generate' | 'edit'>;
   model: string;
   size: string;
   run: () => Promise<SceneGenerateResult>;

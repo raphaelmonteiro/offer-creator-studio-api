@@ -47,8 +47,6 @@ export const SCENE_STEPS = [
   'preparing',
   'generating',
   'editing',
-  // Não é mais emitido (sem recomposição); fica no tipo para ler as linhas antigas.
-  'blending',
   'checking',
   'saving',
   'done',
@@ -133,7 +131,7 @@ export type SceneZones = Record<SceneZoneName, Rect>;
 /** Uma chamada paga (ou a reserva dela) em `metrics.calls` da versão. */
 export interface SceneCallRecord {
   id: string;
-  kind: 'generate' | 'edit' | 'transparent' | 'vision';
+  kind: 'generate' | 'edit' | 'vision';
   /** `pending` é gravada ANTES da chamada (R10); fechada depois com o custo real. */
   status: 'pending' | 'done' | 'failed' | 'discarded';
   model: string;

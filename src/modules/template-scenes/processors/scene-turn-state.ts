@@ -8,13 +8,7 @@ import { cancelVersion, emitVersionEvent, failVersion } from './scene-turn-finis
 import { SceneLockService } from '../services/scene-lock.service';
 import { CallOutcome, closeCallIn, recordCallIn } from './scene-turn-calls';
 import { loadTurnContext, TurnContext } from './scene-turn-context';
-import {
-  CompleteExtra,
-  CompleteImage,
-  readyVersion,
-  rejectVersion,
-  StoredFile,
-} from './scene-turn-complete';
+import { CompleteExtra, CompleteImage, readyVersion, StoredFile } from './scene-turn-complete';
 
 export type { CompleteExtra, StoredFile } from './scene-turn-complete';
 export type { TurnAttachmentAsset, TurnContext, TurnParent } from './scene-turn-context';
@@ -121,7 +115,7 @@ export class SceneTurnState {
   complete(
     ctx: TurnContext,
     files: { master: StoredFile; preview: StoredFile },
-    extra: CompleteExtra = {},
+    extra: CompleteExtra,
   ): Promise<CompleteResult> {
     return this.completeWith(ctx, { kind: 'files', ...files }, extra);
   }
@@ -140,14 +134,6 @@ export class SceneTurnState {
         parentElements: structuredClone(ctx.parent?.elements ?? []),
       };
       return readyVersion(manager, scene, version, { target, image, extra });
-    });
-  }
-
-  /** `running` → `rejected`: nada para fazer (por exemplo, a logo citada não existe); só a resposta no chat. */
-  reject(ctx: TurnContext, reply: string): Promise<void> {
-    return this.run(ctx, async (manager, scene) => {
-      const version = await this.runningVersion(manager, ctx);
-      if (version) await rejectVersion(manager, scene, version, reply);
     });
   }
 

@@ -7,7 +7,7 @@ import { MockSceneVisionClient } from './mock-scene-vision.client';
 /** Token de injeção do cliente de visão da cena (`mock` ou `openai`, junto com o provedor de imagem). */
 export const SCENE_VISION_CLIENT = 'SCENE_VISION_CLIENT';
 
-/** O que a cena precisa do modelo de visão: comparar o recorte antes e depois. */
+/** O que a cena precisa do modelo de visão: comparar a imagem inteira antes e depois. */
 export interface SceneVisionClient {
   compare(input: VisionCompareInput): Promise<VisionCompareResult>;
 }

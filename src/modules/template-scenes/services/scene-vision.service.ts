@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { llmCostUsd, llmPricesFor } from '../../ai/openai-llm-pricing';
 import { VisionUsage } from '../../ai/openai-vision.service';
 import { SCENE_VISION_CLIENT, SceneVisionClient } from '../providers/scene-vision-client';
+import { sleepFor } from '../domain/scene-timing';
 
 export const DEFAULT_VISION_MODEL = 'gpt-6-luna';
 /** PV-2: tempo máximo do juiz; passou disso, a resposta diz que não conseguiu conferir. */
@@ -125,9 +126,6 @@ function parseAssessment(text: string, openIds: string[]): Parsed | null {
     return null;
   }
 }
-
-const sleepFor = (ms: number): Promise<'timeout'> =>
-  new Promise((resolve) => setTimeout(() => resolve('timeout'), ms));
 
 /**
  * O juiz depois de cada imagem (`gpt-6-luna`, `detail: high`): compara antes e depois inteiros com a mensagem do

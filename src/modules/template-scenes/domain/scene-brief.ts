@@ -149,8 +149,3 @@ export function applyJudgeVerdict(
   });
   return { brief: next, changes };
 }
-
-/** Itens em aberto que o juiz não viu: o chat diz "Ainda não vi na imagem: ...". */
-export function stillMissing(brief: BriefItem[], verdict: JudgeBriefVerdict): BriefItem[] {
-  return openItems(brief).filter((item) => verdict.notSeen.includes(item.id));
-}

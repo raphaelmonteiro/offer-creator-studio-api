@@ -75,7 +75,7 @@ export class SceneTurnSupport {
    * gravado), gera master e prévia, grava os arquivos e completa. Se a versão não ficou `ready`
    * (cancelada durante a gravação), apaga os arquivos.
    */
-  async finishWithImage(ctx: TurnContext, png: Buffer, extra: CompleteExtra = {}): Promise<void> {
+  async finishWithImage(ctx: TurnContext, png: Buffer, extra: CompleteExtra): Promise<void> {
     if (await this.state.isCancelRequested(ctx)) {
       await this.state.cancel(ctx);
       return;

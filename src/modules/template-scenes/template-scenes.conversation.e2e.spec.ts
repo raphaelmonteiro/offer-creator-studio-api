@@ -199,21 +199,5 @@ describeIfSceneDb('Conversa da cena de template (e2e, banco chroma_x_e2e)', () =
         .set('Authorization', 'Bearer lixo');
       expect(bad.status).toBe(401);
     });
-
-    it('campos antigos recusados: confirmGlobal e replyToMessageId dão 400, e nada é gravado', async () => {
-      const created = await newScene('E2E conversa campos antigos');
-      const old = await message(created.id, 'campo verde', 0, { confirmGlobal: true });
-      expect(old.status).toBe(400);
-      expect(
-        (
-          await message(created.id, 'campo verde', 0, {
-            replyToMessageId: '11111111-1111-4111-8111-111111111111',
-          })
-        ).status,
-      ).toBe(400);
-      const scene = await get(`/${created.id}`);
-      expect(scene.body.data.messages).toEqual([]);
-      expect(scene.body.data.revision).toBe(0);
-    });
   });
 });

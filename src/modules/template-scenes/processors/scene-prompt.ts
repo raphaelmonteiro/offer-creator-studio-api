@@ -56,6 +56,10 @@ export function continuityApplies(
   );
 }
 
+/** Regra de texto em TODOS os casos: texto pintado é recusado antes, então não há exceção (R32 saiu). */
+export const NO_TEXT_RULES =
+  'Regras: sem texto legível, sem letras ou números, sem logotipos e sem preços.';
+
 export const FIXED_RULES =
   'Regras: sem texto legível, sem letras ou números, sem logotipos, sem preços, sem produtos de marcas reais e sem pessoas identificáveis.';
 
@@ -91,7 +95,7 @@ export function buildGlobalPrompt(input: {
     `Ajuste esta imagem de fundo de encarte conforme o pedido do cliente: "${cleanRequest(input.request)}".`,
     CONTINUOUS_IMAGE_RULE,
     ...(input.continuity ? [CONTINUITY_PHRASE] : []),
-    'Regras: sem texto legível, sem letras ou números, sem logotipos e sem preços.',
+    NO_TEXT_RULES,
   ].join('\n');
 }
 
@@ -123,10 +127,6 @@ export function planRequest(plan: PromptPlanFields): string {
 
 const KEEP_ALL =
   'Preserve todo o resto da imagem exatamente como está, sem mudar estilo, cor ou composição';
-
-/** Regra de texto em TODOS os casos: texto pintado é recusado antes, então não há exceção (R32 saiu). */
-export const NO_TEXT_RULES =
-  'Regras: sem texto legível, sem letras ou números, sem logotipos e sem preços.';
 
 export type RedrawKind = 'global' | 'composition' | 'item' | 'marked';
 

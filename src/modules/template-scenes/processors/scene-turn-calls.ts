@@ -2,6 +2,7 @@ import { EntityManager } from 'typeorm';
 import { SceneCallRecord } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
+import { round6 } from '../domain/scene-timing';
 
 export interface CallOutcome {
   status: 'done' | 'failed';
@@ -10,8 +11,6 @@ export interface CallOutcome {
   errorCode?: string;
   latencyMs?: number;
 }
-
-const round6 = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
 
 /** Grava a tentativa na versão, ou devolve `'limit'` (sem gravar) quando o disjuntor de chamadas dispara. */
 export async function recordCallIn(

@@ -10,7 +10,7 @@ import { TemplateSceneVersion } from '../entities/template-scene-version.entity'
 
 /**
  * Poda de master e prévia (D-12, PV-5): marca `expiresAt = agora` nas que saíram do conjunto
- * protegido (as N versões `ready` mais recentes, incluídas as tentativas não aplicadas, as aprovadas e a
+ * protegido (as N versões `ready` mais recentes, incluídas as que o juiz reprovou, as aprovadas e a
  * atual, D-20) e limpa a marca das que voltaram.
  * Roda no `manager` da transação, sob o lock da cena, em todo caminho que cria versão `ready`
  * (processor, `PATCH elements` e `restore`). Quem apaga o arquivo é o GC.

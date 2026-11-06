@@ -9,9 +9,10 @@ import {
   SCENE_DIRECTOR_CLIENT,
   SceneDirectorClient,
 } from '../providers/scene-director-client';
+import { sleepFor } from '../domain/scene-timing';
 
 export const DEFAULT_DIRECTOR_MODEL = 'gpt-6-luna';
-/** Tempo máximo do Diretor (D-30: "costuma levar até 10 s"; o teto é o dobro). */
+/** Tempo máximo do Diretor (D-30 e D-41: "costuma levar até 20 s"; este é o teto). */
 export const DEFAULT_DIRECTOR_TIMEOUT_MS = 20_000;
 
 export type DirectorRun =
@@ -40,9 +41,6 @@ export interface DirectorRunInput {
   script: DirectorScript;
   correlationId: string;
 }
-
-const sleepFor = (ms: number): Promise<'timeout'> =>
-  new Promise((resolve) => setTimeout(() => resolve('timeout'), ms));
 
 /**
  * Chama o Diretor e entrega o resultado sem lançar: falha, quota, tempo esgotado e modelo sem preço viram

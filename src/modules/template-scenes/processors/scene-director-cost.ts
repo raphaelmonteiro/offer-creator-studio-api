@@ -1,6 +1,7 @@
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { BriefChanges } from '../domain/scene-brief';
+import { round6 } from '../domain/scene-timing';
 
 /**
  * Custo do Diretor (G7): gravado fora de `metrics.calls` (que o disjuntor de chamadas pagas conta), em
@@ -8,8 +9,6 @@ import { BriefChanges } from '../domain/scene-brief';
  * versão, inclusive `cancelled`. Custo desconhecido (resposta sem `usage`, tempo esgotado, erro) nunca soma
  * zero sem marca: `costUnknown`.
  */
-
-const round6 = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
 
 export interface DirectorCallRecord {
   attempt: number;
