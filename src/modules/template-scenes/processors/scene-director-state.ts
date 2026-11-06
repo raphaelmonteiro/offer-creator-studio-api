@@ -34,7 +34,7 @@ import { resolveUndo } from '../services/scene-undo';
 import { publishQueued } from '../services/scene-turn-helpers';
 import { TURN_EXPIRE_SECONDS } from '../services/scene-turn.service';
 import { applyLayerActions } from './scene-layer-actions';
-import { addDirectorCost, summarizeDirectorCalls } from './scene-director-cost';
+import { addDirectorCost, DirectorCallRecord, summarizeDirectorCalls } from './scene-director-cost';
 import { loadAttachments } from './scene-turn-context';
 import { DirectorRunResult } from './scene-director-run';
 import { cancelVersion, emitVersionEvent, failVersion } from './scene-turn-finish';
@@ -124,14 +124,22 @@ export class SceneDirectorState {
   }
 
   /** Último recurso do processor: qualquer erro inesperado fecha a versão de leitura como falha. */
-  failReading(sceneId: string, versionId: string, code: SceneFailureCode): Promise<void> {
+  failReading(
+    sceneId: string,
+    versionId: string,
+    code: SceneFailureCode,
+    calls: DirectorCallRecord[] = [],
+  ): Promise<void> {
     return this.locks.run(
       sceneId,
       async ({ manager, scene }) => {
         const version = await manager.findOne(TemplateSceneVersion, {
           where: { id: versionId, sceneId },
         });
-        if (version && isReading(version)) await failVersion(manager, scene, version, code);
+        if (!version || !isReading(version)) return;
+        if (calls.length) addDirectorCost({ scene, version }, summarizeDirectorCalls(calls));
+        await manager.save(scene);
+        await failVersion(manager, scene, version, code);
       },
       { includeDeleted: true },
     );

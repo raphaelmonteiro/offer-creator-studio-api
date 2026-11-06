@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { llmCostUsd } from '../../ai/openai-llm-pricing';
+import { llmCostUsd, llmPricesFor } from '../../ai/openai-llm-pricing';
 import { VisionUsage } from '../../ai/openai-vision.service';
 import { SCENE_VISION_CLIENT, SceneVisionClient } from '../providers/scene-vision-client';
 
@@ -30,7 +30,7 @@ export type VisionAssessment =
     }
   | {
       ok: false;
-      reason: 'invalid_json' | 'timeout' | 'error';
+      reason: 'invalid_json' | 'timeout' | 'error' | 'unpriced';
       /** Custo conhecido da chamada que falhou (JSON inválido foi cobrado; timeout e erro, desconhecido). */
       costUsd: number | null;
       requestId: string | null;
@@ -168,6 +168,13 @@ export class SceneVisionService {
     },
   ): Promise<VisionAssessment> {
     const model = this.model();
+    // Modelo pago sem preço conferido não é chamado (R11): o custo seria desconhecido. Recusa antes da rede, custo zero.
+    if (!llmPricesFor(model)) {
+      this.logger.error(
+        `Modelo do juiz sem preço conferido, não chamado: ${model} (correlationId=${input.correlationId})`,
+      );
+      return { ok: false, reason: 'unpriced', costUsd: 0, requestId: null };
+    }
     const timeoutMs = this.timeoutMs();
     try {
       const outcome = await Promise.race([

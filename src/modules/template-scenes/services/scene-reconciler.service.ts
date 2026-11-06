@@ -31,7 +31,7 @@ export class SceneReconcilerService implements OnModuleDestroy {
     private readonly state: SceneTurnState,
   ) {}
 
-  /** No boot do worker e a cada 5 minutos. */
+  /** No boot do worker e a cada minuto (`RECONCILE_INTERVAL_MS`). */
   start(): void {
     void this.safeReconcile();
     this.timer = setInterval(() => void this.safeReconcile(), RECONCILE_INTERVAL_MS);
@@ -90,8 +90,13 @@ export class SceneReconcilerService implements OnModuleDestroy {
         if (!version || !busy || version.updatedAt >= cutoff) return false;
         version.metrics = {
           ...version.metrics,
-          // chamada paga que ficou sem resposta: o custo real é desconhecido
-          costUnknown: (version.metrics.calls ?? []).some((call) => call.status === 'pending'),
+          // Custo desconhecido nunca se apaga (R12): a marca que já estava fica; chamada paga sem resposta marca; e
+          // leitura presa pode ter chamado o Diretor sem deixar tentativa gravada antes dela.
+          ...(version.metrics.costUnknown === true ||
+          version.step === 'reading' ||
+          (version.metrics.calls ?? []).some((call) => call.status === 'pending')
+            ? { costUnknown: true }
+            : {}),
           calls: (version.metrics.calls ?? []).map((call) =>
             call.status === 'pending'
               ? { ...call, status: 'failed' as const, errorCode: 'JOB_EXPIRED' }

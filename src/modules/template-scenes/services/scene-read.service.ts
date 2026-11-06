@@ -103,10 +103,14 @@ export class SceneReadService {
         where: { id: page.before, sceneId },
       });
       if (!cursor) throw invalidBody('O cursor "before" não é uma mensagem desta cena.');
+      // A tupla é comparada no banco, a partir do id do cursor: `createdAt` tem microssegundos, e o `Date` do ORM só
+      // tem milissegundos, o que tiraria da página a mensagem do mesmo instante real (R14).
       query.andWhere(
-        `(m."createdAt" < :at
-          OR (m."createdAt" = :at AND (m.role > :role OR (m.role = :role AND m.id < :id))))`,
-        { at: cursor.createdAt, role: cursor.role, id: cursor.id },
+        `EXISTS (
+          SELECT 1 FROM template_scene_messages c
+          WHERE c.id = :cursorId AND (m."createdAt" < c."createdAt"
+            OR (m."createdAt" = c."createdAt" AND (m.role > c.role OR (m.role = c.role AND m.id < c.id)))))`,
+        { cursorId: cursor.id },
       );
     }
     const rows = await query

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MockSceneVisionClient, MOCK_VISION_MARKERS } from '../providers/mock-scene-vision.client';
 import { SceneVisionClient } from '../providers/scene-vision-client';
@@ -71,10 +72,10 @@ describe('SceneVisionService (o juiz)', () => {
     const compare = ok(verdict({ atendeu: 'parcial' }));
     const result = await build(
       { compare },
-      { TEMPLATE_SCENE_VISION_MODEL: 'gpt-6-outro', TEMPLATE_SCENE_VISION_TIMEOUT_MS: '5000' },
+      { TEMPLATE_SCENE_VISION_MODEL: 'gpt-6-luna', TEMPLATE_SCENE_VISION_TIMEOUT_MS: '5000' },
     ).assess(input());
-    expect(compare.mock.calls[0][0]).toMatchObject({ model: 'gpt-6-outro', timeoutMs: 5000 });
-    expect(result).toMatchObject({ ok: true, satisfied: 'parcial', costUsd: null });
+    expect(compare.mock.calls[0][0]).toMatchObject({ model: 'gpt-6-luna', timeoutMs: 5000 });
+    expect(result).toMatchObject({ ok: true, satisfied: 'parcial' });
   });
 
   it('ids desconhecidos saem, e o que foi visto não entra em não visto', async () => {
@@ -102,6 +103,19 @@ describe('SceneVisionService (o juiz)', () => {
   ])('JSON fora do esquema (%s) vira invalid_json e guarda o custo', async (text) => {
     const result = await build({ compare: ok(text) }).assess(input());
     expect(result).toMatchObject({ ok: false, reason: 'invalid_json', costUsd: 0.0004 });
+  });
+
+  it('R11: modelo do juiz sem preço conferido não é chamado, o custo é zero conhecido e há erro no log', async () => {
+    const compare = ok(verdict());
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const result = await build(
+      { compare },
+      { TEMPLATE_SCENE_VISION_MODEL: 'gpt-9-sem-preco' },
+    ).assess(input());
+    expect(compare).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: false, reason: 'unpriced', costUsd: 0, requestId: null });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('sem preço conferido'));
+    error.mockRestore();
   });
 
   it('Juiz indisponível: erro e tempo esgotado viram ok false, sem custo conhecido, sem lançar', async () => {

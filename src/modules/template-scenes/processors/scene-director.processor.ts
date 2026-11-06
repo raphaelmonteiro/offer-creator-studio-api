@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SceneDirectorContextService } from '../services/scene-director-context';
 import { SceneDirectorService } from '../services/scene-director.service';
-import { runDirector } from './scene-director-run';
+import { DirectorRunResult, runDirector } from './scene-director-run';
 import { SceneDirectorState } from './scene-director-state';
 
 export interface SceneDirectorJob {
@@ -27,6 +27,7 @@ export class SceneDirectorProcessor {
   ) {}
 
   async process(job: SceneDirectorJob, jobId?: string): Promise<void> {
+    let result: DirectorRunResult | undefined;
     try {
       const turn = await this.state.begin(job.sceneId, job.versionId);
       if (!turn) {
@@ -36,7 +37,7 @@ export class SceneDirectorProcessor {
         return;
       }
       const context = await this.contexts.build(turn.scene, turn.version);
-      const result = await runDirector(this.director, {
+      result = await runDirector(this.director, {
         context,
         correlationId: turn.version.correlationId,
       });
@@ -47,7 +48,8 @@ export class SceneDirectorProcessor {
         (error as Error).stack,
       );
       await this.state
-        .failReading(job.sceneId, job.versionId, 'DIRECTOR_UNAVAILABLE')
+        // O Diretor já pode ter sido cobrado: o custo das chamadas vai junto, fora do rollback de `settle` (R13).
+        .failReading(job.sceneId, job.versionId, 'DIRECTOR_UNAVAILABLE', result?.calls)
         .catch((failure: Error) =>
           this.logger.error(
             `Não foi possível fechar a leitura ${job.versionId}: ${failure.message}`,

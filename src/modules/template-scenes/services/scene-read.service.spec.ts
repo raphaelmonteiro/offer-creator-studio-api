@@ -191,6 +191,38 @@ describeIfSceneDb('SceneReadService (banco chroma_x_e2e)', () => {
       expect(detail.messages.map((m) => m.content)).toEqual(seen);
     });
 
+    it('R14: mensagens gravadas no mesmo instante real, com microssegundos, nenhuma some entre as páginas', async () => {
+      const scene = await newScene('Histórico microssegundos');
+      const ids: string[] = [];
+      for (const [role, content] of [
+        ['user', 'pergunta A'],
+        ['assistant', 'resposta A'],
+        ['user', 'pergunta B'],
+        ['assistant', 'resposta B'],
+      ] as const) {
+        ids.push((await insertMessage(dataSource, scene.id, { role, content })).id);
+      }
+      // `now()` é o instante da transação, com microssegundos: o mesmo valor para as quatro, como no fluxo real.
+      await dataSource.transaction(async (manager) => {
+        await manager.query(
+          `UPDATE template_scene_messages SET "createdAt" = now() + interval '0.000123 seconds' WHERE id = ANY($1)`,
+          [ids],
+        );
+      });
+
+      const seen: string[] = [];
+      let before: string | undefined;
+      let hasMore = true;
+      while (hasMore) {
+        const page = await reads.loadMessages(scene.id, { before, limit: 1 });
+        seen.unshift(page.items[0].content);
+        before = page.items[0].id;
+        hasMore = page.hasMore;
+      }
+      expect(seen).toHaveLength(4);
+      expect(new Set(seen).size).toBe(4);
+    });
+
     it('Cursor inválido: mensagem de outra cena é 400, e nada vaza', async () => {
       const a = await newScene('Cursor A');
       const b = await newScene('Cursor B');

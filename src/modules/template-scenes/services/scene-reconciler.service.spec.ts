@@ -173,6 +173,36 @@ describeIfSceneDb('SceneReconcilerService (banco chroma_x_e2e)', () => {
       expect(next.status).toBe('queued');
     });
 
+    it('R12: leitura presa marca costUnknown, porque o Diretor pode ter sido cobrado sem tentativa gravada', async () => {
+      const { version } = await sceneWith(
+        'Recon leitura custo',
+        { status: 'queued', step: 'reading' },
+        3,
+      );
+      await reconciler.reconcile();
+      expect((await versionOf(version.id)).metrics.costUnknown).toBe(true);
+    });
+
+    it('R12: a marca costUnknown que já estava gravada não é apagada ao expirar', async () => {
+      const { version } = await sceneWith(
+        'Recon marca',
+        { status: 'running', step: 'editing', metrics: { costUnknown: true } },
+        20,
+      );
+      await reconciler.reconcile();
+      expect((await versionOf(version.id)).metrics.costUnknown).toBe(true);
+    });
+
+    it('R12: sem chamada pendente e sem marca, nada é marcado', async () => {
+      const { version } = await sceneWith(
+        'Recon limpa',
+        { status: 'running', step: 'editing' },
+        20,
+      );
+      await reconciler.reconcile();
+      expect((await versionOf(version.id)).metrics.costUnknown).toBeUndefined();
+    });
+
     it('Imagem esperando vaga não expira como leitura: queued com step nulo há 3 min continua queued', async () => {
       const { version } = await sceneWith('Recon vaga', { status: 'queued', step: null }, 3);
       await reconciler.reconcile();
