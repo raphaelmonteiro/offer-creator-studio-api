@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { TemplateScene } from '../entities/template-scene.entity';
 import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { SceneDirectorProcessor } from '../processors/scene-director.processor';
@@ -9,6 +10,7 @@ import { SceneDirectorService } from '../services/scene-director.service';
 import { SceneLockService } from '../services/scene-lock.service';
 import { SceneTurnService } from '../services/scene-turn.service';
 import { directorPlan } from './scene-director-fixtures';
+import { insertScene } from './scene-fixtures';
 import { useProcessorHarness } from './scene-processor-harness';
 
 /** Custo de uma chamada do Diretor com o `usage` padrão dos testes (2.600 de entrada, 350 de saída). */
@@ -30,6 +32,19 @@ export const directorAnswer = (
  * Banco, fila falsa, POST real, Diretor com cliente controlado e a fila de imagem falsa: o que os specs do
  * consumer do Diretor precisam. Chame dentro do `describeIfSceneDb`.
  */
+type Respond = (
+  call: SceneDirectorCall,
+  attempt: number,
+) => Promise<ReturnType<typeof directorAnswer>>;
+
+export interface TurnOptions {
+  extra?: Record<string, unknown>;
+  brief?: TemplateScene['brief'];
+  env?: Record<string, string>;
+  /** Cena sem imagem (a primeira mensagem), em vez da cena com a versão 1 pronta. */
+  noImage?: boolean;
+}
+
 export function useDirectorHarness() {
   const base = useProcessorHarness();
   const queue = {
@@ -55,39 +70,69 @@ export function useDirectorHarness() {
     queue.publish.mockClear();
   });
 
+  const directorClient = (respond: Respond) => {
+    let attempt = 0;
+    const plan = jest.fn((call: SceneDirectorCall) => {
+      attempt += 1;
+      return respond(call, attempt);
+    });
+    return { client: { plan } as SceneDirectorClient, plan };
+  };
+
+  const post = async (sceneId: string, content: string, extra: Record<string, unknown> = {}) => {
+    const scene = await base.sceneOf(sceneId);
+    const turns = new SceneTurnService(
+      base.dataSource,
+      new SceneLockService(base.dataSource),
+      queueService,
+    );
+    queue.publish.mockClear();
+    return turns.sendMessage(
+      sceneId,
+      { content, expectedRevision: scene.revision, ...extra } as never,
+      null,
+    );
+  };
+
+  const newScene = async (name: string) => {
+    const scene = await insertScene(base.dataSource, { name });
+    base.trackScene(scene.id);
+    return scene;
+  };
+
+  /** Cena (com imagem, salvo `noImage`), POST real e o consumer do Diretor rodando com a resposta dada. */
+  const runTurn = async (
+    content: string,
+    respond: Respond | Parameters<typeof directorAnswer>[0],
+    options: TurnOptions = {},
+  ) => {
+    const scene = options.noImage ? await newScene('Sem imagem') : (await base.readyScene()).scene;
+    if (options.brief) {
+      await base.dataSource.manager.update(
+        TemplateScene,
+        { id: scene.id },
+        { brief: options.brief },
+      );
+    }
+    const sent = await post(scene.id, content, options.extra);
+    const { client, plan } = directorClient(
+      typeof respond === 'function' ? respond : async () => directorAnswer(respond),
+    );
+    const processor = build(client, options.env);
+    queue.publish.mockClear();
+    await processor.process({ sceneId: scene.id, versionId: sent.versionId }, 'job-d');
+    return { scene, sent, plan, processor, version: await base.versionOf(sent.versionId) };
+  };
+
   return Object.assign(base, {
     queue,
+    runTurn,
     /** Cliente do Diretor que responde com o que o teste manda, e registra as chamadas. */
-    directorClient(
-      respond: (
-        call: SceneDirectorCall,
-        attempt: number,
-      ) => Promise<ReturnType<typeof directorAnswer>>,
-    ) {
-      let attempt = 0;
-      const plan = jest.fn((call: SceneDirectorCall) => {
-        attempt += 1;
-        return respond(call, attempt);
-      });
-      return { client: { plan } as SceneDirectorClient, plan };
-    },
+    directorClient,
     directorProcessor: build,
     turns: () =>
       new SceneTurnService(base.dataSource, new SceneLockService(base.dataSource), queueService),
     /** Envia a mensagem pelo POST real (revisão atual da cena) e devolve o resultado. */
-    async post(sceneId: string, content: string, extra: Record<string, unknown> = {}) {
-      const scene = await base.sceneOf(sceneId);
-      const turns = new SceneTurnService(
-        base.dataSource,
-        new SceneLockService(base.dataSource),
-        queueService,
-      );
-      queue.publish.mockClear();
-      return turns.sendMessage(
-        sceneId,
-        { content, expectedRevision: scene.revision, ...extra } as never,
-        null,
-      );
-    },
+    post,
   });
 }

@@ -24,28 +24,7 @@ describeIfSceneDb('SceneDirectorProcessor (banco chroma_x_e2e)', () => {
   const imageJobs = () =>
     h.queue.publish.mock.calls.filter(([queue]) => queue === QUEUES.TEMPLATE_SCENE_TURN);
 
-  /** Cena com imagem, a mensagem enviada pelo POST real e o consumer rodando com a resposta dada. */
-  async function turn(
-    content: string,
-    respond: Parameters<typeof h.directorClient>[0] | Parameters<typeof directorAnswer>[0],
-    options: {
-      extra?: Record<string, unknown>;
-      brief?: TemplateScene['brief'];
-      env?: Record<string, string>;
-    } = {},
-  ) {
-    const { scene } = await h.readyScene();
-    if (options.brief)
-      await h.dataSource.manager.update(TemplateScene, { id: scene.id }, { brief: options.brief });
-    const sent = await h.post(scene.id, content, options.extra);
-    const { client, plan } = h.directorClient(
-      typeof respond === 'function' ? respond : async () => directorAnswer(respond),
-    );
-    const processor = h.directorProcessor(client, options.env);
-    h.queue.publish.mockClear();
-    await processor.process(job(scene.id, sent.versionId), 'job-d');
-    return { scene, sent, plan, processor, version: await h.versionOf(sent.versionId) };
-  }
+  const turn = h.runTurn;
 
   describe('Cada tipo de mensagem tem um efeito definido pelo código', () => {
     it('Pergunta: o chat responde como leitura da imagem, sem chamada de imagem e sem versão com imagem', async () => {
