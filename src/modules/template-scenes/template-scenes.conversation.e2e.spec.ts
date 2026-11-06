@@ -161,7 +161,8 @@ describeIfSceneDb('Conversa da cena de template (e2e, banco chroma_x_e2e)', () =
 
   it('falha do Diretor: a mensagem fica, a versão falha com DIRECTOR_UNAVAILABLE e a cena fica livre', async () => {
     const { id, ready } = await sceneWithImage('E2E conversa falha');
-    await message(id, 'tira o coelho #diretor-falha', ready.revision);
+    const sent = await message(id, 'tira o coelho #diretor-falha', ready.revision);
+    expect(sent.status).toBe(202); // um 409 de revisão ou de cena ocupada aparece aqui, e não como espera de 30 s
     const done = await waitForScene(id, (s) => s.revision > ready.revision + 1 && idle(s));
     expect(done.currentVersion.id).toBe(ready.currentVersion.id);
     expect(done.messages.at(-1)).toMatchObject({
