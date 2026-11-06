@@ -28,9 +28,22 @@ export interface SceneAssetView {
 
 export type RestorableReason = 'not_ready' | 'master_purged';
 
+/** O que o juiz conferiu da imagem, para a tela oferecer "Voltar para a anterior" (reprovado e parcial). */
+export type JudgeVerdictView = 'sim' | 'parcial' | 'nao';
+
 export interface SceneVersionView {
   id: string;
+  /** Número interno: toda mensagem consome um. A tela e o Diretor usam só `displayNumber`. */
   number: number;
+  /**
+   * Posição entre as versões `ready` com imagem, em ordem de `number`, na cena inteira (nunca sobre a página).
+   * `null` na versão sem imagem (resposta, falha, parada, leitura ou fila).
+   */
+  displayNumber: number | null;
+  /** Fim da janela de 5 s com "Parar" (ISO), lido de `metrics.windowEndsAt`; `null` sem janela. */
+  windowEndsAt: string | null;
+  /** Veredito do juiz quando houve conferência; `null` sem ela. */
+  judge: JudgeVerdictView | null;
   operation: SceneVersionOperation;
   status: SceneVersionStatus;
   step: SceneStep | null;
@@ -96,9 +109,10 @@ export interface SceneSummaryView {
 export interface SceneDetailView extends SceneSummaryView {
   zones: SceneZones;
   currentVersion: SceneCurrentVersionView | null;
-  /** Versão `queued`/`running`, para a tela mostrar etapa e "Cancelar" depois de recarregar. */
+  /** Versão `queued`/`running`, para a tela mostrar leitura, janela, etapa e "Parar" depois de recarregar. */
   activeVersion: SceneVersionView | null;
   messages: SceneMessageView[];
+  /** Só as versões `ready` com imagem, com `displayNumber`; o filtro vale também na paginação. */
   versions: {
     items: SceneVersionView[];
     total: number;
@@ -146,9 +160,24 @@ export function toAssetView(asset: TemplateSceneAsset): SceneAssetView {
   };
 }
 
+const JUDGE_VERDICTS: readonly string[] = ['sim', 'parcial', 'nao'];
+
+function judgeOf(version: Pick<TemplateSceneVersion, 'metrics'>): JudgeVerdictView | null {
+  const judge = version.metrics?.judge as { satisfied?: string } | undefined;
+  return judge?.satisfied && JUDGE_VERDICTS.includes(judge.satisfied)
+    ? (judge.satisfied as JudgeVerdictView)
+    : null;
+}
+
+function windowEndsAtOf(version: Pick<TemplateSceneVersion, 'metrics'>): string | null {
+  const value = version.metrics?.windowEndsAt;
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? value : null;
+}
+
 export function toVersionView(
   version: TemplateSceneVersion,
   assets: ReadonlyMap<string, TemplateSceneAsset>,
+  displayNumbers: ReadonlyMap<string, number> = new Map(),
 ): SceneVersionView {
   const master = version.masterAssetId ? assets.get(version.masterAssetId) : undefined;
   const preview = version.previewAssetId ? assets.get(version.previewAssetId) : undefined;
@@ -156,6 +185,9 @@ export function toVersionView(
   return {
     id: version.id,
     number: version.number,
+    displayNumber: displayNumbers.get(version.id) ?? null,
+    windowEndsAt: windowEndsAtOf(version),
+    judge: judgeOf(version),
     operation: version.operation,
     status: version.status,
     step: version.step,
@@ -183,8 +215,9 @@ export function toVersionView(
 export function toCurrentVersionView(
   version: TemplateSceneVersion,
   assets: ReadonlyMap<string, TemplateSceneAsset>,
+  displayNumbers: ReadonlyMap<string, number> = new Map(),
 ): SceneCurrentVersionView {
-  const base = toVersionView(version, assets);
+  const base = toVersionView(version, assets, displayNumbers);
   const live = (id: string | null) => {
     const asset = id ? assets.get(id) : undefined;
     return asset && !asset.purgedAt ? asset : undefined;
@@ -237,4 +270,10 @@ export function toSummaryView(scene: TemplateScene): SceneSummaryView {
     createdAt: scene.createdAt.toISOString(),
     updatedAt: scene.updatedAt.toISOString(),
   };
+}
+
+/** Página de mensagens anteriores (`GET .../messages`): na mesma forma e ordem de `messages` do detalhe. */
+export interface SceneMessagesPageView {
+  items: SceneMessageView[];
+  hasMore: boolean;
 }

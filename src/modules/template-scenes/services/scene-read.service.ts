@@ -1,23 +1,28 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Not } from 'typeorm';
 import { SCENE_BUSY_STATUSES, SCENE_LIMITS } from '../domain/scene.types';
 import { sceneZonesFor } from '../domain/scene-formats';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { sceneNotFound } from '../scene.errors';
+import { invalidBody, sceneNotFound } from '../scene.errors';
+import { displayNumbersOf } from './scene-display-number';
 import {
   SceneDetailView,
   SceneListItemView,
+  SceneMessagesPageView,
   toCurrentVersionView,
   toMessageView,
   toSummaryView,
   toVersionView,
 } from './scene-views';
 
-/** Leituras da cena (detalhe e lista) como views; roda no `manager` da mutação quando recebe um. */
+/** Ordem das mensagens (mais novas primeiro): `createdAt`, o papel (o usuário antes do assistente na tela) e o `id`. */
+const MESSAGE_ORDER = { createdAt: 'DESC', role: 'ASC', id: 'DESC' } as const;
+
+/** Leituras da cena (detalhe, lista e mensagens antigas) como views; roda no `manager` da mutação quando recebe um. */
 @Injectable()
 export class SceneReadService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
@@ -30,8 +35,9 @@ export class SceneReadService {
     const scene = await manager.findOne(TemplateScene, { where: { id: sceneId } });
     if (!scene) throw sceneNotFound();
     const limit = SCENE_LIMITS.versionsPageSize;
+    // O painel lista só as versões com imagem (o filtro entra na paginação); o número exibido vem da cena inteira.
     const [pageVersions, totalVersions] = await manager.findAndCount(TemplateSceneVersion, {
-      where: { sceneId },
+      where: { sceneId, status: 'ready', masterAssetId: Not(IsNull()) },
       order: { number: 'DESC' },
       skip: (versionsPage - 1) * limit,
       take: limit,
@@ -46,10 +52,12 @@ export class SceneReadService {
       where: { sceneId },
       // Resposta sem job grava as duas mensagens na mesma transação, e o `now()` do Postgres é a hora de
       // início dela: `createdAt` empata. Em ordem DESC (antes do `reverse`), 'assistant' < 'user' põe o
-      // assistente primeiro, e o `reverse` deixa o usuário antes do assistente (PV-21).
-      order: { createdAt: 'DESC', role: 'ASC' },
+      // assistente primeiro, e o `reverse` deixa o usuário antes do assistente (PV-21). O `id` fecha o empate
+      // do mesmo papel, e é a mesma ordem que `loadMessages` usa para o cursor.
+      order: MESSAGE_ORDER,
       take: SCENE_LIMITS.recentMessages,
     });
+    const displayNumbers = await displayNumbersOf(manager, sceneId);
 
     const assets = await this.loadAssets(manager, [
       ...pageVersions,
@@ -59,16 +67,57 @@ export class SceneReadService {
     return {
       ...toSummaryView(scene),
       zones: sceneZonesFor(scene.formatId),
-      currentVersion: current ? toCurrentVersionView(current, assets) : null,
-      activeVersion: active ? toVersionView(active, assets) : null,
+      currentVersion: current ? toCurrentVersionView(current, assets, displayNumbers) : null,
+      activeVersion: active ? toVersionView(active, assets, displayNumbers) : null,
       messages: messages.reverse().map(toMessageView),
       versions: {
-        items: pageVersions.map((version) => toVersionView(version, assets)),
+        items: pageVersions.map((version) => toVersionView(version, assets, displayNumbers)),
         total: totalVersions,
         page: versionsPage,
         limit,
         totalPages: Math.max(1, Math.ceil(totalVersions / limit)),
       },
+    };
+  }
+
+  /**
+   * Mensagens anteriores a `before` (até `limit`), na ordem do detalhe, com `hasMore`. A ordem é a tupla
+   * `(createdAt DESC, role ASC, id DESC)`, e o servidor resolve o cursor nela: `createdAt` empata dentro da mesma
+   * transação, e uma página que cai entre duas mensagens do mesmo instante não repete nem perde nenhuma.
+   * `before` que não é da cena: 400. Cena inexistente ou excluída: 404.
+   */
+  async loadMessages(
+    sceneId: string,
+    page: { before?: string; limit?: number },
+  ): Promise<SceneMessagesPageView> {
+    const manager = this.dataSource.manager;
+    const scene = await manager.findOne(TemplateScene, { where: { id: sceneId } });
+    if (!scene) throw sceneNotFound();
+    const limit = page.limit ?? SCENE_LIMITS.recentMessages;
+    const query = manager
+      .getRepository(TemplateSceneMessage)
+      .createQueryBuilder('m')
+      .where('m.sceneId = :sceneId', { sceneId });
+    if (page.before) {
+      const cursor = await manager.findOne(TemplateSceneMessage, {
+        where: { id: page.before, sceneId },
+      });
+      if (!cursor) throw invalidBody('O cursor "before" não é uma mensagem desta cena.');
+      query.andWhere(
+        `(m."createdAt" < :at
+          OR (m."createdAt" = :at AND (m.role > :role OR (m.role = :role AND m.id < :id))))`,
+        { at: cursor.createdAt, role: cursor.role, id: cursor.id },
+      );
+    }
+    const rows = await query
+      .orderBy('m.createdAt', 'DESC')
+      .addOrderBy('m.role', 'ASC')
+      .addOrderBy('m.id', 'DESC')
+      .take(limit + 1)
+      .getMany();
+    return {
+      items: rows.slice(0, limit).reverse().map(toMessageView),
+      hasMore: rows.length > limit,
     };
   }
 

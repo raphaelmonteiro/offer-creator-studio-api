@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { SCENE_LIMITS } from '../domain/scene.types';
 
 export class ListScenesQueryDto {
@@ -34,4 +34,23 @@ export class GetSceneQueryDto {
   @IsInt()
   @Min(1)
   versionsPage?: number;
+}
+
+export class ListMessagesQueryDto {
+  @ApiPropertyOptional({ description: 'Id da mensagem mais antiga que a tela já tem (cursor)' })
+  @IsOptional()
+  @IsUUID()
+  before?: string;
+
+  @ApiPropertyOptional({
+    default: SCENE_LIMITS.recentMessages,
+    minimum: 1,
+    maximum: SCENE_LIMITS.recentMessages,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(SCENE_LIMITS.recentMessages)
+  limit?: number;
 }

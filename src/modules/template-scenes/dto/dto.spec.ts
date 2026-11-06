@@ -2,7 +2,11 @@ import { BadRequestException } from '@nestjs/common';
 import { SmartValidationPipe } from '../../../common/pipes/smart-validation.pipe';
 import { AdminGcDto } from './admin-gc.dto';
 import { CreateSceneDto } from './create-scene.dto';
-import { GetSceneQueryDto, ListScenesQueryDto } from './list-scenes-query.dto';
+import {
+  GetSceneQueryDto,
+  ListMessagesQueryDto,
+  ListScenesQueryDto,
+} from './list-scenes-query.dto';
 import { PatchElementsDto } from './patch-elements.dto';
 import { SendMessageDto } from './send-message.dto';
 
@@ -157,6 +161,31 @@ describe('DTOs da cena', () => {
         [{ replyToMessageId: 'abc' }],
       ])('recusa %j', async (extra) => {
         await expect(send(extra)).rejects.toBeInstanceOf(BadRequestException);
+      });
+    });
+
+    describe('GET .../messages', () => {
+      const messages = (payload: Record<string, unknown>) => query(payload, ListMessagesQueryDto);
+
+      it('aceita sem nada, com cursor UUID e com limite de 1 a 50 (texto da query vira número)', async () => {
+        await expect(messages({})).resolves.toBeDefined();
+        const ok = (await messages({
+          before: '11111111-1111-4111-8111-111111111111',
+          limit: '20',
+        })) as ListMessagesQueryDto;
+        expect(ok.limit).toBe(20);
+      });
+
+      it.each([
+        { before: 'abc' },
+        { before: 123 },
+        { limit: '0' },
+        { limit: '51' },
+        { limit: 'muitos' },
+        { limit: '1.5' },
+        { desconhecido: '1' },
+      ])('Cursor inválido: recusa %j com 400', async (payload) => {
+        await expect(messages(payload)).rejects.toBeInstanceOf(BadRequestException);
       });
     });
 

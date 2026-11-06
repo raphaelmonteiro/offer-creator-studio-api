@@ -153,6 +153,44 @@ describe('toCurrentVersionView', () => {
   });
 });
 
+describe('número exibido, janela e juiz na versão', () => {
+  it('displayNumber vem do mapa da cena inteira; sem entrada, null', () => {
+    const v = version();
+    expect(toVersionView(v, new Map(), new Map([[v.id, 7]])).displayNumber).toBe(7);
+    expect(toVersionView(v, new Map()).displayNumber).toBeNull();
+  });
+
+  it('windowEndsAt sai de metrics, e só se for uma data válida', () => {
+    const at = '2026-11-06T12:00:05.000Z';
+    expect(toVersionView(version({ metrics: { windowEndsAt: at } }), new Map()).windowEndsAt).toBe(
+      at,
+    );
+    expect(
+      toVersionView(version({ metrics: { windowEndsAt: 'ontem' } }), new Map()).windowEndsAt,
+    ).toBeNull();
+    expect(toVersionView(version(), new Map()).windowEndsAt).toBeNull();
+  });
+
+  it('judge traz só o veredito conhecido', () => {
+    const judge = (satisfied: unknown) =>
+      toVersionView(version({ metrics: { judge: { available: true, satisfied } } }), new Map())
+        .judge;
+    expect(judge('nao')).toBe('nao');
+    expect(judge('parcial')).toBe('parcial');
+    expect(judge('sim')).toBe('sim');
+    expect(judge('talvez')).toBeNull();
+    expect(
+      toVersionView(version({ metrics: { judge: { available: false } } }), new Map()).judge,
+    ).toBeNull();
+    expect(toVersionView(version(), new Map()).judge).toBeNull();
+  });
+
+  it('a versão atual leva o número exibido', () => {
+    const v = version();
+    expect(toCurrentVersionView(v, new Map(), new Map([[v.id, 3]])).displayNumber).toBe(3);
+  });
+});
+
 describe('alvo da edição na versão', () => {
   it('versão sem marcação: alvo vazio e sem imagem nova', () => {
     const view = toVersionView(version(), new Map());
