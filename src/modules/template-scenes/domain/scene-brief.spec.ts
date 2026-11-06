@@ -167,6 +167,20 @@ describe('scene-brief', () => {
       expect(brief[0].status).toBe('dropped');
     });
 
+    it('Plural do item: "esquece as flores" desiste do item "flor", e "flor" não casa com "florido"', () => {
+      const flor: BriefItem = { ...RIO, id: 'p1', text: 'flor' };
+      const florido: BriefItem = { ...RIO, id: 'p2', text: 'campo florido' };
+      const { brief } = applyDirectorRequests(
+        [flor, florido],
+        [drop(null, 'flores', 'esquece as flores')],
+        ctx('m2', NOW, 'esquece as flores'),
+      );
+      expect(brief.map((item) => [item.id, item.status])).toEqual([
+        ['p1', 'dropped'],
+        ['p2', 'open'],
+      ]);
+    });
+
     it('R8: "esquece o rio" desiste do "um rio largo", e não do "cenário colorido"', () => {
       const colorido: BriefItem = { ...RIO, id: 'p1', text: 'cenário colorido' };
       const largo: BriefItem = { ...RIO, id: 'p2', text: 'um rio largo' };

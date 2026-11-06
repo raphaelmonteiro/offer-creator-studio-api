@@ -136,6 +136,15 @@ describe('parseDirector', () => {
       ).toBe(false);
     });
 
+    it.each(['esquece isso', 'deixa pra la', 'desisto', 'não precisa', 'não quero mais'])(
+      'Esquece isso: a desistência genérica "%s" é citação válida, sem palavra do item',
+      (quote) => {
+        const raw = directorRaw({ requests: [drop(quote, 'p1')] });
+        const ctx = ctxFor(quote, { briefItems: [{ id: 'p1', text: 'um rio no meio' }] });
+        expect(parseDirector(raw, ctx).ok).toBe(true);
+      },
+    );
+
     it('R10: drop do coelho com a citação "de" numa mensagem que não fala dele é recusado', () => {
       const raw = directorRaw({ requests: [drop('de', 'p1')] });
       const ctx = ctxFor('muda a cor de fundo', {

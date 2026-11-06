@@ -134,6 +134,12 @@ describe('Afirmação sobre o resto da imagem (R7)', () => {
     'sem alterar mais nada',
     'os demais elementos ficam inalterados',
     'mantendo o restante da cena',
+    'o resto da imagem não muda',
+    'o resto continua como está',
+    'o restante continua como estava',
+    'o restante não foi alterado',
+    'o restante permanece',
+    'os demais elementos seguem como antes',
   ])('"%s" é barrada no reply, no mudou e na descrição da emenda', (text) => {
     expect(promisesPreservation(text)).toBe(true);
     expect(replyIsForbidden(text)).toBe(true);

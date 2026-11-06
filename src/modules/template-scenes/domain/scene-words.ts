@@ -39,9 +39,9 @@ export const significantWords = (text: string): string[] =>
     .split(/[^a-z0-9]+/)
     .filter((word) => word && !FUNCTION_WORDS.has(word));
 
-/** Mesma palavra inteira, com ou sem plural: "rio" não é "cenário", "sol" não é "girassol" (R8). */
+/** Mesma palavra inteira, com ou sem plural (`s` ou `es`: "flor" e "flores"): "rio" não é "cenário", "sol" não é "girassol" (R8). */
 export const sameWholeWord = (a: string, b: string): boolean =>
-  a === b || `${a}s` === b || `${b}s` === a;
+  a === b || `${a}s` === b || `${b}s` === a || `${a}es` === b || `${b}es` === a;
 
 /** O texto cita alguma palavra do assunto de `subject`, por palavra inteira? */
 export function mentionsWords(subject: string, text: string): boolean {

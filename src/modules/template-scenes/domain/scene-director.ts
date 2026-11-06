@@ -1,4 +1,5 @@
 import { fold } from '../../../shared/text/fold';
+import { isGenericDesist } from './scene-desist';
 import { FUNCTION_WORDS, mentionsWords } from './scene-words';
 import { DirectorPlan, directorSchema } from './scene-director-schema';
 
@@ -71,7 +72,9 @@ function layerOpProblem(plan: DirectorPlan): string | null {
 
 function requestProblem(plan: DirectorPlan, ctx: DirectorValidationContext): string | null {
   for (const request of plan.requests) {
-    if (!mentionedByClient(request.text, ctx.clientMessages)) {
+    // "Esquece isso" não nomeia o item: o `text` do `drop` genérico não precisa ter palavra do cliente.
+    const genericDrop = request.action === 'drop' && isGenericDesist(request.quote ?? '');
+    if (!genericDrop && !mentionedByClient(request.text, ctx.clientMessages)) {
       return `pedido "${request.text}" sem palavra das mensagens do cliente`;
     }
     const target =
@@ -84,8 +87,10 @@ function requestProblem(plan: DirectorPlan, ctx: DirectorValidationContext): str
     if (quote.length < 2 || !folded(ctx.message).includes(quote)) {
       return 'drop sem citação literal na mensagem atual';
     }
-    // A citação tem de falar do item (R10): "de" numa mensagem qualquer não desiste de nada.
-    if (!mentionsWords(target?.text ?? request.text, request.quote ?? '')) {
+    // A citação tem de falar do item (R10), ou ser desistência genérica ("esquece isso"); "de" numa mensagem
+    // qualquer não desiste de nada.
+    const aboutItem = mentionsWords(target?.text ?? request.text, request.quote ?? '');
+    if (!aboutItem && !isGenericDesist(request.quote ?? '')) {
       return 'drop com citação que não fala do item';
     }
   }

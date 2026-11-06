@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EntityManager } from 'typeorm';
 import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
+import { resolveGenericDrops } from '../domain/scene-desist';
 import { applyDirectorRequests, BriefChanges, openItems } from '../domain/scene-brief';
 import { promptableTexts } from '../domain/scene-director-painted';
 import { DirectorPlan } from '../domain/scene-director-schema';
@@ -13,7 +14,10 @@ import { TemplateSceneVersion } from '../entities/template-scene-version.entity'
 import {
   askedAboutImageReply,
   compositionQuestion,
+  droppedNote,
   NO_INSTRUCTION_REPLY,
+  NO_OPEN_REQUEST_REPLY,
+  whichToForgetReply,
   NUMBER_QUESTION,
   PAINTED_QUESTION,
   currentVersionReply,
@@ -165,7 +169,16 @@ export class SceneDirectorState {
       await this.reject(target, NO_INSTRUCTION_REPLY);
       return;
     }
-    const { plan } = outcome;
+    const dropped = resolveGenericDrops(outcome.plan, scene.brief ?? []);
+    if (dropped.kind === 'none') {
+      await this.reject(target, NO_OPEN_REQUEST_REPLY);
+      return;
+    }
+    if (dropped.kind === 'ask') {
+      await this.reject(target, whichToForgetReply(dropped.items));
+      return;
+    }
+    const { plan } = dropped;
     version.metrics = {
       ...version.metrics,
       plan,
@@ -182,7 +195,8 @@ export class SceneDirectorState {
         ? undefined
         : await this.updateBrief(manager, scene, version, plan);
     version.metrics = { ...version.metrics, director: { ...director, brief } };
-    await this.run(target, { decision, plan, context });
+    const note = this.droppedNote(scene, brief);
+    await this.run(target, { decision, plan, context, note });
   }
 
   /** Efeito do turno pela tabela do código; o plano pode abrir pedidos agora, e eles contam como em aberto. */
@@ -223,29 +237,42 @@ export class SceneDirectorState {
     return applied.changes;
   }
 
+  /** "Tirei da lista: X.": o que este turno desistiu, para o pedido não sumir em silêncio (G9). */
+  private droppedNote(scene: TemplateScene, changes: BriefChanges | undefined): string {
+    const texts = (changes?.dropped ?? [])
+      .map((id) => (scene.brief ?? []).find((item) => item.id === id)?.text)
+      .filter((text): text is string => Boolean(text));
+    return texts.length ? droppedNote(texts) : '';
+  }
+
   private reject(target: DirectorTarget, reply: string): Promise<void> {
     return rejectTarget(target, reply);
   }
 
   private async run(
     target: DirectorTarget,
-    input: { decision: TurnDecision; plan: DirectorPlan; context: DirectorContext },
+    input: { decision: TurnDecision; plan: DirectorPlan; context: DirectorContext; note: string },
   ): Promise<void> {
-    const { decision, plan, context } = input;
+    const { decision, plan, context, note } = input;
+    const withNote = (text: string): string => (note ? `${text} ${note}` : text);
     const { manager, scene } = target;
     switch (decision.kind) {
       case 'reply': {
         const fact = await this.versionFact(manager, scene, context.script.message, plan);
         const text =
           fact ?? (decision.aboutImage ? askedAboutImageReply(decision.reply) : decision.reply);
-        await this.reject(target, text);
+        await this.reject(target, withNote(text));
         return;
       }
       case 'image':
-        await queueImageEffect(target, decision, {
-          queue: this.queue,
-          windowSeconds: this.windowSeconds(),
-        });
+        await queueImageEffect(
+          target,
+          { ...decision, announcement: withNote(decision.announcement) },
+          {
+            queue: this.queue,
+            windowSeconds: this.windowSeconds(),
+          },
+        );
         return;
       case 'undo':
         await applyUndoEffect(target, decision.target);

@@ -32,7 +32,8 @@ const PRESERVATION = [
  * "sem alterar" ou "sem mudar", nas duas ordens. Citar um item ("mantendo o coelho") não é promessa.
  */
 const REST_WORD = '(?:resto|restante|demais)';
-const REST_CLAIM = '(?:igual|iguais|mant\\w*|sem mexer|sem alterar|sem mudar)';
+const REST_CLAIM =
+  '(?:igual|iguais|mant\\w*|sem mexer|sem alterar|sem mudar|continua|permanece|segue|nao muda|nao foi alterad\\w*|como esta|como estava|como antes)';
 const REST_PROMISE = new RegExp(
   `\\b${REST_WORD}\\b.{0,40}\\b${REST_CLAIM}|\\b${REST_CLAIM}\\b.{0,40}\\b${REST_WORD}\\b`,
 );
