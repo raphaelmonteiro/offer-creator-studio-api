@@ -11,6 +11,8 @@ export const MOCK_DIRECTOR_MARKERS = {
   painted: '#plano-pintado',
   /** O plano traz moldura que ninguém pediu: o código refaz e, persistindo, pergunta. */
   frame: '#plano-moldura',
+  /** O plano leva o ano ao pedido de imagem: o código refaz e, persistindo, corta só o trecho. */
+  year: '#plano-ano',
 } as const;
 
 const EMPTY: DirectorPlan = {
@@ -212,8 +214,8 @@ function planFor(script: DirectorScript, message: string): DirectorPlan {
 /**
  * Diretor de desenvolvimento: sem rede e sem custo. Escolhe o plano por roteiro (mensagem + estado da cena),
  * para exercitar contexto, janela, camadas, desfazer, recusa e falha. Marcadores: `#diretor-falha` (erro),
- * `#diretor-invalido` (resposta fora do schema), `#plano-pintado` (aceita pintar preço) e `#plano-moldura`
- * (moldura que ninguém pediu).
+ * `#diretor-invalido` (resposta fora do schema), `#plano-pintado` (aceita pintar preço), `#plano-moldura`
+ * (moldura que ninguém pediu) e `#plano-ano` (leva o ano ao pedido de imagem).
  */
 export class MockSceneDirectorClient {
   async plan(input: SceneDirectorCall): Promise<DirectorCompletionResult> {
@@ -240,6 +242,17 @@ export class MockSceneDirectorClient {
         ...imagePlan({ ...script, hasImage: true }, '', message),
         turn_kind: 'pedido_item',
         what_to_put: 'o preço R$ 9,90 escrito na imagem',
+        requests: [openRequest(message)],
+      };
+    }
+    if (script.message.includes(MOCK_DIRECTOR_MARKERS.year)) {
+      const first = !script.hasImage;
+      return {
+        ...imagePlan(script, '', message),
+        turn_kind: first ? 'imagem_nova' : 'pedido_item',
+        what_to_change: first ? '' : message,
+        what_to_put:
+          'ovos de Páscoa e um coelho, com referências visuais à Páscoa e indicação do ano 2027',
         requests: [openRequest(message)],
       };
     }

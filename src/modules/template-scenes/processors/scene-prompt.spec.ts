@@ -104,17 +104,20 @@ describe('buildGlobalPrompt', () => {
   });
 });
 
-/** Plano do turno 1 da conversa julgada excelente pelo dono (`conversa_dir/t1_prompt.txt`, anexo de design.md). */
+/**
+ * Plano do turno 1 da conversa julgada excelente pelo dono (`conversa_dir/t1_prompt.txt`, anexo de design.md),
+ * sem o trecho "e indicação do ano 2027", que saiu por D-42.
+ */
 const TURN_ONE_PLAN = {
   what_to_change: 'Criar a composição completa do template com temática de Páscoa',
   what_to_put:
-    'Ovos de Páscoa e um coelho em um cenário primaveril bonito e acolhedor, com referências visuais à Páscoa e indicação do ano 2027.',
+    'Ovos de Páscoa e um coelho em um cenário primaveril bonito e acolhedor, com referências visuais à Páscoa.',
   inventory_keep: [],
 };
 
 const TURN_ONE_LITERAL = [
   'Crie a imagem de fundo de um encarte de ofertas de supermercado, para impressão.',
-  'Pedido do cliente: "Criar a composição completa do template com temática de Páscoa; Ovos de Páscoa e um coelho em um cenário primaveril bonito e acolhedor, com referências visuais à Páscoa e indicação do ano 2027.".',
+  'Pedido do cliente: "Criar a composição completa do template com temática de Páscoa; Ovos de Páscoa e um coelho em um cenário primaveril bonito e acolhedor, com referências visuais à Páscoa.".',
   'Formato: 28 x 35 cm (proporção largura/altura 0,80), imagem de 1152 x 1440 px, ocupando toda a área.',
   'Salvo se o pedido acima disser outra coisa, a imagem é única e contínua, sem divisões, faixas ou molduras.',
   'Regras: sem texto legível, sem letras ou números, sem logotipos, sem preços, sem produtos de marcas reais e sem pessoas identificáveis.',
@@ -203,7 +206,8 @@ describe('Prompt montado pelo código', () => {
       expect(planRequest(ITEM_PLAN)).toBe(
         'Remover o coelho da direita do rodapé; Continuar o gramado e as flores no lugar. Mantenha como estão: coelho do meio, cesta de ovos.',
       );
-      expect(planRequest(TURN_ONE_PLAN).endsWith('2027.')).toBe(true);
+      expect(planRequest(TURN_ONE_PLAN).endsWith('visuais à Páscoa.')).toBe(true);
+      expect(planRequest(TURN_ONE_PLAN)).not.toContain('2027');
     });
   });
 

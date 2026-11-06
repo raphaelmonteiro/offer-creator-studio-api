@@ -21,6 +21,10 @@ export const PAINTED_REFUSAL_REPLIES = {
 export const compositionQuestion = (labels: string[]): string =>
   `Você quer ${labels.join(', ')} na imagem? Não incluo isso sem você pedir. Se quiser, me diga como. Nada foi alterado.`;
 
+/** O corte do ano, data ou número (D-42) esvaziou o pedido: vira pergunta, sem imagem. */
+export const NUMBER_QUESTION =
+  'Não pinto ano, data nem número na imagem: o modelo de imagem erra números. Me diga o que mudar na imagem; se quiser o número, me diga o texto entre aspas e onde colocar, e eu o coloco como camada. Nada foi alterado.';
+
 /** Camada ou desfazer numa cena sem imagem. */
 export const NO_IMAGE_REPLY =
   'Ainda não há imagem na cena. Descreva a imagem que quer gerar. Nada foi alterado.';

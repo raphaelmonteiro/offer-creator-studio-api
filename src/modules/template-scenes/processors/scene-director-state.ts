@@ -15,6 +15,7 @@ import { TemplateSceneVersion } from '../entities/template-scene-version.entity'
 import {
   askedAboutImageReply,
   compositionQuestion,
+  NUMBER_QUESTION,
   currentVersionReply,
   layerReply,
   MARKING_DISCARDED_NOTE,
@@ -153,8 +154,16 @@ export class SceneDirectorState {
       await this.reject(target, compositionQuestion(outcome.labels));
       return;
     }
+    if (outcome.kind === 'number_question') {
+      await this.reject(target, NUMBER_QUESTION);
+      return;
+    }
     const { plan } = outcome;
-    version.metrics = { ...version.metrics, plan };
+    version.metrics = {
+      ...version.metrics,
+      plan,
+      ...(outcome.patches ? { planPatched: true, numberPatches: outcome.patches } : {}),
+    };
     const decision = this.decide(scene, { plan, context });
     if (decision.kind === 'refuse') {
       await this.reject(target, PAINTED_REFUSAL_REPLIES[decision.refusal]);

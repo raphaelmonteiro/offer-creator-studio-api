@@ -129,4 +129,15 @@ describe('MockSceneDirectorClient', () => {
       'Diretor indisponível',
     );
   });
+
+  it('#plano-ano: o plano leva o ano ao pedido de imagem, para o código refazer e cortar', async () => {
+    const first = await plan(`gere um template para 2027 ${MOCK_DIRECTOR_MARKERS.year}`, {
+      hasImage: false,
+    });
+    expect(first.plan).toMatchObject({ turn_kind: 'imagem_nova', will_change_image: true });
+    expect(first.plan.what_to_put).toContain('indicação do ano 2027');
+    const edit = await plan(`mais ovos 2027 ${MOCK_DIRECTOR_MARKERS.year}`);
+    expect(edit.plan.turn_kind).toBe('pedido_item');
+    expect(edit.plan.what_to_put).toContain('2027');
+  });
 });
