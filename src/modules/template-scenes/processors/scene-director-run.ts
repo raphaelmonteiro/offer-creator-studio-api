@@ -4,7 +4,12 @@ import {
   CompositionGroup,
 } from '../domain/scene-director-composition';
 import { applyNumberRule, NumberPatch } from '../domain/scene-director-number';
-import { hasInstruction, wantsImage } from '../domain/scene-director-decision';
+import {
+  answersWithoutImage,
+  hasInstruction,
+  unusableAnswer,
+  wantsImage,
+} from '../domain/scene-director-decision';
 import { checkPainted } from '../domain/scene-director-painted';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { parseDirector } from '../domain/scene-director';
@@ -54,6 +59,9 @@ const QUESTION_OUTCOMES = {
 const INSTRUCTION_RETRY_REASON =
   'o plano chama a imagem sem dizer o que mudar: preencha what_to_change ou what_to_put com o pedido do cliente';
 
+const ANSWER_RETRY_REASON =
+  'o plano diz que não muda a imagem, mas a resposta está vazia ou anuncia uma ação ("vou"): responda ao cliente sem prometer nada, ou chame a imagem de verdade preenchendo what_to_change e what_to_put';
+
 type Checked =
   | { plan: DirectorPlan; patches?: NumberPatch[] }
   | Problem
@@ -77,10 +85,11 @@ function validate(text: string, context: DirectorContext, final: boolean): Check
   const written = applyNumberRule(plan, { final });
   if (written.kind === 'retry') return { reason: written.reason, number: true };
   if (written.kind === 'question') return { question: 'number' };
-  if (wantsImage(written.plan) && !hasInstruction(written.plan)) {
+  const emptyAnswer = answersWithoutImage(written.plan) && unusableAnswer(written.plan.reply);
+  if ((wantsImage(written.plan) && !hasInstruction(written.plan)) || emptyAnswer) {
     return final
       ? { question: 'instruction' }
-      : { reason: INSTRUCTION_RETRY_REASON, instruction: true };
+      : { reason: emptyAnswer ? ANSWER_RETRY_REASON : INSTRUCTION_RETRY_REASON, instruction: true };
   }
   return written.patches.length
     ? { plan: written.plan, patches: written.patches }

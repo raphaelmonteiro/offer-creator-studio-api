@@ -4,7 +4,7 @@ import { decideTurn, DecisionInput, windowApplies } from './scene-director-decis
 
 const decide = (plan: Partial<DirectorPlan>, extra: Partial<DecisionInput> = {}) =>
   decideTurn({
-    plan: directorPlan({ what_to_change: 'tirar o coelho', ...plan }),
+    plan: directorPlan({ what_to_change: 'tirar o coelho', will_change_image: true, ...plan }),
     marked: false,
     hasImage: true,
     openRequests: [],
@@ -13,11 +13,9 @@ const decide = (plan: Partial<DirectorPlan>, extra: Partial<DecisionInput> = {})
 
 describe('decideTurn: o efeito vem do tipo e das regras do código', () => {
   it.each(['pedido_item', 'pedido_ajuste_geral', 'pedido_composicao', 'imagem_nova'] as const)(
-    '%s chama imagem mesmo se o booleano do modelo disser o contrário',
+    '%s com will_change_image verdadeiro chama imagem',
     (kind) => {
-      expect(decide({ turn_kind: kind, will_change_image: false })).toMatchObject({
-        kind: 'image',
-      });
+      expect(decide({ turn_kind: kind })).toMatchObject({ kind: 'image' });
     },
   );
 
@@ -217,6 +215,93 @@ describe('decideTurn: plano sem instrução (G2, R5)', () => {
   it('só o what_to_put preenchido basta', () => {
     expect(
       decide({ turn_kind: 'imagem_nova', what_to_change: '', what_to_put: 'um campo' }),
+    ).toMatchObject({ kind: 'image' });
+  });
+});
+
+describe('decideTurn: o Diretor responde em vez de pedir imagem (validação 8, task 1.41)', () => {
+  const KINDS = [
+    'pedido_item',
+    'pedido_ajuste_geral',
+    'pedido_composicao',
+    'imagem_nova',
+    'reclamacao',
+  ] as const;
+  const ANSWER = 'Não vejo uma cerca na imagem. Onde ela está?';
+
+  it.each(KINDS)(
+    'Diretor não vê o objeto (%s): a resposta vai como leitura, sem imagem',
+    (kind) => {
+      expect(
+        decide({ turn_kind: kind, will_change_image: false, reply: ANSWER, what_to_change: '' }),
+      ).toEqual({ kind: 'reply', reply: ANSWER, aboutImage: true });
+    },
+  );
+
+  it('numa cena sem imagem, a resposta vai sem o prefixo de leitura', () => {
+    expect(
+      decide(
+        { turn_kind: 'imagem_nova', will_change_image: false, reply: 'Qual tema você quer?' },
+        { hasImage: false },
+      ),
+    ).toEqual({ kind: 'reply', reply: 'Qual tema você quer?', aboutImage: false });
+  });
+
+  it.each(KINDS)(
+    'Plano diz que não muda, mas traz instrução (%s): will_change_image falso é respeitado, sem imagem',
+    (kind) => {
+      expect(
+        decide({
+          turn_kind: kind,
+          will_change_image: false,
+          reply: 'Não vejo o preço; onde ele está?',
+          what_to_change: 'remover o preço',
+          what_to_put: 'campo limpo',
+        }),
+      ).toMatchObject({ kind: 'reply', aboutImage: true });
+    },
+  );
+
+  it.each([
+    ['vazia', ''],
+    ['anúncio com "vou"', 'Vou tirar a cerca.'],
+    ['anúncio com "irei"', 'Irei remover o título.'],
+  ])('Anúncio sem ação (%s): sem resposta que sirva, o texto fixo, sem prefixo', (_name, reply) => {
+    expect(decide({ turn_kind: 'pedido_item', will_change_image: false, reply })).toEqual({
+      kind: 'reply',
+      reply: expect.stringContaining('Não entendi o que mudar'),
+      aboutImage: false,
+    });
+  });
+
+  it('"não vou conseguir" não é anúncio: a resposta vale', () => {
+    const reply = 'Não vou conseguir tirar o que não vejo; pode marcar a área?';
+    expect(decide({ turn_kind: 'pedido_item', will_change_image: false, reply })).toEqual({
+      kind: 'reply',
+      reply,
+      aboutImage: true,
+    });
+  });
+
+  it.each(['Pronto, removi a cerca.', 'Tudo o resto ficou igual.', 'O resto continua intacto.'])(
+    'Resposta barrada sem instrução: "%s" cai no texto fixo, sem prefixo',
+    (reply) => {
+      expect(
+        decide({ turn_kind: 'pedido_item', will_change_image: false, reply, what_to_change: '' }),
+      ).toEqual({
+        kind: 'reply',
+        reply: expect.stringContaining('Não entendi o que mudar'),
+        aboutImage: false,
+      });
+    },
+  );
+
+  it('o "marquei" é a exceção: executa o pedido em aberto mesmo com will_change_image falso', () => {
+    expect(
+      decide(
+        { turn_kind: 'marcacao_sem_pedido', will_change_image: false, what_to_change: '' },
+        { marked: true, openRequests: ['tirar a cerca'] },
+      ),
     ).toMatchObject({ kind: 'image' });
   });
 });

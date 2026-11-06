@@ -65,7 +65,9 @@ describeIfSceneDb('SceneDirectorProcessor (banco chroma_x_e2e)', () => {
         reply: 'O que devo corrigir?',
       });
       expect(version.status).toBe('rejected');
-      expect((await lastAssistant(scene.id))?.content).toBe('O que devo corrigir?');
+      expect((await lastAssistant(scene.id))?.content).toBe(
+        'Pelo que vejo na imagem: O que devo corrigir?',
+      );
       expect(imageJobs()).toHaveLength(0);
     });
 
@@ -171,17 +173,20 @@ describeIfSceneDb('SceneDirectorProcessor (banco chroma_x_e2e)', () => {
       expect(imageJobs()).toHaveLength(0);
     });
 
-    it('a mensagem não é "pergunta" por texto livre: o efeito vem do tipo, e will_change_image falso não chama imagem em pedido', async () => {
-      const { version } = await turn('tira o coelho', {
+    it('a mensagem não é "pergunta" por texto livre: o efeito vem do tipo, e will_change_image falso é respeitado (validação 8)', async () => {
+      const { scene, version } = await turn('tira o coelho', {
         turn_kind: 'pedido_item',
         will_change_image: false,
-        reply: 'Vou tirar o coelho.',
+        reply: 'Não vejo um coelho na imagem; pode marcar a área?',
         what_to_change: 'tirar o coelho',
         requests: [{ id: null, text: 'tirar o coelho', action: 'open', quote: null }],
       });
-      // pedido direto sempre chama imagem: a tabela do código manda, e não o booleano do modelo
-      expect(version).toMatchObject({ status: 'queued', step: null });
-      expect(imageJobs()).toHaveLength(1);
+      // o reply do Diretor pode dizer que não vai fazer: publicar a imagem o desmentiria
+      expect(version.status).toBe('rejected');
+      expect(imageJobs()).toHaveLength(0);
+      expect((await lastAssistant(scene.id))?.content).toBe(
+        'Pelo que vejo na imagem: Não vejo um coelho na imagem; pode marcar a área?',
+      );
     });
   });
 

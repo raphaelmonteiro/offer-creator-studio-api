@@ -1,6 +1,7 @@
 import { DirectorLayerOp, DirectorPlan, PaintedRefusal } from './scene-director-schema';
 import { NO_IMAGE_REPLY, NO_INSTRUCTION_REPLY } from '../scene-texts';
-import { safeReply } from './scene-director-phrases';
+import { replyIsForbidden, safeReply } from './scene-director-phrases';
+import { fold } from '../../../shared/text/fold';
 
 /**
  * O efeito de um turno vem de uma tabela do código sobre `turn_kind` e `will_change_image`, nunca de texto
@@ -42,11 +43,13 @@ export type TurnDecision =
       isEdit: boolean;
     };
 
-const CHANGES_IMAGE = new Set<DirectorPlan['turn_kind']>([
+/** Tipos que podem pedir imagem: quem decide é `will_change_image`, e o `reply` é a resposta quando ele é falso. */
+const IMAGE_KINDS = new Set<DirectorPlan['turn_kind']>([
   'pedido_item',
   'pedido_ajuste_geral',
   'pedido_composicao',
   'imagem_nova',
+  'reclamacao',
 ]);
 
 /**
@@ -60,18 +63,31 @@ export function hasInstruction(
   return Boolean(plan.what_to_change?.trim() || plan.what_to_put?.trim());
 }
 
-/** O plano pede imagem por si (pedido direto, ou reclamação com ação)? "Marquei" tem regra própria. */
+/** O plano pede imagem? `will_change_image` é respeitado (validação 8); "marquei" tem regra própria. */
 export function wantsImage(plan: Pick<DirectorPlan, 'turn_kind' | 'will_change_image'>): boolean {
-  return (
-    CHANGES_IMAGE.has(plan.turn_kind) || (plan.turn_kind === 'reclamacao' && plan.will_change_image)
-  );
+  return IMAGE_KINDS.has(plan.turn_kind) && plan.will_change_image;
 }
 
-/** O plano muda a imagem? Pedido direto sempre; reclamação e "marquei" por regra própria. */
+/** Tipo que pede imagem mas o Diretor disse que não muda: o `reply` é a resposta ao cliente. */
+export function answersWithoutImage(
+  plan: Pick<DirectorPlan, 'turn_kind' | 'will_change_image'>,
+): boolean {
+  return IMAGE_KINDS.has(plan.turn_kind) && !plan.will_change_image;
+}
+
+/** Anunciar ("vou", "irei") sem mudar a imagem quebraria G8: "não vou conseguir" não é anúncio. */
+const ANNOUNCES = /(?<!\bnao\s)(?<!\bnem\s)\b(?:vou|irei|vamos|farei)\b/;
+
+/** A resposta de um plano que não muda a imagem não serve: vazia ou anunciando uma ação. Refaz uma vez. */
+export function unusableAnswer(reply: string): boolean {
+  const text = reply.trim();
+  return !text || ANNOUNCES.test(fold(text));
+}
+
+/** O plano muda a imagem? Pedido que a quer, ou "marquei" com pedido em aberto. */
 function changesImage(input: DecisionInput): boolean {
   const { plan, marked, openRequests } = input;
-  if (CHANGES_IMAGE.has(plan.turn_kind)) return true;
-  if (plan.turn_kind === 'reclamacao') return plan.will_change_image;
+  if (wantsImage(plan)) return true;
   // "Marquei" executa o pedido em aberto na marcação; sem pedido em aberto, é pergunta.
   if (plan.turn_kind === 'marcacao_sem_pedido') return marked && openRequests.length > 0;
   return false;
@@ -151,6 +167,14 @@ export function decideTurn(input: DecisionInput): TurnDecision {
     return hasInstruction(plan)
       ? imageDecision(input)
       : { kind: 'reply', reply: NO_INSTRUCTION_REPLY, aboutImage: false };
+  }
+  if (answersWithoutImage(plan)) {
+    // O Diretor respondeu em vez de pedir imagem (por exemplo, não viu o objeto): a resposta vai como leitura (G8). Sem
+    // resposta que sirva, ou barrada, o texto fixo, sem o prefixo.
+    const text = plan.reply.trim();
+    return unusableAnswer(text) || replyIsForbidden(text, false)
+      ? { kind: 'reply', reply: NO_INSTRUCTION_REPLY, aboutImage: false }
+      : { kind: 'reply', reply: text, aboutImage: hasImage };
   }
   return {
     kind: 'reply',
