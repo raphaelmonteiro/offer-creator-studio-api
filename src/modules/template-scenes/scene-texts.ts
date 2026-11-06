@@ -23,6 +23,10 @@ export const compositionQuestion = (labels: string[]): string =>
 export const NUMBER_QUESTION =
   'Não pinto ano, data nem número na imagem: o modelo de imagem erra números. Me diga o que mudar na imagem; se quiser o número, me diga o texto entre aspas e onde colocar, e eu o coloco como camada. Nada foi alterado.';
 
+/** Dúvida de escrita que persistiu (D-46): pergunta, sem dizer "não pinto" e sem imagem. */
+export const PAINTED_QUESTION =
+  'Não entendi se você quer isso escrito na imagem. Se for texto, preço ou logo, coloco como camada exata. Pode me dizer o que prefere?';
+
 /** O plano chamaria a imagem sem dizer o que mudar (G2): vira pergunta, sem imagem. */
 export const NO_INSTRUCTION_REPLY =
   'Não entendi o que mudar na imagem. Me diga o que você quer que eu faça. Nada foi alterado.';

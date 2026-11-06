@@ -15,6 +15,7 @@ import {
   compositionQuestion,
   NO_INSTRUCTION_REPLY,
   NUMBER_QUESTION,
+  PAINTED_QUESTION,
   currentVersionReply,
   PAINTED_REFUSAL_REPLIES,
 } from '../scene-texts';
@@ -154,6 +155,10 @@ export class SceneDirectorState {
     }
     if (outcome.kind === 'number_question') {
       await this.reject(target, NUMBER_QUESTION);
+      return;
+    }
+    if (outcome.kind === 'painted_question') {
+      await this.reject(target, PAINTED_QUESTION);
       return;
     }
     if (outcome.kind === 'instruction_question') {

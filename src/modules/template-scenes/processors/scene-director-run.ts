@@ -22,6 +22,8 @@ export type DirectorOutcome =
   | { kind: 'number_question' }
   /** O plano chamaria a imagem sem instrução, duas vezes: pergunta o que mudar, sem imagem (G2). */
   | { kind: 'instruction_question' }
+  /** A dúvida de escrita persistiu: pergunta se o cliente quer isso escrito, sem imagem (D-46). */
+  | { kind: 'painted_question' }
   /** O plano pediu composição que o cliente não pediu, duas vezes: vira pergunta, sem imagem. */
   | { kind: 'composition_question'; labels: string[] }
   /** Falha, tempo esgotado, quota ou saída inválida duas vezes. */
@@ -40,7 +42,14 @@ interface Problem {
   groups?: CompositionGroup[];
   number?: boolean;
   instruction?: boolean;
+  painted?: boolean;
 }
+
+const QUESTION_OUTCOMES = {
+  number: 'number_question',
+  instruction: 'instruction_question',
+  painted: 'painted_question',
+} as const;
 
 const INSTRUCTION_RETRY_REASON =
   'o plano chama a imagem sem dizer o que mudar: preencha what_to_change ou what_to_put com o pedido do cliente';
@@ -48,7 +57,7 @@ const INSTRUCTION_RETRY_REASON =
 type Checked =
   | { plan: DirectorPlan; patches?: NumberPatch[] }
   | Problem
-  | { question: 'number' | 'instruction' };
+  | { question: 'number' | 'instruction' | 'painted' };
 
 /** Valida o texto do Diretor: schema, texto e pedidos (1 a 3), recusa de pintado (4), composição (5) e número (7). */
 function validate(text: string, context: DirectorContext, final: boolean): Checked {
@@ -59,7 +68,8 @@ function validate(text: string, context: DirectorContext, final: boolean): Check
   });
   if (parsed.ok === false) return { reason: parsed.reason };
   const painted = checkPainted(parsed.plan, { final });
-  if (painted.kind === 'retry') return { reason: painted.reason };
+  if (painted.kind === 'retry') return { reason: painted.reason, painted: true };
+  if (painted.kind === 'question') return { question: 'painted' };
   const plan = painted.plan;
   if (plan.turn_kind === 'recusa_pintado') return { plan };
   const composition = checkComposition(plan, context.clientMessages);
@@ -118,9 +128,7 @@ export async function runDirector(
     if ('question' in checked) {
       calls.push({ ...record, status: 'done' });
       return {
-        outcome: {
-          kind: checked.question === 'number' ? 'number_question' : 'instruction_question',
-        },
+        outcome: { kind: QUESTION_OUTCOMES[checked.question] },
         calls,
       };
     }
@@ -145,7 +153,9 @@ export async function runDirector(
           ? 'number'
           : checked.instruction
             ? 'instruction'
-            : 'invalid',
+            : checked.painted
+              ? 'painted'
+              : 'invalid',
       reason: checked.reason.slice(0, 300),
     });
   }

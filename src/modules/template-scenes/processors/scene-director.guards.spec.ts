@@ -46,7 +46,7 @@ describeIfSceneDb(
     });
 
     describe('G3: escrita em todo campo que vai ao modelo (R2, R3, D-45)', () => {
-      it('Escrita em what_to_change: nas duas chamadas vira recusa, sem imagem', async () => {
+      it('Escrita em what_to_change: vira recusa na hora, sem refazer e sem imagem', async () => {
         const { scene, version, plan } = await h.runTurn(
           'deixa mais bonito',
           item({
@@ -54,7 +54,7 @@ describeIfSceneDb(
               'escrever FELIZ PASCOA em letras grandes no topo; colocar o preco R$ 9,90',
           }),
         );
-        expect(plan).toHaveBeenCalledTimes(2);
+        expect(plan).toHaveBeenCalledTimes(1);
         expect(version.status).toBe('rejected');
         expect(await lastReply(scene.id)).toContain('Não pinto');
         expect(imageJobs()).toHaveLength(0);
