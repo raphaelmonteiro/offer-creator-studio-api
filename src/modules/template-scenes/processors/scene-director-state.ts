@@ -3,7 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { EntityManager } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { applyDirectorRequests, BriefChanges, openItems } from '../domain/scene-brief';
-import { DirectorPlan } from '../domain/scene-director-schema';
+import { layerOpsToActions } from '../domain/scene-director-layers';
+import { DirectorLayerOp, DirectorPlan } from '../domain/scene-director-schema';
+import { sceneZonesFor } from '../domain/scene-formats';
 import { decideTurn, TurnDecision } from '../domain/scene-director-decision';
 import { SceneFailureCode } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
@@ -13,6 +15,7 @@ import {
   askedAboutImageReply,
   compositionQuestion,
   currentVersionReply,
+  layerReply,
   MARKING_DISCARDED_NOTE,
   PAINTED_REFUSAL_REPLIES,
   REDRAW_NOTICE,
@@ -27,7 +30,9 @@ import { pruneSceneAssets } from '../services/scene-retention';
 import { resolveUndo } from '../services/scene-undo';
 import { publishQueued } from '../services/scene-turn-helpers';
 import { TURN_EXPIRE_SECONDS } from '../services/scene-turn.service';
+import { applyLayerActions } from './scene-layer-actions';
 import { addDirectorCost, summarizeDirectorCalls } from './scene-director-cost';
+import { loadAttachments } from './scene-turn-context';
 import { DirectorRunResult } from './scene-director-run';
 import { cancelVersion, emitVersionEvent, failVersion } from './scene-turn-finish';
 import { rejectVersion } from './scene-turn-complete';
@@ -225,10 +230,68 @@ export class SceneDirectorState {
       case 'undo':
         await this.undo(target, decision.target);
         return;
-      default:
-        // Camadas entram na task 1.28.
-        await this.reject(target, 'Esta ação ainda não está disponível.');
+      case 'layers':
+        await this.layers(target, decision.ops);
+        return;
+      case 'refuse':
+        // Já tratada antes da lista (a recusa não abre pedidos), mas o tipo exige o ramo.
+        await this.reject(target, PAINTED_REFUSAL_REPLIES[decision.refusal]);
     }
+  }
+
+  /**
+   * Camadas pelo chat (logo e texto exatos) sem chamar o modelo de imagem e sem fila: a versão de leitura vira
+   * `ready` com a master da atual e as camadas novas, sob o lock. Alvo ausente ou ambíguo termina `rejected`.
+   */
+  private async layers(
+    target: { manager: EntityManager; scene: TemplateScene; version: TemplateSceneVersion },
+    ops: DirectorLayerOp[],
+  ): Promise<void> {
+    const { manager, scene, version } = target;
+    const current = await manager.findOneByOrFail(TemplateSceneVersion, {
+      id: scene.currentVersionId as string,
+    });
+    const message = await manager.findOne(TemplateSceneMessage, {
+      where: { versionId: version.id, role: 'user' },
+      order: { createdAt: 'ASC' },
+    });
+    const attachments = await loadAttachments(manager, scene.id, message);
+    const converted = layerOpsToActions(ops, {
+      elements: current.elements,
+      attachmentId: attachments[0]?.id ?? null,
+      hintElementId: version.targetElementId,
+    });
+    if (converted.ok === false) return this.reject(target, converted.reply);
+    const result = applyLayerActions(converted.actions, {
+      zones: sceneZonesFor(scene.formatId),
+      widthPx: scene.widthPx,
+      heightPx: scene.heightPx,
+      elements: current.elements,
+      attachments,
+    });
+    if (result.ok === false) return this.reject(target, result.reply);
+    Object.assign(version, {
+      operation: 'set_layer' as const,
+      status: 'ready' as const,
+      step: 'done' as const,
+      parentVersionId: current.id,
+      masterAssetId: current.masterAssetId,
+      previewAssetId: current.previewAssetId,
+      elements: result.elements,
+      metrics: { ...version.metrics, layer: { changed: result.changed } },
+    });
+    await manager.save(version);
+    scene.currentVersionId = version.id;
+    await pruneSceneAssets(manager, scene);
+    await settleUserMessage(manager, version.id, 'done');
+    await addAssistantMessage(manager, {
+      sceneId: scene.id,
+      versionId: version.id,
+      content: layerReply(result.changed),
+      status: 'done',
+    });
+    await bumpRevision(manager, scene);
+    await emitVersionEvent(manager, scene, version, 'version.ready');
   }
 
   /**
