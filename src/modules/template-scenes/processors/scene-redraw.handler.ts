@@ -19,9 +19,9 @@ import { SceneTurnSupport } from './scene-turn-support';
 import { TurnContext } from './scene-turn-state';
 
 /** Ajuste geral e composição redesenham a imagem pelo prompt global; o resto é item por texto. */
-const GLOBAL_TURNS: ReadonlySet<DirectorPlan['turn_kind']> = new Set([
-  'pedido_ajuste_geral',
-  'pedido_composicao',
+const GLOBAL_TURNS: ReadonlyMap<DirectorPlan['turn_kind'], RedrawKind> = new Map([
+  ['pedido_ajuste_geral', 'global'],
+  ['pedido_composicao', 'composition'],
 ]);
 
 /**
@@ -67,6 +67,8 @@ export class SceneRedrawHandler implements TurnHandler {
       widthPx: ctx.widthPx,
       heightPx: ctx.heightPx,
       openItems,
+      formatId: ctx.formatId,
+      clientMessages: ctx.clientMessages,
     });
     const result = await this.calls.imageCall(ctx, {
       kind: 'generate',
@@ -99,15 +101,13 @@ export class SceneRedrawHandler implements TurnHandler {
     const { width, height } = await sharp(master).metadata();
     const size = `${width}x${height}`;
     const marking = await markupFor(ctx, { width: width as number, height: height as number });
-    const kind: RedrawKind = marking
-      ? 'marked'
-      : GLOBAL_TURNS.has(plan.turn_kind)
-        ? 'global'
-        : 'item';
+    const kind: RedrawKind = marking ? 'marked' : (GLOBAL_TURNS.get(plan.turn_kind) ?? 'item');
     const prompt = buildRedrawPrompt({
       kind,
       plan,
       openItems: promptableTexts(ctx.openItems.map((item) => item.text)),
+      formatId: ctx.formatId,
+      clientMessages: ctx.clientMessages,
     });
     const result = await this.calls.imageCall(ctx, {
       kind: 'edit',

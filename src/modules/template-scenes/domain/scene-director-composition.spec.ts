@@ -1,5 +1,5 @@
 import { directorPlan } from '../testing/scene-director-fixtures';
-import { checkComposition } from './scene-director-composition';
+import { checkComposition, clientAsksForSplit } from './scene-director-composition';
 
 describe('checkComposition: Composição só do cliente', () => {
   describe('Cliente falou em header e rodapé', () => {
@@ -89,5 +89,17 @@ describe('checkComposition: Composição só do cliente', () => {
     it('sem termos no plano nada é conferido', () => {
       expect(checkComposition(directorPlan(), [])).toEqual({ ok: true });
     });
+  });
+});
+
+describe('clientAsksForSplit (D-43)', () => {
+  it.each([
+    ['divide em duas partes, azul em cima e verde embaixo', true],
+    ['coloca uma moldura', true],
+    ['uma faixa de flores', true],
+    ['ovos no rodapé e coelho no cabeçalho', false],
+    ['template de pascoa para 2027', false],
+  ])('"%s" → %s', (message, expected) => {
+    expect(clientAsksForSplit(['quero um template', message])).toBe(expected);
   });
 });

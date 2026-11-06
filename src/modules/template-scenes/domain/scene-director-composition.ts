@@ -83,3 +83,19 @@ export function checkComposition(plan: DirectorPlan, clientMessages: string[]): 
     reason: `o plano pede ${names}, e o cliente não pediu; não invente divisão, faixa ou moldura`,
   };
 }
+
+/** Grupos que o cliente pede e que contradizem a frase de continuidade (D-43): moldura, faixa ou divisão. */
+const SPLIT_GROUPS: readonly CompositionGroup[] = ['moldura', 'faixa', 'divisao'];
+
+/** O pedido de divisão por verbo ou expressão ('divide em duas partes'); fora da validação 5, que só olha termos. */
+const SPLIT_VERBS = /\b(?:divid\w*|duas partes|dois lados)\b/;
+
+/**
+ * Alguma mensagem do cliente pede moldura, faixa ou divisão? "Cabeçalho" e "rodapé" não contam: arranjo não é
+ * divisão (D-43). Pedido do cliente prevalece sobre a frase (D-16).
+ */
+export function clientAsksForSplit(clientMessages: string[]): boolean {
+  const joined = clientMessages.join(' \n ');
+  const said = groupsIn(joined);
+  return SPLIT_GROUPS.some((group) => said.has(group)) || SPLIT_VERBS.test(collapse(joined));
+}

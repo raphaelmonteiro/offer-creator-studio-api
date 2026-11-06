@@ -161,6 +161,45 @@ describeIfSceneDb('SceneRedrawHandler: o redesenho da imagem inteira (banco chro
     });
   });
 
+  describe('Frase de continuidade no formato alto (D-43)', () => {
+    const TALL = 'folheto-27x54';
+    const PHRASE = 'A cena é um único ambiente contínuo do topo à base';
+
+    it.each([
+      ['pedido_composicao', true],
+      ['pedido_ajuste_geral', false],
+      ['pedido_item', false],
+    ] as const)(
+      '%s no formato alto: o prompt enviado ao provedor traz a frase? %s',
+      async (kind, expected) => {
+        const { scene } = await sceneOf(TALL);
+        const queued = await h.queueRedraw(scene, {
+          plan: itemPlan('mudar', { turn_kind: kind }),
+          request: 'muda isso',
+        });
+        const { provider, edit } = h.fakeProvider(() => h.okResult());
+
+        await h.processorWith(provider).process(h.job(scene.id, queued.id));
+
+        expect(edit.mock.calls[0][0].prompt.includes(PHRASE)).toBe(expected);
+      },
+    );
+
+    it('Composição quando o cliente pediu divisão antes: a frase sai', async () => {
+      const { scene } = await sceneOf(TALL);
+      await insertMessage(h.dataSource, scene.id, { content: 'divide em duas partes' });
+      const queued = await h.queueRedraw(scene, {
+        plan: itemPlan('reorganizar', { turn_kind: 'pedido_composicao' }),
+        request: 'reorganiza tudo',
+      });
+      const { provider, edit } = h.fakeProvider(() => h.okResult());
+
+      await h.processorWith(provider).process(h.job(scene.id, queued.id));
+
+      expect(edit.mock.calls[0][0].prompt).not.toContain(PHRASE);
+    });
+  });
+
   describe('um formato, os demais cenários', () => {
     const FORMAT = 'folheto-27x40';
 

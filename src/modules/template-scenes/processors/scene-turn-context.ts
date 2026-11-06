@@ -43,6 +43,8 @@ export interface TurnContext {
   widthPx: number;
   heightPx: number;
   request: string;
+  /** Todas as mensagens do cliente na cena: a frase de continuidade sai se alguma pede moldura, faixa ou divisão. */
+  clientMessages: string[];
   formatId: string;
   operation: SceneVersionOperation;
   /** O plano do Diretor, gravado em `metrics.plan` antes da janela; `null` em versão sem plano (job antigo). */
@@ -78,6 +80,13 @@ export async function loadTurnContext(
     widthPx: scene.widthPx,
     heightPx: scene.heightPx,
     request: message?.content ?? '',
+    clientMessages: (
+      await manager.find(TemplateSceneMessage, {
+        where: { sceneId: scene.id, role: 'user' },
+        select: { content: true, createdAt: true },
+        order: { createdAt: 'ASC' },
+      })
+    ).map((row) => row.content),
     formatId: scene.formatId,
     operation: version.operation,
     plan,
