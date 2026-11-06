@@ -77,7 +77,6 @@ export const SCENE_FAILURE_CODES = [
   'PROVIDER_ERROR',
   'JOB_EXPIRED',
   'PAID_CALL_LIMIT',
-  'RECOMPOSE_MISMATCH',
   /** O Diretor não respondeu, estourou o tempo ou devolveu saída inválida duas vezes. */
   'DIRECTOR_UNAVAILABLE',
 ] as const;

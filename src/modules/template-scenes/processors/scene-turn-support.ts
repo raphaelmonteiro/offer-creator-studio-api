@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'crypto';
 import * as sharp from 'sharp';
 import { SceneFilesService } from '../services/scene-files.service';
 import { buildSceneOutputs, SceneOutputs } from '../services/scene-output';
@@ -49,17 +48,6 @@ export class SceneTurnSupport {
       .resize({ width: JUDGE_EDGE, height: JUDGE_EDGE, fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 85 })
       .toBuffer();
-  }
-
-  /** Grava o PNG de um elemento da versão (o "adicionar"). */
-  async storeElement(
-    ctx: TurnContext,
-    png: Buffer,
-    size: { width: number; height: number },
-  ): Promise<StoredFile & { id: string }> {
-    const id = randomUUID();
-    const written = await this.files.write(ctx.sceneId, ctx.versionId, `element-${id}.png`, png);
-    return { id, url: written.url, bytes: written.bytes, ...size };
   }
 
   async removeFiles(stored: StoredFile[]): Promise<void> {

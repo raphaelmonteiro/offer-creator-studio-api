@@ -3,8 +3,7 @@ import { SceneZoneName } from './scene.types';
 
 /**
  * Tipos e formato das camadas exatas (logo e texto), usados por `processors/scene-layer-actions.ts` e pelo
- * `layer_ops` do Diretor. Moveram de `scene-request-text`, `scene-request-parse`, `scene-operation.classifier`
- * e `scene-intent`, que saem na task 1.18.
+ * `layer_ops` do Diretor. Nasceram do reconhecimento de intenção por texto, que o Diretor substituiu (D-23).
  */
 
 export type LayerKind = 'logo' | 'text';

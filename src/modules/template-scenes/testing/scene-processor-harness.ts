@@ -205,24 +205,21 @@ export function useProcessorHarness() {
         order: { createdAt: 'ASC' },
       }),
     /**
-     * Provedor controlado: devolve o resultado ou lança o erro, e registra as chamadas. `edit` e
-     * `generateTransparent` usam o mesmo comportamento quando não vêm explícitos.
+     * Provedor controlado: devolve o resultado ou lança o erro, e registra as chamadas. `edit` usa o mesmo
+     * comportamento quando não vem explícito.
      */
     fakeProvider(
       behavior: (input: SceneGenerateInput) => Promise<SceneGenerateResult>,
       others: {
         edit?: (input: SceneEditInput) => Promise<SceneGenerateResult>;
-        transparent?: (input: SceneGenerateInput) => Promise<SceneGenerateResult>;
       } = {},
     ) {
       const generate = jest.fn(behavior);
       const edit = jest.fn<Promise<SceneGenerateResult>, [SceneEditInput]>(others.edit ?? behavior);
-      const generateTransparent = jest.fn(others.transparent ?? behavior);
       return {
-        provider: { name: 'mock', generate, edit, generateTransparent } as SceneImageProvider,
+        provider: { name: 'mock', generate, edit } as SceneImageProvider,
         generate,
         edit,
-        generateTransparent,
       };
     },
     okResult: async (costUsd: number | null = 0.1365): Promise<SceneGenerateResult> => ({

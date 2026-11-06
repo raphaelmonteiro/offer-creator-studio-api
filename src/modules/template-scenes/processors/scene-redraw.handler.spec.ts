@@ -81,13 +81,12 @@ describeIfSceneDb('SceneRedrawHandler: o redesenho da imagem inteira (banco chro
         plan: itemPlan('tirar o coelho da direita do rodapé'),
         request: 'tira o coelho da direita do rodapé',
       });
-      const { provider, edit, generate, generateTransparent } = h.fakeProvider(() => h.okResult());
+      const { provider, edit, generate } = h.fakeProvider(() => h.okResult());
 
       await h.processorWith(provider).process(h.job(scene.id, queued.id));
 
       expect(edit).toHaveBeenCalledTimes(1);
       expect(generate).not.toHaveBeenCalled();
-      expect(generateTransparent).not.toHaveBeenCalled();
       const input = edit.mock.calls[0][0];
       expect(input.size).toBe(`${native.width}x${native.height}`);
       expect(input.model).toBe('gpt-image-2.6-sunburst');
@@ -182,13 +181,12 @@ describeIfSceneDb('SceneRedrawHandler: o redesenho da imagem inteira (banco chro
       async (_name, change, request) => {
         const { scene } = await sceneOf(FORMAT, [LOGO, TEXT]);
         const queued = await h.queueRedraw(scene, { plan: itemPlan(change), request });
-        const { provider, edit, generateTransparent } = h.fakeProvider(() => h.okResult());
+        const { provider, edit } = h.fakeProvider(() => h.okResult());
 
         await h.processorWith(provider).process(h.job(scene.id, queued.id));
 
         expect(edit).toHaveBeenCalledTimes(1);
         expect(edit.mock.calls[0][0]).not.toHaveProperty('markup');
-        expect(generateTransparent).not.toHaveBeenCalled();
         const done = await h.versionOf(queued.id);
         expect(done.elements).toEqual([LOGO, TEXT]);
         expect(done.status).toBe('ready');
@@ -349,15 +347,12 @@ describeIfSceneDb('SceneRedrawHandler: o redesenho da imagem inteira (banco chro
           request: 'mais flores',
           operation,
         });
-        const { provider, edit, generate, generateTransparent } = h.fakeProvider(() =>
-          h.okResult(),
-        );
+        const { provider, edit, generate } = h.fakeProvider(() => h.okResult());
 
         await h.processorWith(provider).process(h.job(scene.id, queued.id));
 
         expect(edit).not.toHaveBeenCalled();
         expect(generate).not.toHaveBeenCalled();
-        expect(generateTransparent).not.toHaveBeenCalled();
         expect(await h.versionOf(queued.id)).toMatchObject({
           status: 'failed',
           errorCode: 'PROVIDER_ERROR',

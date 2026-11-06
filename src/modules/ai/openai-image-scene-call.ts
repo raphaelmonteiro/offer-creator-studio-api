@@ -10,7 +10,6 @@ import {
   ImageUsage,
   validateImageBackground,
   validateImageMarkup,
-  validateImageMask,
   validateImageQuality,
   validateImageSize,
 } from '../../shared/image/openai-image-capabilities';
@@ -55,15 +54,13 @@ export interface SceneCallResponse {
 export interface SceneRequestExtras {
   /** `transparent` exige modelo que a tabela marcou como compatível. */
   background?: string;
-  /** Edição com máscara por JSON (`images` + `mask`). */
-  mask?: boolean;
   /** Edição com `markup` (multipart). */
   markup?: boolean;
 }
 
 /**
  * Recusa antes de qualquer rede: modelo pago sem preço conferido (G7: custo nunca vira zero), tamanho,
- * qualidade, fundo, máscara ou `markup` fora da tabela do modelo.
+ * qualidade, fundo ou `markup` fora da tabela do modelo.
  */
 export function assertSceneRequestAllowed(
   model: string,
@@ -78,7 +75,6 @@ export function assertSceneRequestAllowed(
     validateImageSize(model, size) ??
     validateImageQuality(model, quality) ??
     (extras.background ? validateImageBackground(model, extras.background) : null) ??
-    (extras.mask ? validateImageMask(model) : null) ??
     (extras.markup ? validateImageMarkup(model) : null);
   if (problem) throw new TerminalProviderError(problem, SCENE_INVALID_REQUEST_CODE);
 }

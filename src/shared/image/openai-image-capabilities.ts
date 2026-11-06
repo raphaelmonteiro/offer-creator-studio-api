@@ -31,8 +31,6 @@ export interface ImageModelCapabilities {
   inputFidelity: boolean;
   /** Aceita `background: transparent` (com `output_format` png ou webp). Ausente = não conferido. */
   transparentBackground?: boolean;
-  /** Aceita a edição com `images` + `mask` por corpo JSON (data URL), alfa 255 = editar. Ausente = não conferido. */
-  jsonMask?: boolean;
   /**
    * Aceita `markup` (camada de anotação PNG com transparência, mesmas dimensões da imagem, até 16.777.216 px,
    * sem `mask` nem `prompt_rewriter`) em `POST /images/edits`. Ausente = não conferido.
@@ -41,7 +39,7 @@ export interface ImageModelCapabilities {
   prices?: ImageTokenPrices;
   priceSource?: string;
   priceConsultedAt?: string;
-  /** Fonte e data da conferência de `transparentBackground` e `jsonMask`. */
+  /** Fonte e data da conferência de `transparentBackground` e `markup`. */
   capabilitiesSource?: string;
   capabilitiesConsultedAt?: string;
 }
@@ -99,7 +97,6 @@ export const IMAGE_MODEL_CAPABILITIES: readonly ImageModelCapabilities[] = [
     qualities: GPT_IMAGE_2_QUALITIES,
     inputFidelity: false,
     transparentBackground: true,
-    jsonMask: true,
     prices: { imageInput: 8, textInput: 5, imageOutput: 30 },
     priceSource: SUNBURST_PRICE_SOURCE,
     priceConsultedAt: '2026-11-02',
@@ -209,13 +206,6 @@ export function validateImageBackground(model: string, background: string): stri
     return null;
   }
   return `${model} não tem fundo transparente conferido na tabela de capacidades`;
-}
-
-/** Motivo da recusa da edição com máscara por JSON, ou `null` (modelo desconhecido não valida). */
-export function validateImageMask(model: string): string | null {
-  const capabilities = findImageModelCapabilities(model);
-  if (!capabilities || capabilities.jsonMask) return null;
-  return `${model} não tem a edição com máscara por JSON conferida na tabela de capacidades`;
 }
 
 /** Motivo da recusa do `markup`, ou `null` (modelo desconhecido não valida). */

@@ -1,12 +1,11 @@
 import * as sharp from 'sharp';
-import { dilate } from '../../../shared/image/morphology';
 import { areaOf, emptyRaster, Raster } from '../../../shared/image/raster';
 import { MaskShape, Pt, Rect, SceneZoneName, SceneZones } from './scene.types';
 
 /**
- * Formas da edição local (porte de `shapes.ts` do spike): rasteriza o retângulo, a zona, o pincel e
- * o laço na cena inteira (forma S), calcula a região autorizada A e gera a máscara PNG que vai ao
- * modelo. Coordenadas normalizadas (0..1), origem no canto superior esquerdo.
+ * Formas da marcação (porte de `shapes.ts` do spike): rasteriza o retângulo, a zona, o pincel e o laço na cena
+ * inteira. Só serve para conferir a área mínima da marcação (`REGION_TOO_SMALL`): a imagem que vai ao modelo é o
+ * `markup` de `scene-markup.ts`, sem máscara. Coordenadas normalizadas (0..1), origem no canto superior esquerdo.
  */
 
 /** Alvo marcado pelo cliente: retângulo, zona nomeada do formato, ou pincel/laço. */
@@ -14,14 +13,6 @@ export type RegionSpec =
   | { kind: 'rect'; rect: Rect }
   | { kind: 'zone'; zone: SceneZoneName }
   | MaskShape;
-
-/** Alfa que a OpenAI lê como "editar" (convenção medida no spike: 255 = editar, 0 = preservar). */
-export const MASK_EDIT_ALPHA = 255;
-
-/** Margem em px: fração do menor lado da cena (4% por padrão). */
-export function marginPx(fraction: number, width: number, height: number): number {
-  return Math.round(fraction * Math.min(width, height));
-}
 
 function fillRect(raster: Raster, rect: Rect): void {
   const x0 = Math.max(0, Math.round(rect.x * raster.width));
@@ -81,32 +72,6 @@ export async function rasterizeRegion(
     return raster;
   }
   return rasterizeSvg(maskShapeSvg(spec, width, height), width, height);
-}
-
-/** Região autorizada (A): S dilatada pela margem. */
-export function authorizedRegion(shape: Raster, margin: number): Raster {
-  return dilate(shape, margin);
-}
-
-/**
- * Máscara RGBA do tamanho do recorte: alfa 255 onde editar (A) e 0 onde preservar, redimensionada
- * por vizinho mais próximo ao tamanho enviado (`size`).
- */
-export function renderEditMask(
-  authorized: Raster,
-  size?: { w: number; h: number },
-): Promise<Buffer> {
-  const rgba = Buffer.alloc(authorized.data.length * 4, 0);
-  for (let i = 0; i < authorized.data.length; i += 1) {
-    rgba[i * 4 + 3] = authorized.data[i] ? MASK_EDIT_ALPHA : 255 - MASK_EDIT_ALPHA;
-  }
-  let image = sharp(rgba, {
-    raw: { width: authorized.width, height: authorized.height, channels: 4 },
-  });
-  if (size && (size.w !== authorized.width || size.h !== authorized.height)) {
-    image = image.resize(size.w, size.h, { kernel: 'nearest', fit: 'fill' });
-  }
-  return image.png().toBuffer();
 }
 
 /** Fração da cena coberta pela forma. */

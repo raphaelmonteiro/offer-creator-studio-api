@@ -1,6 +1,6 @@
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { restorableState, toCurrentVersionView, toMetricsView, toVersionView } from './scene-views';
+import { restorableState, toCurrentVersionView, toVersionView } from './scene-views';
 
 const asset = (id: string, extra: Partial<TemplateSceneAsset> = {}): TemplateSceneAsset =>
   ({
@@ -153,94 +153,35 @@ describe('toCurrentVersionView', () => {
   });
 });
 
-describe('métricas e alvo da edição na versão', () => {
-  it('versão sem edição local: metrics null e alvo vazio', () => {
+describe('alvo da edição na versão', () => {
+  it('versão sem marcação: alvo vazio e sem imagem nova', () => {
     const view = toVersionView(version(), new Map());
     expect(view).toMatchObject({
-      metrics: null,
-      targetSource: null,
       isNewImage: false,
       requestedRegion: null,
       requestedMask: null,
       targetElementId: null,
     });
+    expect(view).not.toHaveProperty('metrics');
+    expect(view).not.toHaveProperty('targetSource');
   });
 
-  it('Imagem nova: isNewImage vem do plano', () => {
+  it('Imagem nova: isNewImage vem do plano do Diretor', () => {
     const plan = { turn_kind: 'imagem_nova' };
     expect(toVersionView(version({ metrics: { plan } }), new Map()).isNewImage).toBe(true);
   });
 
-  it('edição local: só as métricas públicas, sem calls nem diagnóstico', () => {
-    const metrics = {
-      plan: { operation: 'local_edit' },
-      calls: [],
-      insideMaskDiffRatio: 0.91,
-      marginDiffRatio: 0.12,
-      seamSsim: 0.98,
-      maskAreaRatio: 0.04,
-      outsideMaskDiffRatio: 1,
-      noChange: false,
-      vision: { satisfied: 'sim' },
-    };
+  it('a marcação gravada volta na versão, e as métricas internas não saem', () => {
     const region = { x: 0.1, y: 0.1, w: 0.2, h: 0.2 };
     const view = toVersionView(
-      version({ metrics, requestedRegion: region, targetElementId: null }),
+      version({
+        metrics: { plan: { turn_kind: 'pedido_item' }, calls: [], director: { costUsd: 1 } },
+        requestedRegion: region,
+      }),
       new Map(),
     );
     expect(view.requestedRegion).toEqual(region);
-    expect(view.metrics).toEqual({
-      insideMaskDiffRatio: 0.91,
-      marginDiffRatio: 0.12,
-      seamSsim: 0.98,
-      maskAreaRatio: 0.04,
-      noChange: false,
-      notApplied: false,
-      vision: { satisfied: 'sim' },
-    });
-  });
-
-  it('Zona pelo texto, Área marcada e camada: targetSource vem do plano gravado', () => {
-    const planOf = (target: unknown) => ({
-      metrics: { plan: { operation: 'local_edit', target, instruction: 'x', remove: false } },
-    });
-    const source = (target: unknown) =>
-      toVersionView(version(planOf(target) as never), new Map()).targetSource;
-    expect(source({ kind: 'rect', rect: { x: 0, y: 0, w: 0.1, h: 0.1 } })).toBe('marked');
-    expect(source({ kind: 'zone', zone: 'header', from: 'text' })).toBe('zone_text');
-    expect(source({ kind: 'zone', zone: 'header', from: 'field' })).toBe('zone_field');
-    expect(source({ kind: 'element', elementId: 'e1' })).toBe('element');
-    expect(
-      toVersionView(version({ metrics: { plan: { operation: 'set_layer' } } } as never), new Map())
-        .targetSource,
-    ).toBeNull();
-  });
-
-  it('ajuste geral não atendido: as métricas aparecem só com notApplied e o resto null', () => {
-    expect(toMetricsView({ metrics: { notApplied: true, vision: { satisfied: 'nao' } } })).toEqual({
-      insideMaskDiffRatio: null,
-      marginDiffRatio: null,
-      seamSsim: null,
-      maskAreaRatio: null,
-      noChange: false,
-      notApplied: true,
-      vision: { satisfied: 'nao' },
-    });
-    expect(toMetricsView({ metrics: { vision: { satisfied: 'sim' } } })).toBeNull();
-  });
-
-  it('sem amostra a métrica vai como null (o chip "preservou X%" não aparece); visão que falhou vira null', () => {
-    const view = toMetricsView({
-      metrics: { noChange: true, marginDiffRatio: null, seamSsim: null, vision: null },
-    });
-    expect(view).toEqual({
-      insideMaskDiffRatio: null,
-      marginDiffRatio: null,
-      seamSsim: null,
-      maskAreaRatio: null,
-      noChange: true,
-      notApplied: false,
-      vision: null,
-    });
+    expect(JSON.stringify(view)).not.toContain('director');
+    expect(JSON.stringify(view)).not.toContain('calls');
   });
 });

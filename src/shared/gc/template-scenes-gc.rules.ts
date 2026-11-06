@@ -4,8 +4,8 @@
  *
  * - Master e prévia ficam protegidas enquanto alguma das N versões `ready` mais recentes, uma
  *   versão aprovada ou a versão atual da cena as referenciar (versões `manual`/`restore` apontam
- *   para a master da origem). Tentativas não aplicadas (`notApplied`) são `ready` e ocupam as N vagas
- *   (D-20), por isso a atual é protegida à parte (R22).
+ *   para a master da origem). Toda imagem conta, inclusive a que o juiz reprovou (D-26): ela é `ready` e
+ *   ocupa uma das N vagas (D-20), por isso a atual é protegida à parte (R22).
  * - `raw_output`, `mask` e `crop` expiram após o TTL; logo e elementos não expiram.
  * - Cena excluída há mais que a retenção perde todos os arquivos.
  */

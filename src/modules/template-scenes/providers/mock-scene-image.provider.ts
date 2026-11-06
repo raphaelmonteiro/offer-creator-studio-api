@@ -41,10 +41,9 @@ const color = (hash: Buffer, offset: number): string =>
  * Provedor de desenvolvimento (D-2): sem rede e sem custo. Desenha com `sharp` um gradiente com
  * formas, determinístico pelo hash do prompt, exatamente no tamanho pedido. A latência vem de
  * `TEMPLATE_SCENE_MOCK_LATENCY_MS` (20000; 0 nos testes), e os marcadores `#falha-quota`,
- * `#falha-timeout`, `#falha-conteudo` e `#lento` simulam os caminhos de erro. A edição pinta uma cor
- * sólida na forma S (`paintMask`; sem ela, na área da máscara) (o resto fica byte a byte igual), então o diff é real; sem máscara (a
- * edição da imagem inteira, com ou sem `markup`) tinge a imagem toda, e o `markup` recebido fica em `edits`; `#sem-mudanca`
- * devolve a imagem intacta. O "adicionar" devolve um balão sobre fundo transparente.
+ * `#falha-timeout`, `#falha-conteudo` e `#lento` simulam os caminhos de erro. A edição tinge a imagem inteira
+ * (com ou sem `markup`), então o diff é real, e o `markup` recebido fica em `edits`; `#sem-mudanca` devolve a
+ * imagem intacta.
  */
 @Injectable()
 export class MockSceneImageProvider implements SceneImageProvider {
@@ -69,7 +68,7 @@ export class MockSceneImageProvider implements SceneImageProvider {
     return this.result(hash, buffer, startedAt);
   }
 
-  /** Edição: com máscara pinta só a área editável; sem máscara (ajuste geral) escurece/tinge o fundo todo. */
+  /** Edição da imagem inteira (com ou sem `markup`): tinge a imagem toda, para o diff ser real. */
   async edit(input: SceneEditInput): Promise<SceneGenerateResult> {
     const startedAt = Date.now();
     await this.beforeCall(input);
@@ -79,33 +78,14 @@ export class MockSceneImageProvider implements SceneImageProvider {
       return this.result(hash, input.image, startedAt);
     }
     const image = await loadRgb(input.image);
-    // Pinta só a forma S quando o chamador a informa: a tinta fora de S entraria na faixa R \ S (PV-30).
-    const paint = input.paintMask ?? input.mask;
-    const alpha = paint ? await this.alphaOf(paint, image.width, image.height) : null;
     const tint = [hash[9], hash[10], hash[11]];
     const out = Uint8Array.from(image.data);
     for (let i = 0; i < image.width * image.height; i += 1) {
-      if (alpha && alpha[i] < 255) continue;
       for (let c = 0; c < 3; c += 1) {
-        out[i * 3 + c] = alpha ? tint[c] : (image.data[i * 3 + c] + tint[c]) >> 1;
+        out[i * 3 + c] = (image.data[i * 3 + c] + tint[c]) >> 1;
       }
     }
     const buffer = await imgToPng({ width: image.width, height: image.height, data: out });
-    return this.result(hash, buffer, startedAt);
-  }
-
-  /** Balão simples com borda de pixels transparentes em volta (o "adicionar" recorta o alfa). */
-  async generateTransparent(input: SceneGenerateInput): Promise<SceneGenerateResult> {
-    const startedAt = Date.now();
-    await this.beforeCall(input);
-    const hash = this.hashOf(input);
-    const [width, height] = input.size.split('x').map(Number);
-    const r = Math.round(Math.min(width, height) * 0.3);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-  <ellipse cx="${width / 2}" cy="${Math.round(height * 0.42)}" rx="${r}" ry="${Math.round(r * 1.2)}" fill="${color(hash, 0)}"/>
-  <rect x="${width / 2 - 12}" y="${Math.round(height * 0.42 + r * 1.2)}" width="24" height="${Math.round(r * 0.5)}" fill="${color(hash, 3)}"/>
-</svg>`;
-    const buffer = await sharp(Buffer.from(svg)).png().toBuffer();
     return this.result(hash, buffer, startedAt);
   }
 
@@ -114,7 +94,7 @@ export class MockSceneImageProvider implements SceneImageProvider {
     if (this.edits.length > MAX_RECORDED_EDITS) this.edits.shift();
   }
 
-  /** Latência simulada e falhas por marcador, iguais para as três operações. */
+  /** Latência simulada e falhas por marcador, iguais para as duas operações. */
   private async beforeCall(input: SceneGenerateInput): Promise<void> {
     await this.sleep(this.latencyFor(input.prompt));
     const failure = FAILURES.find(([marker]) => input.prompt.includes(marker));
@@ -133,18 +113,6 @@ export class MockSceneImageProvider implements SceneImageProvider {
       requestId: `mock-${hash.subarray(0, 4).toString('hex')}`,
       latencyMs: Date.now() - startedAt,
     };
-  }
-
-  /** Alfa da máscara no tamanho da imagem. */
-  private async alphaOf(mask: Buffer, width: number, height: number): Promise<Uint8Array> {
-    const { data, info } = await sharp(mask)
-      .ensureAlpha()
-      .resize(width, height, { kernel: 'nearest', fit: 'fill' })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const alpha = new Uint8Array(info.width * info.height);
-    for (let i = 0; i < alpha.length; i += 1) alpha[i] = data[i * 4 + 3];
-    return alpha;
   }
 
   private latencyFor(prompt: string): number {

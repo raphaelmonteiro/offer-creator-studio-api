@@ -162,7 +162,11 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
     );
     const attempts = [];
     for (let number = 3; number <= 7; number++) {
-      attempts.push(await addReadyOnDisk(scene, number, { metrics: { notApplied: true } }));
+      attempts.push(
+        await addReadyOnDisk(scene, number, {
+          metrics: { judge: { available: true, satisfied: 'nao' } },
+        }),
+      );
     }
 
     await prune(scene.id);
@@ -185,7 +189,11 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
     );
     const attempts = [];
     for (let number = 2; number <= 7; number++) {
-      attempts.push(await addReadyOnDisk(scene, number, { metrics: { notApplied: true } }));
+      attempts.push(
+        await addReadyOnDisk(scene, number, {
+          metrics: { judge: { available: true, satisfied: 'nao' } },
+        }),
+      );
     }
 
     await prune(scene.id);

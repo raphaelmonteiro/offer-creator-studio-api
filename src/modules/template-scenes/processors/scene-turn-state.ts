@@ -117,7 +117,7 @@ export class SceneTurnState {
     });
   }
 
-  /** `running` → `ready` com master e prévia novas (geração, ajuste geral e edição local). */
+  /** `running` → `ready` com master e prévia novas (primeira imagem, imagem nova e redesenho). */
   complete(
     ctx: TurnContext,
     files: { master: StoredFile; preview: StoredFile },
@@ -126,25 +126,10 @@ export class SceneTurnState {
     return this.completeWith(ctx, { kind: 'files', ...files }, extra);
   }
 
-  /** `running` → `ready` apontando para a imagem da versão de origem, sem arquivo novo (camadas e "adicionar"). */
-  completeReusingImage(
-    ctx: TurnContext,
-    extra: CompleteExtra,
-    elementFile?: StoredFile & { id: string },
-  ): Promise<CompleteResult> {
-    const image = {
-      kind: 'reuse' as const,
-      masterAssetId: ctx.parent?.masterAssetId ?? null,
-      previewAssetId: ctx.parent?.previewAssetId ?? null,
-    };
-    return this.completeWith(ctx, image, extra, elementFile);
-  }
-
   private completeWith(
     ctx: TurnContext,
     image: CompleteImage,
     extra: CompleteExtra,
-    elementFile?: StoredFile & { id: string },
   ): Promise<CompleteResult> {
     return this.run(ctx, async (manager, scene) => {
       const version = await this.runningVersion(manager, ctx);
@@ -153,7 +138,6 @@ export class SceneTurnState {
         sceneId: ctx.sceneId,
         versionId: ctx.versionId,
         parentElements: structuredClone(ctx.parent?.elements ?? []),
-        elementFile,
       };
       return readyVersion(manager, scene, version, { target, image, extra });
     });

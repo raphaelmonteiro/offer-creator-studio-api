@@ -52,10 +52,10 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
     (await dataSource.manager.findOneByOrFail(TemplateScene, { id: sceneId })).revision;
 
   describe('restore', () => {
-    it('Usar a versão mesmo assim: restaura a tentativa não aplicada sem custo novo', async () => {
+    it('Voltar pelo botão: restaura uma versão que o juiz reprovou, sem custo de imagem novo', async () => {
       const { scene, ready } = await sceneWithVersions('Restore não aplicada', 2);
       const attempt = await insertReadyVersion(dataSource, scene, 3, {
-        metrics: { notApplied: true },
+        metrics: { judge: { available: true, satisfied: 'nao' } },
         providerCostUsd: 0.05,
       });
 
@@ -228,6 +228,35 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
       expect(manuals).toHaveLength(1);
       expect(manuals[0].elements[0]).toMatchObject({ x: 0.2, fontFamily: 'Anton' });
       expect(second.revision).toBe(2);
+    });
+
+    it('Camada antiga: um elemento generated gravado antes continua na lista e continua arrastável', async () => {
+      const old = {
+        id: 'gen-1',
+        kind: 'generated',
+        name: 'Balão 1',
+        x: 0.3,
+        y: 0.4,
+        w: 0.2,
+        aspect: 1,
+        rotation: 0,
+        z: 1,
+      } as const;
+      const scene = await insertScene(dataSource, { name: 'Camada antiga' });
+      createdScenes.push(scene.id);
+      const made = await insertReadyVersion(dataSource, scene, 1, { elements: [old] });
+      scene.currentVersionId = made.version.id;
+      await dataSource.manager.save(scene);
+
+      const opened = await new SceneReadService(dataSource).loadDetail(scene.id);
+      expect(opened.currentVersion?.elements).toEqual([old]);
+
+      const detail = await service.patchElements(
+        scene.id,
+        { expectedRevision: 0, elements: [{ ...old, x: 0.7 }] as never },
+        null,
+      );
+      expect(detail.currentVersion?.elements).toEqual([{ ...old, x: 0.7 }]);
     });
 
     it('revisão antiga: 409 REVISION_CONFLICT', async () => {

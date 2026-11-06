@@ -82,57 +82,14 @@ describe('OpenAiSceneImageProvider', () => {
   });
 });
 
-describe('OpenAiSceneImageProvider: edição e imagem transparente', () => {
-  const IMAGE = Buffer.from('recorte');
-  const MASK = Buffer.from('mascara');
+describe('OpenAiSceneImageProvider: edição da imagem inteira', () => {
+  const IMAGE = Buffer.from('master');
   const OK = {
     image: { buffer: Buffer.from('png') },
     usage: { output_tokens: 10 },
     costUsd: 0.035,
     requestId: 'req_edit',
   };
-
-  it('edição com máscara: envia recorte e máscara no modo sceneCall, PNG opaco', async () => {
-    const editImage = jest.fn().mockResolvedValue(OK);
-    const provider = new OpenAiSceneImageProvider(
-      { editImage } as unknown as OpenAiImageService,
-      new ConfigService({ OPENAI_TIMEOUT_MS: '60000' }),
-    );
-
-    const result = await provider.edit({ ...INPUT, size: '1024x1024', image: IMAGE, mask: MASK });
-
-    expect(editImage).toHaveBeenCalledWith({
-      feature: 'template-scene',
-      prompt: 'campo verde',
-      imageBuffer: IMAGE,
-      imageMimeType: 'image/png',
-      size: '1024x1024',
-      assetKind: 'template',
-      model: 'gpt-image-2.5-sunburst',
-      quality: 'high',
-      outputFormat: 'png',
-      background: 'opaque',
-      sceneCall: { timeoutMs: 60_000, correlationId: 'corr-1' },
-      mask: { buffer: MASK },
-    });
-    expect(result).toMatchObject({ costUsd: 0.035, requestId: 'req_edit' });
-  });
-
-  it('paintMask é só do mock: o corpo enviado ao serviço de imagem é o mesmo com e sem ele (R4)', async () => {
-    const editImage = jest.fn().mockResolvedValue(OK);
-    const provider = new OpenAiSceneImageProvider(
-      { editImage } as unknown as OpenAiImageService,
-      new ConfigService({ OPENAI_TIMEOUT_MS: '60000' }),
-    );
-    const base = { ...INPUT, size: '1024x1024', image: IMAGE, mask: MASK };
-
-    await provider.edit(base);
-    await provider.edit({ ...base, paintMask: Buffer.from('so-o-mock') });
-
-    expect(editImage.mock.calls[1][0]).toEqual(editImage.mock.calls[0][0]);
-    expect(Object.keys(editImage.mock.calls[1][0])).not.toContain('paintMask');
-    expect(JSON.stringify(editImage.mock.calls[1][0])).not.toContain('so-o-mock');
-  });
 
   it('Pedido com marcação: a master inteira e o markup vão ao serviço, sem mask', async () => {
     const editImage = jest.fn().mockResolvedValue(OK);
@@ -171,36 +128,7 @@ describe('OpenAiSceneImageProvider: edição e imagem transparente', () => {
     expect(editImage.mock.calls[0][0]).not.toHaveProperty('markup');
   });
 
-  it('ajuste geral: sem máscara, o campo mask nem vai', async () => {
-    const editImage = jest.fn().mockResolvedValue(OK);
-    const provider = new OpenAiSceneImageProvider(
-      { editImage } as unknown as OpenAiImageService,
-      new ConfigService({}),
-    );
-    await provider.edit({ ...INPUT, image: IMAGE });
-    expect(editImage.mock.calls[0][0]).not.toHaveProperty('mask');
-  });
-
-  it('imagem transparente: background transparent e PNG, no modo sceneCall', async () => {
-    const generateImage = jest.fn().mockResolvedValue(OK);
-    const provider = new OpenAiSceneImageProvider(
-      { generateImage } as unknown as OpenAiImageService,
-      new ConfigService({}),
-    );
-
-    await provider.generateTransparent({ ...INPUT, size: '1024x1024' });
-
-    expect(generateImage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assetKind: 'transparent',
-        background: 'transparent',
-        outputFormat: 'png',
-        sceneCall: { timeoutMs: 180_000, correlationId: 'corr-1' },
-      }),
-    );
-  });
-
-  it('falhas da edição e da imagem transparente saem classificadas', async () => {
+  it('falhas da edição saem classificadas', async () => {
     const quota = new TerminalProviderError('sem saldo', 'quota');
     const provider = new OpenAiSceneImageProvider(
       {
@@ -209,10 +137,7 @@ describe('OpenAiSceneImageProvider: edição e imagem transparente', () => {
       } as unknown as OpenAiImageService,
       new ConfigService({}),
     );
-    await expect(provider.edit({ ...INPUT, image: IMAGE, mask: MASK })).rejects.toMatchObject({
-      code: 'PROVIDER_QUOTA',
-    });
-    await expect(provider.generateTransparent(INPUT)).rejects.toMatchObject({
+    await expect(provider.edit({ ...INPUT, image: IMAGE })).rejects.toMatchObject({
       code: 'PROVIDER_QUOTA',
     });
   });

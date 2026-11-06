@@ -89,25 +89,7 @@ export class OpenAiSceneImageProvider implements SceneImageProvider {
         outputFormat: 'png',
         background: 'opaque',
         sceneCall: this.sceneCall(input),
-        ...(input.mask ? { mask: { buffer: input.mask } } : {}),
         ...(input.markup ? { markup: { buffer: input.markup } } : {}),
-      }),
-    );
-  }
-
-  /** PNG com fundo transparente (o "adicionar"); o modelo precisa estar marcado na tabela de capacidades. */
-  async generateTransparent(input: SceneGenerateInput): Promise<SceneGenerateResult> {
-    return this.run(() =>
-      this.images.generateImage({
-        feature: 'template-scene',
-        prompt: input.prompt,
-        size: input.size as ImageSize,
-        assetKind: 'transparent',
-        model: input.model,
-        quality: input.quality as ImageQuality,
-        background: 'transparent',
-        outputFormat: 'png',
-        sceneCall: this.sceneCall(input),
       }),
     );
   }

@@ -11,8 +11,6 @@ import {
   SceneVersionStatus,
   SceneZones,
 } from '../domain/scene.types';
-import { SceneClassification } from '../domain/scene-operation.classifier';
-import { SceneTargetSource, targetSourceOf } from '../domain/scene-target-source';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
@@ -29,21 +27,6 @@ export interface SceneAssetView {
 }
 
 export type RestorableReason = 'not_ready' | 'master_purged';
-
-/** Métricas públicas de uma edição (o que o front mostra: chip "preservou X%" e o aviso de sem mudança). */
-export interface SceneMetricsView {
-  insideMaskDiffRatio: number | null;
-  /** `null` sem pixels na faixa da margem (o chip não aparece). */
-  marginDiffRatio: number | null;
-  seamSsim: number | null;
-  maskAreaRatio: number | null;
-  /** O modelo devolveu praticamente a mesma área (a versão fica `ready` com aviso). */
-  noChange: boolean;
-  /** A visão disse que o pedido não foi atendido: a versão não virou a atual (D-18/correção 3). */
-  notApplied: boolean;
-  /** Resultado da visão antes/depois; `null` quando ela não rodou ou falhou. */
-  vision: { satisfied: 'sim' | 'parcial' | 'nao' } | null;
-}
 
 export interface SceneVersionView {
   id: string;
@@ -71,12 +54,8 @@ export interface SceneVersionView {
   requestedRegion: Rect | null;
   requestedMask: MaskShape | null;
   targetElementId: string | null;
-  /** De onde veio a área entendida; o chip "região marcada" só aparece em `marked`, `zone_field` e `element`. */
-  targetSource: SceneTargetSource | null;
   /** Imagem nova do zero (D-18): o painel mostra "Imagem nova" em vez de "Ajuste geral". */
   isNewImage: boolean;
-  /** Só nas edições locais; `null` nas demais versões. */
-  metrics: SceneMetricsView | null;
 }
 
 export interface SceneCurrentVersionView extends SceneVersionView {
@@ -157,28 +136,6 @@ const isNewImage = (version: Pick<TemplateSceneVersion, 'metrics'>): boolean =>
 
 const iso = (date: Date | null): string | null => (date ? date.toISOString() : null);
 
-const numberOrNull = (value: unknown): number | null =>
-  typeof value === 'number' && Number.isFinite(value) ? value : null;
-
-/** Só as métricas de edição que o front usa; `calls`, `plan` e diagnósticos ficam no servidor. */
-export function toMetricsView(
-  version: Pick<TemplateSceneVersion, 'metrics'>,
-): SceneMetricsView | null {
-  const m = version.metrics ?? {};
-  // O ajuste geral não grava `noChange`: ele só tem métricas quando não foi aplicado.
-  if (typeof m.noChange !== 'boolean' && m.notApplied !== true) return null;
-  const vision = m.vision as { satisfied?: 'sim' | 'parcial' | 'nao' } | null | undefined;
-  return {
-    insideMaskDiffRatio: numberOrNull(m.insideMaskDiffRatio),
-    marginDiffRatio: numberOrNull(m.marginDiffRatio),
-    seamSsim: numberOrNull(m.seamSsim),
-    maskAreaRatio: numberOrNull(m.maskAreaRatio),
-    noChange: m.noChange === true,
-    notApplied: m.notApplied === true,
-    vision: vision?.satisfied ? { satisfied: vision.satisfied } : null,
-  };
-}
-
 export function toAssetView(asset: TemplateSceneAsset): SceneAssetView {
   return {
     id: asset.id,
@@ -219,9 +176,7 @@ export function toVersionView(
     requestedRegion: version.requestedRegion,
     requestedMask: version.requestedMask,
     targetElementId: version.targetElementId,
-    targetSource: targetSourceOf(version.metrics?.plan as SceneClassification | undefined),
     isNewImage: isNewImage(version),
-    metrics: toMetricsView(version),
   };
 }
 

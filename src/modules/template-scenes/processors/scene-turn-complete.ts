@@ -31,17 +31,13 @@ export interface CompleteExtra {
   judge?: JudgeBriefVerdict;
 }
 
-/** Imagem da versão: arquivos novos (master e prévia) ou a da versão de origem, sem copiar. */
-export type CompleteImage =
-  | { kind: 'files'; master: StoredFile; preview: StoredFile }
-  | { kind: 'reuse'; masterAssetId: string | null; previewAssetId: string | null };
+/** Imagem da versão: arquivos novos (master e prévia). Camadas e desfazer não passam por aqui: reaproveitam a master sob o lock do Diretor. */
+export type CompleteImage = { kind: 'files'; master: StoredFile; preview: StoredFile };
 
 export interface CompleteTarget {
   sceneId: string;
   versionId: string;
   parentElements: SceneElement[];
-  /** Arquivo extra criado pela versão (o PNG transparente do "adicionar"), com o id que o elemento já cita. */
-  elementFile?: StoredFile & { id: string };
 }
 
 /** Cria o asset do arquivo na versão que o criou. */
@@ -49,7 +45,7 @@ function saveAsset(
   manager: EntityManager,
   target: CompleteTarget,
   role: TemplateSceneAsset['role'],
-  file: StoredFile & { id?: string },
+  file: StoredFile,
 ): Promise<TemplateSceneAsset> {
   return manager.save(
     manager.create(TemplateSceneAsset, {
@@ -66,7 +62,6 @@ async function resolveImage(
   target: CompleteTarget,
   image: CompleteImage,
 ): Promise<{ masterAssetId: string | null; previewAssetId: string | null }> {
-  if (image.kind === 'reuse') return image;
   const master = await saveAsset(manager, target, 'master', image.master);
   const preview = await saveAsset(manager, target, 'preview', image.preview);
   return { masterAssetId: master.id, previewAssetId: preview.id };
@@ -89,7 +84,6 @@ export async function readyVersion(
     return 'cancelled';
   }
   const ids = await resolveImage(manager, target, image);
-  if (target.elementFile) await saveAsset(manager, target, 'element', target.elementFile);
   version.status = 'ready';
   version.step = 'done';
   version.masterAssetId = ids.masterAssetId;

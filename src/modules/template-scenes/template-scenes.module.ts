@@ -28,7 +28,6 @@ import { createSceneVisionClient, SCENE_VISION_CLIENT } from './providers/scene-
 import { SceneDirectorContextService } from './services/scene-director-context';
 import { SceneDirectorService } from './services/scene-director.service';
 import { SceneFilesService } from './services/scene-files.service';
-import { SceneImageService } from './services/scene-image.service';
 import { SceneLockService } from './services/scene-lock.service';
 import { SceneLogoService } from './services/scene-logo.service';
 import { SceneReadService } from './services/scene-read.service';
@@ -74,7 +73,6 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneTurnState,
     SceneTurnSupport,
     SceneCallRunner,
-    SceneImageService,
     SceneVisionService,
     SceneDirectorService,
     SceneDirectorContextService,

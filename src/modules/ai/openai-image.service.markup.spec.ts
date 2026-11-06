@@ -138,14 +138,11 @@ describe('OpenAiImageService: edição com markup', () => {
       expect(edit).not.toHaveBeenCalled();
     });
 
-    it('markup sem sceneCall e markup com mask são erros de programação', async () => {
+    it('markup sem sceneCall é erro de programação', async () => {
       const { service } = buildService();
       await expect(service.editImage(await editOptions({ sceneCall: undefined }))).rejects.toThrow(
         'só existe no modo sceneCall',
       );
-      await expect(
-        service.editImage(await editOptions({ mask: { buffer: await png(64, 80) } })),
-      ).rejects.toThrow('não se combinam');
     });
   });
 

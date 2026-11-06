@@ -85,7 +85,7 @@ describeIfSceneDb('O juiz confere e o resultado é sempre aplicado (banco chroma
       'Apliquei a imagem nova, mas na conferência o pedido não aparece atendido: O coelho continua lá. Diga o que ajustar ou use "Voltar para a anterior".',
     );
     expect(edit).toHaveBeenCalledTimes(1);
-    expect(version.metrics.notApplied).toBeUndefined();
+    expect(version.metrics.judge).toMatchObject({ satisfied: 'nao' });
   });
 
   it('Juiz parcial: a versão vira a atual, e o chat diz que atendeu em parte', async () => {

@@ -88,13 +88,6 @@ export const targetElementNotFound = (elementId: string) =>
     { elementId },
   );
 
-export const confirmationNotPending = () =>
-  sceneError(
-    HttpStatus.CONFLICT,
-    'CONFIRMATION_NOT_PENDING',
-    'Não há uma pergunta de ajuste geral pendente para essa resposta. Envie o pedido de novo.',
-  );
-
 export const logoInvalid = (reason: string) =>
   sceneError(HttpStatus.UNPROCESSABLE_ENTITY, 'LOGO_INVALID', reason);
 

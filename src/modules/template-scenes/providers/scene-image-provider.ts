@@ -32,22 +32,17 @@ export interface SceneEditInput extends SceneGenerateInput {
    * quando o cliente não marcou nada (o código nunca gera marcação sozinho).
    */
   markup?: Buffer;
-  /** @deprecated Edição recortada; sai com a task 1.18 (D-22). */
-  mask?: Buffer;
-  /** @deprecated Edição recortada; sai com a task 1.18 (D-22). */
-  paintMask?: Buffer;
 }
 
 /**
- * Porta do provedor de imagem da cena (D-2): `generate` (primeira geração), `edit` (edição local com
- * máscara ou ajuste geral sem ela) e `generateTransparent` (PNG com fundo transparente do "adicionar").
+ * Porta do provedor de imagem da cena (D-2): `generate` (primeira imagem e imagem nova, sem referência) e `edit`
+ * (redesenho da imagem inteira, com `markup` quando o cliente marcou). Sem máscara e sem PNG transparente (D-22, D-33).
  * Falha do provedor vira `SceneProviderError` com o código que a versão grava.
  */
 export interface SceneImageProvider {
   readonly name: 'mock' | 'openai';
   generate(input: SceneGenerateInput): Promise<SceneGenerateResult>;
   edit(input: SceneEditInput): Promise<SceneGenerateResult>;
-  generateTransparent(input: SceneGenerateInput): Promise<SceneGenerateResult>;
 }
 
 /** Falha do provedor já classificada para a versão (`errorCode`). */

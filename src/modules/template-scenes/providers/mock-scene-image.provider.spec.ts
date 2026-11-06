@@ -79,56 +79,23 @@ describe('MockSceneImageProvider', () => {
   });
 });
 
-describe('MockSceneImageProvider: edição e imagem transparente', () => {
+describe('MockSceneImageProvider: edição da imagem inteira', () => {
   const SIZE = 64;
   const solid = (color: string) =>
     sharp({ create: { width: SIZE, height: SIZE, channels: 4, background: color } })
       .png()
       .toBuffer();
 
-  /** Máscara com alfa 255 no quadrado [16, 48) e 0 no resto. */
-  async function squareMask(): Promise<Buffer> {
-    const rgba = Buffer.alloc(SIZE * SIZE * 4, 0);
-    for (let y = 16; y < 48; y += 1) {
-      for (let x = 16; x < 48; x += 1) rgba[(y * SIZE + x) * 4 + 3] = 255;
-    }
-    return sharp(rgba, { raw: { width: SIZE, height: SIZE, channels: 4 } })
-      .png()
-      .toBuffer();
-  }
-
   const raw = async (png: Buffer) =>
     (await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true })).data;
-  const editInput = async (prompt: string, withMask = true) => ({
+  const editInput = async (prompt: string) => ({
     ...input(prompt, `${SIZE}x${SIZE}`),
     image: await solid('#336699'),
-    ...(withMask ? { mask: await squareMask() } : {}),
   });
 
-  it('com máscara: fora dela o recorte fica byte a byte igual e dentro muda', async () => {
+  it('custa zero e traz um id de requisição do mock', async () => {
     const { provider } = build();
-    const original = await solid('#336699');
     const result = await provider.edit(await editInput('deixa o sol mais alaranjado'));
-
-    const before = await raw(original);
-    const after = await raw(result.buffer);
-    expect(after.length).toBe(before.length);
-    let outsideDifferent = 0;
-    let insideDifferent = 0;
-    for (let y = 0; y < SIZE; y += 1) {
-      for (let x = 0; x < SIZE; x += 1) {
-        const inside = x >= 16 && x < 48 && y >= 16 && y < 48;
-        const i = (y * SIZE + x) * 3;
-        const different =
-          before[i] !== after[i] ||
-          before[i + 1] !== after[i + 1] ||
-          before[i + 2] !== after[i + 2];
-        if (different && inside) insideDifferent += 1;
-        if (different && !inside) outsideDifferent += 1;
-      }
-    }
-    expect(outsideDifferent).toBe(0);
-    expect(insideDifferent).toBeGreaterThan(32 * 32 * 0.9);
     expect(result.costUsd).toBe(0);
     expect(result.requestId).toMatch(/^mock-/);
   });
@@ -140,9 +107,9 @@ describe('MockSceneImageProvider: edição e imagem transparente', () => {
     expect(a.buffer.equals(b.buffer)).toBe(true);
   });
 
-  it('sem máscara (ajuste geral): a imagem toda muda, no mesmo tamanho', async () => {
+  it('a imagem toda muda, no mesmo tamanho', async () => {
     const { provider } = build();
-    const result = await provider.edit(await editInput('deixa tudo mais quente', false));
+    const result = await provider.edit(await editInput('deixa tudo mais quente'));
     expect(await sharp(result.buffer).metadata()).toMatchObject({ width: SIZE, height: SIZE });
     const before = await raw(await solid('#336699'));
     const after = await raw(result.buffer);
@@ -217,26 +184,5 @@ describe('MockSceneImageProvider: edição e imagem transparente', () => {
     const error = await provider.edit(await editInput(`x ${marker}`)).catch((e) => e);
     expect(error).toBeInstanceOf(SceneProviderError);
     expect(error.code).toBe(code);
-  });
-
-  it('gera um PNG com alfa: objeto no meio e cantos transparentes', async () => {
-    const { provider } = build();
-    const result = await provider.generateTransparent(input('balão de ar quente', '256x256'));
-    const { data, info } = await sharp(result.buffer)
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    expect(info).toMatchObject({ width: 256, height: 256, channels: 4 });
-    expect(data[3]).toBe(0);
-    const center = (107 * 256 + 128) * 4 + 3;
-    expect(data[center]).toBe(255);
-    expect(result.costUsd).toBe(0);
-  });
-
-  it('a imagem transparente também simula falhas', async () => {
-    const { provider } = build();
-    await expect(
-      provider.generateTransparent(input(`balão ${MOCK_MARKERS.content}`, '256x256')),
-    ).rejects.toMatchObject({ code: 'PROVIDER_CONTENT_POLICY' });
   });
 });

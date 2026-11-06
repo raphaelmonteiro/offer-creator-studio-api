@@ -1,15 +1,11 @@
 import { findSceneFormat, SCENE_FORMATS } from '../domain/scene-formats';
 import { nativeSizeOfFormat } from '../domain/scene-format-size';
 import {
-  buildEditPrompt,
   buildGeneratePrompt,
   buildGlobalPrompt,
   buildRedrawPrompt,
-  buildTransparentPrompt,
   planInstruction,
   planRequest,
-  CONTINUE_BACKGROUND,
-  REMOVE_INSTRUCTION,
 } from './scene-prompt';
 
 const format = findSceneFormat('folheto-27x54')!;
@@ -98,138 +94,13 @@ describe('Composição do prompt só a pedido do cliente: buildGeneratePrompt', 
   });
 });
 
-describe('buildEditPrompt', () => {
-  it('começa com "Na área marcada" e traz a instrução literal e a preservação do resto', () => {
-    const prompt = buildEditPrompt({
-      request: 'deixa o sol  mais\nalaranjado',
-      remove: false,
-      knownElements: [],
-    });
-    expect(prompt.startsWith('Na área marcada: deixa o sol mais alaranjado.')).toBe(true);
-    expect(prompt).toContain('Altere somente a área indicada pela máscara');
-    expect(prompt).toContain('Preserve todo o resto da imagem');
-  });
-
-  it('cita o nome dos elementos conhecidos na região', () => {
-    const prompt = buildEditPrompt({
-      request: 'mais brilho',
-      remove: false,
-      knownElements: ['Sol', 'Nuvem'],
-    });
-    expect(prompt.startsWith('Na área marcada (Sol, Nuvem): mais brilho.')).toBe(true);
-  });
-
-  it('Remover com objeto nomeado: a frase do cliente e a continuação do fundo', () => {
-    const request =
-      'ta a imagem ta melhor mas remove para mim da parte de baixo os ovos a direita.';
-    const prompt = buildEditPrompt({
-      request,
-      remove: true,
-      object: 'os ovos',
-      knownElements: [],
-    });
-    expect(prompt).toContain(`Na área marcada: ${request}`);
-    expect(prompt).toContain('Continue o fundo ao redor');
-    expect(prompt).not.toContain(REMOVE_INSTRUCTION);
-  });
-
-  it('Remover com objeto nomeado: a área marcada citada no texto não troca a frase', () => {
-    const prompt = buildEditPrompt({
-      request: 'remova os ovos da area marcada',
-      remove: true,
-      object: 'os ovos',
-      knownElements: [],
-    });
-    expect(prompt).toContain('remova os ovos da area marcada');
-    expect(prompt).toContain(CONTINUE_BACKGROUND);
-  });
-
-  it.each(['remove isso', 'tira essa área', 'apaga o que está aqui'])(
-    'Remover sem objeto nomeado (%s): pede para remover o que está na área e continuar o fundo',
-    (request) => {
-      const prompt = buildEditPrompt({ request, remove: true, object: null, knownElements: [] });
-      expect(prompt).toContain(`Na área marcada: ${REMOVE_INSTRUCTION}.`);
-    },
-  );
-});
-
-describe('buildEditPrompt: regras fixas (correção 6)', () => {
-  const edit = (request: string, remove = false) =>
-    buildEditPrompt({ request, remove, knownElements: [] });
-
-  it('Edição sem pedido de texto: sem texto legível, sem logotipos e sem preços', () => {
-    const prompt = edit('deixa mais rústico');
-    expect(prompt).toContain('sem texto legível');
-    expect(prompt).toContain('sem letras ou números');
-    expect(prompt).toContain('sem logotipos');
-    expect(prompt).toContain('sem preços');
-  });
-
-  it('a remoção também leva as regras', () => {
-    expect(edit('remova os ovos', true)).toContain('sem texto legível');
-  });
-
-  it('Texto exato: com "uma placa com letras", sai só a regra de texto', () => {
-    const prompt = edit('desenha uma placa com letras');
-    expect(prompt).not.toContain('sem texto legível');
-    expect(prompt).not.toContain('sem letras');
-    expect(prompt).toContain('sem logotipos');
-    expect(prompt).toContain('sem preços');
-  });
-
-  it.each([
-    'coloca uma placa dizendo Feliz Páscoa',
-    'uma faixa com os dizeres Feliz Páscoa',
-    'uma placa com a inscrição Páscoa',
-    'uma placa com o nome Páscoa',
-    'coloca o número 10',
-  ])('R32: texto pedido pelo cliente em "%s" tira só a regra de texto', (request) => {
-    const prompt = edit(request);
-    expect(prompt).not.toContain('sem texto legível');
-    expect(prompt).toContain('Regras: sem logotipos e sem preços.');
-  });
-
-  it('R32: a regra vale sobre a mensagem original, e não sobre a paráfrase do modelo', () => {
-    const prompt = buildEditPrompt({
-      request: 'uma placa de madeira',
-      original: 'coloca uma placa dizendo Feliz Páscoa',
-      remove: false,
-      knownElements: [],
-    });
-    expect(prompt).toContain('Regras: sem logotipos e sem preços.');
-    expect(
-      buildEditPrompt({
-        request: 'uma placa com o nome do mercado',
-        original: 'coloca uma placa',
-        remove: false,
-        knownElements: [],
-      }),
-    ).toContain('sem texto legível');
-  });
-
-  it.each(['uma frase na placa', 'com palavras escritas', 'um texto na faixa'])(
-    'pedido que fala em texto (%s) tira só a regra de texto',
-    (request) => {
-      expect(edit(request)).not.toContain('sem texto legível');
-      expect(edit(request)).toContain('sem preços');
-    },
-  );
-});
-
-describe('buildGlobalPrompt e buildTransparentPrompt', () => {
+describe('buildGlobalPrompt', () => {
   it('Prompt do ajuste geral: sem composição por faixas nem porcentagens de zona', () => {
     const prompt = buildGlobalPrompt({ request: 'deixa tudo mais quente' });
     expect(prompt).toContain('"deixa tudo mais quente"');
     expect(prompt).toContain('única e contínua');
     expect(prompt).toContain('sem texto legível');
     for (const banned of BANNED) expect(prompt).not.toMatch(banned);
-  });
-
-  it('o "adicionar" pede o item isolado com fundo transparente', () => {
-    const prompt = buildTransparentPrompt('balão de ar quente');
-    expect(prompt).toContain('balão de ar quente');
-    expect(prompt).toContain('fundo totalmente transparente');
-    expect(prompt).toContain('sem logotipos');
   });
 });
 

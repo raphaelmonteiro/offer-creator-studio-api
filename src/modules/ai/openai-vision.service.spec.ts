@@ -25,7 +25,7 @@ describe('OpenAiVisionService', () => {
   beforeEach(() => jest.spyOn(console, 'log').mockImplementation(() => undefined));
   afterEach(() => jest.restoreAllMocks());
 
-  it('envia as duas imagens com detail low, JSON e reasoning_effort low, sem retry do SDK', async () => {
+  it('envia as duas imagens inteiras em JPEG com detail high, JSON e reasoning_effort low, sem retry do SDK', async () => {
     const { service, create } = build();
     create.mockReturnValue({
       withResponse: async () => ({
@@ -49,14 +49,28 @@ describe('OpenAiVisionService', () => {
     });
     const content = body.messages[0].content;
     expect(content[0]).toEqual({ type: 'text', text: 'compare' });
-    expect(content[1].image_url.detail).toBe('low');
-    expect(content[2].image_url.detail).toBe('low');
-    expect(content[1].image_url.url).toMatch(/^data:image\/png;base64,/);
+    expect(content[1].image_url.detail).toBe('high');
+    expect(content[2].image_url.detail).toBe('high');
+    expect(content[1].image_url.url).toMatch(/^data:image\/jpeg;base64,/);
     expect(result).toMatchObject({
       text: '{"mudou":"x","atendeu":"sim"}',
       usage: { prompt_tokens: 10, completion_tokens: 5 },
       requestId: 'req_1',
     });
+  });
+
+  it('primeira imagem da cena: só a imagem DEPOIS vai, sem ANTES', async () => {
+    const { service, create } = build();
+    create.mockReturnValue({
+      withResponse: async () => ({
+        data: { choices: [{ message: { content: '{}' } }] },
+        response: { headers: { get: () => null } },
+      }),
+    });
+    await service.compare({ ...INPUT, before: undefined });
+    const content = create.mock.calls[0][0].messages[0].content;
+    expect(content).toHaveLength(2);
+    expect(content[1].image_url.detail).toBe('high');
   });
 
   it('modelo fora da família gpt-6 não leva reasoning_effort', async () => {

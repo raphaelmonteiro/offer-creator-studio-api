@@ -26,7 +26,6 @@ import { MockSceneImageProvider } from '../providers/mock-scene-image.provider';
 import { SCENE_IMAGE_PROVIDER } from '../providers/scene-image-provider';
 import { MockSceneVisionClient } from '../providers/mock-scene-vision.client';
 import { SCENE_VISION_CLIENT } from '../providers/scene-vision-client';
-import { SceneImageService } from '../services/scene-image.service';
 import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
@@ -106,7 +105,6 @@ export async function createSceneE2eApp(
       SceneTurnState,
       SceneTurnSupport,
       SceneCallRunner,
-      SceneImageService,
       SceneVisionService,
       SceneRedrawHandler,
       SceneTurnProcessor,
