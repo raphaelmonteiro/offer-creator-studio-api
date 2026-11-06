@@ -36,8 +36,11 @@ export async function closeCallIn(
 ): Promise<void> {
   const { scene, version } = target;
   const cost = outcome.costUsd ?? 0;
+  // G7: resposta paga sem custo conhecido nunca soma zero sem marca.
+  const costUnknown = outcome.status === 'done' && outcome.costUsd === null;
   version.metrics = {
     ...version.metrics,
+    ...(costUnknown ? { costUnknown: true } : {}),
     calls: (version.metrics.calls ?? []).map((call) =>
       call.id === callId
         ? {

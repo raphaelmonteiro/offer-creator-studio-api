@@ -108,6 +108,21 @@ describeIfSceneDb(
       expect((await sceneOf(scene.id)).totalCostUsd).toBe(0.1365);
     });
 
+    it('Resposta sem usage: o turno segue, metrics.costUnknown fica verdadeiro e há erro no log', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { provider } = fakeProvider(() => okResult(null));
+      const { scene, version } = await queuedScene('sem usage');
+
+      await processorWith(provider).process(job(scene.id, version.id));
+
+      const done = await versionOf(version.id);
+      expect(done.status).toBe('ready');
+      expect(done.metrics.costUnknown).toBe(true);
+      expect(done.providerCostUsd).toBe(0);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('Custo desconhecido'));
+      error.mockRestore();
+    });
+
     it.each([
       ['PROVIDER_QUOTA', 'sem saldo'],
       ['PROVIDER_CONTENT_POLICY', 'Descreva a cena de outro jeito'],

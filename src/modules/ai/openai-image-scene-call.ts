@@ -6,8 +6,10 @@ import {
 import { OPENAI_NO_SDK_RETRY } from '../../shared/providers/openai-errors';
 import {
   estimateCostUsd,
+  hasConfirmedPrice,
   ImageUsage,
   validateImageBackground,
+  validateImageMarkup,
   validateImageMask,
   validateImageQuality,
   validateImageSize,
@@ -55,9 +57,14 @@ export interface SceneRequestExtras {
   background?: string;
   /** Edição com máscara por JSON (`images` + `mask`). */
   mask?: boolean;
+  /** Edição com `markup` (multipart). */
+  markup?: boolean;
 }
 
-/** Recusa antes de qualquer rede: tamanho, qualidade, fundo ou máscara fora da tabela do modelo. */
+/**
+ * Recusa antes de qualquer rede: modelo pago sem preço conferido (G7: custo nunca vira zero), tamanho,
+ * qualidade, fundo, máscara ou `markup` fora da tabela do modelo.
+ */
 export function assertSceneRequestAllowed(
   model: string,
   size: string,
@@ -65,10 +72,14 @@ export function assertSceneRequestAllowed(
   extras: SceneRequestExtras = {},
 ): void {
   const problem =
+    (hasConfirmedPrice(model)
+      ? null
+      : `${model} não tem preço conferido na tabela de capacidades`) ??
     validateImageSize(model, size) ??
     validateImageQuality(model, quality) ??
     (extras.background ? validateImageBackground(model, extras.background) : null) ??
-    (extras.mask ? validateImageMask(model) : null);
+    (extras.mask ? validateImageMask(model) : null) ??
+    (extras.markup ? validateImageMarkup(model) : null);
   if (problem) throw new TerminalProviderError(problem, SCENE_INVALID_REQUEST_CODE);
 }
 

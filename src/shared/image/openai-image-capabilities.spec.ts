@@ -2,7 +2,9 @@ import {
   estimateCostUsd,
   findImageModelCapabilities,
   validateImageBackground,
+  validateImageMarkup,
   validateImageMask,
+  hasConfirmedPrice,
   validateImageQuality,
   validateImageSize,
 } from './openai-image-capabilities';
@@ -135,5 +137,45 @@ describe('capacidades da edição local (fundo transparente e máscara por JSON)
     expect(validateImageMask('gpt-image-2.5-sunburst')).toBeNull();
     expect(validateImageMask('gpt-image-1.5')).toMatch(/máscara/);
     expect(validateImageMask('modelo-novo')).toBeNull();
+  });
+});
+
+describe('gpt-image-2.6-sunburst (modelo da cena)', () => {
+  it('tem entrada própria, com preço 8/5/30, fonte e data', () => {
+    const capabilities = findImageModelCapabilities('gpt-image-2.6-sunburst');
+    expect(capabilities?.prefix).toBe('gpt-image-2.6-sunburst');
+    expect(capabilities?.prices).toEqual({ imageInput: 8, textInput: 5, imageOutput: 30 });
+    expect(capabilities?.priceSource).toContain('/models/gpt-image-2.6-sunburst');
+    expect(capabilities?.priceConsultedAt).toBe('2026-11-06');
+    expect(capabilities?.markup).toBe(true);
+  });
+
+  it('calcula custo pelo usage, sem null', () => {
+    const usage = {
+      output_tokens: 1000,
+      input_tokens_details: { image_tokens: 2000, text_tokens: 100 },
+    };
+    expect(estimateCostUsd('gpt-image-2.6-sunburst', usage)).toBe(0.0465);
+  });
+
+  it('aceita os tamanhos de impressão e 1920x3840', () => {
+    for (const size of ['1152x1440', '1920x3840', '2352x3504', '3520x2336']) {
+      expect(validateImageSize('gpt-image-2.6-sunburst', size)).toBeNull();
+    }
+  });
+
+  it('markup só onde foi conferido (modelo desconhecido não valida)', () => {
+    expect(validateImageMarkup('gpt-image-2.6-sunburst')).toBeNull();
+    expect(validateImageMarkup('gpt-image-2.5-sunburst')).toMatch(/markup/);
+    expect(validateImageMarkup('gpt-image-1.5')).toMatch(/markup/);
+    expect(validateImageMarkup('modelo-novo')).toBeNull();
+  });
+
+  it('preço conferido: só entradas com `prices`', () => {
+    expect(hasConfirmedPrice('gpt-image-2.6-sunburst')).toBe(true);
+    expect(hasConfirmedPrice('gpt-image-2.5-sunburst')).toBe(true);
+    expect(hasConfirmedPrice('gpt-image-2.6-flare')).toBe(false);
+    expect(hasConfirmedPrice('gpt-image-2.5-flare')).toBe(false);
+    expect(hasConfirmedPrice('modelo-novo')).toBe(false);
   });
 });

@@ -78,6 +78,7 @@ export class SceneCallRunner {
       await this.state.fail(ctx, failure.code);
       return null;
     }
+    if (result.costUsd === null) this.logUnknownCost(ctx, result);
     await this.recordCost(ctx, call.id, result);
     return result;
   }
@@ -137,6 +138,13 @@ export class SceneCallRunner {
         `Custo não gravado (cena ${ctx.sceneId}, versão ${ctx.versionId}, custo ${result.costUsd}, requisição ${result.requestId}): ${(error as Error).message}`,
       );
     }
+  }
+
+  /** Resposta paga sem `usage` (ou sem preço): o turno segue com `metrics.costUnknown` e erro no log. */
+  private logUnknownCost(ctx: TurnContext, result: SceneGenerateResult): void {
+    this.logger.error(
+      `Custo desconhecido (resposta sem usage): sceneId=${ctx.sceneId} versionId=${ctx.versionId} requisição=${result.requestId}`,
+    );
   }
 
   private logProviderFailure(ctx: TurnContext, failure: SceneProviderError): void {
