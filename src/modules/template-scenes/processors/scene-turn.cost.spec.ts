@@ -28,6 +28,8 @@ const judge = (): { client: SceneVisionClient; compare: jest.Mock } => {
       vistos: [],
       nao_vistos: [],
       texto_na_imagem: false,
+      emenda: false,
+      emenda_descricao: '',
     }),
     usage: { prompt_tokens: 3000, completion_tokens: 200 },
     requestId: 'req_judge',
