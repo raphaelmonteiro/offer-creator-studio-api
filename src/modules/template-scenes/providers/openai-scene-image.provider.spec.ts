@@ -134,6 +134,43 @@ describe('OpenAiSceneImageProvider: edição e imagem transparente', () => {
     expect(JSON.stringify(editImage.mock.calls[1][0])).not.toContain('so-o-mock');
   });
 
+  it('Pedido com marcação: a master inteira e o markup vão ao serviço, sem mask', async () => {
+    const editImage = jest.fn().mockResolvedValue(OK);
+    const provider = new OpenAiSceneImageProvider(
+      { editImage } as unknown as OpenAiImageService,
+      new ConfigService({ OPENAI_TIMEOUT_MS: '60000' }),
+    );
+    const markup = Buffer.from('marcacao');
+
+    await provider.edit({ ...INPUT, size: '1152x1440', image: IMAGE, markup });
+
+    expect(editImage).toHaveBeenCalledWith({
+      feature: 'template-scene',
+      prompt: 'campo verde',
+      imageBuffer: IMAGE,
+      imageMimeType: 'image/png',
+      size: '1152x1440',
+      assetKind: 'template',
+      model: 'gpt-image-2.5-sunburst',
+      quality: 'high',
+      outputFormat: 'png',
+      background: 'opaque',
+      sceneCall: { timeoutMs: 60_000, correlationId: 'corr-1' },
+      markup: { buffer: markup },
+    });
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty('mask');
+  });
+
+  it('sem marcação o campo markup nem vai', async () => {
+    const editImage = jest.fn().mockResolvedValue(OK);
+    const provider = new OpenAiSceneImageProvider(
+      { editImage } as unknown as OpenAiImageService,
+      new ConfigService({}),
+    );
+    await provider.edit({ ...INPUT, image: IMAGE });
+    expect(editImage.mock.calls[0][0]).not.toHaveProperty('markup');
+  });
+
   it('ajuste geral: sem máscara, o campo mask nem vai', async () => {
     const editImage = jest.fn().mockResolvedValue(OK);
     const provider = new OpenAiSceneImageProvider(

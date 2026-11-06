@@ -13,6 +13,7 @@ import {
 
 const DEFAULT_LATENCY_MS = 20_000;
 const DEFAULT_SLOW_MS = 3_000;
+const MAX_RECORDED_EDITS = 20;
 
 /** Marcadores no prompt que simulam falha ou lentidão do provedor. */
 export const MOCK_MARKERS = {
@@ -41,12 +42,16 @@ const color = (hash: Buffer, offset: number): string =>
  * formas, determinístico pelo hash do prompt, exatamente no tamanho pedido. A latência vem de
  * `TEMPLATE_SCENE_MOCK_LATENCY_MS` (20000; 0 nos testes), e os marcadores `#falha-quota`,
  * `#falha-timeout`, `#falha-conteudo` e `#lento` simulam os caminhos de erro. A edição pinta uma cor
- * sólida na forma S (`paintMask`; sem ela, na área da máscara) (o resto fica byte a byte igual), então o diff é real; `#sem-mudanca`
- * devolve o recorte intacto. O "adicionar" devolve um balão sobre fundo transparente.
+ * sólida na forma S (`paintMask`; sem ela, na área da máscara) (o resto fica byte a byte igual), então o diff é real; sem máscara (a
+ * edição da imagem inteira, com ou sem `markup`) tinge a imagem toda, e o `markup` recebido fica em `edits`; `#sem-mudanca`
+ * devolve a imagem intacta. O "adicionar" devolve um balão sobre fundo transparente.
  */
 @Injectable()
 export class MockSceneImageProvider implements SceneImageProvider {
   readonly name = 'mock' as const;
+
+  /** As últimas edições recebidas, com o `markup` (se houve): serve aos testes, nunca vai ao cliente. */
+  readonly edits: Array<{ prompt: string; size: string; markup: Buffer | null }> = [];
 
   constructor(
     private readonly config: ConfigService,
@@ -68,6 +73,7 @@ export class MockSceneImageProvider implements SceneImageProvider {
   async edit(input: SceneEditInput): Promise<SceneGenerateResult> {
     const startedAt = Date.now();
     await this.beforeCall(input);
+    this.record(input);
     const hash = this.hashOf(input);
     if (input.prompt.includes(MOCK_MARKERS.noChange)) {
       return this.result(hash, input.image, startedAt);
@@ -101,6 +107,11 @@ export class MockSceneImageProvider implements SceneImageProvider {
 </svg>`;
     const buffer = await sharp(Buffer.from(svg)).png().toBuffer();
     return this.result(hash, buffer, startedAt);
+  }
+
+  private record(input: SceneEditInput): void {
+    this.edits.push({ prompt: input.prompt, size: input.size, markup: input.markup ?? null });
+    if (this.edits.length > MAX_RECORDED_EDITS) this.edits.shift();
   }
 
   /** Latência simulada e falhas por marcador, iguais para as três operações. */

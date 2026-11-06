@@ -25,14 +25,16 @@ export interface SceneGenerateResult {
 }
 
 export interface SceneEditInput extends SceneGenerateInput {
-  /** PNG enviado: o recorte da edição local, ou a master inteira no ajuste geral. */
+  /** PNG enviado: a master inteira da versão atual, no tamanho nativo. */
   image: Buffer;
-  /** PNG da máscara (alfa 255 = editar) do tamanho de `image`; ausente no ajuste geral. */
-  mask?: Buffer;
   /**
-   * PNG (alfa 255 = pintar) do tamanho de `image` com só a forma S. Serve ao provedor `mock`, para não
-   * pintar a faixa R \ S (PV-30); o provedor `openai` ignora o campo e o corpo enviado não muda.
+   * Camada de marcação: PNG transparente do tamanho de `image` com o contorno da forma marcada. Ausente
+   * quando o cliente não marcou nada (o código nunca gera marcação sozinho).
    */
+  markup?: Buffer;
+  /** @deprecated Edição recortada; sai com a task 1.18 (D-22). */
+  mask?: Buffer;
+  /** @deprecated Edição recortada; sai com a task 1.18 (D-22). */
   paintMask?: Buffer;
 }
 

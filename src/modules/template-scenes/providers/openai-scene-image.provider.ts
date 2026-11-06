@@ -74,7 +74,7 @@ export class OpenAiSceneImageProvider implements SceneImageProvider {
     );
   }
 
-  /** Edição com máscara (JSON, M3) ou sem ela (multipart, ajuste geral); sempre PNG opaco. */
+  /** Edição da imagem inteira, com `markup` (multipart) quando o cliente marcou; sempre PNG opaco. */
   async edit(input: SceneEditInput): Promise<SceneGenerateResult> {
     return this.run(() =>
       this.images.editImage({
@@ -90,6 +90,7 @@ export class OpenAiSceneImageProvider implements SceneImageProvider {
         background: 'opaque',
         sceneCall: this.sceneCall(input),
         ...(input.mask ? { mask: { buffer: input.mask } } : {}),
+        ...(input.markup ? { markup: { buffer: input.markup } } : {}),
       }),
     );
   }
