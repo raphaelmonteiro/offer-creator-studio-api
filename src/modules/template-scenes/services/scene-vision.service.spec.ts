@@ -105,7 +105,7 @@ describe('SceneVisionService', () => {
     expect(await service.assess(input())).toMatchObject({
       ok: true,
       satisfied: 'sim',
-      costUsd: null,
+      costUsd: 0,
     });
     expect(await service.assess(input(`x ${MOCK_VISION_MARKERS.fail}`))).toMatchObject({
       ok: false,
@@ -126,6 +126,16 @@ describe('visionCostUsd e buildVisionPrompt', () => {
     expect(visionCostUsd('gpt-6-luna', null)).toBeNull();
     expect(visionCostUsd('gpt-6-luna', {})).toBeNull();
     expect(visionCostUsd('outro', { prompt_tokens: 10 })).toBeNull();
+  });
+
+  it('com detail high a entrada é maior e o mesmo cálculo conta o cache de entrada', () => {
+    expect(
+      visionCostUsd('gpt-6-luna', {
+        prompt_tokens: 3000,
+        completion_tokens: 200,
+        prompt_tokens_details: { cached_tokens: 2000 },
+      }),
+    ).toBe(0.00022);
   });
 
   it('o pedido entra literal, sem quebras de linha', () => {

@@ -17,7 +17,12 @@ export class MockSceneVisionClient {
   async compare(input: VisionCompareInput): Promise<VisionCompareResult> {
     if (input.prompt.includes(MOCK_VISION_MARKERS.fail))
       throw new Error('Mock: visão indisponível');
-    return { text: this.answer(input.prompt), usage: null, requestId: 'mock-vision', latencyMs: 0 };
+    return {
+      text: this.answer(input.prompt),
+      usage: { prompt_tokens: 0, completion_tokens: 0 },
+      requestId: 'mock-vision',
+      latencyMs: 0,
+    };
   }
 
   private answer(prompt: string): string {

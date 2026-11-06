@@ -14,7 +14,7 @@ describe('MockSceneVisionClient', () => {
   it('responde que atendeu, sem custo', async () => {
     const result = await compare('Pedido: "deixa o sol laranja".');
     expect(JSON.parse(result.text)).toMatchObject({ atendeu: 'sim' });
-    expect(result.usage).toBeNull();
+    expect(result.usage).toEqual({ prompt_tokens: 0, completion_tokens: 0 });
   });
 
   it('#visao-nao: responde que o pedido não foi atendido', async () => {

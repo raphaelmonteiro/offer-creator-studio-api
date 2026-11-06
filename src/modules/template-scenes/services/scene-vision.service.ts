@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SCENE_VISION_CLIENT, SceneVisionClient } from '../providers/scene-vision-client';
+import { llmCostUsd } from '../../ai/openai-llm-pricing';
 import { VisionUsage } from '../../ai/openai-vision.service';
 
 export const DEFAULT_VISION_MODEL = 'gpt-6-luna';
@@ -27,23 +28,11 @@ export type VisionAssessment =
     };
 
 /**
- * Preços de entrada e saída por 1 M de tokens (USD) do modelo de visão. Fonte:
- * https://developers.openai.com/api/docs/models/gpt-6-luna, consultada em 2026-11-02 (preço de
- * `scripts/template-scene-spike.prices.json`). Modelo sem preço conferido: custo `null`.
+ * Custo da chamada de visão (e do Diretor): o cálculo é o mesmo, com cache de entrada e escrita em cache
+ * (`openai-llm-pricing.ts`). Modelo sem preço conferido ou sem `usage`: `null`.
  */
-const VISION_PRICES: Record<string, { input: number; output: number }> = {
-  'gpt-6-luna': { input: 0.1, output: 0.5 },
-};
-
-const MILLION = 1_000_000;
-
 export function visionCostUsd(model: string, usage: VisionUsage | null): number | null {
-  const price = VISION_PRICES[model];
-  if (!price || !usage || usage.prompt_tokens === undefined) return null;
-  const cost =
-    ((usage.prompt_tokens ?? 0) * price.input + (usage.completion_tokens ?? 0) * price.output) /
-    MILLION;
-  return Math.round(cost * MILLION) / MILLION;
+  return llmCostUsd(model, usage);
 }
 
 /** Pedido ao modelo de visão: duas imagens (recorte antes e depois) e o pedido do cliente. */

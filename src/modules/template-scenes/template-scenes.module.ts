@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queue.service';
 import { SharedModule } from '../../shared/shared.module';
 import { AiModule } from '../ai/ai.module';
+import { OpenAiDirectorService } from '../ai/openai-director.service';
 import { OpenAiImageService } from '../ai/openai-image.service';
 import { OpenAiIntentService } from '../ai/openai-intent.service';
 import { OpenAiVisionService } from '../ai/openai-vision.service';
@@ -19,10 +20,15 @@ import { SceneLayerHandler } from './processors/scene-layer.handler';
 import { SceneTurnJob, SceneTurnProcessor } from './processors/scene-turn.processor';
 import { SceneTurnSupport } from './processors/scene-turn-support';
 import { SceneTurnState } from './processors/scene-turn-state';
+import {
+  createSceneDirectorClient,
+  SCENE_DIRECTOR_CLIENT,
+} from './providers/scene-director-client';
 import { createSceneImageProvider } from './providers/scene-image-provider.factory';
 import { SCENE_IMAGE_PROVIDER } from './providers/scene-image-provider';
 import { createSceneIntentClient, SCENE_INTENT_CLIENT } from './providers/scene-intent-client';
 import { createSceneVisionClient, SCENE_VISION_CLIENT } from './providers/scene-vision-client';
+import { SceneDirectorService } from './services/scene-director.service';
 import { SceneFilesService } from './services/scene-files.service';
 import { SceneImageService } from './services/scene-image.service';
 import { SceneIntentService } from './services/scene-intent.service';
@@ -74,6 +80,7 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneImageService,
     SceneVisionService,
     SceneIntentService,
+    SceneDirectorService,
     SceneGenerateHandler,
     SceneEditHandler,
     SceneLayerHandler,
@@ -89,6 +96,11 @@ import { TemplateScenesController } from './template-scenes.controller';
       provide: SCENE_INTENT_CLIENT,
       inject: [ConfigService, OpenAiIntentService],
       useFactory: createSceneIntentClient,
+    },
+    {
+      provide: SCENE_DIRECTOR_CLIENT,
+      inject: [ConfigService, OpenAiDirectorService],
+      useFactory: createSceneDirectorClient,
     },
     {
       provide: SCENE_VISION_CLIENT,

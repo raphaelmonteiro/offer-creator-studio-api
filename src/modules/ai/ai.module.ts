@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import { OpenAiImageService } from './openai-image.service';
+import { OpenAiDirectorService } from './openai-director.service';
 import { OpenAiIntentService } from './openai-intent.service';
 import { OpenAiVisionService } from './openai-vision.service';
 import { PixabayService } from './pixabay.service';
@@ -62,6 +63,7 @@ import { FlyerEanResolutionService } from './ean/dotcompany/flyer-ean-resolution
     OpenAiImageService,
     OpenAiVisionService,
     OpenAiIntentService,
+    OpenAiDirectorService,
     PixabayService,
     SpellCheckService,
     TemplateGenerateService,
@@ -116,6 +118,8 @@ import { FlyerEanResolutionService } from './ean/dotcompany/flyer-ean-resolution
     OpenAiVisionService,
     // usado pelo módulo de cenas de template (reconhecimento de intenção por texto, D-19)
     OpenAiIntentService,
+    // usado pelo módulo de cenas de template (Diretor, `/responses`)
+    OpenAiDirectorService,
     // usado pelo módulo de mascotes para recortar o fundo do PNG enviado
     BackgroundRemovalService,
   ],

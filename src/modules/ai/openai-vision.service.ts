@@ -18,6 +18,7 @@ export interface VisionCompareInput {
 export interface VisionUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
 }
 
 export interface VisionCompareResult {
