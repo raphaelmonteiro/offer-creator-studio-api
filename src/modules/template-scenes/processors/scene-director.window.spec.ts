@@ -2,6 +2,7 @@ import { Client } from 'pg';
 import { TEMPLATE_SCENE_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
+import { REDRAW_NOTICE } from '../scene-texts';
 import { directorPlan } from '../testing/scene-director-fixtures';
 import { directorAnswer, useDirectorHarness } from '../testing/scene-director-harness';
 import { describeIfSceneDb, SCENE_DB_URL } from '../testing/scene-test-db';
@@ -59,7 +60,9 @@ describeIfSceneDb('Janela de 5 s com Parar (banco chroma_x_e2e)', () => {
           startAfterSeconds: 5,
           expireInSeconds: 905,
         });
-        expect(await assistants(scene.id)).toEqual(['Vou fazer o que você pediu.']);
+        expect(await assistants(scene.id)).toEqual([
+          `Vou fazer o que você pediu. ${REDRAW_NOTICE}`,
+        ]);
         expect(version.updatedAt.getTime()).toBeGreaterThanOrEqual(before);
       },
     );

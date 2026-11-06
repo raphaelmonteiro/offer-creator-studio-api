@@ -8,7 +8,8 @@ import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
 import { cancelVersion, emitVersionEvent } from './scene-turn-finish';
-import { notAppliedReply, READY_REPLY } from '../scene-texts';
+import { READY_REPLY } from '../scene-texts';
+import { applyJudgeVerdict, JudgeBriefVerdict } from '../domain/scene-brief';
 
 export interface StoredFile {
   url: string;
@@ -26,11 +27,8 @@ export interface CompleteExtra {
   metrics?: Record<string, unknown>;
   /** Região alterada (a caixa de uma forma de pincel/laço), para o destaque na prévia. */
   requestedRegion?: Rect | null;
-  /**
-   * A visão disse que o pedido não foi atendido: a versão fica `ready` (restaurável), mas NÃO vira a
-   * atual. O custo já está na versão; a resposta informa a tentativa e o valor.
-   */
-  notApplied?: { changed: string };
+  /** O que o juiz viu e não viu da lista do que o cliente pediu: só ele fecha ou reabre um item (G9). */
+  judge?: JudgeBriefVerdict;
 }
 
 /** Imagem da versão: arquivos novos (master e prévia) ou a da versão de origem, sem copiar. */
@@ -97,22 +95,22 @@ export async function readyVersion(
   version.masterAssetId = ids.masterAssetId;
   version.previewAssetId = ids.previewAssetId;
   version.elements = extra.elements ?? target.parentElements;
-  version.metrics = {
-    ...version.metrics,
-    ...extra.metrics,
-    ...(extra.notApplied ? { notApplied: true } : {}),
-  };
+  version.metrics = { ...version.metrics, ...extra.metrics };
+  if (extra.judge) {
+    const judged = applyJudgeVerdict(scene.brief ?? [], extra.judge, new Date());
+    scene.brief = judged.brief;
+    version.metrics = { ...version.metrics, judgeBrief: judged.changes };
+  }
   if (extra.requestedRegion !== undefined) version.requestedRegion = extra.requestedRegion;
   await manager.save(version);
-  if (!extra.notApplied) scene.currentVersionId = version.id;
+  // O resultado é sempre a versão atual, inclusive com o juiz reprovando (D-26): "Voltar para a anterior" é do cliente.
+  scene.currentVersionId = version.id;
   await pruneSceneAssets(manager, scene);
   await settleUserMessage(manager, version.id, 'done');
   await addAssistantMessage(manager, {
     sceneId: scene.id,
     versionId: version.id,
-    content: extra.notApplied
-      ? notAppliedReply(extra.notApplied.changed, version.providerCostUsd)
-      : (extra.reply ?? READY_REPLY),
+    content: extra.reply ?? READY_REPLY,
     status: 'done',
   });
   await bumpRevision(manager, scene);

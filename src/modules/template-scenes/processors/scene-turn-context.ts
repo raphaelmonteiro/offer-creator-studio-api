@@ -53,6 +53,8 @@ export interface TurnContext {
   parent: TurnParent | null;
   /** Textos dos itens em aberto da lista do que o cliente pediu, no momento da chamada (o juiz os confere depois). */
   openItems: Array<{ id: string; text: string }>;
+  /** Itens já dados como feitos (os mais recentes): o juiz confere se ainda aparecem depois do redesenho. */
+  doneItems: Array<{ id: string; text: string }>;
 }
 
 /** Monta o contexto do turno a partir da versão `queued` (leitura sob o lock da cena). */
@@ -84,6 +86,10 @@ export async function loadTurnContext(
     targetElementId: version.targetElementId,
     parent: await loadParent(manager, scene),
     openItems: openItems(scene.brief ?? []).map((item) => ({ id: item.id, text: item.text })),
+    doneItems: (scene.brief ?? [])
+      .filter((item) => item.status === 'done')
+      .slice(-10)
+      .map((item) => ({ id: item.id, text: item.text })),
   };
 }
 

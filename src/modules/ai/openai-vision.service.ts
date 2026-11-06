@@ -7,9 +7,9 @@ import { withAiLogging } from './utils/ai-telemetry.util';
 export interface VisionCompareInput {
   model: string;
   prompt: string;
-  /** PNG do recorte antes da edição. */
-  before: Buffer;
-  /** PNG do recorte depois da edição. */
+  /** JPEG da imagem inteira antes da edição; ausente na primeira imagem da cena. */
+  before?: Buffer;
+  /** JPEG da imagem inteira depois da edição. */
   after: Buffer;
   timeoutMs: number;
   correlationId: string;
@@ -29,11 +29,11 @@ export interface VisionCompareResult {
   latencyMs: number;
 }
 
-const dataUrl = (png: Buffer): string => `data:image/png;base64,${png.toString('base64')}`;
+const dataUrl = (jpeg: Buffer): string => `data:image/jpeg;base64,${jpeg.toString('base64')}`;
 
 /**
- * Pergunta ao modelo de visão (`chat.completions`) sobre duas imagens, antes e depois, com
- * `detail: low` e resposta em JSON. Uma só requisição, sem retentativa do SDK: o chamador decide o
+ * Pergunta ao modelo de visão (o juiz, `chat.completions`) sobre as imagens inteiras, antes e depois, com
+ * `detail: high` e resposta em JSON. Uma só requisição, sem retentativa do SDK: o chamador decide o
  * que fazer com a falha (na cena, a edição vale e a resposta sai das métricas).
  */
 @Injectable()
@@ -57,8 +57,12 @@ export class OpenAiVisionService {
           role: 'user',
           content: [
             { type: 'text', text: input.prompt },
-            { type: 'image_url', image_url: { url: dataUrl(input.before), detail: 'low' } },
-            { type: 'image_url', image_url: { url: dataUrl(input.after), detail: 'low' } },
+            ...[input.before, input.after]
+              .filter((image): image is Buffer => Boolean(image))
+              .map((image) => ({
+                type: 'image_url',
+                image_url: { url: dataUrl(image), detail: 'high' },
+              })),
           ],
         },
       ],

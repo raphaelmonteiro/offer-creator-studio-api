@@ -8,8 +8,8 @@ import { CompleteExtra, SceneTurnState, StoredFile, TurnContext } from './scene-
 
 const DEFAULT_MODEL = 'gpt-image-2.6-sunburst';
 const DEFAULT_QUALITY = 'high';
-/** Lado maior das imagens inteiras que vão à visão (ela lê em baixa resolução de qualquer jeito). */
-const VISION_EDGE = 1024;
+/** Lado maior das imagens inteiras que vão ao juiz (JPEG, `detail: high`, como no teste da Etapa 0). */
+const JUDGE_EDGE = 1536;
 
 /** Peças que os tratadores de cada operação compartilham: modelo, qualidade, disco e o fechamento da versão. */
 @Injectable()
@@ -43,11 +43,11 @@ export class SceneTurnSupport {
     }
   }
 
-  /** Reduz uma imagem inteira para a visão (`detail: low` lê em 512 px). */
-  thumbnail(png: Buffer): Promise<Buffer> {
+  /** Reduz uma imagem inteira para o juiz: JPEG até 1.536 px. */
+  judgeImage(png: Buffer): Promise<Buffer> {
     return sharp(png)
-      .resize({ width: VISION_EDGE, height: VISION_EDGE, fit: 'inside', withoutEnlargement: true })
-      .png()
+      .resize({ width: JUDGE_EDGE, height: JUDGE_EDGE, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
       .toBuffer();
   }
 

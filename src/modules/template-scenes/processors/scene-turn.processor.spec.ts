@@ -103,6 +103,7 @@ describeIfSceneDb(
       const done = await versionOf(version.id);
       expect(done.metrics.calls).toEqual([
         expect.objectContaining({ status: 'done', costUsd: 0.1365, requestId: 'req_1' }),
+        expect.objectContaining({ kind: 'vision', status: 'done', costUsd: 0, size: 'high' }),
       ]);
       expect(done.providerCostUsd).toBe(0.1365);
       expect(done.latencyMs).toBe(1234);
@@ -261,15 +262,17 @@ describeIfSceneDb(
           'version.step',
           'version.step',
           'version.step',
+          'version.step',
           'version.ready',
         ]);
         expect(mine.map((event) => event.step)).toEqual([
           'preparing',
           'generating',
+          'checking',
           'saving',
           'done',
         ]);
-        expect(mine[3].revision).toBeGreaterThan(0);
+        expect(mine[4].revision).toBeGreaterThan(0);
       } finally {
         await client.end();
       }

@@ -10,6 +10,9 @@ import { TemplateSceneMessage } from '../entities/template-scene-message.entity'
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { SceneCallRunner } from '../processors/scene-call-runner';
 import { SceneRedrawHandler } from '../processors/scene-redraw.handler';
+import { MockSceneVisionClient } from '../providers/mock-scene-vision.client';
+import { SceneVisionClient } from '../providers/scene-vision-client';
+import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneTurnProcessor } from '../processors/scene-turn.processor';
 import { SceneTurnSupport } from '../processors/scene-turn-support';
 import { SceneTurnState } from '../processors/scene-turn-state';
@@ -100,11 +103,19 @@ export function useProcessorHarness() {
   return Object.assign(h, {
     mock: (env: Record<string, string> = {}) => new MockSceneImageProvider(config(env)),
     /** Processor do job de imagem com o provedor dado. */
-    processorWith: (provider: SceneImageProvider, env: Record<string, string> = {}) => {
+    processorWith: (
+      provider: SceneImageProvider,
+      env: Record<string, string> = {},
+      visionClient: SceneVisionClient = new MockSceneVisionClient(),
+    ) => {
       const cfg = config(env);
       const support = new SceneTurnSupport(h.state, h.files, cfg);
       const calls = new SceneCallRunner(h.state, cfg);
-      return new SceneTurnProcessor(h.state, new SceneRedrawHandler(support, calls, provider));
+      const vision = new SceneVisionService(cfg, visionClient);
+      return new SceneTurnProcessor(
+        h.state,
+        new SceneRedrawHandler(support, calls, vision, provider),
+      );
     },
     /** Cena folheto 1920x3840 com uma versão `queued` e a mensagem do pedido. */
     async queuedScene(request: string, overrides: Partial<TemplateSceneVersion> = {}) {

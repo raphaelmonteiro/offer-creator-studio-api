@@ -15,6 +15,7 @@ import {
   currentVersionReply,
   MARKING_DISCARDED_NOTE,
   PAINTED_REFUSAL_REPLIES,
+  REDRAW_NOTICE,
   versionRestoredReply,
 } from '../scene-texts';
 import { DirectorContext } from '../services/scene-director-context';
@@ -272,6 +273,15 @@ export class SceneDirectorState {
     return current ? currentVersionReply(current) : null;
   }
 
+  /** Já houve aviso do redesenho nesta cena? É fato do banco: alguma versão com `metrics.notice = true`. */
+  private async alreadyNotified(manager: EntityManager, sceneId: string): Promise<boolean> {
+    const rows: unknown[] = await manager.query(
+      `SELECT 1 FROM template_scene_versions WHERE "sceneId" = $1 AND metrics->>'notice' = 'true' LIMIT 1`,
+      [sceneId],
+    );
+    return rows.length > 0;
+  }
+
   /** Grava o anúncio e o plano e publica o job de imagem, com `startAfterSeconds` quando há janela. */
   private async queueImage(
     target: { manager: EntityManager; scene: TemplateScene; version: TemplateSceneVersion },
@@ -291,15 +301,19 @@ export class SceneDirectorState {
       version.requestedRegion = null;
       version.requestedMask = null;
     }
-    await manager.save(version);
     await manager.save(scene);
-    const announcement = decision.discardMarking
-      ? `${decision.announcement} ${MARKING_DISCARDED_NOTE}`
-      : decision.announcement;
+    const notes: string[] = [];
+    if (decision.discardMarking) notes.push(MARKING_DISCARDED_NOTE);
+    if (decision.isEdit && !(await this.alreadyNotified(manager, scene.id))) {
+      // D-35: o aviso fica gravado com a versão do anúncio, antes da janela, então "Parar" não o repete.
+      notes.push(REDRAW_NOTICE);
+      version.metrics = { ...version.metrics, notice: true };
+    }
+    await manager.save(version);
     await addAssistantMessage(manager, {
       sceneId: scene.id,
       versionId: version.id,
-      content: announcement,
+      content: [decision.announcement, ...notes].join(' '),
       status: 'done',
     });
     const jobId = await this.queue.publish(

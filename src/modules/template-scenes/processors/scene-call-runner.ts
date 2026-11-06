@@ -26,7 +26,7 @@ export type OptionalCall<T> =
  * Executa as chamadas pagas do turno com as garantias do estágio 3 (R10) e do disjuntor:
  * - a tentativa é gravada ANTES da chamada e fechada depois com o custo (`usage`), por etapa;
  * - uma chamada de imagem barrada pelo limite falha a versão com `PAID_CALL_LIMIT`;
- * - a visão é opcional: se passar do limite, é pulada e a edição vale;
+ * - o juiz é opcional: se passar do limite, é pulado e a imagem vale (D-26);
  * - falha do provedor fecha a tentativa e a versão com o código classificado.
  */
 @Injectable()
@@ -88,7 +88,7 @@ export class SceneCallRunner {
     ctx: TurnContext,
     spec: { model: string; run: () => Promise<VisionAssessment> },
   ): Promise<OptionalCall<VisionAssessment>> {
-    const call = this.pending({ kind: 'vision', model: spec.model, size: 'low' });
+    const call = this.pending({ kind: 'vision', model: spec.model, size: 'high' });
     const reserved = await this.state.reserveCall(ctx, call, this.maxPaidCalls(), 'skip');
     if (reserved === 'cancelled') return { status: 'over' };
     if (reserved === 'limit') return { status: 'skipped' };

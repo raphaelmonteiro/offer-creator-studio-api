@@ -6,6 +6,10 @@ import {
   SceneGenerateResult,
   SceneImageProvider,
 } from '../providers/scene-image-provider';
+import { safeChanged } from '../domain/scene-director-phrases';
+import { JudgeBriefVerdict } from '../domain/scene-brief';
+import { afterImageReply, JudgeFacts } from '../scene-texts';
+import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneCallRunner } from './scene-call-runner';
 import { markupFor, MarkupInfo } from './scene-redraw-markup';
 import { buildGeneratePrompt, buildRedrawPrompt, planRequest, RedrawKind } from './scene-prompt';
@@ -33,6 +37,7 @@ export class SceneRedrawHandler implements TurnHandler {
   constructor(
     private readonly support: SceneTurnSupport,
     private readonly calls: SceneCallRunner,
+    private readonly vision: SceneVisionService,
     @Inject(SCENE_IMAGE_PROVIDER) private readonly provider: SceneImageProvider,
   ) {}
 
@@ -73,7 +78,10 @@ export class SceneRedrawHandler implements TurnHandler {
           correlationId: ctx.correlationId,
         }),
     });
-    if (result) await this.conclude(ctx, { result, prompt });
+    if (result) {
+      const before = ctx.parent ? await this.support.readMaster(ctx) : null;
+      await this.conclude(ctx, { result, prompt, plan, before });
+    }
   }
 
   private async redraw(ctx: TurnContext, plan: DirectorPlan): Promise<void> {
@@ -113,23 +121,88 @@ export class SceneRedrawHandler implements TurnHandler {
           ...(marking ? { markup: marking.png } : {}),
         }),
     });
-    if (result) await this.conclude(ctx, { result, prompt, marking });
+    if (result) await this.conclude(ctx, { result, prompt, plan, before: master, marking });
   }
 
-  /** Grava a imagem no tamanho nativo da cena; o resultado vira a versão atual. O juiz entra na task 1.17. */
+  /**
+   * Depois da imagem: grava no tamanho nativo, o juiz confere antes e depois inteiros com a mensagem, o plano e os
+   * itens em aberto, e o resultado vira a versão atual em todos os casos (D-26), inclusive com o juiz reprovando,
+   * parcial ou indisponível. O texto ao cliente sai do que o juiz conferiu, montado pelo código.
+   */
   private async conclude(
     ctx: TurnContext,
-    done: { result: SceneGenerateResult; prompt: string; marking?: MarkupInfo | null },
+    done: {
+      result: SceneGenerateResult;
+      prompt: string;
+      plan: DirectorPlan;
+      before: Buffer | null;
+      marking?: MarkupInfo | null;
+    },
   ): Promise<void> {
     const png = await sharp(done.result.buffer)
       .resize(ctx.widthPx, ctx.heightPx, { fit: 'fill' })
       .png()
       .toBuffer();
+    if (!(await this.support.state.advance(ctx, 'checking'))) return;
+    const judged = await this.judge(ctx, { ...done, after: png });
+    if (judged === 'over') return;
     await this.support.finishWithImage(ctx, png, {
+      reply: afterImageReply(judged.facts),
+      judge: judged.verdict,
       metrics: {
         prompt: done.prompt,
         ...(done.marking ? { markup: { kind: done.marking.kind, box: done.marking.box } } : {}),
+        judge: judged.record,
       },
     });
+  }
+
+  /** O juiz: fatos, veredito sobre a lista e o registro de auditoria; `'over'` se o turno já acabou (parada ou cena excluída). */
+  private async judge(
+    ctx: TurnContext,
+    input: { plan: DirectorPlan; before: Buffer | null; after: Buffer },
+  ): Promise<
+    | 'over'
+    | { facts: JudgeFacts | null; verdict?: JudgeBriefVerdict; record: Record<string, unknown> }
+  > {
+    const call = await this.calls.visionCall(ctx, {
+      model: this.vision.model(),
+      run: async () =>
+        this.vision.assess({
+          message: ctx.request,
+          plan: input.plan,
+          openItems: ctx.openItems,
+          doneItems: ctx.doneItems,
+          hasBefore: Boolean(input.before),
+          before: input.before ? await this.support.judgeImage(input.before) : undefined,
+          after: await this.support.judgeImage(input.after),
+          correlationId: ctx.correlationId,
+        }),
+    });
+    if (call.status === 'over') return 'over';
+    if (call.status === 'skipped' || call.value.ok === false) {
+      return { facts: null, record: { available: false } };
+    }
+    const assessment = call.value;
+    const labelOf = new Map(
+      [...ctx.openItems, ...ctx.doneItems].map((item) => [item.id, item.text]),
+    );
+    return {
+      facts: {
+        satisfied: assessment.satisfied,
+        changed: safeChanged(assessment.changed),
+        missing: assessment.notSeen.map((id) => labelOf.get(id) as string).filter(Boolean),
+        textInImage: assessment.textInImage,
+      },
+      verdict: { seen: assessment.seen, notSeen: assessment.notSeen },
+      record: {
+        available: true,
+        satisfied: assessment.satisfied,
+        changed: assessment.changed,
+        seen: assessment.seen,
+        notSeen: assessment.notSeen,
+        textInImage: assessment.textInImage,
+      },
+    };
   }
 }
