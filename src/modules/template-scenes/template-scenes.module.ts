@@ -13,6 +13,8 @@ import { TemplateSceneMessage } from './entities/template-scene-message.entity';
 import { TemplateSceneVersion } from './entities/template-scene-version.entity';
 import { SceneAddElementHandler } from './processors/scene-add-element.handler';
 import { SceneCallRunner } from './processors/scene-call-runner';
+import { SceneDirectorJob, SceneDirectorProcessor } from './processors/scene-director.processor';
+import { SceneDirectorState } from './processors/scene-director-state';
 import { SceneEditHandler } from './processors/scene-edit.handler';
 import { SceneGenerateHandler } from './processors/scene-generate.handler';
 import { SceneLayerHandler } from './processors/scene-layer.handler';
@@ -79,6 +81,8 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneVisionService,
     SceneDirectorService,
     SceneDirectorContextService,
+    SceneDirectorState,
+    SceneDirectorProcessor,
     SceneGenerateHandler,
     SceneEditHandler,
     SceneLayerHandler,
@@ -107,23 +111,30 @@ export class TemplateScenesModule implements OnModuleInit {
     private readonly config: ConfigService,
     private readonly queue: AnimationQueueService,
     private readonly processor: SceneTurnProcessor,
+    private readonly directorProcessor: SceneDirectorProcessor,
     private readonly reconciler: SceneReconcilerService,
   ) {}
 
-  /** Consumer e reconciliador só no worker e com a flag da cena ligada. */
+  /** Consumers e reconciliador só no worker e com a flag da cena ligada. */
   async onModuleInit(): Promise<void> {
     if (this.config.get('TEMPLATE_SCENE_ENABLED') !== 'true') return;
     if (this.config.get('WORKER_ONLY') !== 'true') return;
     await this.queue.subscribe(
       QUEUES.TEMPLATE_SCENE_TURN,
-      this.concurrency(),
+      this.positiveInt('TEMPLATE_SCENE_CONCURRENCY', 1),
       (job: SceneTurnJob, jobId: string) => this.processor.process(job, jobId),
+    );
+    // O Diretor tem concorrência própria: não espera a imagem de outra cena (crítica S4).
+    await this.queue.subscribe(
+      QUEUES.TEMPLATE_SCENE_DIRECTOR,
+      this.positiveInt('TEMPLATE_SCENE_DIRECTOR_CONCURRENCY', 4),
+      (job: SceneDirectorJob, jobId: string) => this.directorProcessor.process(job, jobId),
     );
     this.reconciler.start();
   }
 
-  private concurrency(): number {
-    const value = Number(this.config.get<string>('TEMPLATE_SCENE_CONCURRENCY', '1'));
-    return Number.isFinite(value) && value >= 1 ? Math.floor(value) : 1;
+  private positiveInt(key: string, fallback: number): number {
+    const value = Number(this.config.get<string>(key, String(fallback)));
+    return Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback;
   }
 }

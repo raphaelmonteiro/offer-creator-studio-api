@@ -7,6 +7,34 @@ export const READY_REPLY =
 
 export const CANCELLED_REPLY = 'Geração cancelada.';
 
+/** Recusa de texto, preço e logo pintados (G3): a camada é o caminho exato. */
+export const PAINTED_REFUSAL_REPLIES = {
+  painted_text:
+    'Não pinto texto na imagem: o modelo de imagem erra letras. Texto fica exato como camada. Me diga o texto entre aspas e onde colocar, e eu o coloco como camada. Nada foi alterado.',
+  painted_price:
+    'Não pinto preço na imagem: o modelo de imagem erra números. Preço fica exato como texto em camada. Me diga o texto entre aspas e onde colocar, e eu o coloco como camada. Nada foi alterado.',
+  painted_logo:
+    'Não pinto a logo na imagem: ela fica exata como camada. Envie a logo pelo clipe e diga onde colocar, ou mantenha a camada que já está na cena. Nada foi alterado.',
+} as const;
+
+/** Composição que o plano pediu e o cliente não (G4): vira pergunta, sem imagem. */
+export const compositionQuestion = (labels: string[]): string =>
+  `Você quer ${labels.join(', ')} na imagem? Não incluo isso sem você pedir. Se quiser, me diga como. Nada foi alterado.`;
+
+/** Camada ou desfazer numa cena sem imagem. */
+export const NO_IMAGE_REPLY =
+  'Ainda não há imagem na cena. Descreva a imagem que quer gerar. Nada foi alterado.';
+
+/** Fato do sistema, não do modelo: a versão atual (D-23: o número exibido). */
+export const currentVersionReply = (displayNumber: number): string =>
+  `A versão atual é a ${displayNumber}.`;
+
+/** Resposta sobre a imagem: sempre apresentada como leitura do que o modelo vê. */
+export const askedAboutImageReply = (reply: string): string => `Pelo que vejo na imagem: ${reply}`;
+
+/** Marcação que não vale para imagem nova (`/images/generations` não recebe `markup`). */
+export const MARKING_DISCARDED_NOTE = 'A área marcada não vale para uma imagem nova.';
+
 /** Respostas imediatas (sem job pago): o pedido não gera versão nova. */
 export const NEEDS_REGION_REPLY =
   'Marque a área na prévia (retângulo, pincel ou laço) para eu saber onde mudar. Nada foi alterado.';
