@@ -1,5 +1,6 @@
 import { fold } from '../../../shared/text/fold';
 import { DirectorRequest } from './scene-director-schema';
+import { hasWrittenNumber } from './scene-written-number';
 
 /**
  * Memória do que o cliente pediu (G9): `template_scenes.brief`. O que foi pedido e ainda não apareceu na
@@ -64,7 +65,7 @@ export interface DirectorBriefContext {
 /**
  * Aplica os `requests` do Diretor. `open` sem item igual cria um item novo; `open` de item feito ou
  * desistido o reabre (o cliente pediu de novo); `drop` desiste do item (a citação já foi conferida).
- * Pedido repetido não duplica item.
+ * Pedido repetido não duplica item. `open` com ano, data ou número escrito é ignorado (D-42).
  */
 export function applyDirectorRequests(
   brief: BriefItem[],
@@ -75,6 +76,8 @@ export function applyDirectorRequests(
   const next = brief.map((item) => ({ ...item }));
   const updatedAt = ctx.now.toISOString();
   for (const request of requests) {
+    // Ano, data e número escrito não abrem pedido (D-42): o juiz relataria "Ainda não vi na imagem: 2027".
+    if (request.action === 'open' && hasWrittenNumber(request.text, { removal: true })) continue;
     const found = findItem(next, request);
     if (request.action === 'drop') {
       if (found && found.status !== 'dropped') {

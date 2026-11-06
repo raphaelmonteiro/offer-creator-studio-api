@@ -26,7 +26,7 @@ const collapse = (text: string): string => text.replace(/\s+/g, ' ').trim();
 const folded = (text: string): string => collapse(fold(text));
 
 /** Palavras de ligação que não provam que o cliente falou do assunto. */
-const FUNCTION_WORDS = new Set([
+export const FUNCTION_WORDS = new Set([
   'de',
   'da',
   'do',

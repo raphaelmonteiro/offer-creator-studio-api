@@ -52,6 +52,16 @@ describe('scene-brief', () => {
       expect(changes).toEqual({ opened: ['p1'], dropped: [], closed: [], reopened: [] });
     });
 
+    it('Pedido com ano não fica em aberto: ano, data e número escrito não abrem item, e "tira o 2027" abre', () => {
+      const { brief, changes } = applyDirectorRequests(
+        [],
+        [open('indicação do ano 2027'), open('a data 12/04'), open('tira o 2027 do ovo')],
+        ctx(),
+      );
+      expect(brief.map((item) => item.text)).toEqual(['tira o 2027 do ovo']);
+      expect(changes.opened).toEqual(['p1']);
+    });
+
     it('os ids seguem a sequência, mesmo depois de itens feitos ou desistidos', () => {
       const done: BriefItem = { ...RIO, id: 'p3', status: 'done' };
       const { brief } = applyDirectorRequests([done], [open('mais ovos')], ctx('m2'));

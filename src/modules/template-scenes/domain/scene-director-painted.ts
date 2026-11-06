@@ -1,5 +1,6 @@
 import { fold } from '../../../shared/text/fold';
 import { DirectorPlan, PaintedRefusal } from './scene-director-schema';
+import { hasWrittenNumber } from './scene-written-number';
 
 /**
  * Validação 4 (G3): texto, preço e logo nunca são pintados pelo modelo de imagem. Se `what_to_put` traz
@@ -45,10 +46,12 @@ export function enforcePaintedRefusal(plan: DirectorPlan): DirectorPlan {
 }
 
 /**
- * Textos de pedidos em aberto que podem ir ao modelo de imagem (G3). Um item que fala em texto, preço ou logo
+ * Textos de pedidos em aberto que podem ir ao modelo de imagem (G3, D-42: também sem ano, data ou número). Um item que fala em texto, preço ou logo
  * continua na lista, mas não entra no prompt nem na instrução do "marquei": "tirar o preço" é pedido válido, então
  * o plano não é recusado por isso, só o item deixa de chegar ao gerador.
  */
 export function promptableTexts(texts: string[]): string[] {
-  return texts.filter((text) => paintedKindOf(text) === null);
+  return texts.filter(
+    (text) => paintedKindOf(text) === null && !hasWrittenNumber(text, { removal: true }),
+  );
 }

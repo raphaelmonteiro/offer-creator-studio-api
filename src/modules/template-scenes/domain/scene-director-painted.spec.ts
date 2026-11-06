@@ -114,3 +114,17 @@ describe('Item em aberto com conteúdo pintado (C-2)', () => {
     expect(promptableTexts([])).toEqual([]);
   });
 });
+
+describe('Pedido com ano não fica em aberto (D-42)', () => {
+  it('o item com ano, data ou número escrito sai do prompt, e "tira o 2027", "3 coelhos" e "ano novo" ficam', () => {
+    expect(
+      promptableTexts([
+        'indicação do ano 2027',
+        'a data 12/04 no rodapé',
+        'tira o 2027 do ovo',
+        'coloca 3 coelhos',
+        'tema de ano novo',
+      ]),
+    ).toEqual(['tira o 2027 do ovo', 'coloca 3 coelhos', 'tema de ano novo']);
+  });
+});
