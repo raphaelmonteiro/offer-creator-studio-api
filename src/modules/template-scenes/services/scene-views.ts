@@ -153,7 +153,7 @@ export function restorableState(
 }
 
 const isNewImage = (version: Pick<TemplateSceneVersion, 'metrics'>): boolean =>
-  (version.metrics?.plan as { operation?: string } | undefined)?.operation === 'new_image';
+  (version.metrics?.plan as { turn_kind?: string } | undefined)?.turn_kind === 'imagem_nova';
 
 const iso = (date: Date | null): string | null => (date ? date.toISOString() : null);
 

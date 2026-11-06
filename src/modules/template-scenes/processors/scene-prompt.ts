@@ -130,22 +130,22 @@ export function buildTransparentPrompt(subject: string): string {
 
 /** Campos curtos do plano do Diretor que entram no prompt; o Diretor nunca escreve o prompt (G2). */
 export interface PromptPlanFields {
-  what_to_change: string;
-  what_to_put: string;
-  inventory_keep: string[];
+  what_to_change?: string;
+  what_to_put?: string;
+  inventory_keep?: string[];
 }
 
 /** `instr`: o que muda e o que fica no lugar, sem pontuação final. */
 export function planInstruction(plan: PromptPlanFields): string {
   const parts = [plan.what_to_change, plan.what_to_put]
-    .map((part) => cleanRequest(part).replace(/[.!;]+$/, ''))
+    .map((part) => cleanRequest(part ?? '').replace(/[.!;]+$/, ''))
     .filter(Boolean);
   return parts.join('; ');
 }
 
 /** `mant`: o que precisa continuar como está, ou vazio. */
 export function planKeepSentence(plan: PromptPlanFields): string {
-  const names = plan.inventory_keep.map((name) => cleanRequest(name)).filter(Boolean);
+  const names = (plan.inventory_keep ?? []).map((name) => cleanRequest(name)).filter(Boolean);
   return names.length ? ` Mantenha como estão: ${names.join(', ')}.` : '';
 }
 

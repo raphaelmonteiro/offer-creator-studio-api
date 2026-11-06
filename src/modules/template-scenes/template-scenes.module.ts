@@ -11,13 +11,10 @@ import { TemplateScene } from './entities/template-scene.entity';
 import { TemplateSceneAsset } from './entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from './entities/template-scene-message.entity';
 import { TemplateSceneVersion } from './entities/template-scene-version.entity';
-import { SceneAddElementHandler } from './processors/scene-add-element.handler';
 import { SceneCallRunner } from './processors/scene-call-runner';
 import { SceneDirectorJob, SceneDirectorProcessor } from './processors/scene-director.processor';
 import { SceneDirectorState } from './processors/scene-director-state';
-import { SceneEditHandler } from './processors/scene-edit.handler';
-import { SceneGenerateHandler } from './processors/scene-generate.handler';
-import { SceneLayerHandler } from './processors/scene-layer.handler';
+import { SceneRedrawHandler } from './processors/scene-redraw.handler';
 import { SceneTurnJob, SceneTurnProcessor } from './processors/scene-turn.processor';
 import { SceneTurnSupport } from './processors/scene-turn-support';
 import { SceneTurnState } from './processors/scene-turn-state';
@@ -83,10 +80,7 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneDirectorContextService,
     SceneDirectorState,
     SceneDirectorProcessor,
-    SceneGenerateHandler,
-    SceneEditHandler,
-    SceneLayerHandler,
-    SceneAddElementHandler,
+    SceneRedrawHandler,
     SceneTurnProcessor,
     SceneReconcilerService,
     {

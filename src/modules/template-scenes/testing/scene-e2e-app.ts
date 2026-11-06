@@ -17,11 +17,8 @@ import { AnimationEventsService } from '../../../shared/events/animation-events.
 import { TemplateScenesGcRunner } from '../../../shared/gc/template-scenes-gc.runner';
 import { UploadsGcService } from '../../../shared/gc/uploads-gc.service';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
-import { SceneAddElementHandler } from '../processors/scene-add-element.handler';
 import { SceneCallRunner } from '../processors/scene-call-runner';
-import { SceneEditHandler } from '../processors/scene-edit.handler';
-import { SceneGenerateHandler } from '../processors/scene-generate.handler';
-import { SceneLayerHandler } from '../processors/scene-layer.handler';
+import { SceneRedrawHandler } from '../processors/scene-redraw.handler';
 import { SceneTurnProcessor } from '../processors/scene-turn.processor';
 import { SceneTurnSupport } from '../processors/scene-turn-support';
 import { SceneTurnState } from '../processors/scene-turn-state';
@@ -111,10 +108,7 @@ export async function createSceneE2eApp(
       SceneCallRunner,
       SceneImageService,
       SceneVisionService,
-      SceneGenerateHandler,
-      SceneEditHandler,
-      SceneLayerHandler,
-      SceneAddElementHandler,
+      SceneRedrawHandler,
       SceneTurnProcessor,
       { provide: SCENE_VISION_CLIENT, useValue: new MockSceneVisionClient() },
       SceneReconcilerService,

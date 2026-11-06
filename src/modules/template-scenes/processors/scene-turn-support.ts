@@ -6,7 +6,7 @@ import { SceneFilesService } from '../services/scene-files.service';
 import { buildSceneOutputs, SceneOutputs } from '../services/scene-output';
 import { CompleteExtra, SceneTurnState, StoredFile, TurnContext } from './scene-turn-state';
 
-const DEFAULT_MODEL = 'gpt-image-2.5-sunburst';
+const DEFAULT_MODEL = 'gpt-image-2.6-sunburst';
 const DEFAULT_QUALITY = 'high';
 /** Lado maior das imagens inteiras que vão à visão (ela lê em baixa resolução de qualquer jeito). */
 const VISION_EDGE = 1024;

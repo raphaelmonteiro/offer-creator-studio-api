@@ -8,18 +8,11 @@ import { DataSource } from 'typeorm';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { SceneAddElementHandler } from '../processors/scene-add-element.handler';
 import { SceneCallRunner } from '../processors/scene-call-runner';
-import { SceneEditHandler } from '../processors/scene-edit.handler';
-import { SceneGenerateHandler } from '../processors/scene-generate.handler';
-import { SceneLayerHandler } from '../processors/scene-layer.handler';
+import { SceneRedrawHandler } from '../processors/scene-redraw.handler';
 import { SceneTurnProcessor } from '../processors/scene-turn.processor';
 import { SceneTurnSupport } from '../processors/scene-turn-support';
 import { SceneTurnState } from '../processors/scene-turn-state';
-import { MockSceneVisionClient } from '../providers/mock-scene-vision.client';
-import { SceneVisionClient } from '../providers/scene-vision-client';
-import { SceneImageService } from '../services/scene-image.service';
-import { SceneVisionService } from '../services/scene-vision.service';
 import { MockSceneImageProvider } from '../providers/mock-scene-image.provider';
 import {
   SceneEditInput,
@@ -29,10 +22,11 @@ import {
 } from '../providers/scene-image-provider';
 import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
-import { SceneClassification } from '../domain/scene-operation.classifier';
+import { DirectorPlan } from '../domain/scene-director-schema';
 import { SceneElement } from '../domain/scene.types';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { buildSceneOutputs } from '../services/scene-output';
+import { directorPlan } from './scene-director-fixtures';
 import { insertAsset, insertMessage, insertScene, insertVersion } from './scene-fixtures';
 import { syntheticScenePng } from './synthetic-scene';
 import { deleteTestScenes, openSceneTestDb } from './scene-test-db';
@@ -105,24 +99,12 @@ export function useProcessorHarness() {
 
   return Object.assign(h, {
     mock: (env: Record<string, string> = {}) => new MockSceneImageProvider(config(env)),
-    /** Processor com todos os tratadores; a visão é o mock (sem custo) a menos que se passe outra. */
-    processorWith: (
-      provider: SceneImageProvider,
-      env: Record<string, string> = {},
-      visionClient: SceneVisionClient = new MockSceneVisionClient(),
-    ) => {
+    /** Processor do job de imagem com o provedor dado. */
+    processorWith: (provider: SceneImageProvider, env: Record<string, string> = {}) => {
       const cfg = config(env);
       const support = new SceneTurnSupport(h.state, h.files, cfg);
       const calls = new SceneCallRunner(h.state, cfg);
-      const vision = new SceneVisionService(cfg, visionClient);
-      const images = new SceneImageService(cfg);
-      return new SceneTurnProcessor(
-        h.state,
-        new SceneGenerateHandler(support, calls, vision, provider),
-        new SceneEditHandler(support, calls, images, vision, provider),
-        new SceneLayerHandler(support),
-        new SceneAddElementHandler(support, calls, provider),
-      );
+      return new SceneTurnProcessor(h.state, new SceneRedrawHandler(support, calls, provider));
     },
     /** Cena folheto 1920x3840 com uma versão `queued` e a mensagem do pedido. */
     async queuedScene(request: string, overrides: Partial<TemplateSceneVersion> = {}) {
@@ -132,6 +114,14 @@ export function useProcessorHarness() {
         number: 1,
         status: 'queued',
         ...overrides,
+        metrics: {
+          plan: directorPlan({
+            turn_kind: 'imagem_nova',
+            will_change_image: true,
+            what_to_put: request,
+          }),
+          ...overrides.metrics,
+        },
       });
       await insertMessage(h.dataSource, scene.id, {
         versionId: version.id,
@@ -166,11 +156,11 @@ export function useProcessorHarness() {
         previewAsset: made.previewAsset,
       };
     },
-    /** Versão `queued` filha da atual com o plano já classificado (o que o service grava ao enfileirar). */
-    async queueTurn(
+    /** Versão `queued` filha da atual, com o plano do Diretor já gravado (o que o consumer do Diretor deixa). */
+    async queueRedraw(
       scene: { id: string; currentVersionId: string | null },
       turn: {
-        plan: SceneClassification;
+        plan: DirectorPlan;
         request: string;
         number?: number;
         operation?: TemplateSceneVersion['operation'];
@@ -181,14 +171,10 @@ export function useProcessorHarness() {
       const version = await insertVersion(h.dataSource, scene.id, {
         number: turn.number ?? 2,
         status: 'queued',
-        operation:
-          turn.operation ??
-          (turn.plan.operation === 'global_regenerate'
-            ? 'generate'
-            : (turn.plan.operation as TemplateSceneVersion['operation'])),
+        operation: turn.operation ?? 'redraw',
         parentVersionId: scene.currentVersionId,
-        metrics: { plan: turn.plan },
         ...turn.overrides,
+        metrics: { plan: turn.plan, ...turn.overrides?.metrics },
       });
       await insertMessage(h.dataSource, scene.id, {
         versionId: version.id,

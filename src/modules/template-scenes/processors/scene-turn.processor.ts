@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SceneFailureCode } from '../domain/scene.types';
-import { SceneAddElementHandler } from './scene-add-element.handler';
-import { SceneEditHandler } from './scene-edit.handler';
-import { SceneGenerateHandler } from './scene-generate.handler';
-import { SceneLayerHandler } from './scene-layer.handler';
+import { SceneRedrawHandler } from './scene-redraw.handler';
 import { TurnHandler } from './scene-turn-handler';
 import { SceneTurnState, TurnContext } from './scene-turn-state';
 
@@ -29,10 +26,7 @@ export class SceneTurnProcessor {
 
   constructor(
     private readonly state: SceneTurnState,
-    private readonly generate: SceneGenerateHandler,
-    private readonly edit: SceneEditHandler,
-    private readonly layer: SceneLayerHandler,
-    private readonly addElement: SceneAddElementHandler,
+    private readonly redraw: SceneRedrawHandler,
   ) {}
 
   async process(job: SceneTurnJob, jobId?: string): Promise<void> {
@@ -54,16 +48,21 @@ export class SceneTurnProcessor {
   }
 
   private handlerFor(ctx: TurnContext): TurnHandler {
-    switch (ctx.plan?.operation) {
-      case 'local_edit':
-        return this.edit;
-      case 'set_layer':
-        return this.layer;
-      case 'add_element':
-        return this.addElement;
+    switch (ctx.operation) {
+      case 'generate':
+      case 'redraw':
+        return this.redraw;
       default:
-        return this.generate;
+        // Job antigo na fila: hoje o `default` geraria imagem para uma operação que não existe mais.
+        return { run: (turn) => this.failWithoutCall(turn) };
     }
+  }
+
+  private async failWithoutCall(ctx: TurnContext): Promise<void> {
+    this.logger.error(
+      `Operação "${ctx.operation}" não é mais processada (versão ${ctx.versionId}): falha sem chamada paga`,
+    );
+    await this.state.fail(ctx, 'PROVIDER_ERROR');
   }
 
   /** Último recurso: marca a versão como falha; se nem isso der, o reconciliador resolve. */

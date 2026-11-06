@@ -43,6 +43,9 @@ export const SCENE_FORMATS: Readonly<Record<string, SceneFormatSpec>> = Object.f
   ]),
 );
 
+/** Ids dos formatos de impressão aceitos na cena. */
+export const SCENE_FORMAT_IDS: readonly string[] = Object.keys(SCENE_FORMATS);
+
 /** Formato da lista, ou `null` para id inexistente, spread ou social. */
 export function findSceneFormat(formatId: string): SceneFormatSpec | null {
   return Object.prototype.hasOwnProperty.call(SCENE_FORMATS, formatId)

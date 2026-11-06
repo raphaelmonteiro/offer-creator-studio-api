@@ -12,6 +12,7 @@ import {
 } from '../testing/scene-fixtures';
 import { SCENE_DB_URL } from '../testing/scene-test-db';
 import { describeIfSceneDb } from '../testing/scene-test-db';
+import { directorPlan } from '../testing/scene-director-fixtures';
 import { useProcessorHarness } from '../testing/scene-processor-harness';
 
 describeIfSceneDb(
@@ -81,7 +82,7 @@ describeIfSceneDb(
         quality: 'high',
         correlationId: (await versionOf(version.id)).correlationId,
       });
-      expect(input.prompt).toContain('"pedido literal do cliente"');
+      expect(input.prompt).toContain('"pedido literal do cliente."');
       expect(input.prompt).toContain('sem texto legível');
     });
 
@@ -217,7 +218,11 @@ describeIfSceneDb(
       trackScene(scene.id);
       const ready = [];
       for (let n = 1; n <= 5; n++) ready.push(await insertReadyVersion(h.dataSource, scene, n));
-      const version = await insertVersion(h.dataSource, scene.id, { number: 6, status: 'queued' });
+      const version = await insertVersion(h.dataSource, scene.id, {
+        number: 6,
+        status: 'queued',
+        metrics: { plan: directorPlan({ turn_kind: 'imagem_nova', what_to_put: 'poda' }) },
+      });
       await insertMessage(h.dataSource, scene.id, { versionId: version.id, content: 'poda' });
 
       await processorWith(mock()).process(job(scene.id, version.id));

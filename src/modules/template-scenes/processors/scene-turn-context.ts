@@ -1,4 +1,4 @@
-import { EntityManager, In, IsNull } from 'typeorm';
+import { EntityManager, In } from 'typeorm';
 import {
   MaskShape,
   Rect,
@@ -7,7 +7,8 @@ import {
   SceneZones,
 } from '../domain/scene.types';
 import { sceneZonesFor } from '../domain/scene-formats';
-import { SceneClassification } from '../domain/scene-operation.classifier';
+import { openItems } from '../domain/scene-brief';
+import { DirectorPlan } from '../domain/scene-director-schema';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
@@ -44,15 +45,14 @@ export interface TurnContext {
   request: string;
   formatId: string;
   operation: SceneVersionOperation;
-  /** Classificação gravada ao enfileirar; `null` na geração simples (versões antigas). */
-  plan: SceneClassification | null;
+  /** O plano do Diretor, gravado em `metrics.plan` antes da janela; `null` em versão sem plano (job antigo). */
+  plan: DirectorPlan | null;
   requestedRegion: Rect | null;
   requestedMask: MaskShape | null;
   targetElementId: string | null;
   parent: TurnParent | null;
-  attachmentAssets: TurnAttachmentAsset[];
-  /** Pedido efetivo da geração `ready` mais recente (o tema que "gere outra imagem" não repete); só na imagem nova. */
-  originalRequest: string | null;
+  /** Textos dos itens em aberto da lista do que o cliente pediu, no momento da chamada (o juiz os confere depois). */
+  openItems: Array<{ id: string; text: string }>;
 }
 
 /** Monta o contexto do turno a partir da versão `queued` (leitura sob o lock da cena). */
@@ -65,7 +65,7 @@ export async function loadTurnContext(
     where: { versionId: version.id, role: 'user' },
     order: { createdAt: 'ASC' },
   });
-  const plan = (version.metrics.plan as SceneClassification | undefined) ?? null;
+  const plan = (version.metrics.plan as DirectorPlan | undefined) ?? null;
   return {
     sceneId: scene.id,
     versionId: version.id,
@@ -83,39 +83,8 @@ export async function loadTurnContext(
     requestedMask: version.requestedMask,
     targetElementId: version.targetElementId,
     parent: await loadParent(manager, scene),
-    attachmentAssets: await loadAttachments(manager, scene.id, message),
-    originalRequest:
-      plan?.operation === 'new_image' ? await loadOriginalRequest(manager, scene.id) : null,
+    openItems: openItems(scene.brief ?? []).map((item) => ({ id: item.id, text: item.text })),
   };
-}
-
-/**
- * Pedido efetivo da geração `ready` mais recente que o gravou (PV-33): `metrics.generationRequest`. O ajuste
- * geral também é `generate`, mas grava `globalInstruction`, então não conta (R39). Sem nenhuma (versões
- * antigas), cai na mensagem da primeira geração da cena, também `ready` (R30).
- */
-async function loadOriginalRequest(
-  manager: EntityManager,
-  sceneId: string,
-): Promise<string | null> {
-  const generations = await manager.find(TemplateSceneVersion, {
-    where: { sceneId, operation: 'generate', status: 'ready' },
-    order: { number: 'DESC' },
-  });
-  const recorded = generations
-    .map((version) => version.metrics.generationRequest)
-    .find((value) => typeof value === 'string' && value.trim());
-  if (typeof recorded === 'string' && recorded.trim()) return recorded;
-  const first = await manager.findOne(TemplateSceneVersion, {
-    where: { sceneId, operation: 'generate', parentVersionId: IsNull(), status: 'ready' },
-    order: { number: 'ASC' },
-  });
-  if (!first) return null;
-  const message = await manager.findOne(TemplateSceneMessage, {
-    where: { versionId: first.id, role: 'user' },
-    order: { createdAt: 'ASC' },
-  });
-  return message?.content ?? null;
 }
 
 async function loadParent(
@@ -138,7 +107,8 @@ async function loadParent(
   };
 }
 
-async function loadAttachments(
+/** Logos anexadas à mensagem, ainda em disco (as camadas pelo chat usam). */
+export async function loadAttachments(
   manager: EntityManager,
   sceneId: string,
   message: TemplateSceneMessage | null,

@@ -167,7 +167,7 @@ describe('métricas e alvo da edição na versão', () => {
   });
 
   it('Imagem nova: isNewImage vem do plano', () => {
-    const plan = { operation: 'new_image', instruction: 'x' };
+    const plan = { turn_kind: 'imagem_nova' };
     expect(toVersionView(version({ metrics: { plan } }), new Map()).isNewImage).toBe(true);
   });
 
