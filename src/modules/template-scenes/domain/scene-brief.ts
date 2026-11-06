@@ -1,6 +1,7 @@
 import { fold } from '../../../shared/text/fold';
 import { DirectorRequest } from './scene-director-schema';
 import { hasWrittenNumber } from './scene-written-number';
+import { mentionsWords, sameWholeWord, significantWords } from './scene-words';
 
 /**
  * Memória do que o cliente pediu (G9): `template_scenes.brief`. O que foi pedido e ainda não apareceu na
@@ -47,18 +48,31 @@ function nextId(brief: BriefItem[]): string {
   return `p${Math.max(0, ...numbers) + 1}`;
 }
 
-/** O pedido do Diretor aponta para qual item? Pelo id, ou (sem id) pelo mesmo texto ou texto contido. */
+/** Todas as palavras de `small` aparecem em `big`, por palavra inteira. */
+const coversWords = (small: string[], big: string[]): boolean =>
+  small.length > 0 && small.every((word) => big.some((other) => sameWholeWord(word, other)));
+
+/**
+ * O pedido do Diretor aponta para qual item? Pelo id, ou (sem id) pelo mesmo texto ou por palavras inteiras
+ * contidas num dos dois lados. Nunca por pedaço de palavra.
+ */
 function findItem(brief: BriefItem[], request: DirectorRequest): BriefItem | undefined {
   if (request.id) return brief.find((item) => item.id === request.id);
   const wanted = key(request.text);
+  const wantedWords = significantWords(request.text);
   return (
     brief.find((item) => key(item.text) === wanted) ??
-    brief.find((item) => key(item.text).includes(wanted) || wanted.includes(key(item.text)))
+    brief.find((item) => {
+      const words = significantWords(item.text);
+      return coversWords(wantedWords, words) || coversWords(words, wantedWords);
+    })
   );
 }
 
 export interface DirectorBriefContext {
   messageId: string;
+  /** A mensagem atual do cliente: só um pedido nela reabre um item feito ou desistido (R10). */
+  message: string;
   now: Date;
 }
 
@@ -95,6 +109,8 @@ export function applyDirectorRequests(
       });
       changes.opened.push(id);
     } else if (found.status !== 'open') {
+      // Só o juiz reabre item feito; o Diretor só reabre se o cliente pediu de novo na mensagem atual (R10).
+      if (!mentionsWords(request.text, ctx.message)) continue;
       Object.assign(found, { status: 'open', updatedAt, sourceMessageId: ctx.messageId });
       changes.reopened.push(found.id);
     }

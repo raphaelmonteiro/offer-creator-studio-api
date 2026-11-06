@@ -55,7 +55,7 @@ function validate(text: string, context: DirectorContext, final: boolean): Check
   const parsed = parseDirector(text, {
     message: context.script.message,
     clientMessages: context.clientMessages,
-    briefIds: context.briefIds,
+    briefItems: context.briefItems,
   });
   if (parsed.ok === false) return { reason: parsed.reason };
   const painted = checkPainted(parsed.plan, { final });

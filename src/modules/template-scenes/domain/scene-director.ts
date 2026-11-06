@@ -1,4 +1,5 @@
 import { fold } from '../../../shared/text/fold';
+import { FUNCTION_WORDS, mentionsWords } from './scene-words';
 import { DirectorPlan, directorSchema } from './scene-director-schema';
 
 export type {
@@ -16,47 +17,14 @@ export interface DirectorValidationContext {
   message: string;
   /** Todas as mensagens do cliente (inclusive a atual), em texto literal. */
   clientMessages: string[];
-  /** Ids da lista do que o cliente pediu (`brief`), para `drop` e reabertura. */
-  briefIds: string[];
+  /** A lista do que o cliente pediu (`brief`), para `drop` e reabertura. */
+  briefItems: Array<{ id: string; text: string }>;
 }
 
 export type DirectorParse = { ok: true; plan: DirectorPlan } | { ok: false; reason: string };
 
 const collapse = (text: string): string => text.replace(/\s+/g, ' ').trim();
 const folded = (text: string): string => collapse(fold(text));
-
-/** Palavras de ligação que não provam que o cliente falou do assunto. */
-export const FUNCTION_WORDS = new Set([
-  'de',
-  'da',
-  'do',
-  'das',
-  'dos',
-  'no',
-  'na',
-  'nos',
-  'nas',
-  'um',
-  'uma',
-  'uns',
-  'umas',
-  'ao',
-  'aos',
-  'em',
-  'com',
-  'por',
-  'para',
-  'pra',
-  'pro',
-  'que',
-  'se',
-  'ou',
-  'e',
-  'o',
-  'a',
-  'os',
-  'as',
-]);
 
 const tokens = (text: string): string[] =>
   fold(text)
@@ -106,13 +74,19 @@ function requestProblem(plan: DirectorPlan, ctx: DirectorValidationContext): str
     if (!mentionedByClient(request.text, ctx.clientMessages)) {
       return `pedido "${request.text}" sem palavra das mensagens do cliente`;
     }
-    if (request.id !== null && !ctx.briefIds.includes(request.id) && request.action === 'drop') {
+    const target =
+      request.id === null ? undefined : ctx.briefItems.find((item) => item.id === request.id);
+    if (request.id !== null && !target && request.action === 'drop') {
       return 'drop de pedido que não está na lista';
     }
     if (request.action !== 'drop') continue;
     const quote = request.quote ? folded(request.quote) : '';
     if (quote.length < 2 || !folded(ctx.message).includes(quote)) {
       return 'drop sem citação literal na mensagem atual';
+    }
+    // A citação tem de falar do item (R10): "de" numa mensagem qualquer não desiste de nada.
+    if (!mentionsWords(target?.text ?? request.text, request.quote ?? '')) {
+      return 'drop com citação que não fala do item';
     }
   }
   return null;

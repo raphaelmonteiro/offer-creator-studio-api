@@ -7,7 +7,7 @@ const ctxFor = (
 ): DirectorValidationContext => ({
   message,
   clientMessages: [message],
-  briefIds: [],
+  briefItems: [],
   ...extra,
 });
 
@@ -121,24 +121,42 @@ describe('parseDirector', () => {
       const raw = directorRaw({ requests: [drop('esquece o rio')] });
       const ctx = ctxFor('deixa mais quente', {
         clientMessages: ['quero um rio no meio', 'deixa mais quente'],
-        briefIds: ['rio-1'],
+        briefItems: [{ id: 'rio-1', text: 'um rio no meio' }],
       });
       expect(parseDirector(raw, ctx)).toMatchObject({ ok: false });
     });
 
     it('recusa drop sem citação e drop de id que não está na lista', () => {
-      const ctx = ctxFor('esquece o rio', { briefIds: ['rio-1'] });
+      const ctx = ctxFor('esquece o rio', {
+        briefItems: [{ id: 'rio-1', text: 'um rio no meio' }],
+      });
       expect(parseDirector(directorRaw({ requests: [drop(null)] }), ctx).ok).toBe(false);
       expect(
         parseDirector(directorRaw({ requests: [drop('esquece o rio', 'outro')] }), ctx).ok,
       ).toBe(false);
     });
 
+    it('R10: drop do coelho com a citação "de" numa mensagem que não fala dele é recusado', () => {
+      const raw = directorRaw({ requests: [drop('de', 'p1')] });
+      const ctx = ctxFor('muda a cor de fundo', {
+        briefItems: [{ id: 'p1', text: 'um coelho' }],
+      });
+      expect(parseDirector(raw, ctx)).toMatchObject({ ok: false });
+    });
+
+    it('R10: citação de outra palavra da mensagem, que não é a do item, também é recusada', () => {
+      const raw = directorRaw({ requests: [drop('cor de fundo', 'p1')] });
+      const ctx = ctxFor('muda a cor de fundo', {
+        briefItems: [{ id: 'p1', text: 'um coelho' }],
+      });
+      expect(parseDirector(raw, ctx)).toMatchObject({ ok: false });
+    });
+
     it('aceita drop com citação literal da mensagem atual, sem diferenciar acento ou caixa', () => {
       const raw = directorRaw({ requests: [drop('Esquece o RIO')] });
       const ctx = ctxFor('esquece o rio por favor', {
         clientMessages: ['quero um rio', 'esquece o rio por favor'],
-        briefIds: ['rio-1'],
+        briefItems: [{ id: 'rio-1', text: 'um rio no meio' }],
       });
       expect(parseDirector(raw, ctx).ok).toBe(true);
     });

@@ -4,7 +4,7 @@ import { decideTurn, DecisionInput, windowApplies } from './scene-director-decis
 
 const decide = (plan: Partial<DirectorPlan>, extra: Partial<DecisionInput> = {}) =>
   decideTurn({
-    plan: directorPlan(plan),
+    plan: directorPlan({ what_to_change: 'tirar o coelho', ...plan }),
     marked: false,
     hasImage: true,
     openRequests: [],
@@ -184,5 +184,39 @@ describe('decideTurn: o efeito vem do tipo e das regras do código', () => {
     expect(
       decide({ turn_kind: 'pedido_item', reply: 'Pronto, removi o coelho e nada mais mudou' }),
     ).toMatchObject({ announcement: 'Vou fazer a mudança que você pediu.' });
+  });
+});
+
+describe('decideTurn: plano sem instrução (G2, R5)', () => {
+  it.each(['pedido_item', 'pedido_ajuste_geral', 'pedido_composicao', 'imagem_nova'] as const)(
+    '%s com os dois campos vazios pergunta o que mudar, sem imagem',
+    (kind) => {
+      expect(decide({ turn_kind: kind, what_to_change: '', what_to_put: '' })).toMatchObject({
+        kind: 'reply',
+        aboutImage: false,
+        reply: expect.stringContaining('Não entendi o que mudar'),
+      });
+    },
+  );
+
+  it('reclamação com will_change_image e sem instrução também pergunta', () => {
+    expect(
+      decide({ turn_kind: 'reclamacao', will_change_image: true, what_to_change: '' }),
+    ).toMatchObject({ kind: 'reply' });
+  });
+
+  it('o "marquei" com pedido em aberto monta a instrução e segue para a imagem', () => {
+    expect(
+      decide(
+        { turn_kind: 'marcacao_sem_pedido', what_to_change: '' },
+        { marked: true, openRequests: ['um rio'] },
+      ),
+    ).toMatchObject({ kind: 'image' });
+  });
+
+  it('só o what_to_put preenchido basta', () => {
+    expect(
+      decide({ turn_kind: 'imagem_nova', what_to_change: '', what_to_put: 'um campo' }),
+    ).toMatchObject({ kind: 'image' });
   });
 });

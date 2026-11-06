@@ -14,7 +14,11 @@ import { DirectorRequest } from './scene-director-schema';
 
 const NOW = new Date('2026-11-06T12:00:00.000Z');
 const LATER = new Date('2026-11-07T12:00:00.000Z');
-const ctx = (messageId = 'm1', now = NOW) => ({ messageId, now });
+const ctx = (messageId = 'm1', now = NOW, message = 'um rio no meio do campo') => ({
+  messageId,
+  now,
+  message,
+});
 const open = (text: string, id: string | null = null): DirectorRequest => ({
   id,
   text,
@@ -62,6 +66,32 @@ describe('scene-brief', () => {
       expect(changes.opened).toEqual(['p1']);
     });
 
+    it('R8: "rio" não casa com "cenário colorido": vira item novo, e o outro não muda', () => {
+      const colorido: BriefItem = { ...RIO, id: 'p1', text: 'cenário colorido' };
+      const { brief, changes } = applyDirectorRequests([colorido], [open('rio')], ctx());
+      expect(brief.map((item) => [item.id, item.text, item.status])).toEqual([
+        ['p1', 'cenário colorido', 'open'],
+        ['p2', 'rio', 'open'],
+      ]);
+      expect(changes.opened).toEqual(['p2']);
+    });
+
+    it.each([
+      ['sol', 'girassol amarelo'],
+      ['flor', 'campo florido'],
+    ])('R8: "%s" não casa com "%s"', (wanted, existing) => {
+      const item: BriefItem = { ...RIO, text: existing };
+      const { brief } = applyDirectorRequests([item], [open(wanted)], ctx());
+      expect(brief).toHaveLength(2);
+    });
+
+    it('R8: palavra inteira casa, inclusive no plural ("rio" em "um rio largo", "coelhos" em "coelho")', () => {
+      const item: BriefItem = { ...RIO, text: 'um rio largo' };
+      expect(applyDirectorRequests([item], [open('rio')], ctx()).brief).toHaveLength(1);
+      const coelho: BriefItem = { ...RIO, text: 'coelho' };
+      expect(applyDirectorRequests([coelho], [open('coelhos')], ctx()).brief).toHaveLength(1);
+    });
+
     it('os ids seguem a sequência, mesmo depois de itens feitos ou desistidos', () => {
       const done: BriefItem = { ...RIO, id: 'p3', status: 'done' };
       const { brief } = applyDirectorRequests([done], [open('mais ovos')], ctx('m2'));
@@ -96,6 +126,38 @@ describe('scene-brief', () => {
     });
   });
 
+  describe('reabrir (R10)', () => {
+    const feito: BriefItem = { ...RIO, id: 'p1', text: 'coelho', status: 'done' };
+
+    it('o Diretor não reabre item feito se a mensagem atual não fala dele', () => {
+      const { brief, changes } = applyDirectorRequests(
+        [feito],
+        [open('coelho')],
+        ctx('m2', NOW, 'deixa mais quente'),
+      );
+      expect(brief[0].status).toBe('done');
+      expect(changes.reopened).toEqual([]);
+    });
+
+    it('o cliente pede de novo na mensagem atual: o item volta a aberto', () => {
+      const { brief, changes } = applyDirectorRequests(
+        [feito],
+        [open('coelho')],
+        ctx('m2', NOW, 'coloca outro coelho'),
+      );
+      expect(brief[0].status).toBe('open');
+      expect(changes.reopened).toEqual(['p1']);
+    });
+
+    it('item desistido também só reabre se a mensagem atual fala dele', () => {
+      const desistido: BriefItem = { ...feito, status: 'dropped' };
+      expect(
+        applyDirectorRequests([desistido], [open('coelho')], ctx('m2', NOW, 'mais flores')).brief[0]
+          .status,
+      ).toBe('dropped');
+    });
+  });
+
   describe('desistir', () => {
     it('drop por id', () => {
       const { brief, changes } = applyDirectorRequests(
@@ -114,6 +176,21 @@ describe('scene-brief', () => {
         ctx('m2'),
       );
       expect(brief[0].status).toBe('dropped');
+    });
+
+    it('R8: "esquece o rio" desiste do "um rio largo", e não do "cenário colorido"', () => {
+      const colorido: BriefItem = { ...RIO, id: 'p1', text: 'cenário colorido' };
+      const largo: BriefItem = { ...RIO, id: 'p2', text: 'um rio largo' };
+      const { brief, changes } = applyDirectorRequests(
+        [colorido, largo],
+        [drop(null, 'rio', 'esquece o rio')],
+        ctx('m2', NOW, 'esquece o rio'),
+      );
+      expect(brief.map((item) => [item.id, item.status])).toEqual([
+        ['p1', 'open'],
+        ['p2', 'dropped'],
+      ]);
+      expect(changes.dropped).toEqual(['p2']);
     });
 
     it('drop de item que não existe é ignorado', () => {

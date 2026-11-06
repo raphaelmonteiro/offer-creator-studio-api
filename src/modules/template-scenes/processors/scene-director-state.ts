@@ -191,6 +191,7 @@ export class SceneDirectorState {
     const { plan, context } = input;
     const opened = applyDirectorRequests(scene.brief ?? [], plan.requests, {
       messageId: '',
+      message: context.script.message,
       now: new Date(),
     }).brief;
     return decideTurn({
@@ -213,6 +214,7 @@ export class SceneDirectorState {
     });
     const applied = applyDirectorRequests(scene.brief ?? [], plan.requests, {
       messageId: message?.id ?? '',
+      message: message?.content ?? '',
       now: new Date(),
     });
     scene.brief = applied.brief;

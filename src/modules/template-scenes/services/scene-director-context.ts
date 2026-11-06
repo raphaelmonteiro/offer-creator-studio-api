@@ -27,8 +27,8 @@ export interface DirectorContext {
   script: DirectorScript;
   /** Todas as mensagens do cliente, para as validações 3 e 5. */
   clientMessages: string[];
-  /** Ids da lista do que o cliente pediu. */
-  briefIds: string[];
+  /** A lista do que o cliente pediu, com id e texto. */
+  briefItems: Array<{ id: string; text: string }>;
 }
 
 const frac = (value: number): string => value.toFixed(2);
@@ -179,7 +179,7 @@ export class SceneDirectorContextService {
       text,
       image: await this.currentImage(manager, current),
       clientMessages: [...clientMessages, ...(clientMessages.includes(content) ? [] : [content])],
-      briefIds: (scene.brief ?? []).map((item) => item.id),
+      briefItems: (scene.brief ?? []).map((item) => ({ id: item.id, text: item.text })),
       script: {
         message: content,
         hasImage: Boolean(current?.masterAssetId),

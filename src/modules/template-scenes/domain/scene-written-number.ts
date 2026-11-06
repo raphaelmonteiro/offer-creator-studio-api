@@ -1,5 +1,5 @@
 import { fold } from '../../../shared/text/fold';
-import { FUNCTION_WORDS } from './scene-director';
+import { FUNCTION_WORDS } from './scene-words';
 
 /**
  * Detector único de ano, data e número escrito (D-42, validação 7). Nenhum prompt de imagem pede número: o ano

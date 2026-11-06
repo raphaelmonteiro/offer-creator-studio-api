@@ -114,7 +114,7 @@ describeIfSceneDb('SceneDirectorContextService (banco chroma_x_e2e)', () => {
       openRequests: [{ id: 'p1', text: 'um rio no meio' }],
       layers: [{ id: 'logo-1', kind: 'logo', name: 'Logo 1' }],
     });
-    expect(context.briefIds).toEqual(['p1']);
+    expect(context.briefItems.map((item) => item.id)).toEqual(['p1']);
     const image = await sharp(context.image as Buffer).metadata();
     expect(image.format).toBe('jpeg');
     expect(Math.max(image.width ?? 0, image.height ?? 0)).toBeLessThanOrEqual(DIRECTOR_IMAGE_EDGE);
