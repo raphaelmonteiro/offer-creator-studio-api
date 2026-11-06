@@ -53,7 +53,10 @@ export class SceneProviderError extends Error {
       'PROVIDER_QUOTA' | 'PROVIDER_CONTENT_POLICY' | 'PROVIDER_TIMEOUT' | 'PROVIDER_ERROR'
     >,
     message: string,
-    /** Custo já cobrado pela resposta que falhou depois (imagem ilegível); `null` = nada cobrado/desconhecido. */
+    /**
+     * Custo conhecido da chamada que falhou: o cobrado pela resposta ilegível, ou `0` só quando a recusa foi antes da
+     * rede. `null` = desconhecido: a requisição pode ter saído e ter sido cobrada (R9).
+     */
     readonly costUsd: number | null = null,
   ) {
     super(message);

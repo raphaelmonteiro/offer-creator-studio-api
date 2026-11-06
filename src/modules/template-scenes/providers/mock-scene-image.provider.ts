@@ -98,7 +98,7 @@ export class MockSceneImageProvider implements SceneImageProvider {
   private async beforeCall(input: SceneGenerateInput): Promise<void> {
     await this.sleep(this.latencyFor(input.prompt));
     const failure = FAILURES.find(([marker]) => input.prompt.includes(marker));
-    if (failure) throw new SceneProviderError(failure[1], failure[2]);
+    if (failure) throw new SceneProviderError(failure[1], failure[2], 0);
   }
 
   private hashOf(input: SceneGenerateInput): Buffer {

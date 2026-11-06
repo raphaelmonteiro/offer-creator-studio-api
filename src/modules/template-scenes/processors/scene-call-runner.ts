@@ -72,7 +72,7 @@ export class SceneCallRunner {
       this.logProviderFailure(ctx, failure);
       await this.state.closeCall(ctx, call.id, {
         status: 'failed',
-        costUsd: failure.costUsd ?? 0,
+        costUsd: failure.costUsd,
         errorCode: failure.code,
       });
       await this.state.fail(ctx, failure.code);

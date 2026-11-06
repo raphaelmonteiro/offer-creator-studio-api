@@ -36,8 +36,9 @@ export async function closeCallIn(
 ): Promise<void> {
   const { scene, version } = target;
   const cost = outcome.costUsd ?? 0;
-  // G7: resposta paga sem custo conhecido nunca soma zero sem marca.
-  const costUnknown = outcome.status === 'done' && outcome.costUsd === null;
+  // G7: chamada paga sem custo conhecido nunca soma zero sem marca: resposta sem `usage`, e também a que falhou
+  // ou passou do tempo depois de a requisição sair (R9). Só a recusa antes da rede tem custo zero conhecido.
+  const costUnknown = outcome.costUsd === null;
   version.metrics = {
     ...version.metrics,
     ...(costUnknown ? { costUnknown: true } : {}),

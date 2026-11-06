@@ -33,7 +33,8 @@ export function classifySceneProviderError(error: unknown): SceneProviderError {
       return new SceneProviderError('PROVIDER_TIMEOUT', error.message);
     }
     if (error.code === SCENE_INVALID_REQUEST_CODE) {
-      return new SceneProviderError('PROVIDER_ERROR', error.message);
+      // Recusa antes da rede (tabela de capacidades): nada saiu, custo zero conhecido.
+      return new SceneProviderError('PROVIDER_ERROR', error.message, 0);
     }
   }
   const shape = (error ?? {}) as { status?: number; code?: string; error?: { code?: string } };
