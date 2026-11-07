@@ -58,3 +58,20 @@ describe('Detector de ano, data e número escrito (D-42)', () => {
     });
   });
 });
+
+describe('deslocamento não é número escrito (R42)', () => {
+  it.each([
+    '20% para a direita',
+    '30% acima',
+    '10 para cima',
+    '1,50 acima',
+    '1 à esquerda e 1 à direita',
+    '99 à direita',
+    '5 pra baixo',
+  ])('"%s": move algo, segue', (text) => expect(onlyNumberLeft(text)).toBe(false));
+
+  it.each(['99 no canto', '3 no canto', '2027 acima', '12 de abril para cima', '99 em cima'])(
+    '"%s": o cliente pediu o número, recusa',
+    (text) => expect(onlyNumberLeft(text)).toBe(true),
+  );
+});

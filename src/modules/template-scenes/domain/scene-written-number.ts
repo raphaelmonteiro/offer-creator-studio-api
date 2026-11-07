@@ -85,10 +85,17 @@ export function stripNumberClauses(text: string, options: WrittenNumberOptions =
   return out.trim();
 }
 
+/** Deslocamento: porcentagem, decimal ou dígito seguido de direção ("20% para a direita", "1,50 acima"; R42). */
+const DISPLACEMENT =
+  /%|\d[.,]\d|\d+\s+(?:para\s+|pra\s+)?(?:cima|baixo|acima|abaixo|(?:a\s+)?(?:direita|esquerda))\b/;
+
 /** Só sobra o número, posição e palavras de ligação ("2027 em cima"): o cliente pediu o número. */
 export function onlyNumberLeft(text: string): boolean {
+  const written = hasWrittenNumber(text);
   // Dígitos soltos contam ('99 no canto'), mesmo sem ser ano nem data (R34); '3 coelhos' tem palavra sobrando.
-  if (!hasWrittenNumber(text) && !/\d/.test(text)) return false;
+  if (!written && !/\d/.test(text)) return false;
+  // O número que desloca algo não é o número pedido (R42); ano e data valem em qualquer posição.
+  if (!written && DISPLACEMENT.test(fold(text))) return false;
   const words = fold(text)
     .split(/[^a-z0-9]+/)
     .filter(Boolean)

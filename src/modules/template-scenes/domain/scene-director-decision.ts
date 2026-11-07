@@ -75,14 +75,18 @@ export function answersWithoutImage(
   return IMAGE_KINDS.has(plan.turn_kind) && !plan.will_change_image;
 }
 
+/** Raízes dos verbos de edição no futuro ("remov" + "erei"); fora da lista a resposta passa (R45, D-48). */
+const FUTURE_ROOTS =
+  '(?:remov|troc|tir|retir|apag|elimin|substitu|coloc|adicion|ajust|alter|mud|aplic|acrescent|inser|cri|ger|desenh|pint|mov|aument|diminu|clare|escurec|inclu|transform|recri|refaz|ret[o]rn|recompon|complet|corrig|reduz|ampli)';
+
 /** Anunciar ("vou", "irei") sem mudar a imagem quebraria G8: "não vou conseguir" não é anúncio. */
 const ANNOUNCES = new RegExp(
   [
     '\\b(?:vou|irei|vamos)\\b',
-    // futuro simples ("removerei", "farei"), "será removido" e "estou removendo" (R33)
-    '\\b\\w{2,}rei\\b',
+    // futuro simples em lista ("removerei", "farei"): "encontrei" e "procurei" são passado (R33, R45)
+    `\\b(?:${FUTURE_ROOTS}[aei]rei|farei|porei)\\b`,
     '\\b(?:sera|serao)\\s+\\w+[ai]d[oa]s?\\b',
-    '\\b(?:estou|estamos)\\s+(?!vendo|olhando|observando|notando)\\w+ndo\\b',
+    '\\b(?:estou|estamos)\\s+(?!vendo|olhando|observando|notando|enxergando|identificando|percebendo)\\w+ndo\\b',
   ]
     .map((part) => `(?<!\\bnao\\s)(?<!\\bnem\\s)${part}`)
     .join('|'),

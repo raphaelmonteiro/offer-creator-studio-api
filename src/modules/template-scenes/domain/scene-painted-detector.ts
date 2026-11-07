@@ -1,5 +1,15 @@
 import { fold } from '../../../shared/text/fold';
 import { PaintedRefusal } from './scene-director-schema';
+import {
+  ACTION_VERB,
+  INFINITIVE,
+  PUT_VERB,
+  removalMask,
+  SWAP_VERB,
+  Token,
+  tokenize,
+  TRUE_REMOVAL,
+} from './scene-removal-mask';
 import { CLAUSE_SEPARATOR } from './scene-written-number';
 
 /**
@@ -23,8 +33,13 @@ export type PaintedField = 'put' | 'change';
 
 const NONE: PaintedVerdict = { level: 'none', kind: null };
 
-const PRICE_FORM =
-  /r\$\s*\d|\b\d+[.,]\d{2}\b|\d+\s*reais\b|\d\s*%\s*(?:off|de desconto|desconto)|%\s*off\b/;
+/** Depois do decimal, medida ou deslocamento: "2,50 metros", "1,25 vezes", "1,50 acima", "1,50%" não são preço (R41). */
+const NOT_PRICE_AFTER =
+  '(?!\\s*%|\\s*(?:m|cm|mm|km|kg|g|l|x|px|metros?|centimetros?|milimetros?|quilometros?|quilos?|gramas?|litros?|' +
+  'hectares?|graus|pixels?|vezes|de\\s+(?:altura|largura|comprimento|diametro|profundidade|espessura|distancia)|acima|abaixo|cima|baixo|a\\s+direita|a\\s+esquerda|para\\s+(?:cima|baixo|a\\s+direita|a\\s+esquerda|direita|esquerda))\\b)';
+const PRICE_FORM = new RegExp(
+  `r\\$\\s*\\d|(?<![x×]\\s*)\\b\\d+[.,]\\d{2}\\b${NOT_PRICE_AFTER}|\\d+\\s*reais\\b|\\d\\s*%\\s*(?:off|de desconto|desconto)|%\\s*off\\b`,
+);
 const WRITE_VERB = /\b(?:escrev\w*|escrit[oa]s?|dizendo)\b/;
 const WRITE_OBJECT =
   /\b(?:com|colocar|coloca|coloque|poe|ponha|pinta|pintar|adiciona|adicionar)\s+(?:(?:a|o|as|os|uma|um)\s+)?(?:frase|palavra|texto|dizeres)\b/;
@@ -32,21 +47,6 @@ const QUOTED = /"[^"]+"|“[^”]+”|«[^»]+»/g;
 /** Duas palavras em caixa alta, ou uma de 4 letras ou mais ("FELIZ PASCOA", "OFERTA"; "TV" e "LED" não). */
 const UPPERCASE_RUN = /\b[A-ZÀ-Ý]{2,}(?:\s+[A-ZÀ-Ý]{2,})+\b|\b[A-ZÀ-Ý]{4,}\b/g;
 const NAME_CUE = /^(?:estilo|tipo|como|igual|chamad\w*|camada)$/;
-
-const REMOVAL_VERB = /^(?:tir\w*|retir\w*|remov\w*|apag\w*|elimin\w*|sem)$/;
-const SWAP_VERB = /^(?:troc\w*|substitu\w*)$/;
-/** Para a máscara de remoção: `para` abre outro pedido, e a referência de lugar fica de fora do que sai. */
-const STOP_WORD = /^(?:com|para|pra|pro|pros|pras|atras|perto|acima|abaixo|junto)$/;
-/** Verbo de escrita: a máscara de remoção para nele ("placa sem moldura escrita X"), salvo em "o que está escrito". */
-const WRITE_STOP = /^(?:escrev\w*|escrit[oa]s?|dizendo)$/;
-/** O que faz o particípio ficar no objeto: "o que está escrito", "sem nada escrito", "sem texto escrito". */
-const COPULAR =
-  /^(?:esta|estao|estiver|estava|foi|ficou|nada|nenhum|nenhuma|texto|textos|letras|palavra|palavras|frase|frases)$/;
-const ARTICLE_WORD = /^(?:o|a|os|as|um|uma)$/;
-const TRUE_REMOVAL = /^(?:tir\w*|retir\w*|remov\w*|apag\w*|elimin\w*)$/;
-const ACTION_VERB =
-  /^(?:escrev\w*|coloc\w*|pint\w*|poe|ponha|bota|adicion\w*|inclu\w*|faz|fazer|faca)$/;
-const PUT_VERB = /^(?:coloc\w*|poe|ponha|bota|adicion\w*|inclu\w*|pint\w*)$/;
 
 const LOOSE_TERM = new RegExp(
   [
@@ -73,80 +73,6 @@ const DEFINITE_BEFORE = /\b(?:o|a|os|as|do|da|dos|das|no|na|nos|nas|pelo|pela|ao
 const NO_REMOVED: ReadonlySet<string> = new Set();
 const stemOf = (term: string): string => term.trim().split(/\s+/).pop()!.replace(/s$/, '');
 
-interface Token {
-  original: string;
-  folded: string;
-}
-
-const tokenize = (text: string): Token[] =>
-  text
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((original) => ({
-      original,
-      folded: fold(original).replace(/^[^a-z0-9$%"“«]+|[^a-z0-9$%"”»]+$/g, ''),
-    }));
-
-const isNumeric = (word: string): boolean => /^[\d.,%]+$|^(?:reais|real|off)$/.test(word);
-const opensQuote = (word: string): boolean => /^["“«]/.test(word) && !/["”»]$/.test(word.slice(1));
-
-const isFormToken = (token: Token): boolean =>
-  /\d/.test(token.original) ||
-  /^["“«]/.test(token.original) ||
-  /^r\$$/i.test(token.original) ||
-  /^[A-ZÀ-Ý]{2,}[.,;!?]?$/.test(token.original) ||
-  token.folded === 'off';
-
-/**
- * Marca o objeto de remoção: o verbo ou `sem` e até 3 palavras, parando em `para`, `com`, em verbo de escrita (salvo
- * "o que está escrito") e em outro verbo, mais a forma que começou dentro. Com `sem`, a forma só é objeto se vem
- * logo depois dele: "sem R$ 9,90" passa, e "selo sem borda 50% off" não (R30).
- */
-function removalMask(tokens: Token[]): boolean[] {
-  const masked = tokens.map(() => false);
-  tokens.forEach((token, start) => {
-    if (!REMOVAL_VERB.test(token.folded)) return;
-    masked[start] = true;
-    let index = start + 1;
-    let count = 0;
-    while (index < tokens.length && count < 3) {
-      const word = tokens[index].folded;
-      const writing = WRITE_STOP.test(word) && !COPULAR.test(tokens[index - 1].folded);
-      if (STOP_WORD.test(word) || ACTION_VERB.test(word) || writing) return;
-      masked[index] = true;
-      count += 1;
-      index += 1;
-    }
-    // "o que está escrito": o particípio depois de "está" faz parte do objeto, ainda que passe das 3 palavras.
-    if (
-      index < tokens.length &&
-      WRITE_STOP.test(tokens[index].folded) &&
-      COPULAR.test(tokens[index - 1].folded)
-    ) {
-      masked[index] = true;
-      index += 1;
-    }
-    let quoted = tokens.slice(start + 1, index).some((t) => opensQuote(t.original));
-    while (index < tokens.length && (quoted || isNumeric(tokens[index].folded))) {
-      masked[index] = true;
-      if (quoted && /["”»]$/.test(tokens[index].original)) quoted = false;
-      index += 1;
-    }
-    if (token.folded === 'sem') unmaskLateForm(tokens, masked, start, index);
-  });
-  return masked;
-}
-
-/** Com `sem`, a forma que não vem logo depois dele (só artigos no meio) não é o objeto: volta ao trecho. */
-function unmaskLateForm(tokens: Token[], masked: boolean[], start: number, end: number): void {
-  for (let j = start + 1; j < end; j += 1) {
-    if (!isFormToken(tokens[j])) continue;
-    const direct = tokens.slice(start + 1, j).every((t) => ARTICLE_WORD.test(t.folded));
-    if (!direct) for (let k = j; k < end; k += 1) masked[k] = false;
-    return;
-  }
-}
-
 function precedingWords(text: string, index: number, count: number): string[] {
   return fold(text.slice(0, index)).split(/\s+/).filter(Boolean).slice(-count);
 }
@@ -165,16 +91,14 @@ function quotedForm(rest: string, placing: boolean): PaintedLevel {
 }
 
 /**
- * O termo é seguido de um nome ("o título Promoção de Páscoa")? Então dá nome ao que se quer escrever (D-49). Só o fim
- * do trecho, `atual`, `antigo`, `anterior`, `original`, `removido`, `que` ou posição ("de cima", "do topo", "no alto")
- * deixam o termo como referência ao que sai.
+ * O termo é seguido de nome próprio ou conteúdo ("o título Promoção de Páscoa")? Então dá nome ao que se quer escrever
+ * (D-49, R43): a palavra logo depois, sem pontuação no meio, com inicial maiúscula no texto original, ou frase entre
+ * aspas. Qualquer outra continuação é referência ao termo. `fold` não muda o comprimento, então o índice vale no original.
  */
-function namedAfter(after: string): boolean {
-  const next = after.replace(/[^a-z0-9\s]/g, ' ').trim();
-  return (
-    next !== '' &&
-    !/^(?:atual|antigo|anterior|original|removido|que|de cima|do topo|no alto)\b/.test(next)
-  );
+function namedAfter(original: string, end: number): boolean {
+  if (!/[\p{L}\d]$/u.test(original.slice(0, end))) return false;
+  const next = original.slice(end).match(/^\s+(\S+)/)?.[1] ?? '';
+  return /^\p{Lu}/u.test(next) || /^["“«]/.test(next);
 }
 
 function looseTerm(rest: string, removed: ReadonlySet<string>): boolean {
@@ -188,7 +112,7 @@ function looseTerm(rest: string, removed: ReadonlySet<string>): boolean {
     if (
       definite &&
       removed.has(stemOf(match[0])) &&
-      !namedAfter(folded.slice((match.index ?? 0) + match[0].length))
+      !namedAfter(rest, (match.index ?? 0) + match[0].length)
     ) {
       continue;
     }
@@ -260,8 +184,9 @@ export function classifyPainted(
 }
 
 const hasOwnVerb = (tokens: Token[]): boolean =>
+  (tokens[0] !== undefined && INFINITIVE.test(tokens[0].folded)) ||
   tokens.some((t) =>
-    [TRUE_REMOVAL, SWAP_VERB, ACTION_VERB, PUT_VERB, WRITE_STOP].some((verb) =>
+    [TRUE_REMOVAL, SWAP_VERB, ACTION_VERB, PUT_VERB, /^dizendo$/].some((verb) =>
       verb.test(t.folded),
     ),
   );

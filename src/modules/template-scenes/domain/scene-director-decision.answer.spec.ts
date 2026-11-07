@@ -1,6 +1,6 @@
 import { directorPlan } from '../testing/scene-director-fixtures';
 import { DirectorPlan } from './scene-director-schema';
-import { decideTurn, DecisionInput } from './scene-director-decision';
+import { decideTurn, DecisionInput, unusableAnswer } from './scene-director-decision';
 
 const decide = (plan: Partial<DirectorPlan>, extra: Partial<DecisionInput> = {}) =>
   decideTurn({
@@ -146,6 +146,8 @@ describe('decideTurn: anúncio sem ação em outra forma verbal (R33)', () => {
     'Os ovos serão trocados.',
     'Removerei o coelho.',
     'Farei a troca agora.',
+    'Trocarei a cesta e acrescentarei flores.',
+    'Apagarei o texto.',
     'Estou removendo o coelho.',
     'Estamos trocando a cesta.',
   ])('anúncio "%s" não vai ao cliente: texto fixo', (reply) => {
@@ -159,6 +161,21 @@ describe('decideTurn: anúncio sem ação em outra forma verbal (R33)', () => {
     'Não estou vendo uma cerca nesta imagem.',
     'Será que você quer o ovo da cesta ou o do gramado?',
   ])('resposta "%s" não é anúncio e vai ao cliente', (reply) => {
+    expect(answer(reply)).toEqual({ kind: 'reply', reply, aboutImage: expect.any(Boolean) });
+  });
+
+  // R45: o sufixo -rei não distingue futuro de passado; leitura da imagem com "estou" é resposta
+  it.each([
+    'Encontrei dois coelhos. Qual deles?',
+    'Só encontrei um ovo.',
+    'Procurei e não vejo cerca.',
+    'Mostrei o que achei: um coelho e uma cesta.',
+    'Comparei as duas imagens e não achei a cerca.',
+    'Estou enxergando dois ovos. Qual deles?',
+    'Estou identificando um coelho e uma cesta; qual você quer tirar?',
+    'Estou percebendo só um ovo na cesta.',
+  ])('resposta no passado ou leitura "%s" vai ao cliente, sem refazer', (reply) => {
+    expect(unusableAnswer(reply)).toBe(false);
     expect(answer(reply)).toEqual({ kind: 'reply', reply, aboutImage: expect.any(Boolean) });
   });
 });
