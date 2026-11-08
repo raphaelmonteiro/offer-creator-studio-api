@@ -78,6 +78,115 @@ describe('Texto exato (validação 4a)', () => {
   });
 });
 
+describe('Frase inteira (validação 4a, rodada 6, R63)', () => {
+  const quoted = sources(['coloca uma placa com "De R$ 19,90 por R$ 9,90"']);
+
+  it.each(['R$ 1', 'R$ 9', '19,90', '90', 'R$ 19', 'De R$ 19,90 por R$ 9'])(
+    'Pedaço de número não serve: "%s" não vem de "De R$ 19,90 por R$ 9,90"',
+    (line) => {
+      expect(exactLineAllowed(line, quoted)).toBe(false);
+    },
+  );
+
+  it('o preço inteiro, e a frase inteira entre aspas, servem', () => {
+    expect(exactLineAllowed('De R$ 19,90 por R$ 9,90', quoted)).toBe(true);
+    expect(exactLineAllowed('R$ 9,90', sources(['escreve R$ 9,90 na placa']))).toBe(true);
+  });
+
+  it.each([['Promo'], ['Promoç'], ['moção de Páscoa']])(
+    'Pedaço de palavra não serve: "%s"',
+    (line) => {
+      expect(exactLineAllowed(line, sources(['coloca uma placa com "Promoção de Páscoa"']))).toBe(
+        false,
+      );
+      expect(exactLineAllowed(line, sources(['coloca uma placa de promoção de Páscoa']))).toBe(
+        false,
+      );
+    },
+  );
+
+  it('Pedaço de palavra sem aspas: "Oferta" não vem de "Ofertas da semana"', () => {
+    expect(exactLineAllowed('Oferta', sources(['coloca ofertas da semana na placa']))).toBe(false);
+    expect(exactLineAllowed('Ofertas da semana', sources(['coloca ofertas da semana']))).toBe(true);
+  });
+
+  it('Entre aspas fora de ordem: as palavras de dentro das aspas não entram na junção', () => {
+    const msg = sources(['coloca uma placa com "Promoção de Páscoa"']);
+    expect(exactLineAllowed('Páscoa de Promoção', msg)).toBe(false);
+    expect(exactLineAllowed('Promoção de Pascoa', msg)).toBe(false);
+    expect(exactLineAllowed('Promoção de Páscoa', msg)).toBe(true);
+  });
+
+  it('Aspas tipográficas e espaços repetidos valem como o trecho', () => {
+    const msg = sources(['coloca uma placa com “Promoção  de Páscoa”']);
+    expect(exactLineAllowed('Promoção de Páscoa', msg)).toBe(true);
+  });
+
+  it('A junção usa palavras de fora das aspas e do já pintado', () => {
+    const painted = ['Promoção de Páscoa'];
+    expect(exactLineAllowed('Páscoa de Promoção', sources(['coloca a faixa'], painted))).toBe(true);
+    expect(exactLineAllowed('Promoção de Natal', sources(['coloca a faixa'], painted))).toBe(false);
+    expect(
+      exactLineAllowed('Promoção de Natal', sources(['troca para Natal'], ['Promoção de Páscoa'])),
+    ).toBe(true);
+  });
+});
+
+describe('Preço invertido (validação 4a, rodada 6)', () => {
+  const painted = ['De R$ 19,90 por R$ 9,90'];
+  const message = 'muda só o preço final para R$ 12,49';
+
+  it('Preço invertido não passa pela junção', () => {
+    expect(exactLineAllowed('De R$ 12,49 por R$ 19,90', sources([message], painted))).toBe(false);
+    expect(exactLineAllowed('De R$ 9,90 por R$ 9,90', sources([message], painted))).toBe(false);
+  });
+
+  it('o preço na ordem certa passa pela junção', () => {
+    expect(exactLineAllowed('De R$ 19,90 por R$ 12,49', sources([message], painted))).toBe(true);
+    expect(
+      exactLineAllowed(
+        'De R$ 1.299,90 por R$ 999,90',
+        sources(['x'], ['De R$ 1.299,90 por R$ 999,90']),
+      ),
+    ).toBe(true);
+  });
+
+  it('Preço invertido escrito pelo cliente: igual ao trecho entre aspas ou às palavras da mensagem', () => {
+    const quoted = sources(['coloca uma placa com "De R$ 9,90 por R$ 19,90"']);
+    expect(exactLineAllowed('De R$ 9,90 por R$ 19,90', quoted)).toBe(true);
+    const bare = sources(['escreve de R$ 9,90 por R$ 19,90 na placa']);
+    expect(exactLineAllowed('De R$ 9,90 por R$ 19,90', bare)).toBe(true);
+  });
+});
+
+describe('Texto da camada que vai ser pintada (validação 4a, D-55)', () => {
+  const withLayer = (): TextSources => ({
+    clientMessages: ['eu queria um efeito como se tivesse sido escrito na madeira'],
+    paintedText: [],
+    layerTexts: ['Promoção de Páscoa'],
+  });
+
+  it('a linha igual, letra por letra, ao texto inteiro da camada é aceita', () => {
+    expect(exactLineAllowed('Promoção de Páscoa', withLayer())).toBe(true);
+    expect(exactLineAllowed('Promoção  de Páscoa', withLayer())).toBe(true);
+  });
+
+  it('Camada não serve de fonte para outra frase, nem para pedaço, nem para outra grafia', () => {
+    for (const line of [
+      'Páscoa de Promoção',
+      'Promoção',
+      'Promoçao de Páscoa',
+      'Promoção de Páscoa 2027',
+    ]) {
+      expect(exactLineAllowed(line, withLayer())).toBe(false);
+    }
+  });
+
+  it('a camada não entra na junção: palavras dela não montam outra frase', () => {
+    expect(checkExactText(['Páscoa de Promoção'], withLayer()).ok).toBe(false);
+  });
+});
+
 describe('Texto fora do bloco (validação 4b)', () => {
   const none = sources(['tira a placa']);
 
@@ -120,6 +229,24 @@ describe('Texto fora do bloco (validação 4b)', () => {
     const image = directorImage({ change });
     expect(checkTextOutsideBlock(image, none).ok).toBe(true);
     expect(stripTextOutsideBlock(image, none).patches).toEqual([]);
+  });
+
+  it.each(['.', ',', '"', ';', ')'])(
+    'R64: o preço do cliente seguido de "%s" é o preço, e segue inteiro',
+    (end) => {
+      const msg = sources(['Troca o texto para "Oferta" e embaixo "De R$ 19,90 por R$ 9,90".']);
+      const image = directorImage({
+        change: `Two centered lines: Oferta, then De R$ 19,90 por R$ 9,90${end}`,
+      });
+      expect(checkTextOutsideBlock(image, msg).ok).toBe(true);
+      expect(stripTextOutsideBlock(image, msg).patches).toEqual([]);
+    },
+  );
+
+  it('R64: o preço que ninguém escreveu, seguido de ponto, ainda é cortado sem levar a pontuação', () => {
+    const image = directorImage({ change: 'Add a tag with R$ 9,90. Keep the rest' });
+    expect(checkTextOutsideBlock(image, none).ok).toBe(false);
+    expect(stripTextOutsideBlock(image, none).image.change).toBe('Add a tag with. Keep the rest');
   });
 
   it('"% off", "reais" e "de desconto" são preço', () => {

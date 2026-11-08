@@ -70,6 +70,7 @@ export const directorContextFor = (
   clientMessages: [message],
   briefItems: [],
   paintedText: [],
+  layerTexts: [],
   ...over,
 });
 

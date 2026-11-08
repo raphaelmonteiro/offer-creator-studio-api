@@ -13,6 +13,8 @@ export interface TextSources {
   clientMessages: string[];
   /** Linhas pintadas a pedido e conferidas na versão atual. */
   paintedText: string[];
+  /** Texto de cada camada de texto da versão atual: fonte só da linha igual a ele, inteira (D-55). */
+  layerTexts?: string[];
 }
 
 const collapse = (text: string): string => text.replace(/\s+/g, ' ').trim();
@@ -28,10 +30,53 @@ const outsideQuotes = (message: string): string => message.replace(QUOTED, ' | '
 const TOKEN = /\p{N}+(?:[.,]\p{N}+)*|\p{L}+/gu;
 const tokensOf = (text: string): string[] => text.match(TOKEN) ?? [];
 
-function allWordsKnown(line: string, sources: TextSources): boolean {
-  const known = new Set([...sources.clientMessages, ...sources.paintedText].flatMap(tokensOf));
-  const tokens = tokensOf(line);
-  return tokens.length > 0 && tokens.every((token) => known.has(token));
+const typographic = (text: string): string =>
+  collapse(text.replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'"));
+
+/** Preço depois de `de` e depois de `por`, em "de R$ 19,90 por R$ 9,90" (sem caixa). */
+const DE_POR = /\bde\s+R\$\s*(\d(?:[\d.,]*\d)?)\s+por\s+R\$\s*(\d(?:[\d.,]*\d)?)/i;
+
+/** Valor numérico de "19,90", "1.299,90" ou "9.90". */
+function priceValue(raw: string): number {
+  const thousands = /^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(raw);
+  return Number.parseFloat((thousands ? raw.replace(/\./g, '') : raw).replace(',', '.'));
+}
+
+/** "De X por Y" em que X não é maior que Y: só vale se o cliente escreveu os preços nessa ordem (rodada 6). */
+function invertedPrices(line: string): boolean {
+  const match = DE_POR.exec(line);
+  return match !== null && priceValue(match[1]) <= priceValue(match[2]);
+}
+
+/** Palavra e número inteiros: nem letra nem dígito antes ou depois, nem pedaço de "19,90" (`,90`, `19,`). */
+const BEFORE = '(?<![\\p{L}\\p{N}])(?<!\\p{N}[.,])';
+const AFTER = '(?![\\p{L}\\p{N}])(?![.,]\\p{N})';
+
+/** Sem aspas (D-53): a linha, sem acento nem caixa, é uma sequência de palavras inteiras de uma mensagem. */
+function inWholeWords(folded: string, message: string): boolean {
+  const escaped = folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${BEFORE}${escaped}${AFTER}`, 'u').test(
+    collapse(fold(outsideQuotes(message))),
+  );
+}
+
+/** Entre aspas: a linha é igual, letra por letra, ao conteúdo inteiro de um trecho entre aspas. */
+function equalsQuoted(text: string, message: string): boolean {
+  return [...message.matchAll(QUOTED_CAPTURE)].some(
+    (m) => typographic(m[1] ?? m[2] ?? m[3] ?? '') === text,
+  );
+}
+
+/**
+ * Junção (troca de parte do texto já pintado): toda palavra e todo número da linha, inteiros, estão nas mensagens
+ * fora de aspas ou no texto já pintado. As palavras de dentro das aspas não entram, para a regra não montar outra
+ * frase com elas. `de {preço} por {preço}` invertido não vale por aqui.
+ */
+function joinsKnownWords(text: string, sources: TextSources): boolean {
+  const outside = sources.clientMessages.map(outsideQuotes);
+  const known = new Set([...outside, ...sources.paintedText].flatMap(tokensOf));
+  const tokens = tokensOf(text);
+  return tokens.length > 0 && tokens.every((token) => known.has(token)) && !invertedPrices(text);
 }
 
 /**
@@ -44,17 +89,20 @@ export function unquoteLine(line: string): string {
   return pair ? (pair[1] ?? pair[2] ?? pair[3]).trim() : text;
 }
 
-/** Uma linha de `exact_text` é aceita (validação 4a)? */
+/**
+ * Uma linha de `exact_text` é aceita (validação 4a, rodada 6) só como frase inteira, por uma destas regras: igual ao
+ * trecho entre aspas de uma mensagem; palavras inteiras de uma mensagem fora de aspas; junção do já pintado com
+ * palavras do cliente; ou igual ao texto inteiro de uma camada de texto, que sai na versão nova (D-55).
+ */
 export function exactLineAllowed(line: string, sources: TextSources): boolean {
-  const text = collapse(line);
+  const text = typographic(line);
   if (!text) return false;
-  if (sources.clientMessages.some((message) => collapse(message).includes(text))) return true;
-  // D-53: só acento, cedilha e caixa mudam, e o trecho original fica fora de aspas.
   const folded = fold(text);
-  if (sources.clientMessages.some((m) => collapse(fold(outsideQuotes(m))).includes(folded))) {
-    return true;
-  }
-  return allWordsKnown(text, sources);
+  return (
+    sources.clientMessages.some((m) => equalsQuoted(text, m) || inWholeWords(folded, m)) ||
+    (sources.layerTexts ?? []).some((layer) => typographic(layer) === text) ||
+    joinsKnownWords(text, sources)
+  );
 }
 
 export type ExactTextCheck = { ok: true } | { ok: false; reason: string };
@@ -70,8 +118,11 @@ export function checkExactText(lines: string[], sources: TextSources): ExactText
     : { ok: false, reason: `${EXACT_TEXT_RETRY_REASON} ("${bad}")` };
 }
 
-/** Preço: `R$` com valor, valor com "reais", `% off` e `% de desconto`. Decimal solto não é preço (R50). */
-const PRICE = /R\$\s*\d[\d.,]*|\d[\d.,]*\s*reais\b|\d+\s*%\s*(?:off\b|de desconto)/gi;
+/**
+ * Preço: `R$` com valor, valor com "reais", `% off` e `% de desconto`. Decimal solto não é preço (R50). O valor termina
+ * em dígito: ponto, vírgula ou aspas depois dele são pontuação da frase (R64).
+ */
+const PRICE = /R\$\s*\d(?:[\d.,]*\d)?|\d(?:[\d.,]*\d)?\s*reais\b|\d+\s*%\s*(?:off\b|de desconto)/gi;
 
 type TextField = 'composition' | 'style' | 'change';
 const FIELDS: readonly TextField[] = ['composition', 'style', 'change'];

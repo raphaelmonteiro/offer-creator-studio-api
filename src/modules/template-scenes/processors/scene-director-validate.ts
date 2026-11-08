@@ -92,7 +92,11 @@ export function validate(text: string, context: DirectorContext, final: boolean)
   // O par coerente é a única recusa (R62); `parseDirector` já recusou o par incoerente.
   if (parsed.plan.turn_kind === 'recusa_pintado') return { plan: parsed.plan };
   const plan = withCleanExactText(parsed.plan);
-  const sources = { clientMessages: context.clientMessages, paintedText: context.paintedText };
+  const sources = {
+    clientMessages: context.clientMessages,
+    paintedText: context.paintedText,
+    layerTexts: context.layerTexts,
+  };
   const calls = callsImage(plan);
   const texted = calls ? checkText(plan, sources, final) : { plan };
   if (!('plan' in texted)) return texted;

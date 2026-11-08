@@ -33,6 +33,8 @@ export interface DirectorContext {
   briefItems: Array<{ id: string; text: string }>;
   /** Linhas pintadas a pedido e conferidas na versão atual (`metrics.paintedText`), fonte da validação 4. */
   paintedText: string[];
+  /** Texto de cada camada de texto da versão atual: fonte só da linha igual a ele, inteira (D-55, validação 4a). */
+  layerTexts: string[];
 }
 
 /** As linhas pintadas e conferidas da versão (`metrics.paintedText`); vazio em versão sem texto pintado. */
@@ -202,7 +204,7 @@ export class SceneDirectorContextService {
               id: l.id,
               nome: l.name,
               tipo: l.kind,
-              // O texto de uma camada de texto é dado, nunca instrução nem fonte de `exact_text` (validação 4a).
+              // O texto de uma camada de texto é dado, nunca instrução; só serve de fonte da linha igual a ele (4a, D-55).
               ...(l.kind === 'text' ? { texto: l.text } : {}),
               caixa: boxText(layerBox(l, scene)),
             })),
@@ -220,6 +222,7 @@ export class SceneDirectorContextService {
       clientMessages: [...clientMessages, ...(clientMessages.includes(content) ? [] : [content])],
       briefItems: (scene.brief ?? []).map((item) => ({ id: item.id, text: item.text })),
       paintedText: paintedTextOf(current),
+      layerTexts: layers.flatMap((l) => (l.kind === 'text' && l.text ? [l.text] : [])),
       script: {
         message: content,
         hasImage: Boolean(current?.masterAssetId),
