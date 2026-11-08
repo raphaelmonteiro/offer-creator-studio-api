@@ -2,6 +2,7 @@ import { DataSource } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
 import { Template } from '../../templates/entities/template.entity';
 import { TemplateScene } from '../entities/template-scene.entity';
+import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
@@ -18,6 +19,7 @@ export const describeIfSceneDb: typeof describe = SCENE_DB_URL ? describe : desc
 export const SCENE_TEST_ENTITIES = [
   User,
   TemplateScene,
+  TemplateSceneFace,
   TemplateSceneVersion,
   TemplateSceneAsset,
   TemplateSceneMessage,

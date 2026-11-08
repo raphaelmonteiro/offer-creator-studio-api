@@ -1,4 +1,4 @@
-import { computeSceneZones, SceneFormatSpec } from './scene-formats';
+import { SceneZones } from './scene.types';
 
 /** Folga de ponto flutuante: 3328 × (1 − 4/27) não pode virar 2836 por um erro na 12ª casa. */
 const EPS = 1e-9;
@@ -15,12 +15,12 @@ export interface ZoneBands {
 const pct = (fraction: number): string => (fraction * 100).toFixed(1);
 
 /**
- * As faixas de `computeSceneZones` em px sobre a altura nativa da master (D-51). O limite fica dentro da faixa pedida:
+ * As faixas das zonas (da face) em px sobre a altura nativa da master (D-51). O limite fica dentro da faixa pedida:
  * o cabeçalho arredonda para baixo e o rodapé para cima. Em `folheto-20x27` a `2480x3328`: y < 739 e y ≥ 2835.
- * Quem escreve as medidas é o código, nunca o Diretor.
+ * Zona de altura 0 dá 0 px (cabeçalho) ou a altura inteira (início do rodapé). Quem escreve as medidas é o código,
+ * nunca o Diretor.
  */
-export function zoneBands(format: SceneFormatSpec, heightPx: number): ZoneBands {
-  const zones = computeSceneZones(format);
+export function zoneBands(zones: SceneZones, heightPx: number): ZoneBands {
   return {
     headerEnd: Math.floor(heightPx * zones.header.h + EPS),
     footerStart: Math.ceil(heightPx * zones.footer.y - EPS),

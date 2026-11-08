@@ -9,6 +9,8 @@ export interface SceneFormatSpec {
   id: string;
   artWidthCm: number;
   artHeightCm: number;
+  /** Largura impressa (sem sangria), copiada de `dimensions.printWidth` do front: entra no prompt do verso (PV-2). */
+  printWidthCm: number;
   printHeightCm: number;
   headerCm: number;
   footerCm: number;
@@ -18,29 +20,32 @@ type FormatRow = [
   id: string,
   artW: number,
   artH: number,
+  printW: number,
   printH: number,
   header: number,
   footer: number,
 ];
 
 const FORMAT_ROWS: FormatRow[] = [
-  ['revista-20x26.5', 20.5, 27, 26.5, 6, 4],
-  ['revista-13x19.5', 14, 20.5, 19.5, 4, 3],
-  ['folheto-55x36', 55, 36.5, 36, 6, 4],
-  ['folheto-54x40', 55, 41, 40, 6, 4],
-  ['folheto-54x30', 55, 30.5, 30, 5, 3],
-  ['folheto-27x54', 27.5, 55, 54, 6, 4],
-  ['folheto-27x40', 27.5, 41, 40, 6, 4],
-  ['folheto-27x30', 27.5, 30.5, 30, 5, 3],
-  ['folheto-20x27', 20.5, 27.5, 27, 6, 4],
-  ['folheto-10x13', 10.5, 13.75, 13, 3, 2],
+  ['revista-20x26.5', 20.5, 27, 20, 26.5, 6, 4],
+  ['revista-13x19.5', 14, 20.5, 13, 19.5, 4, 3],
+  ['folheto-55x36', 55, 36.5, 55, 36, 6, 4],
+  ['folheto-54x40', 55, 41, 54, 40, 6, 4],
+  ['folheto-54x30', 55, 30.5, 54, 30, 5, 3],
+  ['folheto-27x54', 27.5, 55, 27, 54, 6, 4],
+  ['folheto-27x40', 27.5, 41, 27, 40, 6, 4],
+  ['folheto-27x30', 27.5, 30.5, 27, 30, 5, 3],
+  ['folheto-20x27', 20.5, 27.5, 20, 27, 6, 4],
+  ['folheto-10x13', 10.5, 13.75, 10, 13, 3, 2],
 ];
 
 export const SCENE_FORMATS: Readonly<Record<string, SceneFormatSpec>> = Object.fromEntries(
-  FORMAT_ROWS.map(([id, artWidthCm, artHeightCm, printHeightCm, headerCm, footerCm]) => [
-    id,
-    { id, artWidthCm, artHeightCm, printHeightCm, headerCm, footerCm },
-  ]),
+  FORMAT_ROWS.map(
+    ([id, artWidthCm, artHeightCm, printWidthCm, printHeightCm, headerCm, footerCm]) => [
+      id,
+      { id, artWidthCm, artHeightCm, printWidthCm, printHeightCm, headerCm, footerCm },
+    ],
+  ),
 );
 
 /** Ids dos formatos de impressão aceitos na cena. */

@@ -1,6 +1,6 @@
 import { clientAsksForSplit } from '../domain/scene-director-composition';
 import { DirectorImage } from '../domain/scene-director-schema';
-import { findSceneFormat } from '../domain/scene-formats';
+import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
 import { zoneBands } from '../domain/scene-zone-bands';
 
 export interface ScenePromptInput {
@@ -150,7 +150,7 @@ function regionText(input: EditPromptInput): string {
   const { heightPx: H } = input;
   if (zone === 'marked') return `Make the change only inside the outlined area${on}.`;
   if (zone === 'whole' || !format) return 'The change may affect the whole image.';
-  const bands = zoneBands(format, H);
+  const bands = zoneBands(computeSceneZones(format), H);
   const printCm = cmEn(format.printHeightCm);
   if (zone === 'footer') {
     return `Make the change only inside the footer band${on}: the lowest ${cmEn(format.footerCm)} cm of the ${printCm} cm page (the bottom ${bands.footerPct}% of the image height, y ≥ ${bands.footerStart} of ${H} px; the band is about ${H - bands.footerStart} px tall), sized to fit entirely within it, without extending up into the central product area.`;

@@ -1,5 +1,5 @@
 import { BriefItem } from '../domain/scene-brief';
-import { findSceneFormat } from '../domain/scene-formats';
+import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
 import { maskBounds } from '../domain/scene-mask-shape';
 import { PaintedLine, readPaintedLines } from '../domain/scene-painted-text';
 import { MaskShape, Rect, SceneElement } from '../domain/scene.types';
@@ -83,7 +83,7 @@ export function formatBlock(
   const format = findSceneFormat(scene.formatId);
   const size = `${scene.widthPx} x ${scene.heightPx} px`;
   if (!format) return `Formato: ${scene.formatId}, ${size}.`;
-  const bands = zoneBands(format, scene.heightPx);
+  const bands = zoneBands(computeSceneZones(format), scene.heightPx);
   return [
     `Formato: ${format.id}, ${format.artWidthCm} x ${format.artHeightCm} cm, master de ${size}.`,
     `Zonas de image.region: header = ${format.headerCm} cm (${bands.headerPct}% da altura, y < ${bands.headerEnd} px); body = miolo de produtos (y de ${bands.headerEnd} a ${bands.footerStart} px); footer = ${format.footerCm} cm de ${format.printHeightCm} cm (${bands.footerPct}% da altura, y ≥ ${bands.footerStart} px).`,

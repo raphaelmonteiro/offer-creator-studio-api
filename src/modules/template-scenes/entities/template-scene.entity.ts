@@ -8,13 +8,15 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { BriefItem } from '../domain/scene-brief';
+import { SceneLayout } from '../domain/scene-faces';
 import { numericTransformer } from './numeric.transformer';
 
 /**
  * Cena de template (estágio 3 do Template Pro): o contêiner de versões, mensagens e arquivos de um
  * template em criação. `revision` é o lock otimista (`expectedRevision` → 409 `REVISION_CONFLICT`);
  * `createdByUserId` é referência lógica a `users.id` (sem FK e sem permissão por usuário, D-6).
- * `currentVersionId` não tem FK (a versão aponta de volta para a cena).
+ * `currentVersionId` não tem FK (a versão aponta de volta para a cena). Faces: a versão atual de cada uma fica em
+ * `template_scene_faces`; a trava, o brief e a `revision` são da cena inteira (D-1).
  */
 @Entity('template_scenes')
 @Index('IDX_template_scenes_deleted_updated', ['deletedAt', 'updatedAt'])
@@ -43,6 +45,11 @@ export class TemplateScene {
   @Column({ type: 'numeric', precision: 10, scale: 4, transformer: numericTransformer })
   pixelsPerCm: number;
 
+  /** `single` (uma face) ou `front_back`: as faces ficam em `template_scene_faces`. */
+  @Column({ type: 'varchar', length: 16, default: 'single' })
+  layout: SceneLayout;
+
+  /** Espelha a versão atual da face 0 (compatibilidade); quem grava é `setFaceCurrentVersion`. */
   @Column({ type: 'uuid', nullable: true })
   currentVersionId: string | null;
 
@@ -56,6 +63,7 @@ export class TemplateScene {
   @Column({ type: 'timestamptz', nullable: true })
   approvedAt: Date | null;
 
+  /** Espelha o template da face 0; quem grava é `setFaceTemplate`. */
   @Column({ type: 'uuid', nullable: true })
   approvedTemplateId: string | null;
 

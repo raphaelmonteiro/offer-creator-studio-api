@@ -1,4 +1,4 @@
-import { findSceneFormat } from '../domain/scene-formats';
+import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
 import { DirectorImage } from '../domain/scene-director-schema';
 import { Rect } from '../domain/scene.types';
 import { zoneBands } from '../domain/scene-zone-bands';
@@ -35,7 +35,7 @@ export function textCropBox(input: {
   }
   const format = findSceneFormat(formatId);
   if (!region || !format || region.zone === 'whole' || region.zone === 'marked') return null;
-  const bands = zoneBands(format, height);
+  const bands = zoneBands(computeSceneZones(format), height);
   const [from, to] =
     region.zone === 'header'
       ? [0, bands.headerEnd]

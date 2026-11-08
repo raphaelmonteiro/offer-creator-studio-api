@@ -27,6 +27,10 @@ export class TemplateSceneMessage {
   @Column({ type: 'uuid', nullable: true })
   versionId: string | null;
 
+  /** Face em que a mensagem foi feita (rótulo no chat e contexto do Diretor). */
+  @Column({ type: 'smallint', default: 0 })
+  faceIndex: number;
+
   @Column({ type: 'varchar', length: 10 })
   role: SceneMessageRole;
 
