@@ -20,17 +20,23 @@ export const COMPOSITION_GROUPS = [
 ] as const;
 export type CompositionGroup = (typeof COMPOSITION_GROUPS)[number];
 
-/** Termos sem acento, por grupo (anexo do `design.md`). */
+/**
+ * Termos sem acento, por grupo (anexo do `design.md`), nas duas línguas: os blocos do Diretor são em inglês e a
+ * mensagem do cliente em pt-BR autoriza o grupo inteiro (D-51). `edge` só conta como borda da página ou da imagem:
+ * "rustic edges" descreve uma placa, não pede borda (PV-81).
+ */
 const GROUP_PATTERNS: Record<CompositionGroup, RegExp> = {
-  moldura: /\b(?:moldura|molduras|frame|frames|emoldur\w*)\b/,
-  faixa: /\b(?:faixa|faixas|banner|banners)\b/,
-  cabecalho: /\b(?:cabecalho|cabecalhos|header|topo)\b/,
-  rodape: /\b(?:rodape|rodapes|roda pe|footer)\b/,
-  borda: /\b(?:borda|bordas|beirada|beiradas)\b/,
+  moldura: /\b(?:moldura|molduras|frame|frames|framed|framing|emoldur\w*)\b/,
+  faixa: /\b(?:faixa|faixas|banner|banners|band|bands|strip|strips)\b/,
+  cabecalho: /\b(?:cabecalho|cabecalhos|header|topo|top band)\b/,
+  rodape: /\b(?:rodape|rodapes|roda pe|footer|bottom band)\b/,
+  borda:
+    /\b(?:borda|bordas|beirada|beiradas|border|borders|(?:page|image|flyer) edges?|edges? of the (?:page|image|flyer))\b/,
   divisao:
-    /\b(?:divisao|divisoes|divisoria|divisorias|painel|paineis|quadro|quadros|coluna|colunas)\b/,
-  margem: /\b(?:margem|margens)\b/,
-  espaco: /\b(?:espaco livre|area livre|espaco para)\b/,
+    /\b(?:divisao|divisoes|divisoria|divisorias|painel|paineis|quadro|quadros|coluna|colunas|divider|dividers|panel|panels|column|columns|split|splits)\b/,
+  margem: /\b(?:margem|margens|margin|margins)\b/,
+  espaco:
+    /\b(?:espaco livre|area livre|espaco (?:para|pra|pro|pros|pras)|free space|empty area|blank area|space for)\b/,
 };
 
 /** Cabeçalho e rodapé do cliente autorizam também borda, faixa e topo; "moldura" só autoriza a si mesma. */
@@ -56,8 +62,11 @@ function groupsIn(text: string): Set<CompositionGroup> {
 }
 
 function authorizedGroups(clientMessages: string[]): Set<CompositionGroup> {
-  const said = groupsIn(clientMessages.join(' \n '));
+  const joined = clientMessages.join(' \n ');
+  const said = groupsIn(joined);
   if (said.has('cabecalho') || said.has('rodape')) SECTION_AUTHORIZES.forEach((g) => said.add(g));
+  // R58: "espaço" na mensagem do cliente autoriza "espaço livre" e "free space", com `pra`, `pro` ou sem preposição.
+  if (/\b(?:espaco|space)\b/.test(collapse(joined))) said.add('espaco');
   return said;
 }
 

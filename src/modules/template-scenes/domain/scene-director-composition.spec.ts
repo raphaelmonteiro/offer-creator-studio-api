@@ -1,4 +1,4 @@
-import { directorPlan } from '../testing/scene-director-fixtures';
+import { directorImage, directorPlan } from '../testing/scene-director-fixtures';
 import { checkComposition, clientAsksForSplit } from './scene-director-composition';
 
 describe('checkComposition: Composição só do cliente', () => {
@@ -128,5 +128,68 @@ describe('checkComposition em requests (R4)', () => {
   it('requests com drop não vai ao prompt e não é conferido', () => {
     const check = checkComposition(withRequest('moldura', 'drop'), ['esquece a moldura']);
     expect(check).toEqual({ ok: true });
+  });
+});
+
+describe('Composição só do cliente, nos blocos em inglês (D-51, R58)', () => {
+  const edit = (image: Parameters<typeof directorImage>[0]) =>
+    directorPlan({
+      turn_kind: 'pedido_item',
+      will_change_image: true,
+      image: directorImage(image),
+    });
+
+  it.each([
+    ['composition', { composition: 'a golden frame around the page', change: 'x' }],
+    ['change', { change: 'Add a banner across the middle' }],
+    ['preserve', { change: 'x', preserve: ['the red border'] }],
+  ])('Moldura em inglês que ninguém pediu: %s refaz, e persistindo vira pergunta', (_n, image) => {
+    expect(checkComposition(edit(image), ['quero uma placa'])).toMatchObject({ ok: false });
+  });
+
+  it('Região não é composição: a faixa autorizada com as medidas não pede faixa nenhuma', () => {
+    const plan = edit({
+      change: 'Add one modest wooden sign',
+      region: { zone: 'footer', side: 'right' },
+    });
+    expect(checkComposition(plan, ['coloca uma placa de madeira'])).toEqual({ ok: true });
+  });
+
+  it('"rustic edges" de uma placa não é borda, e "page edge" é', () => {
+    expect(
+      checkComposition(edit({ change: 'a sign with softly rounded rustic edges' }), ['x']),
+    ).toEqual({ ok: true });
+    expect(checkComposition(edit({ change: 'a ribbon along the page edge' }), ['x'])).toMatchObject(
+      {
+        ok: false,
+        groups: ['borda'],
+      },
+    );
+  });
+
+  it.each([
+    ['abre espaço pra logo', 'space for the logo'],
+    ['deixa um espaço pro texto', 'free space at the top for the logo'],
+    ['abre espaço pros preços', 'empty area for prices'],
+    ['abre espaço pras fotos', 'blank area for photos'],
+    ['deixa um espaço em cima', 'a free space at the top'],
+  ])('Espaço pedido com "pra": "%s" autoriza "%s"', (message, change) => {
+    expect(checkComposition(edit({ change }), [message])).toEqual({ ok: true });
+  });
+
+  it('o "topo" que o Diretor acrescenta continua conferido, porque é outro grupo', () => {
+    const plan = edit({ change: 'free space at the top band for the logo' });
+    expect(checkComposition(plan, ['deixa um espaço pra logo'])).toMatchObject({
+      ok: false,
+      groups: expect.arrayContaining(['cabecalho']),
+    });
+  });
+
+  it('o cliente com header ou footer autoriza os termos em inglês de borda, faixa e banner', () => {
+    expect(
+      checkComposition(edit({ change: 'a strip and a banner on the bottom band' }), [
+        'decora o rodapé',
+      ]),
+    ).toEqual({ ok: true });
   });
 });
