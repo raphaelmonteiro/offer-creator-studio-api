@@ -273,6 +273,7 @@ export class SceneRedrawHandler implements TurnHandler {
           ...judged.facts,
           satisfied: effectiveSatisfied(judged.facts.satisfied, lines),
           text: textFactsOf(lines, applied.tried, applied.limited),
+          pendingItem: pendingItemOf(ctx, judged),
         }
       : null;
     await this.support.finishWithImage(ctx, applied.png, {
@@ -291,6 +292,18 @@ export class SceneRedrawHandler implements TurnHandler {
       },
     });
   }
+}
+
+/**
+ * Uma mudança por rodada (D-54): o item aberto desta mensagem que o juiz não viu na imagem, para o chat perguntar se
+ * faz agora. O pedido de outras mensagens continua só na lista.
+ */
+function pendingItemOf(ctx: TurnContext, judged: JudgedResult): string | undefined {
+  const seen = judged.verdict?.seen ?? [];
+  return ctx.openItems.find(
+    (item) =>
+      item.sourceMessageId && item.sourceMessageId === ctx.messageId && !seen.includes(item.id),
+  )?.text;
 }
 
 /** O que a primeira ou a segunda tentativa deixam em `metrics.textCheck.attempts`: prompt, custo e leitura. */

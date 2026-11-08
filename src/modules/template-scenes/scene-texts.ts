@@ -175,9 +175,6 @@ export function afterImageReply(
 export const currentVersionReply = (displayNumber: number): string =>
   `A versão atual é a ${displayNumber}.`;
 
-/** Resposta sobre a imagem: sempre apresentada como leitura do que o modelo vê. */
-export const askedAboutImageReply = (reply: string): string => `Pelo que vejo na imagem: ${reply}`;
-
 /** Marcação que não vale para imagem nova (`/images/generations` não recebe `markup`). */
 export const MARKING_DISCARDED_NOTE = 'A área marcada não vale para uma imagem nova.';
 

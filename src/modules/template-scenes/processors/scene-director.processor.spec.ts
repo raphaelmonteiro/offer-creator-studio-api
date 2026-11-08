@@ -28,9 +28,7 @@ describeIfSceneDb('SceneDirectorProcessor (banco chroma_x_e2e)', () => {
         reply: 'Há 3 coelhos.',
       });
       expect(version).toMatchObject({ status: 'rejected', step: 'done' });
-      expect((await lastAssistant(scene.id))?.content).toBe(
-        'Pelo que vejo na imagem: Há 3 coelhos.',
-      );
+      expect((await lastAssistant(scene.id))?.content).toBe('Há 3 coelhos.');
       expect(imageJobs()).toHaveLength(0);
       expect(version.masterAssetId).toBeNull();
       expect((await h.sceneOf(scene.id)).currentVersionId).not.toBe(version.id);

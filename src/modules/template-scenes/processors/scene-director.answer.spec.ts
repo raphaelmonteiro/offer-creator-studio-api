@@ -29,9 +29,7 @@ describeIfSceneDb(
       );
       expect(plan).toHaveBeenCalledTimes(1);
       expect(version.status).toBe('rejected');
-      expect(await lastReply(scene.id)).toBe(
-        'Pelo que vejo na imagem: Não vejo uma cerca na imagem. Onde ela está?',
-      );
+      expect(await lastReply(scene.id)).toBe('Não vejo uma cerca na imagem. Onde ela está?');
       expect(imageJobs()).toHaveLength(0);
     });
 
@@ -134,9 +132,7 @@ describeIfSceneDb(
         );
         expect(plan).toHaveBeenCalledTimes(1);
         expect(version.status).toBe('rejected');
-        expect(await lastReply(scene.id)).toBe(
-          'Pelo que vejo na imagem: Não vejo faixa. Onde ela está?',
-        );
+        expect(await lastReply(scene.id)).toBe('Não vejo faixa. Onde ela está?');
       });
 
       it('número no plano que não chama imagem também não refaz', async () => {

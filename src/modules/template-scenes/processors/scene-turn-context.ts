@@ -46,6 +46,8 @@ export interface TurnContext {
   widthPx: number;
   heightPx: number;
   request: string;
+  /** A mensagem do cliente deste turno: os itens abertos com esta origem e não feitos têm pergunta própria (D-54). */
+  messageId: string;
   /** Todas as mensagens do cliente na cena: a frase de continuidade sai se alguma pede moldura, faixa ou divisão. */
   clientMessages: string[];
   formatId: string;
@@ -57,7 +59,7 @@ export interface TurnContext {
   targetElementId: string | null;
   parent: TurnParent | null;
   /** Textos dos itens em aberto da lista do que o cliente pediu, no momento da chamada (o juiz os confere depois). */
-  openItems: Array<{ id: string; text: string }>;
+  openItems: Array<{ id: string; text: string; sourceMessageId?: string }>;
   /** Itens já dados como feitos (os mais recentes): o juiz confere se ainda aparecem depois do redesenho. */
   doneItems: Array<{ id: string; text: string }>;
 }
@@ -83,6 +85,7 @@ export async function loadTurnContext(
     widthPx: scene.widthPx,
     heightPx: scene.heightPx,
     request: message?.content ?? '',
+    messageId: message?.id ?? '',
     clientMessages: (
       await manager.find(TemplateSceneMessage, {
         where: { sceneId: scene.id, role: 'user' },
@@ -97,7 +100,11 @@ export async function loadTurnContext(
     requestedMask: version.requestedMask,
     targetElementId: version.targetElementId,
     parent: await loadParent(manager, scene),
-    openItems: openItems(scene.brief ?? []).map((item) => ({ id: item.id, text: item.text })),
+    openItems: openItems(scene.brief ?? []).map((item) => ({
+      id: item.id,
+      text: item.text,
+      sourceMessageId: item.sourceMessageId,
+    })),
     doneItems: (scene.brief ?? [])
       .filter((item) => item.status === 'done')
       .slice(-10)

@@ -28,7 +28,7 @@ type ImageDecision = Extract<TurnDecision, { kind: 'image' }>;
 
 export type TurnDecision =
   | { kind: 'refuse'; refusal: PaintedRefusal }
-  | { kind: 'reply'; reply: string; aboutImage: boolean }
+  | { kind: 'reply'; reply: string }
   | { kind: 'layers'; ops: DirectorLayerOp[]; reply: string }
   | { kind: 'undo'; target: 'previous' | number }
   | {
@@ -95,15 +95,6 @@ const ANNOUNCES = new RegExp(
     .map((part) => `(?<!\\bnao\\s)(?<!\\bnem\\s)${part}`)
     .join('|'),
 );
-
-/**
- * O prefixo "Pelo que vejo na imagem:" só vai quando a primeira frase afirma algo sobre a imagem (G8). Quem só
- * pergunta ("Qual canto você quer deixar livre?") não leu nada para apresentar como leitura.
- */
-export function isReading(reply: string): boolean {
-  const first = reply.trim().match(/^[^.!?]*[.!?]?/)?.[0] ?? '';
-  return !first.trimEnd().endsWith('?');
-}
 
 /** A resposta de um plano que não muda a imagem não serve: vazia ou anunciando uma ação. Refaz uma vez. */
 export function unusableAnswer(reply: string): boolean {
@@ -188,7 +179,7 @@ export function decideTurn(input: DecisionInput): TurnDecision {
     return { kind: 'refuse', refusal: 'painted_logo' };
   }
   if ((plan.turn_kind === 'camada' || plan.turn_kind === 'desfazer') && !hasImage) {
-    return { kind: 'reply', reply: NO_IMAGE_REPLY, aboutImage: false };
+    return { kind: 'reply', reply: NO_IMAGE_REPLY };
   }
   if (plan.turn_kind === 'camada' && plan.layer_ops.length > 0) {
     return {
@@ -203,22 +194,16 @@ export function decideTurn(input: DecisionInput): TurnDecision {
   if (changesImage(input)) {
     return hasInstruction(plan)
       ? imageDecision(input)
-      : { kind: 'reply', reply: NO_INSTRUCTION_REPLY, aboutImage: false };
+      : { kind: 'reply', reply: NO_INSTRUCTION_REPLY };
   }
   if (answersWithoutImage(plan)) {
     // O Diretor respondeu em vez de pedir imagem (por exemplo, não viu o objeto): a resposta vai como leitura (G8). Sem
     // resposta que sirva, ou barrada, o texto fixo, sem o prefixo.
     const text = plan.reply.trim();
     return unusableAnswer(text) || replyIsForbidden(text)
-      ? { kind: 'reply', reply: NO_INSTRUCTION_REPLY, aboutImage: false }
-      : { kind: 'reply', reply: text, aboutImage: hasImage && isReading(text) };
+      ? { kind: 'reply', reply: NO_INSTRUCTION_REPLY }
+      : { kind: 'reply', reply: text };
   }
-  const reply = safeReply({ ...plan, will_change_image: false });
-  // Texto fixo (resposta vazia ou barrada) não é leitura: sai sem o prefixo.
-  const fixed = reply === FIXED_ANSWER;
-  return {
-    kind: 'reply',
-    reply,
-    aboutImage: plan.turn_kind === 'pergunta' && hasImage && !fixed && isReading(reply),
-  };
+  // D-51: a resposta vai como o Diretor escreveu, sem prefixo; barrada ou vazia, cai no texto fixo.
+  return { kind: 'reply', reply: safeReply({ ...plan, will_change_image: false }) };
 }

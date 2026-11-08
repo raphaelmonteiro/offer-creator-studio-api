@@ -11,7 +11,6 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import {
-  askedAboutImageReply,
   NO_OPEN_REQUEST_REPLY,
   whichToForgetReply,
   currentVersionReply,
@@ -240,8 +239,7 @@ export class SceneDirectorState {
     switch (decision.kind) {
       case 'reply': {
         const fact = await this.versionFact(manager, scene, context.script.message, plan);
-        const text =
-          fact ?? (decision.aboutImage ? askedAboutImageReply(decision.reply) : decision.reply);
+        const text = fact ?? decision.reply;
         await this.reject(target, withNote(text));
         return;
       }

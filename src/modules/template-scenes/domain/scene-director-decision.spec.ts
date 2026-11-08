@@ -36,11 +36,9 @@ describe('decideTurn: o efeito vem do tipo e das regras do código', () => {
   });
 
   it('só a pergunta sobre a imagem é apresentada como leitura', () => {
-    expect(decide({ turn_kind: 'pergunta' })).toMatchObject({ aboutImage: true });
-    expect(decide({ turn_kind: 'pergunta' }, { hasImage: false })).toMatchObject({
-      aboutImage: false,
-    });
-    expect(decide({ turn_kind: 'agradecimento' })).toMatchObject({ aboutImage: false });
+    expect(decide({ turn_kind: 'pergunta' })).toMatchObject({ kind: 'reply' });
+    expect(decide({ turn_kind: 'pergunta' }, { hasImage: false })).toMatchObject({});
+    expect(decide({ turn_kind: 'agradecimento' })).toMatchObject({ kind: 'reply' });
   });
 
   it('recusa vira recusa, com o tipo de conteúdo pintado', () => {
@@ -193,7 +191,6 @@ describe('decideTurn: plano sem instrução (G2, R5)', () => {
     (kind) => {
       expect(decide({ turn_kind: kind, what_to_change: '', what_to_put: '' })).toMatchObject({
         kind: 'reply',
-        aboutImage: false,
         reply: expect.stringContaining('Não entendi o que mudar'),
       });
     },
