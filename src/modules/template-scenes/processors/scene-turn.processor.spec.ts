@@ -12,12 +12,16 @@ import {
 } from '../testing/scene-fixtures';
 import { SCENE_DB_URL } from '../testing/scene-test-db';
 import { describeIfSceneDb } from '../testing/scene-test-db';
+import { directorPlan } from '../testing/scene-director-fixtures';
 import { useProcessorHarness } from '../testing/scene-processor-harness';
 
 describeIfSceneDb(
   'SceneTurnProcessor: geração, falhas, custo, poda e eventos (banco chroma_x_e2e)',
   () => {
     const h = useProcessorHarness();
+    afterEach(() => {
+      delete process.env.TEMPLATE_SCENE_MASTERS_KEPT;
+    });
     const {
       mock,
       processorWith,
@@ -81,7 +85,7 @@ describeIfSceneDb(
         quality: 'high',
         correlationId: (await versionOf(version.id)).correlationId,
       });
-      expect(input.prompt).toContain('"pedido literal do cliente"');
+      expect(input.prompt).toContain('"pedido literal do cliente."');
       expect(input.prompt).toContain('sem texto legível');
     });
 
@@ -102,10 +106,26 @@ describeIfSceneDb(
       const done = await versionOf(version.id);
       expect(done.metrics.calls).toEqual([
         expect.objectContaining({ status: 'done', costUsd: 0.1365, requestId: 'req_1' }),
+        expect.objectContaining({ kind: 'vision', status: 'done', costUsd: 0, size: 'high' }),
       ]);
       expect(done.providerCostUsd).toBe(0.1365);
       expect(done.latencyMs).toBe(1234);
       expect((await sceneOf(scene.id)).totalCostUsd).toBe(0.1365);
+    });
+
+    it('Resposta sem usage: o turno segue, metrics.costUnknown fica verdadeiro e há erro no log', async () => {
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const { provider } = fakeProvider(() => okResult(null));
+      const { scene, version } = await queuedScene('sem usage');
+
+      await processorWith(provider).process(job(scene.id, version.id));
+
+      const done = await versionOf(version.id);
+      expect(done.status).toBe('ready');
+      expect(done.metrics.costUnknown).toBe(true);
+      expect(done.providerCostUsd).toBe(0);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('Custo desconhecido'));
+      error.mockRestore();
     });
 
     it.each([
@@ -197,12 +217,17 @@ describeIfSceneDb(
       expect(await h.dataSource.manager.countBy(TemplateSceneAsset, { sceneId: scene.id })).toBe(0);
     });
 
-    it('ao ficar ready, poda a master mais antiga (conjunto protegido de 5)', async () => {
+    it('ao ficar ready, poda a master mais antiga (conjunto protegido configurado em 5)', async () => {
+      process.env.TEMPLATE_SCENE_MASTERS_KEPT = '5'; // o padrão é 20 (D-34); a regra é paramétrica
       const scene = await insertScene(h.dataSource, { name: 'Processor poda' });
       trackScene(scene.id);
       const ready = [];
       for (let n = 1; n <= 5; n++) ready.push(await insertReadyVersion(h.dataSource, scene, n));
-      const version = await insertVersion(h.dataSource, scene.id, { number: 6, status: 'queued' });
+      const version = await insertVersion(h.dataSource, scene.id, {
+        number: 6,
+        status: 'queued',
+        metrics: { plan: directorPlan({ turn_kind: 'imagem_nova', what_to_put: 'poda' }) },
+      });
       await insertMessage(h.dataSource, scene.id, { versionId: version.id, content: 'poda' });
 
       await processorWith(mock()).process(job(scene.id, version.id));
@@ -241,15 +266,17 @@ describeIfSceneDb(
           'version.step',
           'version.step',
           'version.step',
+          'version.step',
           'version.ready',
         ]);
         expect(mine.map((event) => event.step)).toEqual([
           'preparing',
           'generating',
+          'checking',
           'saving',
           'done',
         ]);
-        expect(mine[3].revision).toBeGreaterThan(0);
+        expect(mine[4].revision).toBeGreaterThan(0);
       } finally {
         await client.end();
       }

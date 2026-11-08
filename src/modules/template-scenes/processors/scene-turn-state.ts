@@ -1,49 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
-import { SceneCallRecord, SceneFailureCode, SceneStep, SceneZones } from '../domain/scene.types';
-import { sceneZonesFor } from '../domain/scene-formats';
+import { SceneCallRecord, SceneFailureCode, SceneStep } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
-import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
-import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { READY_REPLY } from '../scene-texts';
 import { SceneEventKind } from '../services/scene-events';
 import { cancelVersion, emitVersionEvent, failVersion } from './scene-turn-finish';
-import { bumpRevision, SceneLockService } from '../services/scene-lock.service';
-import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
-import { pruneSceneAssets } from '../services/scene-retention';
+import { SceneLockService } from '../services/scene-lock.service';
+import { CallOutcome, closeCallIn, recordCallIn } from './scene-turn-calls';
+import { loadTurnContext, TurnContext } from './scene-turn-context';
+import { CompleteExtra, CompleteImage, readyVersion, StoredFile } from './scene-turn-complete';
 
-/** O que o processor precisa saber da versão para trabalhar sem segurar lock durante a chamada paga. */
-export interface TurnContext {
-  sceneId: string;
-  versionId: string;
-  correlationId: string;
-  zones: SceneZones;
-  artWidthCm: number;
-  artHeightCm: number;
-  widthPx: number;
-  heightPx: number;
-  request: string;
-}
+export type { CompleteExtra, StoredFile } from './scene-turn-complete';
+export type { TurnAttachmentAsset, TurnContext, TurnParent } from './scene-turn-context';
 
-export interface StoredFile {
-  url: string;
-  width: number;
-  height: number;
-  bytes: number;
-}
-
+export type { CallOutcome } from './scene-turn-calls';
 export type CompleteResult = 'ready' | 'cancelled' | 'stale';
-
-export interface CallOutcome {
-  status: 'done' | 'failed';
-  costUsd: number | null;
-  requestId?: string | null;
-  errorCode?: string;
-  latencyMs?: number;
-}
-
-const round6 = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
 
 /**
  * Transições da versão durante o turno. Cada uma roda sob o lock da cena (curta, nunca durante a
@@ -78,21 +49,7 @@ export class SceneTurnState {
       version.step = 'preparing';
       await manager.save(version);
       await this.emit(manager, scene, version, 'version.step');
-      const message = await manager.findOne(TemplateSceneMessage, {
-        where: { versionId, role: 'user' },
-        order: { createdAt: 'ASC' },
-      });
-      return {
-        sceneId,
-        versionId,
-        correlationId: version.correlationId,
-        zones: sceneZonesFor(scene.formatId),
-        artWidthCm: scene.artWidthCm,
-        artHeightCm: scene.artHeightCm,
-        widthPx: scene.widthPx,
-        heightPx: scene.heightPx,
-        request: message?.content ?? '',
-      };
+      return loadTurnContext(manager, scene, version);
     });
   }
 
@@ -120,11 +77,16 @@ export class SceneTurnState {
     });
   }
 
-  /** Grava a tentativa ANTES da chamada paga (R10) e aplica o disjuntor de chamadas por mensagem. */
+  /**
+   * Grava a tentativa ANTES da chamada paga (R10) e aplica o disjuntor de chamadas por mensagem.
+   * No limite, `onLimit: 'fail'` (chamada de imagem) falha a versão com `PAID_CALL_LIMIT`; `'skip'`
+   * (visão, opcional) só devolve `'limit'` e a versão segue.
+   */
   reserveCall(
     ctx: TurnContext,
     call: SceneCallRecord,
     maxCalls: number,
+    onLimit: 'fail' | 'skip' = 'fail',
   ): Promise<'ok' | 'cancelled' | 'limit'> {
     return this.run(ctx, async (manager, scene) => {
       const version = await this.runningVersion(manager, ctx);
@@ -133,14 +95,11 @@ export class SceneTurnState {
         await this.cancelIn(manager, scene, version);
         return 'cancelled';
       }
-      const calls = version.metrics.calls ?? [];
-      if (calls.length >= maxCalls) {
+      const result = await recordCallIn(manager, version, call, maxCalls);
+      if (result === 'limit' && onLimit === 'fail') {
         await this.failIn(manager, scene, version, 'PAID_CALL_LIMIT');
-        return 'limit';
       }
-      version.metrics = { ...version.metrics, calls: [...calls, call] };
-      await manager.save(version);
-      return 'ok';
+      return result;
     });
   }
 
@@ -148,72 +107,33 @@ export class SceneTurnState {
   closeCall(ctx: TurnContext, callId: string, outcome: CallOutcome): Promise<void> {
     return this.run(ctx, async (manager, scene) => {
       const version = await manager.findOneBy(TemplateSceneVersion, { id: ctx.versionId });
-      if (!version) return;
-      const cost = outcome.costUsd ?? 0;
-      version.metrics = {
-        ...version.metrics,
-        calls: (version.metrics.calls ?? []).map((call) =>
-          call.id === callId
-            ? {
-                ...call,
-                status: outcome.status,
-                finishedAt: new Date().toISOString(),
-                costUsd: outcome.costUsd,
-                requestId: outcome.requestId ?? null,
-                ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),
-              }
-            : call,
-        ),
-      };
-      version.providerCostUsd = round6(version.providerCostUsd + cost);
-      if (outcome.latencyMs !== undefined) version.latencyMs = outcome.latencyMs;
-      scene.totalCostUsd = round6(scene.totalCostUsd + cost);
-      await manager.save(version);
-      await manager.save(scene);
+      if (version) await closeCallIn(manager, { scene, version }, callId, outcome);
     });
   }
 
-  /** `running` → `ready`: cria os assets, torna a versão atual, poda e responde no chat. */
+  /** `running` → `ready` com master e prévia novas (primeira imagem, imagem nova e redesenho). */
   complete(
     ctx: TurnContext,
     files: { master: StoredFile; preview: StoredFile },
+    extra: CompleteExtra,
+  ): Promise<CompleteResult> {
+    return this.completeWith(ctx, { kind: 'files', ...files }, extra);
+  }
+
+  private completeWith(
+    ctx: TurnContext,
+    image: CompleteImage,
+    extra: CompleteExtra,
   ): Promise<CompleteResult> {
     return this.run(ctx, async (manager, scene) => {
       const version = await this.runningVersion(manager, ctx);
       if (!version) return 'stale';
-      if (scene.deletedAt || version.cancelRequestedAt) {
-        await this.cancelIn(manager, scene, version);
-        return 'cancelled';
-      }
-      const [master, preview] = await Promise.all(
-        (['master', 'preview'] as const).map((role) =>
-          manager.save(
-            manager.create(TemplateSceneAsset, {
-              versionId: ctx.versionId,
-              sceneId: ctx.sceneId,
-              role,
-              ...files[role],
-            }),
-          ),
-        ),
-      );
-      version.status = 'ready';
-      version.step = 'done';
-      version.masterAssetId = master.id;
-      version.previewAssetId = preview.id;
-      await manager.save(version);
-      scene.currentVersionId = version.id;
-      await pruneSceneAssets(manager, scene.id);
-      await settleUserMessage(manager, version.id, 'done');
-      await addAssistantMessage(manager, {
-        sceneId: scene.id,
-        versionId: version.id,
-        content: READY_REPLY,
-        status: 'done',
-      });
-      await bumpRevision(manager, scene);
-      await this.emit(manager, scene, version, 'version.ready');
-      return 'ready';
+      const target = {
+        sceneId: ctx.sceneId,
+        versionId: ctx.versionId,
+        parentElements: structuredClone(ctx.parent?.elements ?? []),
+      };
+      return readyVersion(manager, scene, version, { target, image, extra });
     });
   }
 

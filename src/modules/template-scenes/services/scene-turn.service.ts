@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { SendMessageDto } from '../dto/send-message.dto';
 import { TemplateScene } from '../entities/template-scene.entity';
@@ -11,28 +11,39 @@ import { TemplateSceneVersion } from '../entities/template-scene-version.entity'
 import {
   assetNotInScene,
   sceneBusy,
-  sceneEditUnavailable,
   versionNotCancellable,
   versionNotFound,
 } from '../scene.errors';
 import { CANCELLED_REPLY } from '../scene-texts';
 import { publishSceneEvent } from './scene-events';
+import { isBusyIndexViolation, publishQueued, TurnInput } from './scene-turn-helpers';
+import {
+  assertShapeBigEnough,
+  assertSingleTarget,
+  assertTargetElementExists,
+  requestedTargetOf,
+} from './scene-message-target';
 import { addAssistantMessage, settleUserMessage } from './scene-messages';
+import { closeTurnBrief } from './scene-turn-brief';
 import {
   assertExpectedRevision,
   assertSceneIdle,
   bumpRevision,
+  closeOpenManual,
   nextVersionNumber,
   SceneLockService,
 } from './scene-lock.service';
 
-/** Quanto o job da cena pode rodar antes de expirar (a chamada paga tem timeout de 180 s). */
-const TURN_EXPIRE_SECONDS = 900;
-const BUSY_INDEX = 'UQ_tsv_scene_busy';
+/** Quanto o job da imagem pode rodar antes de expirar (a chamada paga tem timeout de 180 s). */
+export const TURN_EXPIRE_SECONDS = 900;
+/** Quanto o job do Diretor pode rodar: o teto do Diretor é 20 s, e o plano é refeito no máximo uma vez. */
+const DIRECTOR_EXPIRE_SECONDS = 180;
 
+/** Resposta do `POST .../messages` (202): a mensagem e a versão existem antes de o Diretor ler. */
 export interface SendMessageResult {
   messageId: string;
   versionId: string;
+  /** Sempre presente: toda mensagem vira um job do Diretor. */
   jobId: string;
   revision: number;
 }
@@ -44,9 +55,11 @@ export interface CancelVersionResult {
   revision: number;
 }
 
-/** Turno do chat: mensagem + versão `queued` + job (mesma transação) e o cancelamento. */
+/** Turno do chat: mensagem + versão `queued` (lendo) + job do Diretor (mesma transação) e o cancelamento. */
 @Injectable()
 export class SceneTurnService {
+  private readonly logger = new Logger(SceneTurnService.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly locks: SceneLockService,
@@ -54,9 +67,11 @@ export class SceneTurnService {
   ) {}
 
   /**
-   * Neste estágio só a primeira geração existe (`generate`): numa cena com versão `ready`, a API
-   * responde 422 `SCENE_EDIT_UNAVAILABLE` (a edição entra no estágio 4). O job nasce com
-   * `retryLimit: 0`: chamada paga nunca é repetida pela fila.
+   * Sob o lock da cena: confere revisão, cena ocupada, corpo e anexos, e então grava a mensagem do cliente, a
+   * versão `queued` no step `reading` e o job do Diretor na MESMA transação (`retryLimit: 0`). Responde 202
+   * sem esperar o Diretor: fechar a aba não perde a mensagem, e o índice `UQ_tsv_scene_busy` garante um só turno,
+   * inclusive durante a leitura. Duas abas com a mesma revisão: uma recebe 202 e a outra 409, e o Diretor é
+   * chamado uma só vez.
    */
   async sendMessage(
     sceneId: string,
@@ -67,11 +82,17 @@ export class SceneTurnService {
       return await this.locks.run(sceneId, async ({ manager, scene }) => {
         assertExpectedRevision(scene, dto.expectedRevision);
         await assertSceneIdle(manager, sceneId);
-        if (await manager.exists(TemplateSceneVersion, { where: { sceneId, status: 'ready' } })) {
-          throw sceneEditUnavailable();
-        }
+        assertSingleTarget(dto); // 400 antes de qualquer consulta: o corpo inválido vence o 422 do anexo
         await this.assertAttachmentsInScene(manager, sceneId, dto);
-        return this.enqueueGeneration(manager, scene, dto, userId);
+        const hasImage = await manager.exists(TemplateSceneVersion, {
+          where: { sceneId, status: 'ready' },
+        });
+        if (hasImage) {
+          await assertShapeBigEnough(dto, scene);
+          await assertTargetElementExists(manager, scene, dto);
+        }
+        await closeOpenManual(manager, sceneId);
+        return this.enqueueReading(manager, scene, { dto, userId }, hasImage);
       });
     } catch (error) {
       if (isBusyIndexViolation(error)) throw sceneBusy();
@@ -79,19 +100,24 @@ export class SceneTurnService {
     }
   }
 
-  private async enqueueGeneration(
+  private async enqueueReading(
     manager: EntityManager,
     scene: TemplateScene,
-    dto: SendMessageDto,
-    userId: string | null,
+    input: TurnInput,
+    hasImage: boolean,
   ): Promise<SendMessageResult> {
+    const { dto, userId } = input;
     const version = await manager.save(
       manager.create(TemplateSceneVersion, {
         sceneId: scene.id,
         parentVersionId: scene.currentVersionId,
         number: await nextVersionNumber(manager, scene.id),
-        operation: 'generate',
+        // Operação inicial; o consumer do Diretor a troca para `set_layer`, `restore` ou `generate` quando é o caso.
+        operation: hasImage ? 'redraw' : 'generate',
         status: 'queued',
+        step: 'reading',
+        ...requestedTargetOf(dto, scene),
+        metrics: {},
         correlationId: randomUUID(),
         createdByUserId: userId,
       }),
@@ -108,21 +134,17 @@ export class SceneTurnService {
       }),
     );
     const jobId = await this.queue.publish(
-      QUEUES.TEMPLATE_SCENE_TURN,
+      QUEUES.TEMPLATE_SCENE_DIRECTOR,
       { sceneId: scene.id, versionId: version.id },
-      { manager, expireInSeconds: TURN_EXPIRE_SECONDS, retryLimit: 0 },
+      { manager, expireInSeconds: DIRECTOR_EXPIRE_SECONDS, retryLimit: 0 },
     );
-    if (!jobId) throw new Error('A fila não aceitou o job da cena');
+    if (!jobId) throw new Error('A fila não aceitou o job do Diretor');
     const revision = await bumpRevision(manager, scene);
-    await publishSceneEvent(manager, {
+    await publishQueued(manager, {
       sceneId: scene.id,
       versionId: version.id,
-      kind: 'version.step',
-      step: null,
-      status: 'queued',
-      cancelRequested: false,
-      costUsd: 0,
       revision,
+      step: 'reading',
     });
     return { messageId: message.id, versionId: version.id, jobId, revision };
   }
@@ -144,7 +166,7 @@ export class SceneTurnService {
       if (!version.cancelRequestedAt) {
         const wasQueued = version.status === 'queued';
         version.cancelRequestedAt = new Date();
-        if (wasQueued) await this.cancelQueued(manager, version);
+        if (wasQueued) await this.cancelQueued(manager, scene, version);
         else await manager.save(version);
         await bumpRevision(manager, scene);
         await publishSceneEvent(manager, {
@@ -167,8 +189,14 @@ export class SceneTurnService {
     });
   }
 
-  private async cancelQueued(manager: EntityManager, version: TemplateSceneVersion): Promise<void> {
+  private async cancelQueued(
+    manager: EntityManager,
+    scene: TemplateScene,
+    version: TemplateSceneVersion,
+  ): Promise<void> {
     version.status = 'cancelled';
+    // Parar na janela fecha o pedido do turno e o que sobrou do anterior (D-59).
+    await closeTurnBrief(manager, scene, version, { stopped: true });
     await manager.save(version);
     await settleUserMessage(manager, version.id, 'failed');
     await addAssistantMessage(manager, {
@@ -179,7 +207,7 @@ export class SceneTurnService {
     });
   }
 
-  /** Anexos só podem ser assets da própria cena. */
+  /** Anexos só podem ser logos já enviados à própria cena (outro papel é `ASSET_NOT_IN_SCENE`). */
   private async assertAttachmentsInScene(
     manager: EntityManager,
     sceneId: string,
@@ -187,16 +215,9 @@ export class SceneTurnService {
   ): Promise<void> {
     for (const attachment of dto.attachments ?? []) {
       const found = await manager.findOne(TemplateSceneAsset, {
-        where: { id: attachment.assetId, sceneId },
+        where: { id: attachment.assetId, sceneId, role: 'logo' },
       });
       if (!found || found.purgedAt) throw assetNotInScene(attachment.assetId);
     }
   }
-}
-
-/** O índice parcial `UQ_tsv_scene_busy` é a rede de segurança de D-3: a violação também é SCENE_BUSY. */
-function isBusyIndexViolation(error: unknown): boolean {
-  if (!(error instanceof QueryFailedError)) return false;
-  const driver = error.driverError as { code?: string; constraint?: string } | undefined;
-  return driver?.code === '23505' && driver.constraint === BUSY_INDEX;
 }

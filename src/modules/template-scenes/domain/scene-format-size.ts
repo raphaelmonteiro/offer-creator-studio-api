@@ -1,4 +1,4 @@
-import { CUSTOM_SIZE_LIMITS } from '../../ai/config/openai-image-capabilities';
+import { CUSTOM_SIZE_LIMITS } from '../../../shared/image/openai-image-capabilities';
 import { SceneFormatSpec } from './scene-formats';
 
 export interface SceneNativeSize {

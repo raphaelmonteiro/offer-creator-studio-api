@@ -33,6 +33,10 @@ const version = (extra: Partial<TemplateSceneVersion> = {}): TemplateSceneVersio
     masterAssetId: 'm1',
     previewAssetId: 'p1',
     elements: [],
+    metrics: {},
+    requestedRegion: null,
+    requestedMask: null,
+    targetElementId: null,
     ...extra,
   }) as TemplateSceneVersion;
 
@@ -146,5 +150,76 @@ describe('toCurrentVersionView', () => {
     expect(view.assets.map((a) => a.id).sort()).toEqual(['l1', 'm1', 'p1']);
     expect(view.master?.id).toBe('m1');
     expect(view.elements).toHaveLength(2);
+  });
+});
+
+describe('número exibido, janela e juiz na versão', () => {
+  it('displayNumber vem do mapa da cena inteira; sem entrada, null', () => {
+    const v = version();
+    expect(toVersionView(v, new Map(), new Map([[v.id, 7]])).displayNumber).toBe(7);
+    expect(toVersionView(v, new Map()).displayNumber).toBeNull();
+  });
+
+  it('windowEndsAt sai de metrics, e só se for uma data válida', () => {
+    const at = '2026-11-06T12:00:05.000Z';
+    expect(toVersionView(version({ metrics: { windowEndsAt: at } }), new Map()).windowEndsAt).toBe(
+      at,
+    );
+    expect(
+      toVersionView(version({ metrics: { windowEndsAt: 'ontem' } }), new Map()).windowEndsAt,
+    ).toBeNull();
+    expect(toVersionView(version(), new Map()).windowEndsAt).toBeNull();
+  });
+
+  it('judge traz só o veredito conhecido', () => {
+    const judge = (satisfied: unknown) =>
+      toVersionView(version({ metrics: { judge: { available: true, satisfied } } }), new Map())
+        .judge;
+    expect(judge('nao')).toBe('nao');
+    expect(judge('parcial')).toBe('parcial');
+    expect(judge('sim')).toBe('sim');
+    expect(judge('talvez')).toBeNull();
+    expect(
+      toVersionView(version({ metrics: { judge: { available: false } } }), new Map()).judge,
+    ).toBeNull();
+    expect(toVersionView(version(), new Map()).judge).toBeNull();
+  });
+
+  it('a versão atual leva o número exibido', () => {
+    const v = version();
+    expect(toCurrentVersionView(v, new Map(), new Map([[v.id, 3]])).displayNumber).toBe(3);
+  });
+});
+
+describe('alvo da edição na versão', () => {
+  it('versão sem marcação: alvo vazio e sem imagem nova', () => {
+    const view = toVersionView(version(), new Map());
+    expect(view).toMatchObject({
+      isNewImage: false,
+      requestedRegion: null,
+      requestedMask: null,
+      targetElementId: null,
+    });
+    expect(view).not.toHaveProperty('metrics');
+    expect(view).not.toHaveProperty('targetSource');
+  });
+
+  it('Imagem nova: isNewImage vem do plano do Diretor', () => {
+    const plan = { turn_kind: 'imagem_nova' };
+    expect(toVersionView(version({ metrics: { plan } }), new Map()).isNewImage).toBe(true);
+  });
+
+  it('a marcação gravada volta na versão, e as métricas internas não saem', () => {
+    const region = { x: 0.1, y: 0.1, w: 0.2, h: 0.2 };
+    const view = toVersionView(
+      version({
+        metrics: { plan: { turn_kind: 'pedido_item' }, calls: [], director: { costUsd: 1 } },
+        requestedRegion: region,
+      }),
+      new Map(),
+    );
+    expect(view.requestedRegion).toEqual(region);
+    expect(JSON.stringify(view)).not.toContain('director');
+    expect(JSON.stringify(view)).not.toContain('calls');
   });
 });

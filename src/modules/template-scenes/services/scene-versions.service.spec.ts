@@ -52,6 +52,25 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
     (await dataSource.manager.findOneByOrFail(TemplateScene, { id: sceneId })).revision;
 
   describe('restore', () => {
+    it('Voltar pelo botão: restaura uma versão que o juiz reprovou, sem custo de imagem novo', async () => {
+      const { scene, ready } = await sceneWithVersions('Restore não aplicada', 2);
+      const attempt = await insertReadyVersion(dataSource, scene, 3, {
+        metrics: { judge: { available: true, satisfied: 'nao' } },
+        providerCostUsd: 0.05,
+      });
+
+      const detail = await service.restore(scene.id, attempt.version.id, null);
+
+      expect(detail.currentVersion).toMatchObject({
+        operation: 'restore',
+        providerCostUsd: 0,
+        parentVersionId: attempt.version.id,
+      });
+      expect(detail.currentVersion?.master?.id).toBe(attempt.master.id);
+      expect(ready).toHaveLength(2);
+      expect((await versionsOf(scene.id)).map((v) => v.number)).toEqual([1, 2, 3, 4]);
+    });
+
     it('restaurar a versão 1 cria a versão 4 com a imagem da 1 e mantém as outras e as mensagens', async () => {
       const { scene, ready } = await sceneWithVersions('Restore ok', 3);
       ready[0].version.elements = [textElement('t1')] as never;
@@ -102,7 +121,7 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
       );
       const body = await errorBodyOf(service.restore(scene.id, ready[0].version.id, null));
       expect(body.details).toEqual({ reason: 'master_purged' });
-      expect(String(body.message)).toContain('5 versões mais recentes');
+      expect(String(body.message)).toContain('20 versões mais recentes');
     });
 
     it('com versão em curso: 409 SCENE_BUSY', async () => {
@@ -209,6 +228,35 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
       expect(manuals).toHaveLength(1);
       expect(manuals[0].elements[0]).toMatchObject({ x: 0.2, fontFamily: 'Anton' });
       expect(second.revision).toBe(2);
+    });
+
+    it('Camada antiga: um elemento generated gravado antes continua na lista e continua arrastável', async () => {
+      const old = {
+        id: 'gen-1',
+        kind: 'generated',
+        name: 'Balão 1',
+        x: 0.3,
+        y: 0.4,
+        w: 0.2,
+        aspect: 1,
+        rotation: 0,
+        z: 1,
+      } as const;
+      const scene = await insertScene(dataSource, { name: 'Camada antiga' });
+      createdScenes.push(scene.id);
+      const made = await insertReadyVersion(dataSource, scene, 1, { elements: [old] });
+      scene.currentVersionId = made.version.id;
+      await dataSource.manager.save(scene);
+
+      const opened = await new SceneReadService(dataSource).loadDetail(scene.id);
+      expect(opened.currentVersion?.elements).toEqual([old]);
+
+      const detail = await service.patchElements(
+        scene.id,
+        { expectedRevision: 0, elements: [{ ...old, x: 0.7 }] as never },
+        null,
+      );
+      expect(detail.currentVersion?.elements).toEqual([{ ...old, x: 0.7 }]);
     });
 
     it('revisão antiga: 409 REVISION_CONFLICT', async () => {

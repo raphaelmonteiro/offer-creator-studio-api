@@ -47,7 +47,7 @@ export const versionNotRestorable = () =>
   sceneError(
     HttpStatus.GONE,
     'VERSION_NOT_RESTORABLE',
-    'Esta versão é antiga demais: guardamos a imagem só das 5 versões mais recentes e das aprovadas.',
+    'Esta versão é antiga demais: guardamos a imagem só das 20 versões mais recentes, das aprovadas e da atual.',
     { reason: 'master_purged' },
   );
 
@@ -73,11 +73,19 @@ export const sceneFormatUnsupported = (formatId: string) =>
     { formatId },
   );
 
-export const sceneEditUnavailable = () =>
+export const regionTooSmall = () =>
   sceneError(
     HttpStatus.UNPROCESSABLE_ENTITY,
-    'SCENE_EDIT_UNAVAILABLE',
-    'A edição da cena por mensagem ainda não está disponível. Só a primeira geração funciona nesta versão.',
+    'REGION_TOO_SMALL',
+    'A área marcada é pequena demais. Marque uma área maior (pelo menos 0,1% da imagem).',
+  );
+
+export const targetElementNotFound = (elementId: string) =>
+  sceneError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'TARGET_ELEMENT_NOT_FOUND',
+    'O elemento selecionado não existe mais nesta cena.',
+    { elementId },
   );
 
 export const logoInvalid = (reason: string) =>

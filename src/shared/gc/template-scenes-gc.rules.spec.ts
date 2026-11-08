@@ -82,12 +82,48 @@ describe('selectProtectedSceneAssets', () => {
     expect(protectedIds.has('m3')).toBe(false);
   });
 
+  it('protege a versão atual mesmo fora das mais recentes (D-20, R22)', () => {
+    const versions = [1, 2, 3, 4, 5, 6, 7].map((n) => version(n));
+    const protectedIds = selectProtectedSceneAssets(versions, 5, 'v1');
+    expect(protectedIds.has('m1')).toBe(true);
+    expect(protectedIds.has('p1')).toBe(true);
+    expect(protectedIds.has('m2')).toBe(false);
+    expect(selectProtectedSceneAssets(versions, 5).has('m1')).toBe(false);
+  });
+
+  it('tentativas ocupam as vagas: a atual e a aprovada ficam além das 5', () => {
+    const versions = [
+      version(1),
+      version(2, { approvedAt: daysAgo(3) }),
+      ...[3, 4, 5, 6, 7].map((n) => version(n)),
+    ];
+    const protectedIds = selectProtectedSceneAssets(versions, 5, 'v1');
+    expect([...protectedIds].sort()).toEqual(
+      [1, 2, 3, 4, 5, 6, 7].flatMap((n) => [`m${n}`, `p${n}`]).sort(),
+    );
+  });
+
   it('cena sem versões não protege nada', () => {
     expect(selectProtectedSceneAssets([], 5).size).toBe(0);
   });
 });
 
 describe('selectSceneAssetsToPurge', () => {
+  it('não apaga a master da versão atual, mesmo vencida e fora das vagas', () => {
+    const versions = [1, 2, 3, 4, 5, 6, 7].map((n) => version(n));
+    const assets = [asset('m1', { expiresAt: daysAgo(1) }), asset('m2', { expiresAt: daysAgo(1) })];
+    const result = selectSceneAssetsToPurge({
+      assets,
+      versions,
+      sceneDeletedAt: null,
+      currentVersionId: 'v1',
+      now: NOW,
+      config: CONFIG,
+    });
+    expect(ids(result.purge)).toEqual(['m2']);
+    expect(result.clearExpiry).toEqual(['m1']);
+  });
+
   const six = [1, 2, 3, 4, 5, 6].map((n) => version(n));
   const sixAssets = (expiredIds: string[] = []) =>
     [1, 2, 3, 4, 5, 6].flatMap((n) => [
@@ -184,9 +220,9 @@ describe('selectSceneAssetsToPurge', () => {
 });
 
 describe('sceneGcConfigFromEnv', () => {
-  it('usa os padrões 5, 7 e 30', () => {
+  it('usa os padrões 20, 7 e 30 (D-34: 20 imagens por cena)', () => {
     expect(sceneGcConfigFromEnv({})).toEqual({
-      mastersKept: 5,
+      mastersKept: 20,
       intermediateTtlMs: 7 * DAY_MS,
       deletedRetentionMs: 30 * DAY_MS,
     });

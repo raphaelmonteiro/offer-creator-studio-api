@@ -102,15 +102,21 @@ GC_DRY_RUN                    # GC de /uploads (inclui /uploads/commercials) só
 TEMPLATE_SCENE_ENABLED        # liga rotas, fila, SSE e GC da cena; sem isso as rotas respondem 404 TEMPLATE_SCENE_DISABLED
 TEMPLATE_SCENE_IMAGE_PROVIDER # mock (padrão, sem custo; valor desconhecido também cai no mock) | openai (pago, só na passada do dono)
 TEMPLATE_SCENE_IMAGE_MODEL / TEMPLATE_SCENE_IMAGE_QUALITY
-                              # gpt-image-2.5-sunburst / high; passados explicitamente (não dependem de OPENAI_IMAGE_MODEL)
-TEMPLATE_SCENE_CONCURRENCY    # jobs de geração em paralelo no worker (padrão 1)
+                              # gpt-image-2.6-sunburst / high; passados explicitamente (não dependem de OPENAI_IMAGE_MODEL). Modelo sem preço na tabela de capacidades não é chamado na cena
+TEMPLATE_SCENE_CONCURRENCY    # jobs de IMAGEM em paralelo no worker (padrão 1)
+TEMPLATE_SCENE_DIRECTOR_MODEL / TEMPLATE_SCENE_DIRECTOR_TIMEOUT_MS / TEMPLATE_SCENE_DIRECTOR_CONCURRENCY
+                              # Diretor (D-23): gpt-6-luna (`/responses`, effort medium, store false) / 20000 ms / 4 leituras em paralelo, fila própria
+TEMPLATE_SCENE_WINDOW_SECONDS # janela com "Parar" antes da chamada de imagem (padrão 5; o job entra pelo menos 5 s depois, pelo intervalo da fila)
 TEMPLATE_SCENE_MOCK_LATENCY_MS / TEMPLATE_SCENE_MOCK_SLOW_MS
                               # latência do mock (20000; 0 nos testes) e do marcador #lento (3000)
 TEMPLATE_SCENE_ASSET_TTL_DAYS / TEMPLATE_SCENE_DELETED_RETENTION_DAYS / TEMPLATE_SCENE_MASTERS_KEPT
-                              # 7 dias (raw_output, mask, crop) / 30 dias (cena excluída) / 5 versões com master guardada
+                              # 7 dias (raw_output, mask, crop) / 30 dias (cena excluída) / 20 versões com master guardada (D-34); a atual e as aprovadas também ficam (D-20)
 TEMPLATE_SCENE_GC_DRY_RUN     # só vale para /uploads/template-scenes; ausente = true (só apaga com false explícito); o GC_DRY_RUN global não muda
 TEMPLATE_SCENE_MAX_PAID_CALLS_PER_MESSAGE
                               # disjuntor: chamadas pagas por mensagem (padrão 4)
+TEMPLATE_SCENE_VISION_MODEL / TEMPLATE_SCENE_VISION_TIMEOUT_MS
+                              # o juiz: gpt-6-luna (reasoning_effort low, imagens inteiras em JPEG, detail high) / 20000: passou do tempo, a resposta diz que não conseguiu conferir
+TEMPLATE_SCENE_EDIT_QUALITY   # qualidade do redesenho da imagem inteira (padrão high)
 OPENAI_TIMEOUT_MS             # timeout por requisição do modo sceneCall (padrão 180000); NÃO é global
 TEMPLATE_SCENE_E2E_DB_URL     # só testes: banco descartável chroma_x_e2e (nunca o flyer_db); sem ela os specs de banco ficam skipped
 FAL_API_KEY / ELEVENLABS_API_KEY / GEMINI_API_KEY
@@ -577,9 +583,10 @@ cenas; `createdByUserId` só registra o autor. Contrato completo (payloads, erro
 |--------|------|-------|
 | POST | `/` | `{name, formatId}`; formato fora da lista de impressão (revista/folheto) → 422 `SCENE_FORMAT_UNSUPPORTED` |
 | GET | `/` | lista leve paginada (`page`, `limit` ≤ 50), com autor e `previewUrl` da versão atual |
-| GET | `/:id` | cena com `revision`, `zones`, versão atual, `activeVersion`, 50 últimas mensagens e versões paginadas (`versionsPage`) |
+| GET | `/:id` | cena com `revision`, `zones`, versão atual, `activeVersion`, 50 últimas mensagens e versões com imagem paginadas (`versionsPage`), cada uma com `displayNumber`, `windowEndsAt` e `judge` |
+| GET | `/:id/messages` | `before` (id da mensagem mais antiga que a tela tem) e `limit` (1 a 50): `{items, hasMore}`; cursor de outra cena 400, cena inexistente 404 |
 | DELETE | `/:id` | exclusão lógica (204); cancela a versão em curso; repetir dá 404 |
-| POST | `/:id/messages` | 202 `{messageId, versionId, jobId, revision}`; só `generate` (com versão `ready`: 422 `SCENE_EDIT_UNAVAILABLE`) |
+| POST | `/:id/messages` | 202 `{messageId, versionId, jobId, revision}`, `jobId` nunca nulo: a mensagem e a versão `queued` (step `reading`) ficam gravadas e o Diretor lê depois; `confirmGlobal` e `replyToMessageId` são 400 |
 | POST | `/:id/versions/:versionId/cancel` | 202; `cancelRequestedAt` na hora; estado final → 409 `VERSION_NOT_CANCELLABLE` |
 | POST | `/:id/versions/:versionId/restore` | cria versão `restore`; master apagada → 410 `VERSION_NOT_RESTORABLE` |
 | PATCH | `/:id/elements` | camadas à mão (versão `manual` aberta), sem chamar o modelo |
@@ -595,12 +602,14 @@ cenas; `createdByUserId` só registra o autor. Contrato completo (payloads, erro
   com URL **relativa**; a API nunca devolve entidade do ORM nem aceita URL de imagem (campo desconhecido é 400).
 - Versões `manual`, `restore` e `set_layer` apontam para a master da origem sem copiar o arquivo.
 
-**Geração (fila `template_scene.turn`)**: `POST /messages` grava a mensagem, a versão `queued` e publica o job **na mesma
-transação** (`AnimationQueueService`, `retryLimit: 0`, expira em 900 s). O consumer só sobe com `WORKER_ONLY=true` e a flag
-(`TemplateScenesModule.onModuleInit`). `SceneTurnProcessor`: `preparing` → `generating` → `saving` → `done`; grava a tentativa
-pendente em `metrics.calls` antes da chamada paga e o custo do `usage` depois; nunca lança depois de chamada paga; confere o
-cancelamento antes de cada etapa e depois da chamada; job repetido sai sem chamar o provedor. `SceneReconcilerService`
-(boot do worker e a cada 5 min) marca `JOB_EXPIRED` a versão presa há mais de 16 min. Provedor atrás da porta
+**Geração (filas `template_scene.director` e `template_scene.turn`)**: `POST /messages` grava a mensagem, a versão `queued` no
+step `reading` e o job do **Diretor** **na mesma transação** (`AnimationQueueService`, `retryLimit: 0`). O consumer só sobe com
+`WORKER_ONLY=true` e a flag (`TemplateScenesModule.onModuleInit`: o Diretor com `TEMPLATE_SCENE_DIRECTOR_CONCURRENCY`, a imagem com
+`TEMPLATE_SCENE_CONCURRENCY`). A imagem (`SceneTurnProcessor`, `SceneRedrawHandler`): `preparing` → `generating` ou `editing` →
+`checking` (o juiz) → `saving` → `done`; grava a tentativa pendente em `metrics.calls` antes da chamada paga e o custo do
+`usage` depois; nunca lança depois de chamada paga; confere o cancelamento antes de cada etapa e depois da chamada; job repetido
+sai sem chamar o provedor. `SceneReconcilerService` (boot do worker e a cada minuto) marca `JOB_EXPIRED` a versão em leitura
+presa há mais de 2 min e as demais, há mais de 16 min. Provedor atrás da porta
 `SceneImageProvider` (`mock` padrão, `openai` só por `TEMPLATE_SCENE_IMAGE_PROVIDER=openai`). Falhas: `PROVIDER_QUOTA`
 (terminal, log de erro com `sceneId` e `correlationId`), `PROVIDER_CONTENT_POLICY`, `PROVIDER_TIMEOUT`, `PROVIDER_ERROR`,
 `JOB_EXPIRED`, `PAID_CALL_LIMIT`.
@@ -609,22 +618,86 @@ cancelamento antes de cada etapa e depois da chamada; job repetido sai sem chama
 kind, step, status, cancelRequested, costUsd, revision, at}`. O `AnimationEventsService` (que também sobe com a flag da
 cena) roteia por cena em `subscribeScene(sceneId)`; a assinatura por usuário não muda. O front refaz `GET /:id` a cada evento.
 
-**Retenção (D-12, PV-5)**: master e prévia ficam protegidas enquanto uma das `TEMPLATE_SCENE_MASTERS_KEPT` (5) versões
-`ready` mais recentes ou uma versão aprovada as referenciar. `pruneSceneAssets` marca `expiresAt` no restore, no `PATCH` e
+**Retenção (D-12, PV-5, D-34)**: master e prévia ficam protegidas enquanto uma das `TEMPLATE_SCENE_MASTERS_KEPT` (20) versões
+`ready` mais recentes (toda imagem conta, inclusive a que o juiz reprovou, D-20), uma versão aprovada ou a versão atual as referenciar (R22). `pruneSceneAssets` marca `expiresAt` no restore, no `PATCH` e
 no processor; o GC (`UploadsGcService.runTemplateScenes` → `shared/gc/template-scenes-gc.runner.ts`, regras puras em
 `template-scenes-gc.rules.ts`) trava a cena, grava `purgedAt` e só então apaga o arquivo, sempre sob
 `/uploads/template-scenes/`. "Restaurável" = `purgedAt` nulo na master (derivado, sem marca por versão). O GC das cenas
 roda no worker com a flag da cena, independente de animações e comerciais.
 
+**Conversa (change `add-template-scene-conversation`)**: toda mensagem é lida pelo **Diretor** (`gpt-6-luna`, `/responses`, effort
+`medium`, `store: false`, sem `previous_response_id`; `OpenAiDirectorService` no módulo `ai`, `SceneDirectorService` e a porta
+`SCENE_DIRECTOR_CLIENT` na cena, com `MockSceneDirectorClient` por roteiro). O contexto vem do nosso banco
+(`SceneDirectorContextService`: últimas 30 mensagens, lista do que o cliente pediu em `template_scenes.brief`, versões com o
+`displayNumber`, a imagem atual em JPEG até 1.536 px com `detail: high`, a marcação, as camadas). A saída é um plano em schema fechado
+(`domain/scene-director-schema.ts`, D-51: o Diretor escreve os **blocos** do prompt em inglês, `image.composition`, `style`, `change`, `region`,
+`preserve` e `exact_text`); o **código valida e executa** (`SceneDirectorProcessor`, `SceneDirectorState` e `processors/scene-director-validate.ts`):
+schema, texto exato de camada e pedidos (1 a 3), texto exato e texto fora do bloco (4a e 4b, `domain/scene-exact-text.ts`), a logo recusada
+(4c), composição só do cliente, sem cortar frase (5), frases proibidas (6), ano, data e número escrito (7), refazendo o Diretor no máximo uma vez.
+**Não existe detector de escrita**: texto, preço, placa e faixa pedidos pelo cliente são **pintados** por padrão, literais, no bloco de texto exato
+do prompt; a logo é sempre camada. O efeito vem de uma tabela do código sobre `turn_kind`
+(`domain/scene-director-decision.ts`): resposta e recusa terminam `rejected`; **camadas** (`domain/scene-director-layers.ts` e
+`applyLayerActions`) e **desfazer** (`restoreInto`, `services/scene-undo.ts`) viram `ready` sob o lock, sem fila e sem imagem; **imagem**
+grava o anúncio e o plano e publica `template_scene.turn` com `startAfterSeconds` (a **janela de 5 s**, só em pedido sem marcação,
+reclamação e imagem nova; "Parar" é o `cancel` de uma versão `queued`). O custo do Diretor fica em `metrics.director`, fora de
+`metrics.calls`. A versão de leitura nunca vira `running`.
+- Imagem: `SceneRedrawHandler` redesenha **a imagem inteira** a partir da versão atual no tamanho nativo (`gpt-image-2.6-sunburst`,
+  `/images/edits`), com `markup` (`domain/scene-markup.ts`: PNG transparente com o contorno `#e0241a`, multipart) quando o cliente marcou
+  e sem ele quando não marcou; imagem nova é `/images/generations`. Sem recorte, máscara nem recomposição (D-22). Edição: `buildEditPrompt`
+  (`processors/scene-prompt.ts`) monta **oito blocos em ordem fixa** (ação, formato e uso, composição, estilo, "Make exactly one change",
+  região com as medidas de `computeSceneZones` em px por `domain/scene-zone-bands.ts`, preservação, texto), sem a linha de pedidos em aberto
+  (D-54). A primeira imagem e a imagem nova ficam com `buildGeneratePrompt` (D-38, D-52); com texto pedido, só a linha `Regras:` muda.
+- Juiz (`SceneVisionService`, D-51): imagens inteiras antes e depois, mensagem, plano e **só os itens do turno** (D-59), mais o **texto esperado** (as linhas
+  de `exact_text` ou o texto já pintado da versão atual) e o recorte da região na resolução da master. Ele **transcreve** o texto
+  (`texto_lido`) e o **código** compara com a linha pedida (`domain/scene-text-check.ts`: acento, cedilha, caixa, vírgula e `R$` contam). Texto
+  diferente leva a **uma** refação por mensagem (step `retrying_text`, `processors/scene-redraw-conclude.ts`), da mesma base, com a linha de
+  correção no prompt, dentro de `TEMPLATE_SCENE_MAX_PAID_CALLS_PER_MESSAGE`; a primeira imagem é descartada (`metrics.textCheck.attempts`),
+  e `judge` fica no máximo `parcial` com texto errado. Provedor que falha na segunda imagem não falha a versão: a primeira, já paga, vale. Com
+  limite 3 a segunda imagem vale sem segundo juiz, e o chat diz que não a conferiu. O resultado é **sempre aplicado** (D-26), o texto ao
+  cliente sai do que ele conferiu (`afterImageReply`, sem prefixo fixo), e só o juiz fecha um item da lista (G9; ele **não reabre** item feito, D-59); "Ainda falta: X.
+  Quer que eu faça agora?" sai de `nao_vistos`.
+- **Sempre para a frente (D-59):** `brief` ganha o estado `superseded`. Item do turno é o da mensagem atual (aberto por ela, ou do turno
+  anterior que o Diretor devolve com o mesmo `id`, e que passa a ser dela). Ao fim de todo turno (`services/scene-turn-brief.ts`, chamado por
+  `readyVersion`, `rejectVersion`, `failVersion`, `cancelVersion`, desfazer, camada e o cancelamento na janela) o item aberto que não é do turno
+  vira `superseded`; Parar fecha também os do turno parado e do anterior. O juiz recebe só os itens do turno e ignora `id` fora dele, então
+  "Ainda falta" só sai sobre a mensagem atual e uma vez. Mensagem que se contradiz vira pergunta sem imagem (regra do prompt do Diretor).
+- **Texto pintado por versão (D-56, rodada 6):** `metrics.paintedText` guarda `{text, zone, unchecked?}` (`domain/scene-painted-text.ts`).
+  Redesenho grava as linhas esperadas lidas iguais (as da rodada, com a zona dela, e as mantidas); camada pelo chat, camada à mão e
+  desfazer copiam o campo (da atual, ou da origem). O bloco 8 manda manter a linha herdada que a rodada não substitui (mesma zona, texto
+  novo e linha não repetida substituem). Linha enviada ao modelo que o juiz não pôde ler fica `unchecked`, e a rodada seguinte a mantém.
+- **Texto pintado na validação 4a (rodada 6):** a linha vale só como frase inteira (aspas iguais; palavras inteiras fora de aspas; junção
+  com o já pintado, sem palavras de dentro das aspas e sem preço invertido; ou texto inteiro de uma camada de texto, D-55). Validação 9: o
+  anúncio só promete o que o plano traz (`domain/scene-director-announce.ts`): a segunda mudança não feita só aparece no texto "Ainda falta"; a isenção do verbo de tirar vale só na mesma oração (até `.`, `,`, `;` ou ` e `) e só se o plano de fato remove aquilo; nome de camada entre aspas não é frase.
+- **Camadas pelo chat (D-51, D-55):** `set_text` com `position` (zona e lado) e cor `#1f1f1f` ou `#ffffff` pela luminância da master sob a
+  caixa; a resposta vem da **diferença** das camadas (`domain/scene-layer-diff.ts`), e sem diferença nenhuma versão nasce. `layer_ops` de plano
+  com imagem entram na versão nova (`processors/scene-plan-layers.ts`); pintar uma frase que é camada de texto tira a camada na mesma versão.
+- **Ano, data e número escrito (D-42, D-51):** nenhum bloco de contexto do prompt os pede, nem o da primeira imagem. O detector é único
+  (`domain/scene-written-number.ts`: meses em inglês, fração simples não é data, troca e remoção herdada depois de " e "/" and ") e a regra é do
+  código (`domain/scene-director-number.ts`, validação 7): `exact_text` é isento (o número que o cliente pede para escrever é pintado);
+  `preserve` e `requests` com número perdem o item; nos demais blocos o Diretor é refeito uma vez e, persistindo, o código corta só o trecho
+  (`metrics.planPatched`, `numberPatches`); `image.change` que esvazia vira pergunta. Limite: "2000 ovos" é lido como ano.
+- **Frase de continuidade (D-43):** só no `folheto-27x54` (`CONTINUITY_FORMAT_IDS`), na primeira imagem, na imagem nova e em `pedido_composicao`
+  (em `pedido_composicao`, a frase em inglês, `CONTINUITY_PHRASE_EN`); fora de item, ajuste geral e marcação. Sai quando alguma mensagem do cliente pede moldura,
+  faixa ou divisão (`clientAsksForSplit`). `TurnContext.clientMessages` leva as mensagens ao handler.
+- **Juiz e emenda (D-44):** o juiz devolve também `emenda` e `emenda_descricao` (falta de `emenda` invalida a saída). Não muda `atendeu` nem `judge`:
+  o chat só acrescenta o aviso (`seamNote`), com a descrição passando pelo filtro de frases proibidas, e nunca afirma que não há emenda (G8).
+  Na medida da task 1.35 o juiz acertou 2 de 3 emendas e deu 1 falso alarme em 21 imagens: é um aviso, não garantia.
+- Aviso do redesenho (D-35) uma vez por cena, na primeira edição (`metrics.notice`). `GET /:id/messages` pagina o histórico.
+- Camadas, marcação por pincel e laço, `markup`: a tabela de capacidades (`openai-image-capabilities`, com `markup` e preço do 2.6) e os
+  códigos do modo `sceneCall` estão em `src/shared/` (DT-12). Morfologia e SSIM têm implementação única em `src/shared/image/` (DT-10),
+  usada também por `commercials`. Contrato e provisórios (PV-56 em diante): `openspec/changes/add-template-scene-conversation/design.md`.
+
 **Chamada de imagem (`OpenAiImageService`, opção `sceneCall`)**: quota terminal (uma requisição só), `maxRetries: 0` do SDK,
 `withOpenAiRetry` para 5xx/429 de taxa/rede, timeout por requisição (`OPENAI_TIMEOUT_MS`), `.withResponse()` com `usage`,
-`requestId` e `costUsd` (tabela `modules/ai/config/openai-image-capabilities.ts`, preços do spike de 2026-11-02), tamanho e
-qualidade validados pela tabela e `correlationId` no log. **Sem `sceneCall` nada muda** para os outros chamadores (teste de
+`requestId` e `costUsd` (tabela `shared/image/openai-image-capabilities.ts`, preços do spike de 2026-11-02), tamanho e
+qualidade (e fundo transparente e `markup`) validados pela tabela, **modelo pago sem preço conferido recusado antes da rede**
+(`metrics.costUnknown` na resposta sem `usage`) e `correlationId` no log. `editImage` com `markup` envia a camada em multipart ao lado de `image`
+(mesmo tamanho, até 16.777.216 px; `openai-image-markup.ts`). **Sem `sceneCall` nada muda** para os outros chamadores (teste de
 snapshot do corpo em `openai-image.service.request-snapshot.spec.ts`); o 429 do caminho legado continua (DT-8).
 
 **Testes**: unitários ao lado do código; specs com banco usam `describeIfSceneDb` (`testing/scene-test-db.ts`) e só rodam com
 `TEMPLATE_SCENE_E2E_DB_URL` (banco `chroma_x_e2e`, porta 5434; nunca o `flyer_db`). E2E:
-`TEMPLATE_SCENE_E2E_DB_URL=... npm run test -- template-scenes.controller.e2e` (rodando todos os specs de banco juntos, use
+`TEMPLATE_SCENE_E2E_DB_URL=... npm run test -- template-scenes.controller.e2e` (estágio 3) e `template-scenes.conversation.e2e` (a conversa) (rodando todos os specs de banco juntos, use
 `--runInBand`: o GC manual olha todas as cenas do banco). Ordem em desenvolvimento: `migration:run` ANTES do
 `docker restart` (o `synchronize` cria o schema sozinho e a migration depois falharia).
 

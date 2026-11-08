@@ -29,8 +29,10 @@ export const QUEUES = {
    * recursos, expiração própria de 900 s).
    */
   MC_RENDER: 'mc.render',
-  /** Cena de template (change add-template-scene-persistence): um turno do chat da cena (`generate`). */
+  /** Cena de template (change add-template-scene-persistence): um turno do chat da cena (a chamada de imagem). */
   TEMPLATE_SCENE_TURN: 'template_scene.turn',
+  /** Cena de template (change add-template-scene-conversation): a leitura da mensagem pelo Diretor, com concorrência própria. */
+  TEMPLATE_SCENE_DIRECTOR: 'template_scene.director',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

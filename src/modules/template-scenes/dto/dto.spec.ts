@@ -2,7 +2,11 @@ import { BadRequestException } from '@nestjs/common';
 import { SmartValidationPipe } from '../../../common/pipes/smart-validation.pipe';
 import { AdminGcDto } from './admin-gc.dto';
 import { CreateSceneDto } from './create-scene.dto';
-import { GetSceneQueryDto, ListScenesQueryDto } from './list-scenes-query.dto';
+import {
+  GetSceneQueryDto,
+  ListMessagesQueryDto,
+  ListScenesQueryDto,
+} from './list-scenes-query.dto';
 import { PatchElementsDto } from './patch-elements.dto';
 import { SendMessageDto } from './send-message.dto';
 
@@ -75,14 +79,124 @@ describe('DTOs da cena', () => {
       await expect(body(payload, SendMessageDto)).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it.each(['imageUrl', 'region', 'mask', 'targetElementId', 'target'])(
-      'recusa o campo %s (URL e alvo não existem neste estágio)',
+    it.each([
+      ['confirmGlobal', true],
+      ['replyToMessageId', '11111111-1111-4111-8111-111111111111'],
+    ])('campos antigos recusados: %s dá 400 (R20, saiu do e2e)', async (field, value) => {
+      await expect(
+        body({ content: 'campo verde', expectedRevision: 0, [field]: value }, SendMessageDto),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it.each(['imageUrl', 'target', 'maskUploadId', 'url'])(
+      'recusa o campo %s (a API recebe dados, nunca URL)',
       async (field) => {
         await expect(
           body({ content: 'x', expectedRevision: 0, [field]: 'http://x/a.png' }, SendMessageDto),
         ).rejects.toBeInstanceOf(BadRequestException);
       },
     );
+
+    describe('campos de alvo (estágio 4)', () => {
+      const send = (extra: Record<string, unknown>) =>
+        body(
+          { content: 'x', expectedRevision: 0, ...extra },
+          SendMessageDto,
+        ) as Promise<SendMessageDto>;
+      const lasso = (n: number) => ({
+        kind: 'lasso',
+        points: Array.from({ length: n }, (_v, i) => ({ x: (i % 100) / 100, y: 0.5 })),
+      });
+
+      it('aceita região, forma, zona e elemento', async () => {
+        expect((await send({ region: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } })).region?.w).toBe(0.2);
+        expect((await send({ mask: lasso(10) })).mask?.kind).toBe('lasso');
+        expect((await send({ zone: 'body' })).zone).toBe('body');
+        expect((await send({ targetElementId: 'logo-1' })).targetElementId).toBe('logo-1');
+      });
+
+      it('recusa campo desconhecido, ponto com carga extra e traços vazios no mask (R2)', async () => {
+        const tri = [
+          { x: 0, y: 0 },
+          { x: 1, y: 0 },
+          { x: 0.5, y: 1 },
+        ];
+        await expect(
+          send({ mask: { kind: 'lasso', points: tri, imageUrl: 'http://x' } }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        await expect(
+          send({
+            mask: {
+              kind: 'lasso',
+              points: [{ ...tri[0], blob: 'x'.repeat(1_000_000) }, tri[1], tri[2]],
+            },
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        await expect(
+          send({
+            mask: {
+              kind: 'brush',
+              radius: 0.02,
+              strokes: [[{ x: 0, y: 0 }], ...Array.from({ length: 100_000 }, () => [])],
+            },
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it('recusa repositionGenerated (D-13): campo desconhecido', async () => {
+        await expect(send({ repositionGenerated: true })).rejects.toBeInstanceOf(
+          BadRequestException,
+        );
+      });
+
+      it('aceita 2000 pontos e recusa 2001', async () => {
+        await expect(send({ mask: lasso(2000) })).resolves.toBeDefined();
+        await expect(send({ mask: lasso(2001) })).rejects.toBeInstanceOf(BadRequestException);
+      });
+
+      it.each([
+        [{ region: { x: -0.1, y: 0, w: 0.2, h: 0.2 } }],
+        [{ region: { x: 0, y: 0, w: 0, h: 0.2 } }],
+        [{ region: { x: 0, y: 0, w: 1.5, h: 0.2 } }],
+        [{ region: 'a' }],
+        [{ mask: { kind: 'lasso', points: [{ x: 0, y: 0 }] } }],
+        [{ mask: { kind: 'brush', radius: 0.02, strokes: [[{ x: 3, y: 0 }]] } }],
+        [{ mask: 'x' }],
+        [{ zone: 'meio' }],
+        [{ targetElementId: 'x'.repeat(65) }],
+        [{ confirmGlobal: true }],
+        [{ confirmGlobal: 'sim' }],
+        [{ replyToMessageId: '11111111-1111-4111-8111-111111111111' }],
+        [{ replyToMessageId: 'abc' }],
+      ])('recusa %j', async (extra) => {
+        await expect(send(extra)).rejects.toBeInstanceOf(BadRequestException);
+      });
+    });
+
+    describe('GET .../messages', () => {
+      const messages = (payload: Record<string, unknown>) => query(payload, ListMessagesQueryDto);
+
+      it('aceita sem nada, com cursor UUID e com limite de 1 a 50 (texto da query vira número)', async () => {
+        await expect(messages({})).resolves.toBeDefined();
+        const ok = (await messages({
+          before: '11111111-1111-4111-8111-111111111111',
+          limit: '20',
+        })) as ListMessagesQueryDto;
+        expect(ok.limit).toBe(20);
+      });
+
+      it.each([
+        { before: 'abc' },
+        { before: 123 },
+        { limit: '0' },
+        { limit: '51' },
+        { limit: 'muitos' },
+        { limit: '1.5' },
+        { desconhecido: '1' },
+      ])('Cursor inválido: recusa %j com 400', async (payload) => {
+        await expect(messages(payload)).rejects.toBeInstanceOf(BadRequestException);
+      });
+    });
 
     it('recusa anexo sem assetId válido', async () => {
       await expect(

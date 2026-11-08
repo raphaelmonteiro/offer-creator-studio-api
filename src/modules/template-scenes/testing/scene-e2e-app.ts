@@ -17,10 +17,22 @@ import { AnimationEventsService } from '../../../shared/events/animation-events.
 import { TemplateScenesGcRunner } from '../../../shared/gc/template-scenes-gc.runner';
 import { UploadsGcService } from '../../../shared/gc/uploads-gc.service';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
+import { SceneCallRunner } from '../processors/scene-call-runner';
+import { SceneDirectorProcessor } from '../processors/scene-director.processor';
+import { SceneDirectorState } from '../processors/scene-director-state';
+import { SceneRedrawHandler } from '../processors/scene-redraw.handler';
 import { SceneTurnProcessor } from '../processors/scene-turn.processor';
+import { SceneTurnSupport } from '../processors/scene-turn-support';
 import { SceneTurnState } from '../processors/scene-turn-state';
 import { MockSceneImageProvider } from '../providers/mock-scene-image.provider';
 import { SCENE_IMAGE_PROVIDER } from '../providers/scene-image-provider';
+import { MockSceneDirectorClient } from '../providers/mock-scene-director.client';
+import { MockSceneVisionClient } from '../providers/mock-scene-vision.client';
+import { SCENE_DIRECTOR_CLIENT } from '../providers/scene-director-client';
+import { SCENE_VISION_CLIENT } from '../providers/scene-vision-client';
+import { SceneDirectorContextService } from '../services/scene-director-context';
+import { SceneDirectorService } from '../services/scene-director.service';
+import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
 import { SceneLogoService } from '../services/scene-logo.service';
@@ -52,7 +64,7 @@ export interface SceneE2eApp {
  */
 export async function createSceneE2eApp(
   dataSource: DataSource,
-  options: { uploadsDir: string; mockSlowMs: number },
+  options: { uploadsDir: string; mockSlowMs: number; windowSeconds?: number },
 ): Promise<SceneE2eApp> {
   const opts = dataSource.options as unknown as Record<string, string | number>;
   const config = {
@@ -69,6 +81,8 @@ export async function createSceneE2eApp(
     TEMPLATE_SCENE_IMAGE_PROVIDER: 'mock',
     TEMPLATE_SCENE_MOCK_LATENCY_MS: '0',
     TEMPLATE_SCENE_MOCK_SLOW_MS: String(options.mockSlowMs),
+    // A janela de 5 s é de produção; nos testes ela dura 1 s (o job de imagem entra pelo menos 2 s depois, pelo intervalo da fila).
+    TEMPLATE_SCENE_WINDOW_SECONDS: String(options.windowSeconds ?? 1),
   };
   const moduleRef = await Test.createTestingModule({
     imports: [
@@ -97,7 +111,17 @@ export async function createSceneE2eApp(
       SceneTurnService,
       TemplateScenesService,
       SceneTurnState,
+      SceneTurnSupport,
+      SceneCallRunner,
+      SceneVisionService,
+      SceneRedrawHandler,
+      SceneDirectorService,
+      SceneDirectorContextService,
+      SceneDirectorState,
+      SceneDirectorProcessor,
+      { provide: SCENE_DIRECTOR_CLIENT, useValue: new MockSceneDirectorClient() },
       SceneTurnProcessor,
+      { provide: SCENE_VISION_CLIENT, useValue: new MockSceneVisionClient() },
       SceneReconcilerService,
       TemplateScenesGcRunner,
       UploadsGcService,
@@ -121,6 +145,12 @@ export async function createSceneE2eApp(
 
   const queue = app.get(AnimationQueueService);
   const processor = app.get(SceneTurnProcessor);
+  const director = app.get(SceneDirectorProcessor);
+  await queue.subscribe(
+    QUEUES.TEMPLATE_SCENE_DIRECTOR,
+    2,
+    (job: { sceneId: string; versionId: string }, jobId: string) => director.process(job, jobId),
+  );
   await queue.subscribe(
     QUEUES.TEMPLATE_SCENE_TURN,
     1,

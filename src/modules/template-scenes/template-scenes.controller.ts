@@ -20,7 +20,11 @@ import { CurrentUser } from '../../common/decorators/user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { createFileInterceptor } from '../../common/utils/multer.util';
 import { CreateSceneDto } from './dto/create-scene.dto';
-import { GetSceneQueryDto, ListScenesQueryDto } from './dto/list-scenes-query.dto';
+import {
+  GetSceneQueryDto,
+  ListMessagesQueryDto,
+  ListScenesQueryDto,
+} from './dto/list-scenes-query.dto';
 import { PatchElementsDto } from './dto/patch-elements.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { RestoreVersionDto } from './dto/restore-version.dto';
@@ -115,6 +119,12 @@ export class TemplateScenesController {
     @CurrentUser() user: { id: string },
   ) {
     return this.turns.sendMessage(id, dto, user?.id ?? null);
+  }
+
+  @Get(':id/messages')
+  @ApiOperation({ summary: 'Mensagens anteriores ao cursor `before`, em páginas, com `hasMore`' })
+  messages(@Param('id', SceneIdPipe) id: string, @Query() query: ListMessagesQueryDto) {
+    return this.scenes.messages(id, query);
   }
 
   @Post(':id/versions/:versionId/cancel')

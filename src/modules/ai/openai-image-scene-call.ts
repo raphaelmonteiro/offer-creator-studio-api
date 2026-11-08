@@ -6,10 +6,18 @@ import {
 import { OPENAI_NO_SDK_RETRY } from '../../shared/providers/openai-errors';
 import {
   estimateCostUsd,
+  hasConfirmedPrice,
   ImageUsage,
+  validateImageBackground,
+  validateImageMarkup,
   validateImageQuality,
   validateImageSize,
-} from './config/openai-image-capabilities';
+} from '../../shared/image/openai-image-capabilities';
+import {
+  SCENE_CONNECTION_LOST_CODE,
+  SCENE_INVALID_REQUEST_CODE,
+  SCENE_TIMEOUT_CODE,
+} from '../../shared/providers/openai-scene-call-errors';
 
 /**
  * Modo de chamada da cena (change add-template-scene-persistence): quota terminal, sem retentativa
@@ -23,34 +31,13 @@ export interface SceneCallOptions {
   correlationId: string;
 }
 
-/** Código de `TerminalProviderError` para tamanho ou qualidade recusados pela tabela. */
-export const SCENE_INVALID_REQUEST_CODE = 'invalid_request';
-/** Código de `TerminalProviderError` para conexão perdida DEPOIS de a requisição sair (pode ter sido cobrada). */
-export const SCENE_CONNECTION_LOST_CODE = 'connection_lost';
-/** Código de `TerminalProviderError` para resposta paga cuja imagem não pôde ser lida. */
-export const SCENE_UNREADABLE_CODE = 'unreadable_response';
-
-/** A resposta foi paga, mas a imagem veio vazia/ilegível: leva o custo do `usage` para o chamador gravar. */
-export class PaidResponseUnreadableError extends TerminalProviderError {
-  constructor(
-    message: string,
-    readonly costUsd: number | null,
-    readonly requestId: string | null,
-  ) {
-    super(message, SCENE_UNREADABLE_CODE);
-  }
-}
-
-/** Código de `TerminalProviderError` para o timeout da requisição (não se repete chamada paga). */
-export const SCENE_TIMEOUT_CODE = 'timeout';
-
 interface WithResponseResult {
   data: { data?: unknown[]; usage?: ImageUsage };
   response: { headers?: { get?: (name: string) => string | null } };
   request_id?: string | null;
 }
 
-type SdkImageCall = (
+export type SdkImageCall = (
   request: unknown,
   options: unknown,
 ) => { withResponse(): Promise<WithResponseResult> };
@@ -63,9 +50,32 @@ export interface SceneCallResponse {
   requestId: string | null;
 }
 
-/** Recusa antes de qualquer rede: tamanho ou qualidade fora da tabela do modelo. */
-export function assertSceneRequestAllowed(model: string, size: string, quality: string): void {
-  const problem = validateImageSize(model, size) ?? validateImageQuality(model, quality);
+/** O que a chamada da cena pede além de tamanho e qualidade, para a tabela de capacidades conferir. */
+export interface SceneRequestExtras {
+  /** `transparent` exige modelo que a tabela marcou como compatível. */
+  background?: string;
+  /** Edição com `markup` (multipart). */
+  markup?: boolean;
+}
+
+/**
+ * Recusa antes de qualquer rede: modelo pago sem preço conferido (G7: custo nunca vira zero), tamanho,
+ * qualidade, fundo ou `markup` fora da tabela do modelo.
+ */
+export function assertSceneRequestAllowed(
+  model: string,
+  size: string,
+  quality: string,
+  extras: SceneRequestExtras = {},
+): void {
+  const problem =
+    (hasConfirmedPrice(model)
+      ? null
+      : `${model} não tem preço conferido na tabela de capacidades`) ??
+    validateImageSize(model, size) ??
+    validateImageQuality(model, quality) ??
+    (extras.background ? validateImageBackground(model, extras.background) : null) ??
+    (extras.markup ? validateImageMarkup(model) : null);
   if (problem) throw new TerminalProviderError(problem, SCENE_INVALID_REQUEST_CODE);
 }
 

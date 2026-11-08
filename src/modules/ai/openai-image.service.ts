@@ -2,15 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI, { toFile } from 'openai';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
-import { ImageUsage } from './config/openai-image-capabilities';
+import { ImageUsage } from '../../shared/image/openai-image-capabilities';
 import { withOpenAiRetry } from '../../shared/providers/openai-errors';
+import { PaidResponseUnreadableError } from '../../shared/providers/openai-scene-call-errors';
 import {
   assertSceneRequestAllowed,
   callSdkWithResponse,
-  PaidResponseUnreadableError,
   SceneCallOptions,
   SceneCallResponse,
+  SceneRequestExtras,
 } from './openai-image-scene-call';
+import { assertMarkupMatchesImage, MarkupInput } from './openai-image-markup';
 import {
   MaterializedImage,
   OpenAiImageSize,
@@ -75,6 +77,11 @@ export interface EditOpenAiImageOptions {
   outputCompression?: number;
   inputFidelity?: OpenAiImageInputFidelity;
   sceneCall?: SceneCallOptions;
+  /**
+   * Edição da cena com marcação: PNG transparente do tamanho da imagem, enviado em multipart ao lado de
+   * `image`, sem `mask`. Exige `sceneCall`; sem `markup` o corpo da requisição não muda.
+   */
+  markup?: MarkupInput;
 }
 
 export interface OpenAiImageResult {
@@ -190,6 +197,7 @@ export class OpenAiImageService {
       quality,
       mode,
       sceneCall: options.sceneCall,
+      extras: { background },
     });
 
     const image = await this.materialize(response, preset.fallbackMimeType, options.sceneCall);
@@ -209,6 +217,7 @@ export class OpenAiImageService {
 
   async editImage(options: EditOpenAiImageOptions): Promise<OpenAiImageResult> {
     if (!this.openai) throw new Error('OpenAI não configurada');
+    const markup = await this.resolveMarkup(options);
 
     const assetKind = options.assetKind ?? 'template';
     // Public endpoints still default to final. Internal callers can opt into preview
@@ -238,6 +247,7 @@ export class OpenAiImageService {
       outputCompression,
       inputFidelity,
     });
+    if (markup) request.markup = markup;
 
     const response = await this.dispatchImageCall({
       method: 'edit',
@@ -249,6 +259,7 @@ export class OpenAiImageService {
       mode,
       inputFidelity: supportsConfigurableInputFidelity(model) ? inputFidelity : undefined,
       sceneCall: options.sceneCall,
+      extras: markup ? { markup: true } : undefined,
     });
 
     const image = await this.materialize(response, preset.fallbackMimeType, options.sceneCall);
@@ -265,6 +276,18 @@ export class OpenAiImageService {
       mode,
       ...sceneCallResult(options.sceneCall, response),
     };
+  }
+
+  /**
+   * `markup` por multipart (o `images.edit` do SDK serializa toda chave do corpo; só a tipagem não a conhece).
+   * Só no modo `sceneCall`, sem `mask`, e com a camada do tamanho da imagem, tudo conferido antes da rede.
+   */
+  private async resolveMarkup(options: EditOpenAiImageOptions): Promise<unknown | undefined> {
+    if (!options.markup) return undefined;
+    if (!options.sceneCall) throw new Error('A edição com markup só existe no modo sceneCall');
+    const image = options.images?.[0]?.buffer ?? options.imageBuffer;
+    await assertMarkupMatchesImage({ image, markup: options.markup, size: options.size });
+    return toFile(options.markup.buffer, 'markup.png', { type: 'image/png' });
   }
 
   /** Lê a imagem da resposta; no modo `sceneCall` uma falha aqui já foi paga, então carrega o custo. */
@@ -296,10 +319,12 @@ export class OpenAiImageService {
     mode: string;
     inputFidelity?: string;
     sceneCall?: SceneCallOptions;
+    /** Fundo transparente e `markup` conferidos pela tabela de capacidades (só no modo `sceneCall`). */
+    extras?: SceneRequestExtras;
   }): Promise<ImageCallResponse> {
     const { method, request, feature, model, sceneCall } = args;
     const endpoint = `images.${method}`;
-    if (sceneCall) assertSceneRequestAllowed(model, args.size, args.quality);
+    if (sceneCall) assertSceneRequestAllowed(model, args.size, args.quality, args.extras);
     // `images.generate`/`images.edit` precisam do `this` do cliente: chamar sempre pelo objeto.
     const images = this.openai!.images as any;
 

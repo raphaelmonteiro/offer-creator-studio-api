@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
+import { paintedMetricsOf } from '../domain/scene-painted-text';
 import { PatchElementsDto } from '../dto/patch-elements.dto';
 import { SceneElement } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
@@ -12,9 +13,9 @@ import {
   noCurrentVersion,
   versionNotFound,
   versionNotReady,
-  versionNotRestorable,
 } from '../scene.errors';
 import { publishSceneEvent } from './scene-events';
+import { assertMasterOnDisk, restoreInto } from './scene-restore';
 import {
   assertExpectedRevision,
   assertSceneIdle,
@@ -56,23 +57,10 @@ export class SceneVersionsService {
       });
       if (!source) throw versionNotFound();
       if (source.status !== 'ready') throw versionNotReady();
-      await this.assertMasterOnDisk(manager, source);
+      await assertMasterOnDisk(manager, source);
 
       await closeOpenManual(manager, sceneId);
-      const restored = await manager.save(
-        manager.create(TemplateSceneVersion, {
-          sceneId,
-          parentVersionId: source.id,
-          number: await nextVersionNumber(manager, sceneId),
-          operation: 'restore',
-          status: 'ready',
-          masterAssetId: source.masterAssetId,
-          previewAssetId: source.previewAssetId,
-          elements: structuredClone(source.elements),
-          correlationId: randomUUID(),
-          createdByUserId: userId,
-        }),
-      );
+      const restored = await restoreInto(manager, scene, source, { userId });
       return this.finishReadyVersion(manager, scene, restored);
     });
   }
@@ -111,6 +99,8 @@ export class SceneVersionsService {
               masterAssetId: current.masterAssetId,
               previewAssetId: current.previewAssetId,
               elements,
+              // A master não muda: o texto pintado da atual segue valendo (R66).
+              metrics: paintedMetricsOf(current),
               isOpenManual: true,
               correlationId: randomUUID(),
               createdByUserId: userId,
@@ -118,16 +108,6 @@ export class SceneVersionsService {
           );
       return this.finishReadyVersion(manager, scene, manual);
     });
-  }
-
-  private async assertMasterOnDisk(
-    manager: EntityManager,
-    version: TemplateSceneVersion,
-  ): Promise<void> {
-    const master = version.masterAssetId
-      ? await manager.findOne(TemplateSceneAsset, { where: { id: version.masterAssetId } })
-      : null;
-    if (!master || master.purgedAt) throw versionNotRestorable();
   }
 
   /** Elementos só referenciam assets de logo/elemento da própria cena e ainda em disco. */
@@ -155,7 +135,7 @@ export class SceneVersionsService {
     version: TemplateSceneVersion,
   ): Promise<SceneDetailView> {
     scene.currentVersionId = version.id;
-    await pruneSceneAssets(manager, scene.id);
+    await pruneSceneAssets(manager, scene);
     const revision = await bumpRevision(manager, scene);
     await publishSceneEvent(manager, {
       sceneId: scene.id,

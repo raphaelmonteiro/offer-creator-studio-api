@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { BriefItem } from '../domain/scene-brief';
 import { numericTransformer } from './numeric.transformer';
 
 /**
@@ -69,6 +70,10 @@ export class TemplateScene {
     transformer: numericTransformer,
   })
   totalCostUsd: number;
+
+  /** O que o cliente pediu e o estado de cada item (aberto, feito ou desistido), entre turnos e sessões. */
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  brief: BriefItem[];
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

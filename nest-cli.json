@@ -4,7 +4,10 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "deleteOutDir": true,
-    "assets": [{ "include": "**/*.sql", "outDir": "dist" }],
+    "assets": [
+      { "include": "**/*.sql", "outDir": "dist" },
+      { "include": "modules/template-scenes/domain/scene-intent.eval.json", "outDir": "dist" }
+    ],
     "watchAssets": true
   }
 }

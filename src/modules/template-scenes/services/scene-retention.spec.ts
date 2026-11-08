@@ -51,6 +51,11 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
     await fs.rm(uploadsDir, { recursive: true, force: true });
   });
 
+  // As regras são paramétricas: a maioria dos cenários usa 5 vagas para ficar leve; o padrão de 20 (D-34) tem os seus.
+  beforeEach(() => {
+    process.env.TEMPLATE_SCENE_MASTERS_KEPT = '5';
+  });
+
   afterEach(() => {
     process.env = { ...env };
   });
@@ -106,7 +111,9 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
   }
 
   const prune = (sceneId: string) =>
-    dataSource.transaction((manager) => pruneSceneAssets(manager, sceneId));
+    dataSource.transaction(async (manager) =>
+      pruneSceneAssets(manager, await manager.findOneByOrFail(TemplateScene, { id: sceneId })),
+    );
   const purge = (sceneId: string, dryRun = false) =>
     gc.run({ dryRun, now: later(), onlySceneIds: [sceneId] });
   const assetRow = (id: string) => dataSource.manager.findOneByOrFail(TemplateSceneAsset, { id });
@@ -144,6 +151,63 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
 
     expect(await exists(ready[0].master.url)).toBe(false);
     expect(await exists(ready[4].master.url)).toBe(true);
+  });
+
+  it('Tentativas ocupam as vagas da retenção: 5 tentativas seguidas, a atual e a aprovada intactas (D-20, R22)', async () => {
+    const { scene, ready } = await sceneWith('GC tentativas', 2);
+    await dataSource.manager.update(
+      TemplateSceneVersion,
+      { id: ready[1].version.id },
+      { approvedAt: new Date() },
+    );
+    await dataSource.manager.update(
+      TemplateScene,
+      { id: scene.id },
+      { currentVersionId: ready[0].version.id },
+    );
+    const attempts = [];
+    for (let number = 3; number <= 7; number++) {
+      attempts.push(
+        await addReadyOnDisk(scene, number, {
+          metrics: { judge: { available: true, satisfied: 'nao' } },
+        }),
+      );
+    }
+
+    await prune(scene.id);
+    const summary = await purge(scene.id);
+
+    expect(summary.selected).toBe(0);
+    for (const item of [...ready, ...attempts]) {
+      expect(await exists(item.master.url)).toBe(true);
+      expect(await exists(item.preview.url)).toBe(true);
+      expect((await assetRow(item.master.id)).expiresAt).toBeNull();
+    }
+  });
+
+  it('a atual fora das 5 vagas e sem aprovação também fica protegida; a sexta tentativa poda a mais antiga', async () => {
+    const { scene, ready } = await sceneWith('GC atual fora das vagas', 1);
+    await dataSource.manager.update(
+      TemplateScene,
+      { id: scene.id },
+      { currentVersionId: ready[0].version.id },
+    );
+    const attempts = [];
+    for (let number = 2; number <= 7; number++) {
+      attempts.push(
+        await addReadyOnDisk(scene, number, {
+          metrics: { judge: { available: true, satisfied: 'nao' } },
+        }),
+      );
+    }
+
+    await prune(scene.id);
+    await purge(scene.id);
+
+    expect(await exists(ready[0].master.url)).toBe(true);
+    expect(await exists(ready[0].preview.url)).toBe(true);
+    expect(await exists(attempts[0].master.url)).toBe(false);
+    expect(await exists(attempts[5].master.url)).toBe(true);
   });
 
   it('versão aprovada continua protegida mesmo com 7 versões depois dela', async () => {
@@ -337,5 +401,82 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
     expect(await fs.readFile(outside, 'utf8')).toBe('não apagar');
     expect(summary.files.every((url) => url.startsWith(SCENE_UPLOADS_URL_PREFIX))).toBe(true);
     expect(summary.files).not.toContain('/uploads/products/precioso.png');
+  });
+
+  describe('Retenção com 20 (D-34)', () => {
+    beforeEach(() => {
+      delete process.env.TEMPLATE_SCENE_MASTERS_KEPT;
+    });
+
+    it('o padrão guarda as 20 mais recentes: com 21 versões, só a primeira sai', async () => {
+      const { scene, ready } = await sceneWith('GC 21 versões', 21);
+      await prune(scene.id);
+      const summary = await purge(scene.id);
+
+      expect(summary.selected).toBe(2);
+      expect(await exists(ready[0].master.url)).toBe(false);
+      expect(await exists(ready[0].preview.url)).toBe(false);
+      for (const item of ready.slice(1)) {
+        expect(await exists(item.master.url)).toBe(true);
+        expect((await assetRow(item.master.id)).expiresAt).toBeNull();
+      }
+    });
+
+    it('com 20 versões nada sai, inclusive a que o juiz reprovou: toda imagem conta', async () => {
+      const { scene, ready } = await sceneWith('GC 20 versões', 20);
+      await dataSource.manager.update(
+        TemplateSceneVersion,
+        { id: ready[10].version.id },
+        { metrics: { judge: { available: true, satisfied: 'nao' } } },
+      );
+      await prune(scene.id);
+      const summary = await purge(scene.id);
+      expect(summary.selected).toBe(0);
+      expect(await exists(ready[10].master.url)).toBe(true);
+    });
+
+    it('a atual fora das 20 vagas e a aprovada continuam protegidas (D-20)', async () => {
+      const { scene, ready } = await sceneWith('GC atual e aprovada', 24);
+      await dataSource.manager.update(
+        TemplateSceneVersion,
+        { id: ready[1].version.id },
+        { approvedAt: new Date() },
+      );
+      await dataSource.manager.update(
+        TemplateScene,
+        { id: scene.id },
+        { currentVersionId: ready[0].version.id },
+      );
+      await prune(scene.id);
+      await purge(scene.id);
+
+      // as 20 mais recentes são os índices 4 a 23; a atual (0) e a aprovada (1) ficam, e só 2 e 3 saem
+      expect(await exists(ready[0].master.url)).toBe(true);
+      expect(await exists(ready[1].master.url)).toBe(true);
+      expect(await exists(ready[2].master.url)).toBe(false);
+      expect(await exists(ready[3].master.url)).toBe(false);
+      expect(await exists(ready[4].master.url)).toBe(true);
+    });
+
+    it('restore e manual contam como versões, mas reaproveitam a master: nenhum arquivo novo, e a master reaproveitada fica protegida', async () => {
+      const { scene, ready } = await sceneWith('GC reaproveita', 20);
+      await versions.restore(scene.id, ready[5].version.id, null);
+      await versions.patchElements(
+        scene.id,
+        { expectedRevision: 1, elements: [textElement('t')] },
+        null,
+      );
+      await purge(scene.id);
+
+      const stored = await dataSource.manager.countBy(TemplateSceneAsset, {
+        sceneId: scene.id,
+        role: 'master',
+      });
+      expect(stored).toBe(20);
+      // 22 versões: as 20 mais recentes são 3 a 22, então 1 e 2 saem; a 6 foi reaproveitada e segue em disco
+      expect(await exists(ready[0].master.url)).toBe(false);
+      expect(await exists(ready[1].master.url)).toBe(false);
+      expect(await exists(ready[5].master.url)).toBe(true);
+    });
   });
 });

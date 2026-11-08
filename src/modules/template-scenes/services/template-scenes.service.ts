@@ -9,7 +9,7 @@ import { sceneFormatUnsupported, sceneNotFound } from '../scene.errors';
 import { publishSceneEvent } from './scene-events';
 import { bumpRevision, findBusyVersion, SceneLockService } from './scene-lock.service';
 import { SceneReadService } from './scene-read.service';
-import { SceneDetailView, SceneListItemView } from './scene-views';
+import { SceneDetailView, SceneListItemView, SceneMessagesPageView } from './scene-views';
 
 /** Criar, listar, abrir e excluir (lógico) a cena. */
 @Injectable()
@@ -51,6 +51,13 @@ export class TemplateScenesService {
   async assertExists(sceneId: string): Promise<void> {
     const found = await this.dataSource.manager.exists(TemplateScene, { where: { id: sceneId } });
     if (!found) throw sceneNotFound();
+  }
+
+  messages(
+    sceneId: string,
+    page: { before?: string; limit?: number },
+  ): Promise<SceneMessagesPageView> {
+    return this.reads.loadMessages(sceneId, page);
   }
 
   get(sceneId: string, versionsPage = 1): Promise<SceneDetailView> {

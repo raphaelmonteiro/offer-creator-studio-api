@@ -5,9 +5,10 @@ import {
   PaidResponseUnreadableError,
   SCENE_INVALID_REQUEST_CODE,
   SCENE_TIMEOUT_CODE,
-} from '../../ai/openai-image-scene-call';
+} from '../../../shared/providers/openai-scene-call-errors';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import {
+  SceneEditInput,
   SceneGenerateInput,
   SceneGenerateResult,
   SceneImageProvider,
@@ -32,7 +33,8 @@ export function classifySceneProviderError(error: unknown): SceneProviderError {
       return new SceneProviderError('PROVIDER_TIMEOUT', error.message);
     }
     if (error.code === SCENE_INVALID_REQUEST_CODE) {
-      return new SceneProviderError('PROVIDER_ERROR', error.message);
+      // Recusa antes da rede (tabela de capacidades): nada saiu, custo zero conhecido.
+      return new SceneProviderError('PROVIDER_ERROR', error.message, 0);
     }
   }
   const shape = (error ?? {}) as { status?: number; code?: string; error?: { code?: string } };
@@ -59,9 +61,8 @@ export class OpenAiSceneImageProvider implements SceneImageProvider {
   ) {}
 
   async generate(input: SceneGenerateInput): Promise<SceneGenerateResult> {
-    const startedAt = Date.now();
-    try {
-      const result = await this.images.generateImage({
+    return this.run(() =>
+      this.images.generateImage({
         feature: 'template-scene',
         prompt: input.prompt,
         size: input.size as ImageSize,
@@ -69,8 +70,41 @@ export class OpenAiSceneImageProvider implements SceneImageProvider {
         model: input.model,
         quality: input.quality as ImageQuality,
         outputFormat: 'png',
-        sceneCall: { timeoutMs: this.timeoutMs(), correlationId: input.correlationId },
-      });
+        sceneCall: this.sceneCall(input),
+      }),
+    );
+  }
+
+  /** Edição da imagem inteira, com `markup` (multipart) quando o cliente marcou; sempre PNG opaco. */
+  async edit(input: SceneEditInput): Promise<SceneGenerateResult> {
+    return this.run(() =>
+      this.images.editImage({
+        feature: 'template-scene',
+        prompt: input.prompt,
+        imageBuffer: input.image,
+        imageMimeType: 'image/png',
+        size: input.size as ImageSize,
+        assetKind: 'template',
+        model: input.model,
+        quality: input.quality as ImageQuality,
+        outputFormat: 'png',
+        background: 'opaque',
+        sceneCall: this.sceneCall(input),
+        ...(input.markup ? { markup: { buffer: input.markup } } : {}),
+      }),
+    );
+  }
+
+  private sceneCall(input: SceneGenerateInput) {
+    return { timeoutMs: this.timeoutMs(), correlationId: input.correlationId };
+  }
+
+  private async run(
+    call: () => Promise<Awaited<ReturnType<OpenAiImageService['generateImage']>>>,
+  ): Promise<SceneGenerateResult> {
+    const startedAt = Date.now();
+    try {
+      const result = await call();
       return {
         buffer: result.image.buffer,
         usage: result.usage ?? null,

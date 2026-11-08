@@ -78,3 +78,111 @@ describe('MockSceneImageProvider', () => {
     expect(sleep).toHaveBeenCalledWith(20_000);
   });
 });
+
+describe('MockSceneImageProvider: edição da imagem inteira', () => {
+  const SIZE = 64;
+  const solid = (color: string) =>
+    sharp({ create: { width: SIZE, height: SIZE, channels: 4, background: color } })
+      .png()
+      .toBuffer();
+
+  const raw = async (png: Buffer) =>
+    (await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true })).data;
+  const editInput = async (prompt: string) => ({
+    ...input(prompt, `${SIZE}x${SIZE}`),
+    image: await solid('#336699'),
+  });
+
+  it('custa zero e traz um id de requisição do mock', async () => {
+    const { provider } = build();
+    const result = await provider.edit(await editInput('deixa o sol mais alaranjado'));
+    expect(result.costUsd).toBe(0);
+    expect(result.requestId).toMatch(/^mock-/);
+  });
+
+  it('é determinístico: mesmo pedido, mesma imagem', async () => {
+    const { provider } = build();
+    const a = await provider.edit(await editInput('x'));
+    const b = await provider.edit(await editInput('x'));
+    expect(a.buffer.equals(b.buffer)).toBe(true);
+  });
+
+  it('a imagem toda muda, no mesmo tamanho', async () => {
+    const { provider } = build();
+    const result = await provider.edit(await editInput('deixa tudo mais quente'));
+    expect(await sharp(result.buffer).metadata()).toMatchObject({ width: SIZE, height: SIZE });
+    const before = await raw(await solid('#336699'));
+    const after = await raw(result.buffer);
+    expect(after[0]).not.toBe(before[0]);
+    expect(after[after.length - 3]).not.toBe(before[before.length - 3]);
+  });
+
+  it('com markup: registra o markup recebido e altera a imagem inteira, para o diff ser real', async () => {
+    const provider = new MockSceneImageProvider(
+      new ConfigService({ TEMPLATE_SCENE_MOCK_LATENCY_MS: '0' }),
+    );
+    const image = await solid('#336699');
+    const markup = await sharp({
+      create: {
+        width: SIZE,
+        height: SIZE,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    const result = await provider.edit({
+      ...input('tire o coelho', `${SIZE}x${SIZE}`),
+      image,
+      markup,
+    });
+
+    expect(provider.edits).toHaveLength(1);
+    expect(provider.edits[0].markup).toBe(markup);
+    expect(provider.edits[0].prompt).toBe('tire o coelho');
+    const before = await raw(image);
+    const after = await raw(result.buffer);
+    let changed = 0;
+    for (let i = 0; i < before.length; i += 3) {
+      if (
+        before[i] !== after[i] ||
+        before[i + 1] !== after[i + 1] ||
+        before[i + 2] !== after[i + 2]
+      )
+        changed += 1;
+    }
+    expect(changed).toBe(SIZE * SIZE);
+  });
+
+  it('sem markup o registro guarda null, e só as últimas 20 edições ficam', async () => {
+    const provider = new MockSceneImageProvider(
+      new ConfigService({ TEMPLATE_SCENE_MOCK_LATENCY_MS: '0' }),
+    );
+    const image = await solid('#336699');
+    for (let i = 0; i < 22; i += 1) {
+      await provider.edit({ ...input(`pedido ${i}`, `${SIZE}x${SIZE}`), image });
+    }
+    expect(provider.edits).toHaveLength(20);
+    expect(provider.edits[0].prompt).toBe('pedido 2');
+    expect(provider.edits[19].markup).toBeNull();
+  });
+
+  it('#sem-mudanca devolve o recorte intacto', async () => {
+    const { provider } = build();
+    const given = await editInput(`x ${MOCK_MARKERS.noChange}`);
+    const result = await provider.edit(given);
+    expect(result.buffer.equals(given.image)).toBe(true);
+  });
+
+  it.each([
+    [MOCK_MARKERS.quota, 'PROVIDER_QUOTA'],
+    [MOCK_MARKERS.timeout, 'PROVIDER_TIMEOUT'],
+  ])('a edição também simula %s', async (marker, code) => {
+    const { provider } = build();
+    const error = await provider.edit(await editInput(`x ${marker}`)).catch((e) => e);
+    expect(error).toBeInstanceOf(SceneProviderError);
+    expect(error.code).toBe(code);
+  });
+});

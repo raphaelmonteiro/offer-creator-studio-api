@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import { OpenAiImageService } from './openai-image.service';
+import { OpenAiDirectorService } from './openai-director.service';
+import { OpenAiVisionService } from './openai-vision.service';
 import { PixabayService } from './pixabay.service';
 import { SpellCheckService } from './spell-check.service';
 import { TemplateGenerateService } from './template-generate.service';
@@ -58,6 +60,8 @@ import { FlyerEanResolutionService } from './ean/dotcompany/flyer-ean-resolution
   providers: [
     AiService,
     OpenAiImageService,
+    OpenAiVisionService,
+    OpenAiDirectorService,
     PixabayService,
     SpellCheckService,
     TemplateGenerateService,
@@ -108,6 +112,10 @@ import { FlyerEanResolutionService } from './ean/dotcompany/flyer-ean-resolution
     'ImageMetadataService',
     // usado pelo módulo de animações para gerar a imagem base do background
     OpenAiImageService,
+    // usado pelo módulo de cenas de template (resposta por visão antes/depois)
+    OpenAiVisionService,
+    // usado pelo módulo de cenas de template (Diretor, `/responses`)
+    OpenAiDirectorService,
     // usado pelo módulo de mascotes para recortar o fundo do PNG enviado
     BackgroundRemovalService,
   ],

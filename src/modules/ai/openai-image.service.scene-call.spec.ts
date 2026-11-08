@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { APIConnectionError, APIConnectionTimeoutError } from 'openai';
+import { findImageModelCapabilities } from '../../shared/image/openai-image-capabilities';
 import { TerminalProviderError } from '../../shared/providers/provider-errors';
 import { OpenAiImageService } from './openai-image.service';
 import {
@@ -7,7 +8,7 @@ import {
   SCENE_CONNECTION_LOST_CODE,
   SCENE_INVALID_REQUEST_CODE,
   SCENE_TIMEOUT_CODE,
-} from './openai-image-scene-call';
+} from '../../shared/providers/openai-scene-call-errors';
 
 const PNG_B64 = Buffer.from('png-falso').toString('base64');
 const SCENE = { timeoutMs: 180_000, correlationId: 'corr-1' };
@@ -96,11 +97,79 @@ describe('OpenAiImageService: modo sceneCall', () => {
     expect(result.requestId).toBe('req-header');
   });
 
-  it('custo nulo para modelo sem preço conferido', async () => {
-    const { service, generate } = buildService();
-    generate.mockReturnValue(sdkOk());
-    const result = await service.generateImage({ ...baseOptions, model: 'gpt-image-2.5-flare' });
-    expect(result.costUsd).toBeNull();
+  describe('Preço do modelo da cena', () => {
+    it('gpt-image-2.6-sunburst: custo vem da entrada própria da tabela, não é null', async () => {
+      const { service, generate } = buildService();
+      generate.mockReturnValue(sdkOk());
+      const result = await service.generateImage({
+        ...baseOptions,
+        model: 'gpt-image-2.6-sunburst',
+      });
+      expect(result.costUsd).toBe(0.13655);
+      expect(findImageModelCapabilities('gpt-image-2.6-sunburst')).toMatchObject({
+        prefix: 'gpt-image-2.6-sunburst',
+        priceConsultedAt: '2026-11-06',
+        prices: { imageInput: 8, textInput: 5, imageOutput: 30 },
+      });
+    });
+  });
+
+  describe('Modelo sem preço conferido', () => {
+    it.each(['gpt-image-2.5-flare', 'gpt-image-2.6-flare', 'modelo-novo'])(
+      'recusa %s antes da rede, com erro de pedido inválido',
+      async (model) => {
+        const { service, generate, edit } = buildService();
+        await expect(service.generateImage({ ...baseOptions, model })).rejects.toMatchObject({
+          code: SCENE_INVALID_REQUEST_CODE,
+          message: expect.stringContaining('preço'),
+        });
+        await expect(
+          service.editImage({
+            feature: 'template-scene',
+            prompt: 'x',
+            imageBuffer: Buffer.from('x'),
+            size: '1920x3840',
+            model,
+            quality: 'high',
+            outputFormat: 'png',
+            sceneCall: SCENE,
+          }),
+        ).rejects.toMatchObject({ code: SCENE_INVALID_REQUEST_CODE });
+        expect(generate).not.toHaveBeenCalled();
+        expect(edit).not.toHaveBeenCalled();
+      },
+    );
+
+    it('fora do modo sceneCall o modelo sem preço segue como sempre', async () => {
+      const { service, generate } = buildService();
+      generate.mockResolvedValue({ data: [{ b64_json: PNG_B64 }] });
+      await service.generateImage({
+        ...baseOptions,
+        sceneCall: undefined,
+        size: '1024x1024',
+        model: 'gpt-image-2.5-flare',
+      });
+      expect(generate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Resposta sem usage', () => {
+    it('devolve costUsd null (o turno marca costUnknown)', async () => {
+      const { service, generate } = buildService();
+      generate.mockReturnValue({
+        withResponse: async () => ({
+          data: { data: [{ b64_json: PNG_B64 }] },
+          response: { headers: { get: () => null } },
+          request_id: 'req_1',
+        }),
+      });
+      const result = await service.generateImage({
+        ...baseOptions,
+        model: 'gpt-image-2.6-sunburst',
+      });
+      expect(result.usage).toBeUndefined();
+      expect(result.costUsd).toBeNull();
+    });
   });
 
   it('quota: uma só requisição, sem retentativa', async () => {

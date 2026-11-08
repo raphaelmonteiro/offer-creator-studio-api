@@ -5,6 +5,8 @@
 
 export const SCENE_VERSION_OPERATIONS = [
   'generate',
+  /** Redesenho da imagem inteira a partir da versão atual (change add-template-scene-conversation). */
+  'redraw',
   'local_edit',
   'add_element',
   'set_layer',
@@ -39,7 +41,18 @@ export const SCENE_FINAL_STATUSES = [
   'cancelled',
 ] as const satisfies readonly SceneVersionStatus[];
 
-export const SCENE_STEPS = ['preparing', 'generating', 'saving', 'done'] as const;
+export const SCENE_STEPS = [
+  /** O Diretor está lendo a mensagem (versão `queued`, sem imagem ainda). */
+  'reading',
+  'preparing',
+  'generating',
+  'editing',
+  'checking',
+  /** O texto pintado saiu diferente do pedido: segunda chamada de imagem, uma só por mensagem (D-51). */
+  'retrying_text',
+  'saving',
+  'done',
+] as const;
 export type SceneStep = (typeof SCENE_STEPS)[number];
 
 export const SCENE_ASSET_ROLES = [
@@ -64,6 +77,8 @@ export const SCENE_FAILURE_CODES = [
   'PROVIDER_ERROR',
   'JOB_EXPIRED',
   'PAID_CALL_LIMIT',
+  /** O Diretor não respondeu, estourou o tempo ou devolveu saída inválida duas vezes. */
+  'DIRECTOR_UNAVAILABLE',
 ] as const;
 export type SceneFailureCode = (typeof SCENE_FAILURE_CODES)[number];
 
@@ -85,7 +100,7 @@ export type MaskShape =
   | { kind: 'brush'; strokes: Pt[][]; radius: number }
   | { kind: 'lasso'; points: Pt[] };
 
-export const SCENE_ELEMENT_KINDS = ['sun', 'cloud', 'logo', 'text'] as const;
+export const SCENE_ELEMENT_KINDS = ['sun', 'cloud', 'logo', 'text', 'generated'] as const;
 export type SceneElementKind = (typeof SCENE_ELEMENT_KINDS)[number];
 
 /** Camada manual da cena. Imagem só por `assetId` da própria cena (a API nunca aceita URL). */
@@ -118,7 +133,7 @@ export type SceneZones = Record<SceneZoneName, Rect>;
 /** Uma chamada paga (ou a reserva dela) em `metrics.calls` da versão. */
 export interface SceneCallRecord {
   id: string;
-  kind: 'generate' | 'edit';
+  kind: 'generate' | 'edit' | 'vision';
   /** `pending` é gravada ANTES da chamada (R10); fechada depois com o custo real. */
   status: 'pending' | 'done' | 'failed' | 'discarded';
   model: string;
