@@ -22,6 +22,23 @@ describe('Prompt do 54x40 (Externa)', () => {
     expect(prompt).not.toMatch(/20\d\d/);
   });
 
+  it('fundo rico e contínuo; faixa do rodapé opaca com fim reto na dobra; logo com espaço vazio (D-9)', () => {
+    const prompt = buildOuterPrompt({
+      ...base,
+      request: 'tema',
+      zones: faceZones(format, 'outer'),
+    });
+    expect(prompt).toContain('Never a flat blank wash');
+    expect(prompt).toContain('along ALL the outer edges and corners of BOTH halves');
+    expect(prompt).toContain('solid, opaque band');
+    expect(prompt).toContain('clean straight end at x = 1574 px');
+    expect(prompt).toContain('It never fades, blurs or dissolves');
+    expect(prompt).toContain('the header artwork starts at x = 2160');
+    expect(prompt).not.toMatch(
+      /calm, uniform background|fades softly|no objects and no illustration/,
+    );
+  });
+
   it('Externa sem texto pedido proíbe qualquer texto', () => {
     const prompt = buildOuterPrompt({ ...base, request: 'jornal de hortifrúti, verde e fresco' });
     expect(prompt).toContain('Text: no text, no letters, no numbers, no logo, no watermark.');
@@ -36,7 +53,8 @@ describe('Prompt do 54x40 (Externa)', () => {
       openItems: ['balões dourados.'],
     });
     expect(prompt).toContain('y from 0 to 620 px');
-    expect(prompt).toContain('not be taller than 620 px');
+    expect(prompt).toContain('never lower than 620 px');
+    expect(prompt).toContain('y = 496 px or higher');
     expect(prompt).toContain('Other client requests still open (Portuguese): balões dourados.');
   });
 });
@@ -46,6 +64,9 @@ describe('Prompt da Interna (derivação)', () => {
     const prompt = buildInnerPrompt({ ...base, zones: faceZones(format, 'inner') });
     expect(prompt).toMatchSnapshot();
     expect(prompt).toContain('Do NOT draw a gutter');
+    expect(prompt).toContain('the same decorative language as the outer side');
+    expect(prompt).toContain('along ALL four outer edges and corners');
+    expect(prompt).not.toMatch(/no objects, no illustration|plain, even background/);
     expect(prompt).not.toMatch(/20\d\d|Client request/);
   });
 });

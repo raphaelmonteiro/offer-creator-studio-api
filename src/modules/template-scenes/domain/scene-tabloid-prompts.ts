@@ -55,38 +55,48 @@ function openItemsText(items: string[] | undefined): string {
   return ` Other client requests still open (Portuguese): ${list}.`;
 }
 
+/** Folga do cabeçalho (D-9): o modelo passa do limite em px, então o ponto mais baixo pedido é 80% do limite. */
+const HEADER_SAFE = 0.8;
+/** Margem entre o espaço da logo e a arte do cabeçalho, em px. */
+const LOGO_GAP = 48;
+
+/** O estilo rico das duas faces (D-9): o fundo é contínuo e decorado; só o miolo de produtos fica sem objetos grandes. */
+const RICH_STYLE =
+  "Style: a rich, finished, professional retail-flyer artwork, as good as a top graphic designer's work. The whole sheet has a lush continuous background: subtle paper or fabric texture, soft gradients, gentle light, soft bokeh and decorative elements of the theme (the same family of elements everywhere) spread along ALL the outer edges and corners of BOTH halves, always fading toward the center. Colors are saturated and harmonious. Never a flat blank wash.";
+
 /**
- * Prompt da primeira imagem e da imagem nova da Externa (PV-T6): cabeçalho só na capa, com limite em px e base em
- * fita ou curva; espaço da logo; capa livre abaixo; contracapa livre; faixa do rodapé até a faixa da dobra; faixa de
- * segurança da dobra.
+ * Prompt da primeira imagem e da imagem nova da Externa (PV-T6, D-9): fundo rico e contínuo nas duas metades, só o
+ * miolo de produtos sem objetos grandes; cabeçalho só na capa, com folga sobre o limite em px, base em fita ou curva e
+ * a arte depois do espaço da logo; faixa do rodapé da contracapa opaca, com fita no topo e fim reto na faixa da dobra.
  */
 export function buildOuterPrompt(input: OuterPromptInput): string {
   const m = measuresOf(input);
   const { format } = input;
   const side = format.printWidthCm / 2;
   const logoEnd = m.logoX + m.logoSize;
+  const lowest = Math.round(m.headerEnd * HEADER_SAFE);
   return [
-    'Create a new image: the OUTER side of a 4-page supermarket newspaper flyer, as print-ready background artwork. Only the painted background and the cover header are drawn; the products, the logo and the store footer are added later by another tool.',
+    'Create a new image: the OUTER side of a 4-page supermarket newspaper flyer, as print-ready background artwork. Only the painted background, the cover header and the back-cover footer band are drawn; the products, the logo and the store text are added later by another tool.',
     `Client request (Portuguese, follow its theme, mood, colors and header decoration): "${cleanRequest(input.request)}".${openItemsText(input.openItems)}`,
     `Format and use: ${sheetText(format, m)}. The sheet is printed on both sides and folded vertically at the exact center (x = ${m.foldX} px) into two pages of ${side} x ${format.printHeightCm} cm: the LEFT half is the back cover and the RIGHT half is the front cover. The background is ONE continuous picture that crosses the fold with no seam, no border and no visible dividing line.`,
-    `Composition: (a) RIGHT half: a cover header strictly confined to y from 0 to ${m.headerEnd} px and strictly to the right of x = ${m.headerX} px, spreading up to the right edge. The header must not be taller than ${m.headerEnd} px. Its lower edge is never a straight cut: it ends in a ribbon, a wave or a soft curve. Reserve a clean empty space of ${m.logoSize} x ${m.logoSize} px at the top-left of the header (x from ${m.logoX} to ${logoEnd}, y from ${m.logoY} to ${m.logoY + m.logoSize}) with only soft background, for the client logo placed later. (b) Below the header the right half (y from ${m.headerEnd + 20} to ${m.height} px) is free: only calm, uniform background, no objects. (c) LEFT half: entirely free calm background, with no header, no objects and no illustration. Keep every light source, sun or ray burst in the upper right part of the right half, far from the fold, fading before the left half. (d) A plain footer band at the bottom of the left half (y from ${m.footerStart} to ${m.height} px, x from 0 to ${m.footerEndX} px): flat, uniform, slightly darker, with no pattern and nothing drawn; it fades softly into the background before x = ${m.footerEndX} px, without a hard edge. (e) Keep a vertical safe strip ${m.foldTo - m.foldFrom} px wide centered on the fold (${foldStrip(m)}) without any object, light source or important element: only plain background may cross it.`,
-    'Style: clean, saturated, high-resolution print quality; the free areas are calm and low-contrast so that colorful product cards stay readable on top.',
+    RICH_STYLE,
+    `Composition: (a) RIGHT half: a cover header strictly confined to y from 0 to ${m.headerEnd} px and strictly to the right of x = ${m.headerX} px, spreading up to the right edge. The lowest point of any header element must be at y = ${lowest} px or higher, and never lower than ${m.headerEnd} px: the header is a shallow strip at the top, and the open area starts right below it. Its lower edge is never a straight cut: it ends in a ribbon, a wave or a soft curve. Keep a clean empty space of ${m.logoSize} x ${m.logoSize} px at the top-left of the header (x from ${m.logoX} to ${logoEnd}, y from ${m.logoY} to ${m.logoY + m.logoSize}) with only soft background, for the client logo placed later: no title, letters or decoration may enter it, and the header artwork starts at x = ${logoEnd + LOGO_GAP}. (b) Below the header the right half (y from ${m.headerEnd + 20} to ${m.height} px) keeps the same rich background, with decorative elements only near the right and bottom edges; the central product area stays open, with no large objects and no strong contrast. (c) LEFT half: the same rich background with decorative elements along its top, left and bottom edges; no header, and the central product area stays open. (d) A finished footer band at the bottom of the left half: a solid, opaque band in a deep tone of the theme, x from 0 to ${m.footerEndX} px and y from ${m.footerStart} to ${m.height} px, with a ribbon-like curved top edge (a gentle wave with a thin lighter accent line), a clean straight end at x = ${m.footerEndX} px, nothing drawn on it. It never fades, blurs or dissolves. (e) Keep a vertical safe strip ${m.foldTo - m.foldFrom} px wide centered on the fold (${foldStrip(m)}) with no object and no light source: only the continuous background texture may cross it.`,
     ...(input.correctionLines ?? []),
     outerTextBlock(input.exactText),
   ].join('\n');
 }
 
 /**
- * Prompt fixo da derivação da Interna (PV-T7): edita a Externa e tira cabeçalho e rodapé, arte contínua e sem calha.
- * Nunca leva pedido do cliente, ano nem brief.
+ * Prompt fixo da derivação da Interna (PV-T7, D-9): edita a Externa, tira cabeçalho e rodapé e dá às páginas de dentro
+ * a mesma linguagem decorativa, arte contínua e sem calha. Nunca leva pedido do cliente, ano nem brief.
  */
 export function buildInnerPrompt(input: TabloidPromptInput): string {
   const m = measuresOf(input);
   return [
-    'Edit the provided image. It is the OUTER side of a 4-page newspaper flyer. Create the INNER side of the same sheet from it: the same printed piece, same artwork family, with the header and the footer removed.',
+    'Edit the provided image. It is the OUTER side of a 4-page newspaper flyer. Create the INNER side of the same sheet from it: the same printed piece, the same artwork family, with the header, its title and the footer band removed.',
     `Format and use: ${sheetText(input.format, m)}. The inner side is the spread of pages 2 and 3, folded vertically at the exact center (x = ${m.foldX} px), seen as ONE continuous screen with no seam, no border and no visible dividing line.`,
-    `Composition: remove the header, its title and every decorative object of the header, and the footer band completely, from the top edge to the bottom edge; paint the background there as the natural continuation of the same picture. The whole canvas is a free, calm background for product cards: no header, no footer, no objects, no illustration, no title. Keep a vertical safe strip ${m.foldTo - m.foldFrom} px wide centered on the fold (${foldStrip(m)}) with only plain, even background, with no light source, no bright ray, no bokeh and no curved streak crossing it. Do NOT draw a gutter, book-spine shadow, darker or lighter vertical band, crease or page edge at the center: the color and brightness at x = ${m.foldX} px must be identical to the color and brightness 400 px to its left and right, as one seamless flat-lit picture.`,
-    'Style: keep exactly the same style as the provided image: the same colors, the same lighting, the same motifs and texture and the same print quality. Any light burst or stronger motif stays near the outer corners only, fading to calm low-contrast background toward the center and the bottom, so the two sides of the sheet look like the same piece.',
+    `Composition: remove the header and its decoration and the footer band completely, from the top edge to the bottom edge, and paint the background there as the natural continuation of the same picture. Give the inner side the same decorative language as the outer side: the same lush background texture and the same family of decorative elements and light along ALL four outer edges and corners of the sheet, as richly as the outer side, fading toward the center. The center of both pages stays open for product cards, with no large objects and no strong contrast. No header, no footer band, no title, no text. Keep a vertical safe strip ${m.foldTo - m.foldFrom} px wide centered on the fold (${foldStrip(m)}) with only the continuous background texture, no object and no light source. Do NOT draw a gutter, book-spine shadow, darker or lighter vertical band, crease or page edge at the center: the color and brightness at x = ${m.foldX} px must match the color and brightness 400 px to its left and right.`,
+    'Style: keep exactly the same style as the provided image: the same colors, lighting, motifs, texture and print quality, so the two sides of the sheet look like the same piece.',
     'Preserve: the color palette, the lighting, the texture and the motifs style of the provided image, and the same canvas size and proportion.',
     `Text: ${NO_TEXT}.`,
   ].join('\n');
