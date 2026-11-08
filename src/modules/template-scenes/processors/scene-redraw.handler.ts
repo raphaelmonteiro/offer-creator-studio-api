@@ -146,6 +146,8 @@ export class SceneRedrawHandler implements TurnHandler {
       heightPx: height,
       corrections,
       keepText: text.keep,
+      zones: ctx.zones,
+      faceKey: ctx.layout === 'front_back' ? ctx.faceKey : undefined,
     });
     const model = this.support.model();
     const size = `${width}x${height}`;

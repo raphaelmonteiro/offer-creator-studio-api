@@ -6,6 +6,7 @@ import {
   insertReadyVersion,
   insertScene,
   insertVersion,
+  pointFace,
 } from '../testing/scene-fixtures';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
 import { errorOf } from '../testing/scene-test-helpers';
@@ -56,8 +57,7 @@ describeIfSceneDb('SceneReadService (banco chroma_x_e2e)', () => {
       await insertVersion(dataSource, scene.id, { number: 2, status: 'rejected' });
       await insertVersion(dataSource, scene.id, { number: 3, status: 'failed' });
       const fourth = await insertReadyVersion(dataSource, scene, 4, { operation: 'redraw' });
-      scene.currentVersionId = fourth.version.id;
-      await dataSource.manager.save(scene);
+      await pointFace(dataSource, scene, fourth.version.id);
 
       const detail = await reads.loadDetail(scene.id);
 

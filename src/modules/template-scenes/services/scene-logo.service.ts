@@ -8,6 +8,7 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { logoInvalid, noCurrentVersion, sceneNotFound } from '../scene.errors';
+import { parseFaceKey, resolveFace } from './scene-faces';
 import { SceneFilesService } from './scene-files.service';
 
 const LOGO_FORMATS: Readonly<Record<string, string>> = { png: 'png', jpeg: 'jpg', webp: 'webp' };
@@ -32,13 +33,16 @@ export class SceneLogoService {
   async upload(
     sceneId: string,
     file: Pick<Express.Multer.File, 'buffer' | 'mimetype' | 'size'> | undefined,
+    face?: unknown,
   ): Promise<UploadedLogo> {
+    const faceKey = parseFaceKey(face); // 400 antes de ler o arquivo
     const image = await this.inspect(file);
     const scene = await this.dataSource.manager.findOne(TemplateScene, { where: { id: sceneId } });
     if (!scene) throw sceneNotFound();
-    // O asset precisa de uma versão que o "criou" (FK); o logo vai para a mais recente da cena.
+    const target = await resolveFace(this.dataSource.manager, scene, faceKey);
+    // O asset precisa de uma versão que o "criou" (FK); o logo vai para a mais recente da face.
     const version = await this.dataSource.manager.findOne(TemplateSceneVersion, {
-      where: { sceneId },
+      where: { sceneId, faceIndex: target.index },
       order: { number: 'DESC' },
     });
     if (!version) throw noCurrentVersion();

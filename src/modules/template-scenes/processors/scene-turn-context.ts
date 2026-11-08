@@ -6,15 +6,17 @@ import {
   SceneVersionOperation,
   SceneZones,
 } from '../domain/scene.types';
-import { sceneZonesFor } from '../domain/scene-formats';
+import { FaceKey, SceneLayout } from '../domain/scene-faces';
 import { openItems, turnItems } from '../domain/scene-brief';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { PaintedLine } from '../domain/scene-painted-text';
 import { paintedLinesOf } from '../services/scene-director-blocks';
 import { TemplateScene } from '../entities/template-scene.entity';
+import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
+import { currentVersionOf, loadFace } from '../services/scene-faces';
 
 /** A versão de onde o turno parte: imagem em disco e camadas. */
 export interface TurnParent {
@@ -41,6 +43,11 @@ export interface TurnContext {
   sceneId: string;
   versionId: string;
   correlationId: string;
+  /** Face do turno: as zonas, a versão de origem e a versão atual a trocar são as dela. */
+  layout: SceneLayout;
+  faceIndex: number;
+  faceKey: FaceKey;
+  /** Zonas da face (a frente não tem rodapé e o verso não tem cabeçalho; zona de altura 0 vale como miolo, PV-9). */
   zones: SceneZones;
   artWidthCm: number;
   artHeightCm: number;
@@ -81,15 +88,21 @@ export async function loadTurnContext(
     order: { createdAt: 'ASC' },
   });
   const plan = (version.metrics.plan as DirectorPlan | undefined) ?? null;
+  const face = await loadFace(manager, scene.id, version.faceIndex);
+  // Só a cena de frente e verso separa os pedidos em aberto por face (PV-8).
+  const itemFace = scene.layout === 'front_back' ? face.key : undefined;
   return {
     sceneId: scene.id,
     versionId: version.id,
     correlationId: version.correlationId,
-    zones: sceneZonesFor(scene.formatId),
+    layout: scene.layout,
+    faceIndex: face.index,
+    faceKey: face.key,
+    zones: face.zones,
     artWidthCm: scene.artWidthCm,
     artHeightCm: scene.artHeightCm,
-    widthPx: scene.widthPx,
-    heightPx: scene.heightPx,
+    widthPx: face.widthPx,
+    heightPx: face.heightPx,
     request: message?.content ?? '',
     messageId: message?.id ?? '',
     clientMessages: (
@@ -105,9 +118,9 @@ export async function loadTurnContext(
     requestedRegion: version.requestedRegion,
     requestedMask: version.requestedMask,
     targetElementId: version.targetElementId,
-    parent: await loadParent(manager, scene),
+    parent: await loadParent(manager, version, face),
     attachments: await loadAttachments(manager, scene.id, message),
-    openItems: openItems(scene.brief ?? []).map((item) => ({
+    openItems: openItems(scene.brief ?? [], itemFace).map((item) => ({
       id: item.id,
       text: item.text,
       sourceMessageId: item.sourceMessageId,
@@ -119,13 +132,19 @@ export async function loadTurnContext(
   };
 }
 
+/**
+ * A versão de onde o turno parte: a atual da face; na derivação do verso, a versão da frente que serviu de referência
+ * (`derivedFromVersionId`), que não é a do verso (o verso nasce vazio).
+ */
 async function loadParent(
   manager: EntityManager,
-  scene: TemplateScene,
+  version: TemplateSceneVersion,
+  face: TemplateSceneFace,
 ): Promise<TurnParent | null> {
-  const parent = scene.currentVersionId
-    ? await manager.findOne(TemplateSceneVersion, { where: { id: scene.currentVersionId } })
-    : null;
+  const parent =
+    version.operation === 'derive_face' && version.derivedFromVersionId
+      ? await manager.findOne(TemplateSceneVersion, { where: { id: version.derivedFromVersionId } })
+      : await currentVersionOf(manager, face);
   if (!parent) return null;
   const master = parent.masterAssetId
     ? await manager.findOne(TemplateSceneAsset, { where: { id: parent.masterAssetId } })

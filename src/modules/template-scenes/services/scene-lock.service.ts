@@ -82,11 +82,18 @@ export async function nextVersionNumber(manager: EntityManager, sceneId: string)
   return Number(row?.max ?? 0) + 1;
 }
 
-/** Fecha a versão manual aberta (próximo pedido ao chat, restauração ou aprovação). */
-export async function closeOpenManual(manager: EntityManager, sceneId: string): Promise<void> {
+/**
+ * Fecha a versão manual aberta (próximo pedido ao chat ou restauração). Com `faceIndex`, só a da face (PV-5): a manual
+ * aberta da outra face continua aberta.
+ */
+export async function closeOpenManual(
+  manager: EntityManager,
+  sceneId: string,
+  faceIndex?: number,
+): Promise<void> {
   await manager.update(
     TemplateSceneVersion,
-    { sceneId, isOpenManual: true },
+    { sceneId, isOpenManual: true, ...(faceIndex === undefined ? {} : { faceIndex }) },
     { isOpenManual: false },
   );
 }

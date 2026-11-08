@@ -7,7 +7,7 @@ import { SceneReadService } from '../services/scene-read.service';
 import { SceneVersionsService } from '../services/scene-versions.service';
 import { directorPlan } from '../testing/scene-director-fixtures';
 import { directorAnswer, useDirectorHarness } from '../testing/scene-director-harness';
-import { insertAsset } from '../testing/scene-fixtures';
+import { insertAsset, pointFace } from '../testing/scene-fixtures';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 import { fakeQueue, textElement } from '../testing/scene-test-helpers';
 
@@ -92,8 +92,7 @@ describeIfSceneDb(
       it('voltar para uma versão antiga: um job', async () => {
         const { scene, version } = await h.readyScene();
         const second = await h.readyVersionLike(scene, 2, version.id);
-        scene.currentVersionId = second.version.id;
-        await h.dataSource.manager.save(scene);
+        await pointFace(h.dataSource, scene, second.version.id);
         const queue = fakeQueue();
 
         await versions(queue).restore(scene.id, version.id, null);
@@ -146,8 +145,7 @@ describeIfSceneDb(
       it('desfazer pelo Diretor: um job', async () => {
         const first = await h.readyScene();
         const v2 = await h.readyVersionLike(first.scene, 2, first.version.id);
-        first.scene.currentVersionId = v2.version.id;
-        await h.dataSource.manager.save(first.scene);
+        await pointFace(h.dataSource, first.scene, v2.version.id);
         const sent = await h.post(first.scene.id, 'volta como estava');
         const { client } = h.directorClient(async () =>
           directorAnswer(

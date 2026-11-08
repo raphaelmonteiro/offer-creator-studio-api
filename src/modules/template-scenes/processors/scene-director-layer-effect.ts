@@ -1,13 +1,13 @@
 import { QueuePort } from '../../../shared/queue/animation-queue.service';
 import { layerOpsToActions } from '../domain/scene-director-layers';
 import { DirectorLayerOp } from '../domain/scene-director-schema';
-import { sceneZonesFor } from '../domain/scene-formats';
 import { describeLayerDiff, noLayerChangeText } from '../domain/scene-layer-diff';
 import { LayerAction } from '../domain/scene-layer.types';
 import { paintedMetricsOf } from '../domain/scene-painted-text';
 import { SceneElement } from '../domain/scene.types';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
+import { currentVersionOf, loadFace, setFaceCurrentVersion } from '../services/scene-faces';
 import { bumpRevision } from '../services/scene-lock.service';
 import { closeTurnBrief } from '../services/scene-turn-brief';
 import { SceneFilesService } from '../services/scene-files.service';
@@ -67,7 +67,7 @@ async function finishLayerTurn(
   queue: Pick<QueuePort, 'publish'>,
 ): Promise<void> {
   const { manager, scene, version } = target;
-  scene.currentVersionId = version.id;
+  await setFaceCurrentVersion(manager, scene, version.faceIndex, version.id);
   await pruneSceneAssets(manager, scene);
   await settleUserMessage(manager, version.id, 'done');
   await addAssistantMessage(manager, {
@@ -92,9 +92,8 @@ export async function applyLayersEffect(
   deps: { files: SceneFilesService; queue: Pick<QueuePort, 'publish'> },
 ): Promise<void> {
   const { manager, scene, version } = target;
-  const current = await manager.findOneByOrFail(TemplateSceneVersion, {
-    id: scene.currentVersionId as string,
-  });
+  const face = await loadFace(manager, scene.id, version.faceIndex);
+  const current = (await currentVersionOf(manager, face)) as TemplateSceneVersion;
   const message = await manager.findOne(TemplateSceneMessage, {
     where: { versionId: version.id, role: 'user' },
     order: { createdAt: 'ASC' },
@@ -106,7 +105,7 @@ export async function applyLayersEffect(
     hintElementId: version.targetElementId,
   });
   if (converted.ok === false) return rejectTarget(target, converted.reply);
-  const zones = sceneZonesFor(scene.formatId);
+  const { zones } = face;
   const result = applyLayerActions(converted.actions, {
     zones,
     widthPx: scene.widthPx,

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { zoneRect } from '../domain/scene-faces';
 import { LayerAction } from '../domain/scene-layer.types';
 import { SceneElement, SceneElementKind } from '../domain/scene.types';
 import { belowSpot, RunState } from './scene-layer-below';
@@ -39,7 +40,7 @@ function logoElement(
   const asset = ctx.attachments.find((a) => a.id === action.assetId);
   if (!asset?.width || !asset.height) return null;
   const aspect = asset.width / asset.height;
-  const zone = ctx.zones[action.zone];
+  const zone = zoneRect(ctx.zones, action.zone);
   const x =
     action.side === 'left'
       ? SIDE_MARGIN + LOGO_WIDTH / 2
@@ -70,7 +71,7 @@ function textPosition(
 ): [number, number] {
   const { position } = action;
   if (!position) return textY(action.placement, ctx, elements);
-  const zone = ctx.zones[position.zone];
+  const zone = zoneRect(ctx.zones, position.zone);
   const x =
     position.side === 'left'
       ? SIDE_MARGIN + TEXT_WIDTH / 2
@@ -85,7 +86,7 @@ function textY(placement: string, ctx: LayerContext, elements: SceneElement[]): 
   if (placement === 'below-logo' && logo) {
     return [logo.x, Math.min(0.95, logo.y + heightFraction(logo, ctx) / 2 + 0.06)];
   }
-  const zone = placement === 'top' ? ctx.zones.header : ctx.zones.footer;
+  const zone = zoneRect(ctx.zones, placement === 'top' ? 'header' : 'footer');
   return [0.5, zone.y + zone.h / 2];
 }
 

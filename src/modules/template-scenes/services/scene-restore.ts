@@ -44,6 +44,7 @@ export async function restoreInto(
 ): Promise<TemplateSceneVersion> {
   const { reading, userId = null } = options;
   const image = {
+    faceIndex: source.faceIndex,
     parentVersionId: source.id,
     operation: 'restore' as const,
     masterAssetId: source.masterAssetId,

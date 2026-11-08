@@ -16,7 +16,8 @@ import {
  * prompt da imagem; eles e `what_i_see` (auditoria) nunca vão ao cliente.
  */
 
-export const TURN_KINDS = [
+/** As classes de sempre: o prompt da cena de uma face lista só estas (byte a byte, PV-14). */
+export const BASE_TURN_KINDS = [
   'pedido_item',
   'pedido_ajuste_geral',
   'pedido_composicao',
@@ -30,6 +31,12 @@ export const TURN_KINDS = [
   'recusa_pintado',
   'outro',
 ] as const;
+
+/**
+ * `fazer_verso` (PV-14): o cliente pede para fazer ou criar o verso. A linha só entra no prompt da cena de frente e
+ * verso; o schema aceita sempre, e o código responde "uma face só" quando a cena não tem verso.
+ */
+export const TURN_KINDS = [...BASE_TURN_KINDS, 'fazer_verso'] as const;
 export type TurnKind = (typeof TURN_KINDS)[number];
 
 /** D-51: só a logo é recusada (sempre camada); texto e preço são pintados a pedido. */

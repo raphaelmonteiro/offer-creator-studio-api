@@ -3,11 +3,14 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { Template } from '../../templates/entities/template.entity';
 import { CreateSceneDto } from '../dto/create-scene.dto';
+import { acceptsFrontBack, FaceKey } from '../domain/scene-faces';
 import { findSceneFormat } from '../domain/scene-formats';
 import { nativeSizeOfFormat, pixelsPerCm } from '../domain/scene-format-size';
 import { TemplateScene } from '../entities/template-scene.entity';
-import { sceneFormatUnsupported, sceneNotFound } from '../scene.errors';
+import { TemplateSceneFace } from '../entities/template-scene-face.entity';
+import { sceneFormatUnsupported, sceneLayoutUnsupported, sceneNotFound } from '../scene.errors';
 import { publishSceneEvent } from './scene-events';
+import { faceKeyOfVersion, newFaces } from './scene-faces';
 import { bumpRevision, findBusyVersion, SceneLockService } from './scene-lock.service';
 import { SceneReadService } from './scene-read.service';
 import { SceneDetailView, SceneListItemView, SceneMessagesPageView } from './scene-views';
@@ -21,23 +24,35 @@ export class TemplateScenesService {
     private readonly reads: SceneReadService,
   ) {}
 
-  /** Valida o formato (lista de impressão, 1:3 a 3:1) e grava a cena com o tamanho nativo. */
+  /**
+   * Valida o formato (lista de impressão, 1:3 a 3:1) e o layout (frente e verso só nos formatos em retrato, D-9) e
+   * grava a cena com o tamanho nativo e as faces, na mesma transação.
+   */
   async create(dto: CreateSceneDto, userId: string | null): Promise<SceneDetailView> {
     const format = findSceneFormat(dto.formatId);
     const size = format ? nativeSizeOfFormat(format) : null;
     if (!format || !size) throw sceneFormatUnsupported(dto.formatId);
+    const layout = dto.layout ?? 'single';
+    if (layout === 'front_back' && !acceptsFrontBack(format.id)) {
+      throw sceneLayoutUnsupported(format.id, layout);
+    }
 
-    const scene = await this.dataSource.manager.save(TemplateScene, {
-      name: dto.name,
-      formatId: format.id,
-      artWidthCm: format.artWidthCm,
-      artHeightCm: format.artHeightCm,
-      widthPx: size.width,
-      heightPx: size.height,
-      pixelsPerCm: pixelsPerCm(size, format),
-      createdByUserId: userId,
+    const sceneId = await this.dataSource.transaction(async (manager) => {
+      const scene = await manager.save(TemplateScene, {
+        name: dto.name,
+        formatId: format.id,
+        layout,
+        artWidthCm: format.artWidthCm,
+        artHeightCm: format.artHeightCm,
+        widthPx: size.width,
+        heightPx: size.height,
+        pixelsPerCm: pixelsPerCm(size, format),
+        createdByUserId: userId,
+      });
+      await manager.insert(TemplateSceneFace, newFaces(scene, format, layout));
+      return scene.id;
     });
-    return this.reads.loadDetail(scene.id);
+    return this.reads.loadDetail(sceneId);
   }
 
   async list(page = 1, limit = 20): Promise<{ data: SceneListItemView[]; pagination: PageInfo }> {
@@ -61,8 +76,8 @@ export class TemplateScenesService {
     return this.reads.loadMessages(sceneId, page);
   }
 
-  get(sceneId: string, versionsPage = 1): Promise<SceneDetailView> {
-    return this.reads.loadDetail(sceneId, versionsPage);
+  get(sceneId: string, versionsPage = 1, face?: FaceKey): Promise<SceneDetailView> {
+    return this.reads.loadDetail(sceneId, versionsPage, undefined, face);
   }
 
   /**
@@ -87,6 +102,7 @@ export class TemplateScenesService {
         await publishSceneEvent(manager, {
           sceneId,
           versionId: busy.id,
+          faceKey: faceKeyOfVersion(scene, busy),
           kind: 'version.step',
           step: busy.step,
           status: busy.status,

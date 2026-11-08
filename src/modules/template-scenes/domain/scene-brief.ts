@@ -1,5 +1,6 @@
 import { fold } from '../../../shared/text/fold';
 import { DirectorRequest } from './scene-director-schema';
+import { FaceKey } from './scene-faces';
 import { numberKeepsOutOfList } from './scene-written-number';
 import { mentionsWords, sameWholeWord, significantWords } from './scene-words';
 
@@ -23,6 +24,8 @@ export interface BriefItem {
   status: BriefStatus;
   sourceMessageId: string;
   updatedAt: string;
+  /** Face do pedido, só na cena de frente e verso (PV-8); ausente vale a face 0 (`front`). */
+  faceKey?: FaceKey;
 }
 
 /** O que mudou na lista no turno (vai para `metrics.director.brief`). */
@@ -49,9 +52,12 @@ const noChanges = (): BriefChanges => ({
 
 const key = (text: string): string => fold(text).replace(/\s+/g, ' ').trim();
 
-/** Itens em aberto na lista. */
-export const openItems = (brief: BriefItem[]): BriefItem[] =>
-  brief.filter((item) => item.status === 'open');
+/** A face do item: sem `faceKey`, a face 0 (`front` na cena de frente e verso). */
+const faceOfItem = (item: BriefItem): FaceKey => item.faceKey ?? 'front';
+
+/** Itens em aberto na lista; com `faceKey`, só os da face (PV-8). */
+export const openItems = (brief: BriefItem[], faceKey?: FaceKey): BriefItem[] =>
+  brief.filter((item) => item.status === 'open' && (!faceKey || faceOfItem(item) === faceKey));
 
 /** Os itens do turno (D-59): abertos pela mensagem atual, ou do turno anterior que ela executa. */
 export const turnItems = (brief: BriefItem[], messageId: string): BriefItem[] =>
@@ -84,6 +90,8 @@ function findItem(brief: BriefItem[], request: DirectorRequest): BriefItem | und
 }
 
 export interface DirectorBriefContext {
+  /** Face dos itens novos (só na cena de frente e verso); sem ela o item nasce sem `faceKey`. */
+  faceKey?: FaceKey;
   messageId: string;
   /** A mensagem atual do cliente: só um pedido nela reabre um item feito ou desistido (R10). */
   message: string;
@@ -146,6 +154,7 @@ export function applyDirectorRequests(
         status: 'open',
         sourceMessageId: ctx.messageId,
         updatedAt,
+        ...(ctx.faceKey ? { faceKey: ctx.faceKey } : {}),
       });
       changes.opened.push(id);
     } else {

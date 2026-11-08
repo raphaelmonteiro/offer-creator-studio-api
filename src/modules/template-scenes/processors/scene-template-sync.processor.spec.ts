@@ -2,6 +2,7 @@ import { SceneElement } from '../domain/scene.types';
 import { SceneLockService } from '../services/scene-lock.service';
 import { SceneReadService } from '../services/scene-read.service';
 import { SceneVersionsService } from '../services/scene-versions.service';
+import { pointFace } from '../testing/scene-fixtures';
 import { useSyncHarness } from '../testing/scene-template-sync-harness';
 import { layer, near, pixelOf, Rgb } from '../testing/scene-template-fixtures';
 import { describeIfSceneDb } from '../testing/scene-test-db';
@@ -64,10 +65,7 @@ describeIfSceneDb('SceneTemplateSyncProcessor: fluxo (banco chroma_x_e2e)', () =
         `UPDATE template_scene_versions SET status = 'failed' WHERE id = $1`,
         [version.id],
       );
-      await h.dataSource.query(`UPDATE template_scenes SET "currentVersionId" = $1 WHERE id = $2`, [
-        version.id,
-        scene.id,
-      ]);
+      await pointFace(h.dataSource, scene, version.id);
       await h.sync(scene.id);
       expect(await h.templatesOf(scene.id)).toEqual([]);
     });

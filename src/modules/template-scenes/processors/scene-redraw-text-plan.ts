@@ -39,7 +39,7 @@ export function buildRoundText(
     crop: textCropBox({
       region: image?.region ?? null,
       marking,
-      formatId: ctx.formatId,
+      zones: ctx.zones,
       width: ctx.widthPx,
       height: ctx.heightPx,
     }),

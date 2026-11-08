@@ -11,7 +11,13 @@ import {
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { insertAsset, insertScene, insertVersion } from '../testing/scene-fixtures';
+import {
+  insertAsset,
+  insertReadyOnDisk,
+  insertScene,
+  insertVersion,
+  pointFace,
+} from '../testing/scene-fixtures';
 import { errorOf, textElement, fakeQueue } from '../testing/scene-test-helpers';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
 import { SceneFilesService } from './scene-files.service';
@@ -69,44 +75,21 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
   const later = () => new Date(Date.now() + 60_000);
 
   /** Versão `ready` com master e prévia próprias, com arquivo em disco. */
-  async function addReadyOnDisk(
+  const addReadyOnDisk = (
     scene: TemplateScene,
     number: number,
     extra: Partial<TemplateSceneVersion> = {},
-  ) {
-    const version = await insertVersion(dataSource, scene.id, { number, ...extra });
-    const make = async (role: 'master' | 'preview') => {
-      const name = `${role}-${number}.png`;
-      const written = await files.write(
-        scene.id,
-        version.id,
-        name,
-        Buffer.from(`${role}${number}`),
-      );
-      return insertAsset(dataSource, version, role, { url: written.url });
-    };
-    const master = await make('master');
-    const preview = await make('preview');
-    await dataSource.manager.update(
-      TemplateSceneVersion,
-      { id: version.id },
-      {
-        masterAssetId: master.id,
-        previewAssetId: preview.id,
-      },
-    );
-    return { version, master, preview };
-  }
+  ) => insertReadyOnDisk(dataSource, files, scene, { number, extra });
 
   async function sceneWith(name: string, count: number) {
     const scene = await insertScene(dataSource, { name });
     createdScenes.push(scene.id);
     const ready = [];
     for (let number = 1; number <= count; number++) ready.push(await addReadyOnDisk(scene, number));
-    await dataSource.manager.update(
-      TemplateScene,
-      { id: scene.id },
-      { currentVersionId: ready[count - 1].version.id },
+    await pointFace(
+      dataSource,
+      { id: scene.id, currentVersionId: null },
+      ready[count - 1].version.id,
     );
     return { scene, ready };
   }
@@ -161,11 +144,7 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
       { id: ready[1].version.id },
       { approvedAt: new Date() },
     );
-    await dataSource.manager.update(
-      TemplateScene,
-      { id: scene.id },
-      { currentVersionId: ready[0].version.id },
-    );
+    await pointFace(dataSource, { id: scene.id, currentVersionId: null }, ready[0].version.id);
     const attempts = [];
     for (let number = 3; number <= 7; number++) {
       attempts.push(
@@ -188,11 +167,7 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
 
   it('a atual fora das 5 vagas e sem aprovação também fica protegida; a sexta tentativa poda a mais antiga', async () => {
     const { scene, ready } = await sceneWith('GC atual fora das vagas', 1);
-    await dataSource.manager.update(
-      TemplateScene,
-      { id: scene.id },
-      { currentVersionId: ready[0].version.id },
-    );
+    await pointFace(dataSource, { id: scene.id, currentVersionId: null }, ready[0].version.id);
     const attempts = [];
     for (let number = 2; number <= 7; number++) {
       attempts.push(
@@ -443,11 +418,7 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
         { id: ready[1].version.id },
         { approvedAt: new Date() },
       );
-      await dataSource.manager.update(
-        TemplateScene,
-        { id: scene.id },
-        { currentVersionId: ready[0].version.id },
-      );
+      await pointFace(dataSource, { id: scene.id, currentVersionId: null }, ready[0].version.id);
       await prune(scene.id);
       await purge(scene.id);
 

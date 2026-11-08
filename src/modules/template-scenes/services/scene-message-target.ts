@@ -2,9 +2,10 @@ import { SendMessageDto } from '../dto/send-message.dto';
 import { maskBounds, MIN_SHAPE_AREA_RATIO } from '../domain/scene-mask-shape';
 import { rasterizeRegion, shapeAreaRatio } from '../domain/scene-shapes';
 import { MaskShape, Rect } from '../domain/scene.types';
-import { sceneZonesFor } from '../domain/scene-formats';
+import { zoneRect } from '../domain/scene-faces';
 import { EntityManager } from 'typeorm';
 import { TemplateScene } from '../entities/template-scene.entity';
+import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { invalidBody, regionTooSmall, targetElementNotFound } from '../scene.errors';
 
@@ -53,14 +54,19 @@ export interface RequestedTarget {
  * Marcação gravada na versão: retângulo e zona viram o retângulo (a zona é o retângulo do formato), a forma
  * guarda a forma e a caixa dela. `targetElementId` é só dica de camada: não é marcação e não gera `markup`.
  */
-export function requestedTargetOf(dto: SendMessageDto, scene: TemplateScene): RequestedTarget {
+export function requestedTargetOf(
+  dto: SendMessageDto,
+  scene: TemplateScene,
+  face: Pick<TemplateSceneFace, 'zones'>,
+): RequestedTarget {
   const none: RequestedTarget = {
     requestedRegion: null,
     requestedMask: null,
     targetElementId: null,
   };
   if (dto.region) return { ...none, requestedRegion: dto.region };
-  if (dto.zone) return { ...none, requestedRegion: sceneZonesFor(scene.formatId)[dto.zone] };
+  // Zona que a face não tem (rodapé na frente, cabeçalho no verso) vale como miolo (PV-9).
+  if (dto.zone) return { ...none, requestedRegion: zoneRect(face.zones, dto.zone) };
   if (dto.mask) {
     return {
       ...none,
@@ -71,15 +77,15 @@ export function requestedTargetOf(dto: SendMessageDto, scene: TemplateScene): Re
   return { ...none, targetElementId: dto.targetElementId ?? null };
 }
 
-/** `targetElementId` precisa ser uma camada da versão atual (422 `TARGET_ELEMENT_NOT_FOUND`). */
+/** `targetElementId` precisa ser uma camada da versão atual da face (422 `TARGET_ELEMENT_NOT_FOUND`). */
 export async function assertTargetElementExists(
   manager: EntityManager,
-  scene: TemplateScene,
+  face: Pick<TemplateSceneFace, 'currentVersionId'>,
   dto: SendMessageDto,
 ): Promise<void> {
   if (!dto.targetElementId) return;
-  const current = scene.currentVersionId
-    ? await manager.findOne(TemplateSceneVersion, { where: { id: scene.currentVersionId } })
+  const current = face.currentVersionId
+    ? await manager.findOne(TemplateSceneVersion, { where: { id: face.currentVersionId } })
     : null;
   if (!current?.elements.some((element) => element.id === dto.targetElementId)) {
     throw targetElementNotFound(dto.targetElementId);

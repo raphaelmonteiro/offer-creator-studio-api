@@ -5,6 +5,7 @@ import { DirectorPlan } from '../domain/scene-director-schema';
 import { MARKING_DISCARDED_NOTE, PAINTED_LAYER_NOTE, REDRAW_NOTICE } from '../scene-texts';
 import { fold } from '../../../shared/text/fold';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
+import { faceKeyOfVersion, loadFace } from '../services/scene-faces';
 import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage } from '../services/scene-messages';
 import { publishQueued } from '../services/scene-turn-helpers';
@@ -65,8 +66,9 @@ export async function queueImageEffect(
   await manager.save(scene);
   const notes: string[] = [];
   if (decision.discardMarking) notes.push(MARKING_DISCARDED_NOTE);
+  const face = await loadFace(manager, scene.id, version.faceIndex);
   if (
-    await paintsExistingLayer(manager, scene.currentVersionId, version.metrics.plan as DirectorPlan)
+    await paintsExistingLayer(manager, face.currentVersionId, version.metrics.plan as DirectorPlan)
   ) {
     notes.push(PAINTED_LAYER_NOTE);
   }
@@ -75,14 +77,31 @@ export async function queueImageEffect(
     notes.push(REDRAW_NOTICE);
     version.metrics = { ...version.metrics, notice: true };
   }
+  await announceAndQueue(target, {
+    content: [decision.announcement, ...notes].join(' '),
+    windowSeconds,
+    queue: deps.queue,
+  });
+}
+
+/**
+ * O fim comum dos turnos que chamam a imagem: grava a versão e o anúncio, publica o job (com `startAfterSeconds`
+ * quando há janela), sobe a `revision` e avisa que a versão está na fila.
+ */
+export async function announceAndQueue(
+  target: DirectorTarget,
+  input: { content: string; windowSeconds: number; queue: AnimationQueueService },
+): Promise<void> {
+  const { manager, scene, version } = target;
+  const { content, windowSeconds } = input;
   await manager.save(version);
   await addAssistantMessage(manager, {
     sceneId: scene.id,
     versionId: version.id,
-    content: [decision.announcement, ...notes].join(' '),
+    content,
     status: 'done',
   });
-  const jobId = await deps.queue.publish(
+  const jobId = await input.queue.publish(
     QUEUES.TEMPLATE_SCENE_TURN,
     { sceneId: scene.id, versionId: version.id },
     {
@@ -94,5 +113,11 @@ export async function queueImageEffect(
   );
   if (!jobId) throw new Error('A fila não aceitou o job de imagem da cena');
   const revision = await bumpRevision(manager, scene);
-  await publishQueued(manager, { sceneId: scene.id, versionId: version.id, revision, step: null });
+  await publishQueued(manager, {
+    sceneId: scene.id,
+    versionId: version.id,
+    faceKey: faceKeyOfVersion(scene, version),
+    revision,
+    step: null,
+  });
 }

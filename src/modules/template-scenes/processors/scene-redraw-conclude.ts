@@ -49,7 +49,7 @@ interface Applied {
 }
 
 /** O PNG no tamanho nativo do formato (D-32), de qualquer resposta do provedor. */
-const normalize = (ctx: TurnContext, result: SceneGenerateResult): Promise<Buffer> =>
+export const normalize = (ctx: TurnContext, result: SceneGenerateResult): Promise<Buffer> =>
   sharp(result.buffer).resize(ctx.widthPx, ctx.heightPx, { fit: 'fill' }).png().toBuffer();
 
 /** O que a primeira ou a segunda tentativa deixam em `metrics.textCheck.attempts`: prompt, custo e leitura. */

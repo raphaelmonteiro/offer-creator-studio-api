@@ -16,6 +16,12 @@ import {
   versionNotReady,
 } from '../scene.errors';
 import { publishVersionReady } from './scene-events';
+import {
+  currentVersionOf,
+  faceKeyOfVersion,
+  resolveFace,
+  setFaceCurrentVersion,
+} from './scene-faces';
 import { assertMasterOnDisk, restoreInto } from './scene-restore';
 import {
   assertExpectedRevision,
@@ -61,15 +67,16 @@ export class SceneVersionsService {
       if (source.status !== 'ready') throw versionNotReady();
       await assertMasterOnDisk(manager, source);
 
-      await closeOpenManual(manager, sceneId);
+      await closeOpenManual(manager, sceneId, source.faceIndex);
       const restored = await restoreInto(manager, scene, source, { userId });
       return this.finishReadyVersion(manager, scene, restored);
     });
   }
 
   /**
-   * Atualiza a versão `manual` aberta ou cria uma (`ready`, apontando para a master da atual). Ela
-   * fecha no próximo pedido ao chat, no `restore` ou na aprovação (estágio 5).
+   * Atualiza a versão `manual` aberta da face ou cria uma (`ready`, apontando para a master da atual da face). Ela
+   * fecha no próximo pedido ao chat na mesma face, no `restore` dela ou na aprovação (estágio 5); a manual aberta da
+   * outra face continua aberta (PV-5).
    */
   async patchElements(
     sceneId: string,
@@ -79,21 +86,21 @@ export class SceneVersionsService {
     return this.locks.run(sceneId, async ({ manager, scene }) => {
       assertExpectedRevision(scene, dto.expectedRevision);
       await assertSceneIdle(manager, sceneId);
-      const current = scene.currentVersionId
-        ? await manager.findOne(TemplateSceneVersion, { where: { id: scene.currentVersionId } })
-        : null;
+      const face = await resolveFace(manager, scene, dto.face);
+      const current = await currentVersionOf(manager, face);
       if (!current) throw noCurrentVersion();
       const elements = dto.elements as SceneElement[];
       await this.assertElementAssetsInScene(manager, sceneId, elements);
 
       const open = await manager.findOne(TemplateSceneVersion, {
-        where: { sceneId, isOpenManual: true },
+        where: { sceneId, faceIndex: face.index, isOpenManual: true },
       });
       const manual = open
         ? await manager.save(Object.assign(open, { elements }))
         : await manager.save(
             manager.create(TemplateSceneVersion, {
               sceneId,
+              faceIndex: face.index,
               parentVersionId: current.id,
               number: await nextVersionNumber(manager, sceneId),
               operation: 'manual',
@@ -136,12 +143,13 @@ export class SceneVersionsService {
     scene: TemplateScene,
     version: TemplateSceneVersion,
   ): Promise<SceneDetailView> {
-    scene.currentVersionId = version.id;
+    await setFaceCurrentVersion(manager, scene, version.faceIndex, version.id);
     await pruneSceneAssets(manager, scene);
     const revision = await bumpRevision(manager, scene);
     await publishVersionReady(manager, this.queue, {
       sceneId: scene.id,
       versionId: version.id,
+      faceKey: faceKeyOfVersion(scene, version),
       step: null,
       status: 'ready',
       cancelRequested: false,

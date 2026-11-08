@@ -5,6 +5,7 @@ import { TemplateSceneVersion } from '../entities/template-scene-version.entity'
 import { directorPlan } from '../testing/scene-director-fixtures';
 import { directorAnswer, useDirectorHarness } from '../testing/scene-director-harness';
 import { describeIfSceneDb } from '../testing/scene-test-db';
+import { pointFace } from '../testing/scene-fixtures';
 
 describeIfSceneDb('Desfazer sem chamar o modelo de imagem (banco chroma_x_e2e)', () => {
   const h = useDirectorHarness();
@@ -14,8 +15,7 @@ describeIfSceneDb('Desfazer sem chamar o modelo de imagem (banco chroma_x_e2e)',
     const first = await h.readyScene();
     const v2 = await h.readyVersionLike(first.scene, 2, first.version.id);
     const v3 = await h.readyVersionLike(first.scene, 3, v2.version.id);
-    first.scene.currentVersionId = v3.version.id;
-    await h.dataSource.manager.save(first.scene);
+    await pointFace(h.dataSource, first.scene, v3.version.id);
     return { scene: first.scene, v1: first.version, v2: v2.version, v3: v3.version };
   }
 

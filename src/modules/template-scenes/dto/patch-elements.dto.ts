@@ -15,6 +15,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { FACE_KEYS, FaceKey } from '../domain/scene-faces';
 import { SCENE_ELEMENT_KINDS, SCENE_LIMITS, SceneElementKind } from '../domain/scene.types';
 
 /** Camada manual. Imagem só por `assetId`: a API nunca aceita URL (`src`, `imageUrl` dão 400). */
@@ -109,4 +110,13 @@ export class PatchElementsDto {
   @ValidateNested({ each: true })
   @Type(() => SceneElementDto)
   elements: SceneElementDto[];
+
+  @ApiPropertyOptional({
+    enum: FACE_KEYS,
+    description:
+      'Face das camadas; sem ela, a face 0. Face que a cena não tem: 422 `FACE_NOT_FOUND`',
+  })
+  @IsOptional()
+  @IsIn(FACE_KEYS)
+  face?: FaceKey;
 }

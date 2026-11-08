@@ -5,7 +5,16 @@ import {
   PaintedRefusal,
 } from './scene-director-schema';
 import { emptyImage, imageChange } from './scene-director-image';
-import { NO_IMAGE_REPLY, NO_INSTRUCTION_REPLY } from '../scene-texts';
+import {
+  BACK_EXISTS_REPLY,
+  BACK_MISSING_REPLY,
+  DERIVE_BACK_ANNOUNCEMENT,
+  FRONT_FIRST_REPLY,
+  NO_IMAGE_REPLY,
+  NO_INSTRUCTION_REPLY,
+  SINGLE_FACE_REPLY,
+} from '../scene-texts';
+import { DirectorFace, isFrontBack } from './scene-director-faces';
 import { replyIsForbidden, safeReply } from './scene-director-phrases';
 import { fold } from '../../../shared/text/fold';
 
@@ -22,6 +31,8 @@ export interface DecisionInput {
   hasImage: boolean;
   /** Os itens da lista do que o cliente pediu em aberto, contando os que o plano abre agora (só o texto). */
   openRequests: string[];
+  /** A face do pedido e o estado das faces; ausente vale cena de uma face (o comportamento de sempre). */
+  face?: DirectorFace;
 }
 
 type ImageDecision = Extract<TurnDecision, { kind: 'image' }>;
@@ -31,6 +42,8 @@ export type TurnDecision =
   | { kind: 'reply'; reply: string }
   | { kind: 'layers'; ops: DirectorLayerOp[]; reply: string }
   | { kind: 'undo'; target: 'previous' | number }
+  /** "Fazer o verso" pelo chat (PV-14): a versão de leitura vira a do verso, derivada da frente atual. */
+  | { kind: 'derive'; announcement: string; window: boolean }
   | {
       kind: 'image';
       /** `generate` não recebe imagem de referência (primeira imagem e imagem nova). */
@@ -173,11 +186,37 @@ function imageDecision(input: DecisionInput): TurnDecision {
   };
 }
 
+/**
+ * Efeito dos turnos que dependem da face (PV-14, D-13): `fazer_verso` e o pedido de imagem no verso vazio ou o de
+ * imagem nova no verso pronto. `null` deixa o turno seguir a tabela de sempre.
+ */
+function decideFaceTurn(input: DecisionInput): TurnDecision | null {
+  const { plan, face } = input;
+  const reply = (text: string): TurnDecision => ({ kind: 'reply', reply: text });
+  if (plan.turn_kind === 'fazer_verso') {
+    if (!isFrontBack(face)) return reply(SINGLE_FACE_REPLY);
+    if (!face?.frontReady) return reply(FRONT_FIRST_REPLY);
+    if (face.backReady) return reply(BACK_EXISTS_REPLY);
+    return { kind: 'derive', announcement: DERIVE_BACK_ANNOUNCEMENT, window: true };
+  }
+  if (!isFrontBack(face) || face?.key !== 'back') return null;
+  const wantsNewImage = plan.turn_kind === 'imagem_nova';
+  if (face.hasImage) return wantsNewImage ? reply(BACK_EXISTS_REPLY) : null;
+  const touchesImage =
+    wantsNewImage ||
+    plan.turn_kind === 'camada' ||
+    plan.turn_kind === 'desfazer' ||
+    changesImage(input);
+  return touchesImage ? reply(BACK_MISSING_REPLY) : null;
+}
+
 export function decideTurn(input: DecisionInput): TurnDecision {
   const { plan, hasImage } = input;
   if (plan.turn_kind === 'recusa_pintado') {
     return { kind: 'refuse', refusal: 'painted_logo' };
   }
+  const faceDecision = decideFaceTurn(input);
+  if (faceDecision) return faceDecision;
   if ((plan.turn_kind === 'camada' || plan.turn_kind === 'desfazer') && !hasImage) {
     return { kind: 'reply', reply: NO_IMAGE_REPLY };
   }

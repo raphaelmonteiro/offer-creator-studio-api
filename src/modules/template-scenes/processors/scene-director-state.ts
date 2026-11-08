@@ -4,6 +4,7 @@ import { EntityManager } from 'typeorm';
 import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { resolveGenericDrops } from '../domain/scene-desist';
 import { applyDirectorRequests, BriefChanges, openItems } from '../domain/scene-brief';
+import { briefFaceKey } from '../domain/scene-director-faces';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { decideTurn, TurnDecision } from '../domain/scene-director-decision';
 import { SceneFailureCode } from '../domain/scene.types';
@@ -18,6 +19,7 @@ import {
 } from '../scene-texts';
 import { DirectorContext } from '../services/scene-director-context';
 import { displayNumbersOf } from '../services/scene-display-number';
+import { currentVersionOf, loadFace } from '../services/scene-faces';
 import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
 import { keepOpenItems } from '../services/scene-turn-brief';
@@ -30,6 +32,7 @@ import { applyLayersEffect } from './scene-director-layer-effect';
 import { queueImageEffect } from './scene-director-image-effect';
 import { DirectorTarget, rejectTarget } from './scene-director-target';
 import { applyUndoEffect } from './scene-director-undo-effect';
+import { applyDeriveEffect } from './scene-director-derive-effect';
 
 export const DEFAULT_WINDOW_SECONDS = 5;
 
@@ -176,7 +179,7 @@ export class SceneDirectorState {
     const brief =
       plan.turn_kind === 'camada'
         ? undefined
-        : await this.updateBrief(manager, scene, version, plan);
+        : await this.updateBrief(manager, scene, version, { plan, context });
     version.metrics = { ...version.metrics, director: { ...director, brief } };
     const note = droppedNoteOf(scene, brief);
     await this.run(target, { decision, plan, context, note });
@@ -189,6 +192,7 @@ export class SceneDirectorState {
   ): TurnDecision {
     const { plan, context } = input;
     const opened = applyDirectorRequests(scene.brief ?? [], plan.requests, {
+      faceKey: briefFaceKey(plan, context.face),
       messageId: '',
       message: context.script.message,
       now: new Date(),
@@ -197,7 +201,11 @@ export class SceneDirectorState {
       plan,
       marked: context.script.marked,
       hasImage: context.script.hasImage,
-      openRequests: openItems(opened).map((item) => item.text),
+      openRequests: openItems(
+        opened,
+        context.face?.layout === 'front_back' ? context.face.key : undefined,
+      ).map((item) => item.text),
+      face: context.face,
     });
   }
 
@@ -205,13 +213,15 @@ export class SceneDirectorState {
     manager: EntityManager,
     scene: TemplateScene,
     version: TemplateSceneVersion,
-    plan: DirectorPlan,
+    turn: { plan: DirectorPlan; context: DirectorContext },
   ): Promise<BriefChanges> {
+    const { plan, context } = turn;
     const message = await manager.findOne(TemplateSceneMessage, {
       where: { versionId: version.id, role: 'user' },
       order: { createdAt: 'ASC' },
     });
     const applied = applyDirectorRequests(scene.brief ?? [], plan.requests, {
+      faceKey: briefFaceKey(plan, context.face),
       messageId: message?.id ?? '',
       message: message?.content ?? '',
       now: new Date(),
@@ -233,7 +243,12 @@ export class SceneDirectorState {
     const { manager, scene } = target;
     switch (decision.kind) {
       case 'reply': {
-        const fact = await this.versionFact(manager, scene, context.script.message, plan);
+        const fact = await this.versionFact(
+          manager,
+          scene,
+          { message: context.script.message, faceIndex: target.version.faceIndex },
+          plan,
+        );
         const text = fact ?? decision.reply;
         await this.reject(target, withNote(text));
         return;
@@ -251,6 +266,12 @@ export class SceneDirectorState {
       case 'undo':
         await applyUndoEffect(target, decision.target, { queue: this.queue });
         return;
+      case 'derive':
+        await applyDeriveEffect(target, decision, {
+          queue: this.queue,
+          windowSeconds: this.windowSeconds(),
+        });
+        return;
       case 'layers':
         await applyLayersEffect(target, decision.ops, { files: this.files, queue: this.queue });
         return;
@@ -264,12 +285,14 @@ export class SceneDirectorState {
   private async versionFact(
     manager: EntityManager,
     scene: TemplateScene,
-    message: string,
+    turn: { message: string; faceIndex: number },
     plan: DirectorPlan,
   ): Promise<string | null> {
-    if (plan.turn_kind !== 'pergunta' || !/\bvers[aã]o\b/i.test(message)) return null;
-    if (!scene.currentVersionId) return null;
-    const current = (await displayNumbersOf(manager, scene.id)).get(scene.currentVersionId);
-    return current ? currentVersionReply(current) : null;
+    if (plan.turn_kind !== 'pergunta' || !/\bvers[aã]o\b/i.test(turn.message)) return null;
+    const face = await loadFace(manager, scene.id, turn.faceIndex);
+    const current = await currentVersionOf(manager, face);
+    if (!current) return null;
+    const shown = (await displayNumbersOf(manager, scene.id)).get(current.id);
+    return shown ? currentVersionReply(shown) : null;
   }
 }

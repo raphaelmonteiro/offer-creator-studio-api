@@ -222,3 +222,23 @@ const FAILURE_REPLIES: Record<SceneFailureCode, string> = {
 export function failureReply(code: SceneFailureCode): string {
   return FAILURE_REPLIES[code];
 }
+
+/** Faces (change add-template-scene-faces): textos fixos do código, nunca do modelo. */
+export const DERIVE_BACK_MESSAGE = 'Fazer o verso';
+
+export const DERIVE_BACK_ANNOUNCEMENT =
+  'Vou fazer o verso a partir da frente atual, sem cabeçalho e com o rodapé livre.';
+
+export const DERIVE_BACK_REPLY =
+  'Pronto, fiz o verso a partir da frente atual. Peça aqui os ajustes do verso.';
+
+export const BACK_MISSING_REPLY =
+  'O verso ainda não existe. Use “Fazer o verso” e depois peça o ajuste.';
+
+export const BACK_EXISTS_REPLY =
+  'O verso já existe e nasce da frente. Peça aqui o ajuste que quer no verso, ou volte a uma versão anterior dele.';
+
+export const FRONT_FIRST_REPLY = 'Faça a frente primeiro; o verso nasce dela.';
+
+export const SINGLE_FACE_REPLY =
+  'Esta cena tem uma face só. Para ter verso, crie uma cena de frente e verso.';

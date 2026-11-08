@@ -1,6 +1,7 @@
 import { EntityManager } from 'typeorm';
 import { TEMPLATE_SCENE_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { QUEUES, QueuePort } from '../../../shared/queue/animation-queue.service';
+import { FaceKey } from '../domain/scene-faces';
 import { SceneStep, SceneVersionStatus } from '../domain/scene.types';
 
 export type SceneEventKind =
@@ -13,6 +14,8 @@ export type SceneEventKind =
 export interface SceneEvent {
   sceneId: string;
   versionId: string;
+  /** Face da versão (`single`, `front` ou `back`): a tela troca de aba quando o verso é derivado pelo chat. */
+  faceKey: FaceKey;
   kind: SceneEventKind;
   step: SceneStep | null;
   status: SceneVersionStatus;

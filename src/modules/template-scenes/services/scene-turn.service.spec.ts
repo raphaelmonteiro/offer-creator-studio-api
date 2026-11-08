@@ -10,6 +10,7 @@ import {
   insertReadyVersion,
   insertScene,
   insertVersion,
+  pointFace,
 } from '../testing/scene-fixtures';
 import { errorOf } from '../testing/scene-test-helpers';
 import {
@@ -57,8 +58,7 @@ describeIfSceneDb('SceneTurnService (banco chroma_x_e2e)', () => {
   const readyScene = async (name: string, elements: TemplateSceneVersion['elements'] = []) => {
     const scene = await newScene(name);
     const { version } = await insertReadyVersion(dataSource, scene, 1, { elements });
-    scene.currentVersionId = version.id;
-    await dataSource.manager.save(scene);
+    await pointFace(dataSource, scene, version.id);
     return scene;
   };
   const message = (content = 'campo verde com sol', expectedRevision = 0) => ({

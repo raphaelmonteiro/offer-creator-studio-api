@@ -73,6 +73,33 @@ export const sceneFormatUnsupported = (formatId: string) =>
     { formatId },
   );
 
+export const sceneLayoutUnsupported = (formatId: string, layout: string) =>
+  sceneError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'SCENE_LAYOUT_UNSUPPORTED',
+    'Este formato não aceita frente e verso. Escolha um formato em retrato.',
+    { formatId, layout },
+  );
+
+export const faceNotFound = (face: string) =>
+  sceneError(HttpStatus.UNPROCESSABLE_ENTITY, 'FACE_NOT_FOUND', 'Esta cena não tem essa face.', {
+    face,
+  });
+
+export const frontNotReady = () =>
+  sceneError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'FRONT_NOT_READY',
+    'Faça a frente primeiro: o verso nasce dela.',
+  );
+
+export const backAlreadyExists = () =>
+  sceneError(
+    HttpStatus.CONFLICT,
+    'BACK_ALREADY_EXISTS',
+    'O verso já existe e nasce da frente. Peça os ajustes na aba Verso, ou volte a uma versão anterior dele.',
+  );
+
 export const regionTooSmall = () =>
   sceneError(
     HttpStatus.UNPROCESSABLE_ENTITY,

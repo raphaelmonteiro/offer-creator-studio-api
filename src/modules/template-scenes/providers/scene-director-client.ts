@@ -5,6 +5,7 @@ import type {
   DirectorCompletionResult,
 } from '../../ai/openai-director.service';
 import { OpenAiDirectorService } from '../../ai/openai-director.service';
+import type { FaceKey, SceneLayout } from '../domain/scene-faces';
 import { MockSceneDirectorClient } from './mock-scene-director.client';
 
 /** Token de injeção do cliente do Diretor da cena (`mock` ou `openai`, junto com o provedor de imagem). */
@@ -12,6 +13,9 @@ export const SCENE_DIRECTOR_CLIENT = 'SCENE_DIRECTOR_CLIENT';
 
 /** O estado da conversa que só o `mock` lê para escolher o plano (o `openai` recebe o texto e a imagem). */
 export interface DirectorScript {
+  /** Layout da cena e face do pedido (o `mock` reconhece "faz o verso" só na cena de frente e verso). */
+  layout?: SceneLayout;
+  face?: FaceKey;
   /** A mensagem atual do cliente, literal. */
   message: string;
   /** A cena já tem imagem. */

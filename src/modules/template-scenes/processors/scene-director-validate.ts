@@ -10,6 +10,7 @@ import {
 import { checkAnnouncement } from '../domain/scene-director-announce';
 import { applyNumberRule, NumberPatch } from '../domain/scene-director-number';
 import { DirectorPlan } from '../domain/scene-director-schema';
+import { applyFaceZones } from '../domain/scene-director-faces';
 import {
   checkExactText,
   checkTextOutsideBlock,
@@ -114,7 +115,9 @@ export function validate(text: string, context: DirectorContext, final: boolean)
   if (parsed.ok === false) return { reason: parsed.reason };
   // O par coerente é a única recusa (R62); `parseDirector` já recusou o par incoerente.
   if (parsed.plan.turn_kind === 'recusa_pintado') return { plan: parsed.plan };
-  const plan = withCleanExactText(parsed.plan);
+  // PV-9: a zona que a face não tem (rodapé na frente, cabeçalho no verso) vira miolo antes de tudo o mais.
+  const zoned = context.face ? applyFaceZones(parsed.plan, context.face.zones) : parsed.plan;
+  const plan = withCleanExactText(zoned);
   const sources = {
     clientMessages: context.clientMessages,
     paintedText: context.paintedText,

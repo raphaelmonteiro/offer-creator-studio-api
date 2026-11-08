@@ -9,6 +9,7 @@ import {
   insertReadyVersion,
   insertScene,
   insertVersion,
+  pointFace,
 } from '../testing/scene-fixtures';
 import { errorOf } from '../testing/scene-test-helpers';
 import {
@@ -80,8 +81,7 @@ describeIfSceneDb('TemplateScenesService (banco chroma_x_e2e)', () => {
         insertScene(dataSource, { name: 'Lista A', createdByUserId: user.id }),
       );
       const ready = await insertReadyVersion(dataSource, scene, 1);
-      scene.currentVersionId = ready.version.id;
-      await dataSource.manager.save(scene);
+      await pointFace(dataSource, scene, ready.version.id);
 
       const page = await service.list(1, 50);
       const item = page.data.find((entry) => entry.id === scene.id);
@@ -117,8 +117,7 @@ describeIfSceneDb('TemplateScenesService (banco chroma_x_e2e)', () => {
       const v1 = await insertReadyVersion(dataSource, scene, 1);
       await insertReadyVersion(dataSource, scene, 2);
       const v3 = await insertReadyVersion(dataSource, scene, 3);
-      scene.currentVersionId = v3.version.id;
-      await dataSource.manager.save(scene);
+      await pointFace(dataSource, scene, v3.version.id);
       for (let i = 1; i <= 6; i++) {
         await insertMessage(dataSource, scene.id, {
           content: `mensagem ${i}`,
