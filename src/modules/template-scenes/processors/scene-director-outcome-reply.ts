@@ -1,5 +1,6 @@
 import {
   compositionQuestion,
+  contradictionQuestion,
   NO_INSTRUCTION_REPLY,
   EXACT_TEXT_QUESTION,
   NUMBER_QUESTION,
@@ -14,6 +15,8 @@ export function questionReply(outcome: DirectorOutcome): string | null {
   switch (outcome.kind) {
     case 'composition_question':
       return compositionQuestion(outcome.labels);
+    case 'contradiction_question':
+      return contradictionQuestion(outcome.lines[0], outcome.lines[1]);
     case 'exact_text_question':
       return EXACT_TEXT_QUESTION;
     case 'number_question':

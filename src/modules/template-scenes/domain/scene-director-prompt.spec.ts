@@ -40,8 +40,19 @@ describe('Regras de D-59 no prompt do Diretor', () => {
     expect(rule).toContain('will_change_image false');
     expect(rule).toContain('image nulo');
     expect(rule).toContain('requests vazio');
-    expect(rule).toContain('pergunta curta que cita as opções');
-    expect(rule).toContain('Duas mudanças que podem valer juntas não são contradição');
+    expect(rule).toContain('UMA pergunta curta que cita as duas opções');
+    expect(rule).toContain('Duas mudanças que podem valer juntas também não são contradição');
+  });
+
+  it('Mensagem que se contradiz (B5): o exemplo do dono, variações e o que não é contradição', () => {
+    const rule = lineWith('não podem valer juntas');
+    expect(rule).toContain(
+      'escreve nela promoção de páscoa, e eu quero que o texto oferta de páscoa',
+    );
+    expect(rule).toContain('colocar e tirar a mesma coisa');
+    expect(rule).toContain('duas cores para o mesmo objeto');
+    expect(rule).toContain('NÃO é contradição: duas frases em linhas diferentes pedidas como tal');
+    expect(rule).toContain('De R$ 19,90 por R$ 9,90');
   });
 
   it('Item do turno anterior: só é executado quando a mensagem atual o pede, com o mesmo id', () => {

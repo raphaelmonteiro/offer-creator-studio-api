@@ -82,6 +82,38 @@ describeIfSceneDb(
       });
     });
 
+    describe('Duas frases para o mesmo lugar (B5, PV-111)', () => {
+      const twoLines = async () =>
+        directorAnswer({
+          turn_kind: 'pedido_item',
+          will_change_image: true,
+          reply: 'Vou acrescentar a placa com as duas frases.',
+          what_to_change: 'Add a wooden sign with the requested lettering',
+          exact_text: ['promoção de páscoa', 'oferta de páscoa'],
+        });
+
+      it('Diretor que insiste nas duas frases: pergunta citando as duas, rejected e sem job de imagem', async () => {
+        const { scene, version } = await h.runTurn(
+          'cria uma placa e escreve nela promoção de páscoa, e eu quero que o texto oferta de páscoa fique como se fosse parte da placa',
+          twoLines,
+        );
+        expect(version.status).toBe('rejected');
+        expect(await lastReply(scene.id)).toBe(
+          'Qual vai na imagem: “promoção de páscoa” ou “oferta de páscoa”? Nada foi alterado.',
+        );
+        expect(imageJobs()).toHaveLength(0);
+      });
+
+      it('duas linhas pedidas como tal ("embaixo") seguem para a imagem', async () => {
+        const { version } = await h.runTurn(
+          'coloca uma placa com promoção de páscoa e embaixo oferta de páscoa',
+          twoLines,
+        );
+        expect(version.status).toBe('queued');
+        expect(imageJobs()).toHaveLength(1);
+      });
+    });
+
     describe('Item de turno anterior', () => {
       it('Voltar outro dia: "sim, faz" executa o item em aberto, que passa a ser da mensagem atual', async () => {
         const { scene } = await h.readyScene();

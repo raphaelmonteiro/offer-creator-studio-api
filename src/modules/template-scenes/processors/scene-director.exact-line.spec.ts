@@ -1,9 +1,11 @@
 import {
   directorContextFor,
+  directorRaw,
   directorReturning,
   PlanOverrides,
 } from '../testing/scene-director-fixtures';
 import { DirectorContext } from '../services/scene-director-context';
+import { questionReply } from './scene-director-outcome-reply';
 import { runDirector } from './scene-director-run';
 
 /** Rodada 6: a validação 4a só aceita frase inteira, e o preço do cliente seguido de ponto não é "preço fora do bloco". */
@@ -99,5 +101,58 @@ describe('Texto da camada que vai ser pintada (D-55)', () => {
   it('Camada não serve de fonte para outra frase: pergunta o texto exato', async () => {
     const result = await run(imagePlan({ exact_text: ['Páscoa de Promoção'] }), context());
     expect(result).toMatchObject({ calls: 2, outcome: { kind: 'exact_text_question' } });
+  });
+});
+
+describe('Duas frases para o mesmo lugar (B5, D-59)', () => {
+  const OWNER =
+    'cria uma placa e escreve nela promoção de páscoa, e eu quero que o texto oferta de páscoa fique como se fosse parte da placa';
+  const both = imagePlan({ exact_text: ['promoção de páscoa', 'oferta de páscoa'] });
+
+  it('persistindo, a pergunta cita as duas frases, sem imagem, depois de refazer uma vez', async () => {
+    const result = await run(both, directorContextFor(OWNER));
+    expect(result.calls).toBe(2);
+    expect(result.outcome).toEqual({
+      kind: 'contradiction_question',
+      lines: ['promoção de páscoa', 'oferta de páscoa'],
+    });
+    expect(questionReply(result.outcome)).toBe(
+      'Qual vai na imagem: “promoção de páscoa” ou “oferta de páscoa”? Nada foi alterado.',
+    );
+  });
+
+  it('a refação com a observação serve: o Diretor que pergunta na segunda chamada passa', async () => {
+    const model = directorReturning(both);
+    const answer = (text: string) => ({
+      ok: true,
+      text,
+      costUsd: 0.0004,
+      requestId: 'r',
+      latencyMs: 5,
+    });
+    model.run.mockResolvedValueOnce(answer(directorRaw(both))).mockResolvedValueOnce(
+      answer(
+        directorRaw({
+          turn_kind: 'outro',
+          reply: 'Na placa vai “promoção de páscoa” ou “oferta de páscoa”?',
+        }),
+      ),
+    );
+    const { outcome } = await runDirector(model.director, {
+      context: directorContextFor(OWNER),
+      correlationId: 'c',
+    });
+    expect(model.run).toHaveBeenCalledTimes(2);
+    expect(String(model.run.mock.calls[1][0].text)).toContain('mesmo lugar');
+    expect(outcome.kind).toBe('plan');
+  });
+
+  it('duas linhas pedidas como tal seguem na primeira chamada', async () => {
+    const message = 'coloca uma placa com "Oferta de Páscoa" e embaixo "Compre já"';
+    const result = await run(
+      imagePlan({ exact_text: ['Oferta de Páscoa', 'Compre já'] }),
+      directorContextFor(message),
+    );
+    expect(result).toMatchObject({ calls: 1, outcome: { kind: 'plan' } });
   });
 });
