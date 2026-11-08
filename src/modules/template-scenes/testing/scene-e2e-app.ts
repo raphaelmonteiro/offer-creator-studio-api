@@ -13,6 +13,10 @@ import { AuthService } from '../../auth/auth.service';
 import { User } from '../../auth/entities/user.entity';
 import { JwtStrategy } from '../../auth/strategies/jwt.strategy';
 import { EmailService } from '../../email/email.service';
+import { Template } from '../../templates/entities/template.entity';
+import { TemplatesController } from '../../templates/templates.controller';
+import { TemplatesService } from '../../templates/templates.service';
+import { UploadsService } from '../../uploads/uploads.service';
 import { AnimationEventsService } from '../../../shared/events/animation-events.service';
 import { TemplateScenesGcRunner } from '../../../shared/gc/template-scenes-gc.runner';
 import { UploadsGcService } from '../../../shared/gc/uploads-gc.service';
@@ -21,6 +25,7 @@ import { SceneCallRunner } from '../processors/scene-call-runner';
 import { SceneDirectorProcessor } from '../processors/scene-director.processor';
 import { SceneDirectorState } from '../processors/scene-director-state';
 import { SceneRedrawHandler } from '../processors/scene-redraw.handler';
+import { SceneTemplateSyncProcessor } from '../processors/scene-template-sync.processor';
 import { SceneTurnProcessor } from '../processors/scene-turn.processor';
 import { SceneTurnSupport } from '../processors/scene-turn-support';
 import { SceneTurnState } from '../processors/scene-turn-state';
@@ -38,6 +43,8 @@ import { SceneLockService } from '../services/scene-lock.service';
 import { SceneLogoService } from '../services/scene-logo.service';
 import { SceneReadService } from '../services/scene-read.service';
 import { SceneReconcilerService } from '../services/scene-reconciler.service';
+import { SceneTemplateFilesService } from '../services/scene-template-files.service';
+import { SceneTemplateSweepService } from '../services/scene-template-sweep.service';
 import { SceneTurnService } from '../services/scene-turn.service';
 import { SceneVersionsService } from '../services/scene-versions.service';
 import { TemplateScenesService } from '../services/template-scenes.service';
@@ -48,11 +55,15 @@ import { TemplateScenesController } from '../template-scenes.controller';
 
 export const E2E_JWT_SECRET = 'segredo-e2e-da-cena';
 export const E2E_ADMIN_TOKEN = 'token-admin-e2e';
+export const E2E_CDN_URL = 'http://cdn.e2e.test/uploads';
 
 export interface SceneE2eApp {
   app: INestApplication;
   queue: AnimationQueueService;
   jwt: JwtService;
+  /** O job de sincronização do template e a varredura, reais, para os testes dirigirem sem esperar a fila. */
+  templateSync: SceneTemplateSyncProcessor;
+  templateSweep: SceneTemplateSweepService;
   /** Fecha o app, a fila e o LISTEN. */
   close(): Promise<void>;
 }
@@ -71,6 +82,7 @@ export async function createSceneE2eApp(
     JWT_SECRET: E2E_JWT_SECRET,
     ADMIN_API_TOKEN: E2E_ADMIN_TOKEN,
     UPLOAD_DEST: options.uploadsDir,
+    CDN_URL: E2E_CDN_URL,
     DB_HOST: opts.host,
     DB_PORT: opts.port,
     DB_USERNAME: opts.username,
@@ -94,11 +106,15 @@ export async function createSceneE2eApp(
       TemplateScenesController,
       TemplateSceneEventsController,
       TemplateScenesAdminController,
+      TemplatesController,
     ],
     providers: [
       { provide: DataSource, useValue: dataSource },
       { provide: getRepositoryToken(User), useValue: dataSource.getRepository(User) },
       { provide: EmailService, useValue: {} },
+      { provide: getRepositoryToken(Template), useValue: dataSource.getRepository(Template) },
+      TemplatesService,
+      UploadsService,
       { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
       AuthService,
       JwtStrategy,
@@ -123,6 +139,9 @@ export async function createSceneE2eApp(
       SceneTurnProcessor,
       { provide: SCENE_VISION_CLIENT, useValue: new MockSceneVisionClient() },
       SceneReconcilerService,
+      SceneTemplateFilesService,
+      SceneTemplateSyncProcessor,
+      SceneTemplateSweepService,
       TemplateScenesGcRunner,
       UploadsGcService,
       AnimationQueueService,
@@ -156,10 +175,18 @@ export async function createSceneE2eApp(
     1,
     (job: { sceneId: string; versionId: string }, jobId: string) => processor.process(job, jobId),
   );
+  const templateSync = app.get(SceneTemplateSyncProcessor);
+  await queue.subscribe(
+    QUEUES.TEMPLATE_SCENE_TEMPLATE_SYNC,
+    1,
+    (job: { sceneId: string }, jobId: string) => templateSync.process(job, jobId),
+  );
   return {
     app,
     queue,
     jwt: app.get(JwtService),
+    templateSync,
+    templateSweep: app.get(SceneTemplateSweepService),
     close: () => app.close(),
   };
 }
