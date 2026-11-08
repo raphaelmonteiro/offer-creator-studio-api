@@ -1,7 +1,6 @@
 import * as sharp from 'sharp';
-import { SceneFormatSpec } from '../domain/scene-formats';
-import { sectionBands } from '../domain/scene-template-config';
-import { SceneElement } from '../domain/scene.types';
+import { zoneSectionBands } from '../domain/scene-template-config';
+import { SceneElement, SceneZones } from '../domain/scene.types';
 
 const JPEG_QUALITY = 92;
 const THUMBNAIL_EDGE = 512;
@@ -15,8 +14,9 @@ export interface FlattenOverlay {
 
 export interface TemplateImageBuffers {
   full: Buffer;
-  header: Buffer;
-  footer: Buffer;
+  /** `null` na face sem a zona: não há fatia de altura 0 (PV-11). */
+  header: Buffer | null;
+  footer: Buffer | null;
   thumbnail: Buffer;
   width: number;
   height: number;
@@ -86,12 +86,12 @@ const jpeg = (image: sharp.Sharp): Promise<Buffer> =>
 
 /**
  * Achata a master com os elementos `generated` (em ordem de `z`), corta o cabeçalho e o rodapé nas alturas das
- * zonas e gera a miniatura, tudo em JPEG (PV-3, PV-4). Logo e texto não entram. Não chama provedor.
+ * zonas da face (a zona de altura 0 não tem fatia) e gera a miniatura, tudo em JPEG (PV-3, PV-4). Logo e texto não entram. Não chama provedor.
  */
 export async function renderTemplateImages(input: {
   master: Buffer;
   overlays: FlattenOverlay[];
-  format: SceneFormatSpec;
+  zones: SceneZones;
 }): Promise<TemplateImageBuffers> {
   const meta = await sharp(input.master).metadata();
   const canvas = { width: meta.width as number, height: meta.height as number };
@@ -108,11 +108,11 @@ export async function renderTemplateImages(input: {
     .toBuffer();
   const slice = (top: number, height: number): sharp.Sharp =>
     sharp(flat).extract({ left: 0, top, width: canvas.width, height });
-  const { headerPx, footerPx } = sectionBands(input.format, canvas.height);
+  const { headerPx, footerPx } = zoneSectionBands(input.zones, canvas.height);
   return {
     full: await jpeg(sharp(flat)),
-    header: await jpeg(slice(0, headerPx)),
-    footer: await jpeg(slice(canvas.height - footerPx, footerPx)),
+    header: headerPx > 0 ? await jpeg(slice(0, headerPx)) : null,
+    footer: footerPx > 0 ? await jpeg(slice(canvas.height - footerPx, footerPx)) : null,
     thumbnail: await sharp(flat)
       .resize({
         width: THUMBNAIL_EDGE,

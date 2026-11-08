@@ -5,6 +5,7 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { publishSceneEvent } from '../services/scene-events';
+import { faceKeyOfVersion, setFaceCurrentVersion } from '../services/scene-faces';
 import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage, turnMessageOf } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
@@ -31,6 +32,8 @@ export interface CompleteExtra {
   requestedRegion?: Rect | null;
   /** O que o juiz viu e não viu da lista do que o cliente pediu: só ele fecha ou reabre um item (G9). */
   judge?: JudgeBriefVerdict;
+  /** Derivação do verso: o fim do turno não supera os pedidos em aberto (o do verso fica para o cliente pedir). */
+  keepBrief?: boolean;
 }
 
 /** Imagem da versão: arquivos novos (master e prévia). Camadas e desfazer não passam por aqui: reaproveitam a master sob o lock do Diretor. */
@@ -106,11 +109,11 @@ export async function readyVersion(
     scene.brief = judged.brief;
     version.metrics = { ...version.metrics, judgeBrief: judged.changes };
   }
-  await closeTurnBrief(manager, scene, version, { messageId });
+  if (!extra.keepBrief) await closeTurnBrief(manager, scene, version, { messageId });
   if (extra.requestedRegion !== undefined) version.requestedRegion = extra.requestedRegion;
   await manager.save(version);
   // O resultado é sempre a versão atual, inclusive com o juiz reprovando (D-26): "Voltar para a anterior" é do cliente.
-  scene.currentVersionId = version.id;
+  await setFaceCurrentVersion(manager, scene, version.faceIndex, version.id);
   await pruneSceneAssets(manager, scene);
   await settleUserMessage(manager, version.id, 'done');
   await addAssistantMessage(manager, {
@@ -146,6 +149,7 @@ export async function rejectVersion(
   await publishSceneEvent(manager, {
     sceneId: scene.id,
     versionId: version.id,
+    faceKey: faceKeyOfVersion(scene, version),
     kind: 'version.failed',
     step: version.step,
     status: version.status,

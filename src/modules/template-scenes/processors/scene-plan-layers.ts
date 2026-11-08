@@ -1,7 +1,6 @@
 import { fold } from '../../../shared/text/fold';
 import { layerOpsToActions } from '../domain/scene-director-layers';
 import { describeLayerDiff } from '../domain/scene-layer-diff';
-import { sceneZonesFor } from '../domain/scene-formats';
 import { SceneElement } from '../domain/scene.types';
 import { applyLayerActions } from './scene-layer-actions';
 import { colorNewTexts } from './scene-layer-color';
@@ -23,7 +22,7 @@ export async function planLayers(
   const withoutPainted = base.filter(
     (element) => !(element.kind === 'text' && painted.has(fold((element.text ?? '').trim()))),
   );
-  const zones = sceneZonesFor(ctx.formatId);
+  const { zones } = ctx;
   let elements = withoutPainted;
   let failure = '';
   if (plan.layer_ops.length) {

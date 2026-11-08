@@ -7,6 +7,7 @@ import {
   insertScene,
   insertVersion,
   insertMessage,
+  pointFace,
 } from '../testing/scene-fixtures';
 import { errorBodyOf, errorOf, textElement, fakeQueue } from '../testing/scene-test-helpers';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
@@ -42,8 +43,7 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
     for (let number = 1; number <= count; number++) {
       ready.push(await insertReadyVersion(dataSource, scene, number));
     }
-    scene.currentVersionId = ready[count - 1].version.id;
-    await dataSource.manager.save(scene);
+    await pointFace(dataSource, scene, ready[count - 1].version.id);
     return { scene, ready };
   }
 
@@ -246,8 +246,7 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
       const scene = await insertScene(dataSource, { name: 'Camada antiga' });
       createdScenes.push(scene.id);
       const made = await insertReadyVersion(dataSource, scene, 1, { elements: [old] });
-      scene.currentVersionId = made.version.id;
-      await dataSource.manager.save(scene);
+      await pointFace(dataSource, scene, made.version.id);
 
       const opened = await new SceneReadService(dataSource).loadDetail(scene.id);
       expect(opened.currentVersion?.elements).toEqual([old]);

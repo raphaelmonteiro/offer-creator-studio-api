@@ -85,6 +85,7 @@ export async function runDirector(
       image: context.image,
       script: context.script,
       correlationId,
+      layout: context.face?.layout,
     });
     if (run.ok === false) {
       calls.push(failedCall(attempt, run.reason));

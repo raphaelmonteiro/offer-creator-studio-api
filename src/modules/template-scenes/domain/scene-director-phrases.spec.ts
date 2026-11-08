@@ -8,7 +8,7 @@ import {
   safeReply,
 } from './scene-director-phrases';
 import { DIRECTOR_INSTRUCTIONS } from './scene-director-prompt';
-import { TURN_KINDS } from './scene-director-schema';
+import { BASE_TURN_KINDS } from './scene-director-schema';
 
 describe('Modelo afirma o que não pode', () => {
   it('reply com conclusão e preservação cai no anúncio fixo, no futuro', () => {
@@ -91,7 +91,9 @@ describe('Juiz escreve frase proibida', () => {
 
 describe('prompt do Diretor', () => {
   it('lista as 12 classes de turno e os campos do schema', () => {
-    for (const kind of TURN_KINDS) expect(DIRECTOR_INSTRUCTIONS).toContain(`${kind}:`);
+    for (const kind of BASE_TURN_KINDS) expect(DIRECTOR_INSTRUCTIONS).toContain(`${kind}:`);
+    expect(DIRECTOR_INSTRUCTIONS).toContain('Classes de turn_kind (12)');
+    expect(DIRECTOR_INSTRUCTIONS).not.toContain('fazer_verso');
     for (const field of [
       'will_change_image',
       'image.change',

@@ -30,6 +30,7 @@ import { TemplateScene } from './template-scene.entity';
 @Entity('template_scene_versions')
 @Index('UQ_tsv_scene_number', ['sceneId', 'number'], { unique: true })
 @Index('IDX_tsv_scene_status', ['sceneId', 'status'])
+@Index('IDX_tsv_scene_face_status', ['sceneId', 'faceIndex', 'status'])
 @Index('UQ_tsv_scene_busy', ['sceneId'], {
   unique: true,
   where: `"status" IN ('queued', 'running')`,
@@ -47,6 +48,14 @@ export class TemplateSceneVersion {
 
   @Column({ type: 'uuid', nullable: true })
   parentVersionId: string | null;
+
+  /** Face da versão (`template_scene_faces.index`); 0 na cena de uma face e na frente (PV-1). */
+  @Column({ type: 'smallint', default: 0 })
+  faceIndex: number;
+
+  /** Verso derivado: a versão da frente cuja master serviu de referência (só auditoria; não protege a master). */
+  @Column({ type: 'uuid', nullable: true })
+  derivedFromVersionId: string | null;
 
   @Column({ type: 'int' })
   number: number;

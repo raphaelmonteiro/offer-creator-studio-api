@@ -5,6 +5,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { SendMessageDto } from '../dto/send-message.dto';
 import { TemplateScene } from '../entities/template-scene.entity';
+import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
@@ -16,6 +17,7 @@ import {
 } from '../scene.errors';
 import { CANCELLED_REPLY } from '../scene-texts';
 import { publishSceneEvent } from './scene-events';
+import { faceKeyOfVersion, resolveFace } from './scene-faces';
 import { isBusyIndexViolation, publishQueued, TurnInput } from './scene-turn-helpers';
 import {
   assertShapeBigEnough,
@@ -80,19 +82,20 @@ export class SceneTurnService {
   ): Promise<SendMessageResult> {
     try {
       return await this.locks.run(sceneId, async ({ manager, scene }) => {
+        const face = await resolveFace(manager, scene, dto.face); // 422 `FACE_NOT_FOUND`, nada gravado
         assertExpectedRevision(scene, dto.expectedRevision);
         await assertSceneIdle(manager, sceneId);
         assertSingleTarget(dto); // 400 antes de qualquer consulta: o corpo inválido vence o 422 do anexo
         await this.assertAttachmentsInScene(manager, sceneId, dto);
         const hasImage = await manager.exists(TemplateSceneVersion, {
-          where: { sceneId, status: 'ready' },
+          where: { sceneId, faceIndex: face.index, status: 'ready' },
         });
         if (hasImage) {
           await assertShapeBigEnough(dto, scene);
-          await assertTargetElementExists(manager, scene, dto);
+          await assertTargetElementExists(manager, face, dto);
         }
-        await closeOpenManual(manager, sceneId);
-        return this.enqueueReading(manager, scene, { dto, userId }, hasImage);
+        await closeOpenManual(manager, sceneId, face.index);
+        return this.enqueueReading(manager, scene, { dto, userId }, { hasImage, face });
       });
     } catch (error) {
       if (isBusyIndexViolation(error)) throw sceneBusy();
@@ -104,19 +107,21 @@ export class SceneTurnService {
     manager: EntityManager,
     scene: TemplateScene,
     input: TurnInput,
-    hasImage: boolean,
+    target: { hasImage: boolean; face: TemplateSceneFace },
   ): Promise<SendMessageResult> {
     const { dto, userId } = input;
+    const { hasImage, face } = target;
     const version = await manager.save(
       manager.create(TemplateSceneVersion, {
         sceneId: scene.id,
-        parentVersionId: scene.currentVersionId,
+        faceIndex: face.index,
+        parentVersionId: face.currentVersionId,
         number: await nextVersionNumber(manager, scene.id),
         // Operação inicial; o consumer do Diretor a troca para `set_layer`, `restore` ou `generate` quando é o caso.
         operation: hasImage ? 'redraw' : 'generate',
         status: 'queued',
         step: 'reading',
-        ...requestedTargetOf(dto, scene),
+        ...requestedTargetOf(dto, scene, face),
         metrics: {},
         correlationId: randomUUID(),
         createdByUserId: userId,
@@ -126,6 +131,7 @@ export class SceneTurnService {
       manager.create(TemplateSceneMessage, {
         sceneId: scene.id,
         versionId: version.id,
+        faceIndex: face.index,
         role: 'user',
         content: dto.content,
         attachments: dto.attachments ?? [],
@@ -143,6 +149,7 @@ export class SceneTurnService {
     await publishQueued(manager, {
       sceneId: scene.id,
       versionId: version.id,
+      faceKey: face.key,
       revision,
       step: 'reading',
     });
@@ -172,6 +179,7 @@ export class SceneTurnService {
         await publishSceneEvent(manager, {
           sceneId,
           versionId,
+          faceKey: faceKeyOfVersion(scene, version),
           kind: wasQueued ? 'version.cancelled' : 'version.step',
           step: version.step,
           status: version.status,

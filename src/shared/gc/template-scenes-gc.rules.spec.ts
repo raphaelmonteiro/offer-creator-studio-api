@@ -219,6 +219,39 @@ describe('selectSceneAssetsToPurge', () => {
   });
 });
 
+describe('selectProtectedSceneAssets por face (PV-10)', () => {
+  it('conta as 5 mais recentes de cada face: a frente com 3 e o verso com 6 só perdem a versão 1 do verso', () => {
+    const front = [1, 2, 3].map((n) => version(n));
+    const back = [4, 5, 6, 7, 8, 9].map((n) => version(n, { faceIndex: 1 }));
+    const protectedIds = selectProtectedSceneAssets([...front, ...back], 5);
+    expect(protectedIds.has('m4')).toBe(false);
+    for (const n of [1, 2, 3, 5, 6, 7, 8, 9]) expect(protectedIds.has(`m${n}`)).toBe(true);
+  });
+
+  it('a versão atual de cada face é protegida, mesmo fora das mais recentes', () => {
+    const front = [1, 2, 3, 4, 5, 6, 7].map((n) => version(n));
+    const back = [8, 9].map((n) => version(n, { faceIndex: 1 }));
+    const protectedIds = selectProtectedSceneAssets([...front, ...back], 5, ['v1', 'v8']);
+    expect(protectedIds.has('m1')).toBe(true);
+    expect(protectedIds.has('m2')).toBe(false);
+    expect(protectedIds.has('m8')).toBe(true);
+  });
+
+  it('versão sem faceIndex vale a face 0 e currentVersionIds se soma ao currentVersionId', () => {
+    const versions = [1, 2, 3, 4, 5, 6, 7].map((n) => version(n));
+    const selection = selectSceneAssetsToPurge({
+      assets: [asset('m1', { expiresAt: daysAgo(1) }), asset('m2', { expiresAt: daysAgo(1) })],
+      versions,
+      sceneDeletedAt: null,
+      currentVersionId: 'v1',
+      currentVersionIds: ['v2'],
+      now: NOW,
+      config: CONFIG,
+    });
+    expect(selection.purge).toEqual([]);
+  });
+});
+
 describe('sceneGcConfigFromEnv', () => {
   it('usa os padrões 20, 7 e 30 (D-34: 20 imagens por cena)', () => {
     expect(sceneGcConfigFromEnv({})).toEqual({

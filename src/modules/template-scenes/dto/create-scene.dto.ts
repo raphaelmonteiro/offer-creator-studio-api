@@ -1,6 +1,7 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { SCENE_LAYOUTS, SceneLayout } from '../domain/scene-faces';
 import { SCENE_LIMITS } from '../domain/scene.types';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -19,4 +20,14 @@ export class CreateSceneDto {
   @IsNotEmpty()
   @MaxLength(64)
   formatId: string;
+
+  @ApiPropertyOptional({
+    enum: SCENE_LAYOUTS,
+    default: 'single',
+    description:
+      '`single` (uma face, como sempre) ou `front_back` (frente e verso, só nos formatos em retrato)',
+  })
+  @IsOptional()
+  @IsIn(SCENE_LAYOUTS)
+  layout?: SceneLayout;
 }

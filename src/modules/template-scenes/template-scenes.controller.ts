@@ -20,6 +20,7 @@ import { CurrentUser } from '../../common/decorators/user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { createFileInterceptor } from '../../common/utils/multer.util';
 import { CreateSceneDto } from './dto/create-scene.dto';
+import { DeriveFaceDto } from './dto/derive-face.dto';
 import {
   GetSceneQueryDto,
   ListMessagesQueryDto,
@@ -29,6 +30,7 @@ import { PatchElementsDto } from './dto/patch-elements.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { RestoreVersionDto } from './dto/restore-version.dto';
 import { sceneNotFound, versionNotFound } from './scene.errors';
+import { SceneFacesService } from './services/scene-faces.service';
 import { SceneLogoService } from './services/scene-logo.service';
 import { SceneTurnService } from './services/scene-turn.service';
 import { SceneVersionsService } from './services/scene-versions.service';
@@ -49,6 +51,7 @@ export class TemplateScenesController {
     private readonly versions: SceneVersionsService,
     private readonly logos: SceneLogoService,
     private readonly turns: SceneTurnService,
+    private readonly faces: SceneFacesService,
   ) {}
 
   @Post()
@@ -64,9 +67,12 @@ export class TemplateScenesController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Abre a cena: versão atual, zonas, mensagens e versões' })
+  @ApiOperation({
+    summary:
+      'Abre a cena: faces, versão atual, zonas, mensagens e versões (da face `face`, padrão a 0)',
+  })
   get(@Param('id', SceneIdPipe) id: string, @Query() query: GetSceneQueryDto) {
-    return this.scenes.get(id, query.versionsPage);
+    return this.scenes.get(id, query.versionsPage, query.face);
   }
 
   @Delete(':id')
@@ -103,9 +109,29 @@ export class TemplateScenesController {
   @SkipValidation()
   @UseInterceptors(createFileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Envia o logo da cena (PNG, JPEG ou WebP até 10 MB)' })
-  uploadLogo(@Param('id', SceneIdPipe) id: string, @UploadedFile() file: Express.Multer.File) {
-    return this.logos.upload(id, file);
+  @ApiOperation({
+    summary:
+      'Envia o logo da cena (PNG, JPEG ou WebP até 10 MB); o campo `face` do formulário escolhe a face',
+  })
+  uploadLogo(
+    @Param('id', SceneIdPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('face') face?: string,
+  ) {
+    return this.logos.upload(id, file, face);
+  }
+
+  @Post(':id/faces/back/derive')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Faz o verso a partir da frente atual (assíncrono, uma chamada de imagem)',
+  })
+  deriveBack(
+    @Param('id', SceneIdPipe) id: string,
+    @Body() dto: DeriveFaceDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.faces.deriveBack(id, dto.expectedRevision, user?.id ?? null);
   }
 
   @Post(':id/messages')

@@ -4,6 +4,7 @@ import { directorPlan } from '../testing/scene-director-fixtures';
 import { directorAnswer, useDirectorHarness } from '../testing/scene-director-harness';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 import { judgePromptOf, visionReadings } from '../testing/scene-vision-fake';
+import { pointFace } from '../testing/scene-fixtures';
 
 const PROMO = 'Promoção de Páscoa';
 const OFERTA = 'Oferta de Páscoa';
@@ -89,8 +90,7 @@ describeIfSceneDb('Texto pintado herdado por camada e desfazer (banco chroma_x_e
   it('Texto pintado volta com o desfazer: a versão restaurada copia o campo da versão de origem', async () => {
     const first = await h.readyScene();
     const v2 = await h.readyVersionLike(first.scene, 2, first.version.id);
-    first.scene.currentVersionId = v2.version.id;
-    await h.dataSource.manager.save(first.scene);
+    await pointFace(h.dataSource, first.scene, v2.version.id);
     await paint(first.version.id, [{ text: PROMO, zone: 'footer' }]);
     await paint(v2.version.id, [{ text: OFERTA, zone: 'footer' }]);
 

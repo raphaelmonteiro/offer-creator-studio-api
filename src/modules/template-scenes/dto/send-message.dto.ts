@@ -16,6 +16,7 @@ import {
   ValidateBy,
   ValidateNested,
 } from 'class-validator';
+import { FACE_KEYS, FaceKey } from '../domain/scene-faces';
 import { maskShapeProblem } from '../domain/scene-mask-shape';
 import { MaskShape, SCENE_LIMITS, SceneZoneName } from '../domain/scene.types';
 
@@ -124,4 +125,13 @@ export class SendMessageDto {
   @IsString()
   @MaxLength(64)
   targetElementId?: string;
+
+  @ApiPropertyOptional({
+    enum: FACE_KEYS,
+    description:
+      'Face do pedido (a aba ativa); sem ela, a face 0. Face que a cena não tem: 422 `FACE_NOT_FOUND`',
+  })
+  @IsOptional()
+  @IsIn(FACE_KEYS)
+  face?: FaceKey;
 }

@@ -1,6 +1,6 @@
-import { findSceneFormat } from '../domain/scene-formats';
+import { effectiveZone } from '../domain/scene-faces';
 import { DirectorImage } from '../domain/scene-director-schema';
-import { Rect } from '../domain/scene.types';
+import { Rect, SceneZones } from '../domain/scene.types';
 import { zoneBands } from '../domain/scene-zone-bands';
 
 export interface CropBox {
@@ -15,17 +15,17 @@ const MARKED_MARGIN = 0.1;
 
 /**
  * Recorte da região autorizada, na resolução da master, que o juiz recebe como imagem a mais para ler o texto
- * (`design.md`, "Leitura do texto"): a faixa da zona escolhida, ou a caixa da marcação com 10% de margem. Com
+ * (`design.md`, "Leitura do texto"): a faixa da zona escolhida na face (a que a face não tem vale como miolo), ou a caixa da marcação com 10% de margem. Com
  * `region: whole` não há recorte: o juiz lê a imagem inteira.
  */
 export function textCropBox(input: {
   region: DirectorImage['region'] | null;
   marking: Rect | null;
-  formatId: string;
+  zones: SceneZones;
   width: number;
   height: number;
 }): CropBox | null {
-  const { region, marking, formatId, width, height } = input;
+  const { region, marking, zones, width, height } = input;
   if (marking) {
     const x0 = Math.max(0, marking.x - marking.w * MARKED_MARGIN);
     const y0 = Math.max(0, marking.y - marking.h * MARKED_MARGIN);
@@ -33,13 +33,13 @@ export function textCropBox(input: {
     const y1 = Math.min(1, marking.y + marking.h * (1 + MARKED_MARGIN));
     return box(x0 * width, y0 * height, x1 * width, y1 * height, { width, height });
   }
-  const format = findSceneFormat(formatId);
-  if (!region || !format || region.zone === 'whole' || region.zone === 'marked') return null;
-  const bands = zoneBands(format, height);
+  if (!region || region.zone === 'whole' || region.zone === 'marked') return null;
+  const bands = zoneBands(zones, height);
+  const zone = effectiveZone(region.zone, zones);
   const [from, to] =
-    region.zone === 'header'
+    zone === 'header'
       ? [0, bands.headerEnd]
-      : region.zone === 'footer'
+      : zone === 'footer'
         ? [bands.footerStart, height]
         : [bands.headerEnd, bands.footerStart];
   return box(0, from, width, to, { width, height });

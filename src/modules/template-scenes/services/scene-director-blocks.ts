@@ -1,8 +1,9 @@
 import { BriefItem } from '../domain/scene-brief';
-import { findSceneFormat } from '../domain/scene-formats';
+import { FaceKey, hasZone } from '../domain/scene-faces';
+import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
 import { maskBounds } from '../domain/scene-mask-shape';
 import { PaintedLine, readPaintedLines } from '../domain/scene-painted-text';
-import { MaskShape, Rect, SceneElement } from '../domain/scene.types';
+import { MaskShape, Rect, SceneElement, SceneZones } from '../domain/scene.types';
 import { zoneBands } from '../domain/scene-zone-bands';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
@@ -63,14 +64,25 @@ const OPERATION_LABEL: Record<string, string> = {
   restore: 'restaurada',
 };
 
+const FACE_NAME: Record<FaceKey, string> = {
+  single: 'da cena',
+  front: 'da Frente',
+  back: 'do Verso',
+};
+
 /** Resumo das versões: número exibido, operação e data, para "é a versão 7?" e "volta para a 3". */
-export function versionsBlock(versions: DisplayedVersion[], currentId: string | null): string {
-  if (versions.length === 0) return 'Versões da cena: nenhuma imagem ainda.';
+export function versionsBlock(
+  versions: DisplayedVersion[],
+  currentId: string | null,
+  faceKey: FaceKey = 'single',
+): string {
+  const title = `Versões ${FACE_NAME[faceKey]}`;
+  if (versions.length === 0) return `${title}: nenhuma imagem ainda.`;
   const lines = versions.map(
     (v) =>
       `- Versão ${v.displayNumber}: ${OPERATION_LABEL[v.operation] ?? v.operation} em ${v.createdAt.toISOString().slice(0, 16).replace('T', ' ')}${v.id === currentId ? ' (a atual)' : ''}`,
   );
-  return `Versões da cena (número exibido):\n${lines.join('\n')}`;
+  return `${title} (número exibido):\n${lines.join('\n')}`;
 }
 
 /**
@@ -79,15 +91,34 @@ export function versionsBlock(versions: DisplayedVersion[], currentId: string | 
  */
 export function formatBlock(
   scene: Pick<TemplateScene, 'formatId' | 'widthPx' | 'heightPx'>,
+  zones?: SceneZones,
 ): string {
   const format = findSceneFormat(scene.formatId);
   const size = `${scene.widthPx} x ${scene.heightPx} px`;
   if (!format) return `Formato: ${scene.formatId}, ${size}.`;
-  const bands = zoneBands(format, scene.heightPx);
+  const faceZones = zones ?? computeSceneZones(format);
+  const bands = zoneBands(faceZones, scene.heightPx);
+  // A zona que a face não tem não é escrita: o Diretor não a escolhe (PV-9).
+  const parts = [
+    hasZone(faceZones, 'header') &&
+      `header = ${format.headerCm} cm (${bands.headerPct}% da altura, y < ${bands.headerEnd} px)`,
+    `body = miolo de produtos (y de ${bands.headerEnd} a ${bands.footerStart} px)`,
+    hasZone(faceZones, 'footer') &&
+      `footer = ${format.footerCm} cm de ${format.printHeightCm} cm (${bands.footerPct}% da altura, y ≥ ${bands.footerStart} px)`,
+  ].filter(Boolean);
   return [
     `Formato: ${format.id}, ${format.artWidthCm} x ${format.artHeightCm} cm, master de ${size}.`,
-    `Zonas de image.region: header = ${format.headerCm} cm (${bands.headerPct}% da altura, y < ${bands.headerEnd} px); body = miolo de produtos (y de ${bands.headerEnd} a ${bands.footerStart} px); footer = ${format.footerCm} cm de ${format.printHeightCm} cm (${bands.footerPct}% da altura, y ≥ ${bands.footerStart} px).`,
+    `Zonas de image.region: ${parts.join('; ')}.`,
   ].join('\n');
+}
+
+/**
+ * Bloco de faces (só na cena de frente e verso, escrito pelo código): a face do pedido, se tem imagem, as zonas de
+ * cada face e quando usar `fazer_verso` (PV-14).
+ */
+export function facesBlock(face: { key: FaceKey; hasImage: boolean }): string {
+  const name = face.key === 'back' ? 'Verso' : 'Frente';
+  return `Cena de frente e verso. Face deste pedido: ${name} (${face.hasImage ? 'com imagem' : 'vazia'}). A frente tem cabeçalho e não tem rodapé; o verso não tem cabeçalho e tem rodapé. Use turn_kind fazer_verso só quando o cliente pedir para fazer ou criar o verso.`;
 }
 
 export function paintedBlock(lines: PaintedLine[]): string {
@@ -98,7 +129,10 @@ export function paintedBlock(lines: PaintedLine[]): string {
   return `Textos já pintados na imagem atual (cite sem inventar): ${shown.join(' / ')}`;
 }
 
-export function briefBlock(brief: BriefItem[]): string {
+export function briefBlock(brief: BriefItem[], labelFaces = false): string {
+  // Na cena de frente e verso cada item leva a face dele (PV-8); sem `faceKey`, a frente.
+  const tag = (item: BriefItem): string =>
+    labelFaces ? `[${item.faceKey === 'back' ? 'Verso' : 'Frente'}] ` : '';
   const open = brief.filter((item) => item.status === 'open');
   // Item superado (D-59) já ficou para trás: não é contexto nem pendência.
   const closed = brief
@@ -106,14 +140,15 @@ export function briefBlock(brief: BriefItem[]): string {
     .slice(-10);
   const lines = [
     open.length
-      ? `Pedidos do cliente em aberto, do turno anterior (execute só o que a mensagem atual pede):\n${open.map((i) => `- ${i.id}: ${oneLine(i.text)}`).join('\n')}`
+      ? `Pedidos do cliente em aberto, do turno anterior (execute só o que a mensagem atual pede):\n${open.map((i) => `- ${i.id}: ${tag(i)}${oneLine(i.text)}`).join('\n')}`
       : 'Pedidos do cliente em aberto, do turno anterior: nenhum.',
   ];
   if (closed.length) {
     lines.push(
       `Pedidos já resolvidos ou desistidos (só contexto):\n${closed
         .map(
-          (i) => `- ${i.id} (${i.status === 'done' ? 'feito' : 'desistido'}): ${oneLine(i.text)}`,
+          (i) =>
+            `- ${i.id} (${i.status === 'done' ? 'feito' : 'desistido'}): ${tag(i)}${oneLine(i.text)}`,
         )
         .join('\n')}`,
     );
@@ -125,13 +160,15 @@ export interface HistoryEntry {
   message: TemplateSceneMessage;
   displayNumber: number | null;
   marking: Marking | null;
+  /** Rótulo da face ("Frente", "Verso") na cena de frente e verso; ausente na cena de uma face. */
+  faceLabel?: string;
 }
 
 export function historyBlock(entries: HistoryEntry[]): string {
   if (entries.length === 0) return 'Histórico da conversa: nenhuma mensagem anterior.';
-  const lines = entries.map(({ message, displayNumber, marking }) => {
+  const lines = entries.map(({ message, displayNumber, marking, faceLabel }) => {
     const who = message.role === 'user' ? 'Cliente' : 'Assistente';
-    const notes: string[] = [];
+    const notes: string[] = faceLabel ? [faceLabel] : [];
     if (displayNumber !== null) notes.push(`versão ${displayNumber}`);
     if (marking) notes.push(`com marcação (${marking.kind}, ${boxText(marking.box)})`);
     return `${who}${notes.length ? ` [${notes.join(', ')}]` : ''}: ${oneLine(message.content)}`;

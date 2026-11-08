@@ -4,7 +4,7 @@ import { SceneLockService } from '../services/scene-lock.service';
 import { SceneTurnService } from '../services/scene-turn.service';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { insertReadyVersion, insertScene } from './scene-fixtures';
+import { insertReadyVersion, insertScene, pointFace } from './scene-fixtures';
 import { deleteTestScenes, openSceneTestDb } from './scene-test-db';
 
 export interface TurnServiceHarness {
@@ -53,8 +53,7 @@ export function useTurnServiceHarness(): TurnServiceHarness {
   h.readyScene = async (name, elements = []) => {
     const scene = await h.newScene(name);
     const { version } = await insertReadyVersion(h.dataSource, scene, 1, { elements });
-    scene.currentVersionId = version.id;
-    await h.dataSource.manager.save(scene);
+    await pointFace(h.dataSource, scene, version.id);
     return scene;
   };
   h.send = (sceneId, body, revision = 0) =>

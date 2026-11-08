@@ -1,16 +1,23 @@
-import { buildTemplateConfiguration, sectionBands } from '../domain/scene-template-config';
+import { buildTemplateConfiguration, zoneSectionBands } from '../domain/scene-template-config';
 import { mapLayersToSections } from '../domain/scene-template-layers';
 import { PROJECTION_VERSION, ProjectionKeys } from '../domain/scene-template-keys';
-import { SceneFormatSpec } from '../domain/scene-formats';
+import { FaceKey } from '../domain/scene-faces';
+import { computeSceneZones, SceneFormatSpec } from '../domain/scene-formats';
 import { SceneTemplateConfiguration, TemplateImageUrls } from '../domain/scene-template.types';
-import { SceneElement } from '../domain/scene.types';
+import { SceneElement, SceneZones } from '../domain/scene.types';
 import { SceneTemplateFilesService } from './scene-template-files.service';
 import { FlattenOverlay, renderTemplateImages } from './scene-template-render';
 
 /** O que a projeção precisa da cena (lido sem trava pelo job). */
 export interface ProjectionSource {
   sceneId: string;
+  /** Nome do template da face: o da cena, ou "<nome> — Frente" e "<nome> — Verso". */
   name: string;
+  /** Face do template; ausente vale a face única do formato (cena de uma face). */
+  faceKey?: FaceKey;
+  faceIndex?: number;
+  /** Zonas da face: a frente não tem rodapé e o verso não tem cabeçalho (PV-11). */
+  zones?: SceneZones;
   format: SceneFormatSpec;
   widthPx: number;
   heightPx: number;
@@ -53,7 +60,8 @@ export function configurationFor(
   urls: TemplateImageUrls,
   logos: Map<string, string>,
 ): SceneTemplateConfiguration {
-  const bands = sectionBands(source.format, source.heightPx);
+  const zones = source.zones ?? computeSceneZones(source.format);
+  const bands = zoneSectionBands(zones, source.heightPx);
   const sections = mapLayersToSections({
     elements: source.elements,
     widthPx: source.widthPx,
@@ -64,11 +72,14 @@ export function configurationFor(
   });
   return buildTemplateConfiguration({
     format: source.format,
+    zones,
     urls,
     ...sections,
     source: {
       kind: 'template-scene',
       sceneId: source.sceneId,
+      faceKey: source.faceKey ?? 'single',
+      faceIndex: source.faceIndex ?? 0,
       versionId: source.versionId,
       sceneRevision: source.sceneRevision,
       pictorialKey: source.keys.pictorialKey,
@@ -96,15 +107,15 @@ export async function projectFull(
   const images = await renderTemplateImages({
     master: input.master,
     overlays: input.overlays,
-    format: source.format,
+    zones: source.zones ?? computeSceneZones(source.format),
   });
   const syncId = files.newSyncId();
   const write = (name: string, buffer: Buffer) =>
     files.writeProjection(source.sceneId, syncId, name, buffer);
   const urls: TemplateImageUrls = {
     full: await write('full.jpg', images.full),
-    header: await write('header.jpg', images.header),
-    footer: await write('footer.jpg', images.footer),
+    ...(images.header ? { header: await write('header.jpg', images.header) } : {}),
+    ...(images.footer ? { footer: await write('footer.jpg', images.footer) } : {}),
     thumbnail: await write('thumbnail.jpg', images.thumbnail),
   };
   return {

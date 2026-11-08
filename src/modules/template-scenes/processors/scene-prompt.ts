@@ -1,6 +1,8 @@
 import { clientAsksForSplit } from '../domain/scene-director-composition';
 import { DirectorImage } from '../domain/scene-director-schema';
-import { findSceneFormat } from '../domain/scene-formats';
+import { backPreservationSentence, effectiveZone, FaceKey } from '../domain/scene-faces';
+import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
+import { SceneZones } from '../domain/scene.types';
 import { zoneBands } from '../domain/scene-zone-bands';
 
 export interface ScenePromptInput {
@@ -131,6 +133,10 @@ export interface EditPromptInput {
   heightPx: number;
   /** Linhas lidas diferente do pedido, na refação única. */
   corrections?: TextCorrection[];
+  /** Zonas da face; sem elas, as do formato. A que a face não tem vale como miolo (PV-9). */
+  zones?: SceneZones;
+  /** No verso, o prompt termina com a frase de preservação do verso (PV-9). */
+  faceKey?: FaceKey;
   /** Texto já pintado na versão atual que esta rodada não substitui: é mantido como está (D-56, 4d). */
   keepText?: string[];
 }
@@ -140,17 +146,19 @@ const sentence = (text: string): string => {
   return /[.!?]$/.test(clean) ? clean : `${clean}.`;
 };
 
-/** Faixas de `computeSceneZones` em px sobre o tamanho nativo: o limite fica dentro da faixa pedida. */
+/** Faixas das zonas da face em px sobre o tamanho nativo: o limite fica dentro da faixa pedida. */
 function regionText(input: EditPromptInput): string {
   const { side } = input.image.region;
-  // A marcação vale (a mensagem pode citar outro lugar): com `markup` a região é sempre a área contornada.
-  const zone = input.marked ? 'marked' : input.image.region.zone;
-  const on = side ? ` on the ${side} side` : '';
   const format = findSceneFormat(input.formatId);
+  const zones = input.zones ?? (format ? computeSceneZones(format) : undefined);
+  // A marcação vale (a mensagem pode citar outro lugar): com `markup` a região é sempre a área contornada.
+  const requested = input.marked ? 'marked' : input.image.region.zone;
+  const zone = zones ? effectiveZone(requested, zones) : requested;
+  const on = side ? ` on the ${side} side` : '';
   const { heightPx: H } = input;
   if (zone === 'marked') return `Make the change only inside the outlined area${on}.`;
-  if (zone === 'whole' || !format) return 'The change may affect the whole image.';
-  const bands = zoneBands(format, H);
+  if (zone === 'whole' || !format || !zones) return 'The change may affect the whole image.';
+  const bands = zoneBands(zones, H);
   const printCm = cmEn(format.printHeightCm);
   if (zone === 'footer') {
     return `Make the change only inside the footer band${on}: the lowest ${cmEn(format.footerCm)} cm of the ${printCm} cm page (the bottom ${bands.footerPct}% of the image height, y ≥ ${bands.footerStart} of ${H} px; the band is about ${H - bands.footerStart} px tall), sized to fit entirely within it, without extending up into the central product area.`;
@@ -207,6 +215,19 @@ export function textBlock(
   ].join('\n');
 }
 
+/** Frase de preservação do verso (PV-9): só nas edições da face `back`, e sem a parte "sem texto" se há texto. */
+function backSentence(input: EditPromptInput): string {
+  const format = findSceneFormat(input.formatId);
+  if (input.faceKey !== 'back' || !format || !input.zones) return '';
+  return backPreservationSentence({
+    format,
+    widthPx: input.widthPx,
+    heightPx: input.heightPx,
+    zones: input.zones,
+    withClientText: input.image.exact_text.length > 0 || (input.keepText?.length ?? 0) > 0,
+  });
+}
+
 /**
  * Prompt da edição em oito blocos, em ordem fixa (D-51): ação, formato e uso, composição, estilo, mudança desta
  * rodada, região com as medidas do formato, preservação e texto. O Diretor escreve composição, estilo, mudança e
@@ -241,6 +262,7 @@ export function buildEditPrompt(input: EditPromptInput): string {
     regionText(input),
     `${keep.length ? `Preserve: ${keep.join('; ')}. ` : ''}Do not change or remove any other element.`,
     textBlock(image.exact_text, input.corrections, input.keepText),
+    backSentence(input),
   ]
     .filter(Boolean)
     .join('\n');

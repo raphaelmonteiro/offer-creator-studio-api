@@ -6,7 +6,7 @@ import { SceneElement } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset as TemplateSceneAssetEntity } from '../entities/template-scene-asset.entity';
 import { directorPlan } from '../testing/scene-director-fixtures';
-import { insertVersion } from '../testing/scene-fixtures';
+import { insertVersion, pointFace } from '../testing/scene-fixtures';
 import { useProcessorHarness } from '../testing/scene-processor-harness';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 
@@ -154,8 +154,7 @@ describeIfSceneDb('SceneRedrawHandler: demais cenários do redesenho (banco chro
         masterAssetId: v1.masterAssetId,
         previewAssetId: v1.previewAssetId,
       });
-      scene.currentVersionId = restored.id;
-      await h.dataSource.manager.save(scene);
+      await pointFace(h.dataSource, scene, restored.id);
       const queued = await h.queueRedraw(scene, {
         plan: itemPlan('mais flores'),
         request: 'mais flores',

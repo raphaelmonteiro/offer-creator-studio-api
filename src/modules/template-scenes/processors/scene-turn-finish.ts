@@ -4,6 +4,7 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { CANCELLED_REPLY, failureReply, NO_LAYER_CHANGED } from '../scene-texts';
 import { QueuePort } from '../../../shared/queue/animation-queue.service';
+import { faceKeyOfVersion } from '../services/scene-faces';
 import { publishSceneEvent, publishVersionReady, SceneEventKind } from '../services/scene-events';
 import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
@@ -15,6 +16,7 @@ function versionEventOf(scene: TemplateScene, version: TemplateSceneVersion) {
   return {
     sceneId: scene.id,
     versionId: version.id,
+    faceKey: faceKeyOfVersion(scene, version),
     step: version.step,
     status: version.status,
     cancelRequested: version.cancelRequestedAt !== null,

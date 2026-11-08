@@ -2,18 +2,20 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, IsNull, Not } from 'typeorm';
 import { SCENE_BUSY_STATUSES, SCENE_LIMITS } from '../domain/scene.types';
-import { sceneZonesFor } from '../domain/scene-formats';
+import { FaceKey } from '../domain/scene-faces';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { invalidBody, sceneNotFound } from '../scene.errors';
+import { loadFaces, pickFace } from './scene-faces';
 import { displayNumbersOf } from './scene-display-number';
 import {
   SceneDetailView,
   SceneListItemView,
   SceneMessagesPageView,
   toCurrentVersionView,
+  toFaceView,
   toMessageView,
   toSummaryView,
   toVersionView,
@@ -27,24 +29,29 @@ const MESSAGE_ORDER = { createdAt: 'DESC', role: 'ASC', id: 'DESC' } as const;
 export class SceneReadService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
+  /**
+   * Detalhe da cena. `faceKey` escolhe de qual face vem a página de versões (padrão: face 0); `currentVersion` e
+   * `zones` do topo são sempre os da face 0, e `faces` traz a versão atual de cada face.
+   */
   async loadDetail(
     sceneId: string,
     versionsPage = 1,
     manager: EntityManager = this.dataSource.manager,
+    faceKey?: FaceKey,
   ): Promise<SceneDetailView> {
     const scene = await manager.findOne(TemplateScene, { where: { id: sceneId } });
     if (!scene) throw sceneNotFound();
+    const faces = await loadFaces(manager, sceneId);
+    const pageFace = pickFace(faces, faceKey);
     const limit = SCENE_LIMITS.versionsPageSize;
-    // O painel lista só as versões com imagem (o filtro entra na paginação); o número exibido vem da cena inteira.
+    // O painel lista só as versões com imagem da face (o filtro entra na paginação); o número exibido vem da face inteira.
     const [pageVersions, totalVersions] = await manager.findAndCount(TemplateSceneVersion, {
-      where: { sceneId, status: 'ready', masterAssetId: Not(IsNull()) },
+      where: { sceneId, faceIndex: pageFace.index, status: 'ready', masterAssetId: Not(IsNull()) },
       order: { number: 'DESC' },
       skip: (versionsPage - 1) * limit,
       take: limit,
     });
-    const current = scene.currentVersionId
-      ? await manager.findOne(TemplateSceneVersion, { where: { id: scene.currentVersionId } })
-      : null;
+    const currents = await this.currentVersions(manager, faces);
     const active = await manager.findOne(TemplateSceneVersion, {
       where: { sceneId, status: In([...SCENE_BUSY_STATUSES]) },
     });
@@ -61,23 +68,46 @@ export class SceneReadService {
 
     const assets = await this.loadAssets(manager, [
       ...pageVersions,
-      ...(current ? [current] : []),
+      ...currents.values(),
       ...(active ? [active] : []),
     ]);
+    const { layout } = scene;
+    const currentView = (version: TemplateSceneVersion | undefined) =>
+      version ? toCurrentVersionView(version, assets, displayNumbers, layout) : null;
     return {
       ...toSummaryView(scene),
-      zones: sceneZonesFor(scene.formatId),
-      currentVersion: current ? toCurrentVersionView(current, assets, displayNumbers) : null,
-      activeVersion: active ? toVersionView(active, assets, displayNumbers) : null,
-      messages: messages.reverse().map(toMessageView),
+      zones: faces[0].zones,
+      currentVersion: currentView(currents.get(faces[0].index)),
+      activeVersion: active ? toVersionView(active, assets, displayNumbers, layout) : null,
+      faces: faces.map((face) => toFaceView(face, currentView(currents.get(face.index)))),
+      messages: messages.reverse().map((message) => toMessageView(message, layout)),
       versions: {
-        items: pageVersions.map((version) => toVersionView(version, assets, displayNumbers)),
+        items: pageVersions.map((version) =>
+          toVersionView(version, assets, displayNumbers, layout),
+        ),
         total: totalVersions,
         page: versionsPage,
         limit,
         totalPages: Math.max(1, Math.ceil(totalVersions / limit)),
       },
     };
+  }
+
+  /** A versão atual de cada face (por índice da face); face sem versão fica de fora. */
+  private async currentVersions(
+    manager: EntityManager,
+    faces: Array<{ index: number; currentVersionId: string | null }>,
+  ): Promise<Map<number, TemplateSceneVersion>> {
+    const ids = faces.map((face) => face.currentVersionId).filter(Boolean) as string[];
+    if (ids.length === 0) return new Map();
+    const found = await manager.findBy(TemplateSceneVersion, { id: In(ids) });
+    const byId = new Map(found.map((version) => [version.id, version]));
+    const result = new Map<number, TemplateSceneVersion>();
+    for (const face of faces) {
+      const version = face.currentVersionId ? byId.get(face.currentVersionId) : undefined;
+      if (version) result.set(face.index, version);
+    }
+    return result;
   }
 
   /**
@@ -120,7 +150,10 @@ export class SceneReadService {
       .take(limit + 1)
       .getMany();
     return {
-      items: rows.slice(0, limit).reverse().map(toMessageView),
+      items: rows
+        .slice(0, limit)
+        .reverse()
+        .map((message) => toMessageView(message, scene.layout)),
       hasMore: rows.length > limit,
     };
   }
@@ -154,6 +187,7 @@ export class SceneReadService {
       id: scene.id,
       name: scene.name,
       formatId: scene.formatId,
+      layout: scene.layout,
       previewUrl: scene.currentVersionId ? (previews.get(scene.currentVersionId) ?? null) : null,
       updatedAt: scene.updatedAt.toISOString(),
       totalCostUsd: scene.totalCostUsd,

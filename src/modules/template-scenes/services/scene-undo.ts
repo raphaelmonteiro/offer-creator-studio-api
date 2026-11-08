@@ -1,5 +1,5 @@
 import { EntityManager } from 'typeorm';
-import { TemplateScene } from '../entities/template-scene.entity';
+import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import {
   FIRST_IMAGE_REPLY,
@@ -8,6 +8,7 @@ import {
   versionPurgedReply,
 } from '../scene-texts';
 import { DisplayedVersion, loadDisplayedVersions } from './scene-display-number';
+import { currentVersionOf } from './scene-faces';
 import { masterOnDisk } from './scene-restore';
 
 /** A origem da restauração, ou a resposta ao cliente quando não há como voltar. */
@@ -55,19 +56,17 @@ async function previousOf(
 }
 
 /**
- * Resolve o alvo do "volta" do Diretor: `previous` ou o número exibido (validado contra todas as versões da
- * cena). Nada aqui chama o modelo de imagem. Master apagada, versão inexistente ou já na primeira terminam com
+ * Resolve o alvo do "volta" do Diretor na face do pedido: `previous` ou o número exibido (validado contra as versões
+ * da face, PV-4). Nada aqui chama o modelo de imagem. Master apagada, versão inexistente ou já na primeira terminam com
  * a resposta ao cliente, e a versão de leitura fica `rejected`.
  */
 export async function resolveUndo(
   manager: EntityManager,
-  scene: TemplateScene,
+  face: Pick<TemplateSceneFace, 'sceneId' | 'index' | 'currentVersionId'>,
   target: 'previous' | number,
 ): Promise<UndoResolution> {
-  const displayed = await loadDisplayedVersions(manager, scene.id);
-  const current = scene.currentVersionId
-    ? await manager.findOne(TemplateSceneVersion, { where: { id: scene.currentVersionId } })
-    : null;
+  const displayed = await loadDisplayedVersions(manager, face.sceneId, face.index);
+  const current = await currentVersionOf(manager, face);
   if (!current) return { kind: 'reply', reply: FIRST_IMAGE_REPLY };
   let source: TemplateSceneVersion | null;
   if (target === 'previous') {

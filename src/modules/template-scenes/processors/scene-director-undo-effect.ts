@@ -3,6 +3,7 @@ import { versionRestoredReply } from '../scene-texts';
 import { displayNumbersOf } from '../services/scene-display-number';
 import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
+import { loadFace, setFaceCurrentVersion } from '../services/scene-faces';
 import { restoreInto } from '../services/scene-restore';
 import { pruneSceneAssets } from '../services/scene-retention';
 import { closeTurnBrief } from '../services/scene-turn-brief';
@@ -20,14 +21,15 @@ export async function applyUndoEffect(
   deps: { queue: Pick<QueuePort, 'publish'> },
 ): Promise<void> {
   const { manager, scene, version } = target;
-  const resolution = await resolveUndo(manager, scene, undoTarget);
+  const face = await loadFace(manager, scene.id, version.faceIndex);
+  const resolution = await resolveUndo(manager, face, undoTarget);
   if (resolution.kind === 'reply') {
     await rejectTarget(target, resolution.reply);
     return;
   }
   await closeTurnBrief(manager, scene, version);
   await restoreInto(manager, scene, resolution.source, { reading: version });
-  scene.currentVersionId = version.id;
+  await setFaceCurrentVersion(manager, scene, version.faceIndex, version.id);
   await pruneSceneAssets(manager, scene);
   await settleUserMessage(manager, version.id, 'done');
   const shown = (await displayNumbersOf(manager, scene.id)).get(version.id) ?? 0;

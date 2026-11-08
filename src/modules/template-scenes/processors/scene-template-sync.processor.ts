@@ -5,6 +5,7 @@ import { SceneTemplateConfiguration } from '../domain/scene-template.types';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { Template } from '../../templates/entities/template.entity';
 import { SceneFilesService } from '../services/scene-files.service';
+import { faceTemplateIdOf, loadFace } from '../services/scene-faces';
 import { SceneLockService } from '../services/scene-lock.service';
 import { readVersionMaster } from '../services/scene-master';
 import {
@@ -16,12 +17,12 @@ import {
 } from '../services/scene-template-projection';
 import { SceneTemplateFilesService } from '../services/scene-template-files.service';
 import {
-  CurrentScene,
+  CurrentFace,
   imageUrlsOf,
   loadLayerAssets,
   planFor,
   projectionSourceOf,
-  readCurrentScene,
+  readCurrentFaces,
   SyncPlan,
 } from './scene-template-sync-read';
 import { isStale, writeSceneTemplate } from './scene-template-sync-write';
@@ -43,9 +44,11 @@ export interface TemplateSyncFailure {
 }
 
 /**
- * Job `template_scene.template_sync`: mantém o template `type = 'full'` da cena em dia com a versão atual (D-9,
- * D-10). Lê sem trava, projeta fora da transação (sem provedor, só `sharp`), confere sob a trava que a cena não
- * mudou e grava o template. Idempotente: repetir o job com a cena em dia só atualiza `sceneRevision` (PV-12, PV-13).
+ * Job `template_scene.template_sync`: mantém o template `type = 'full'` de cada face da cena em dia com a versão
+ * atual dela (D-8, D-9, D-10). Um job por cena, que projeta uma face por vez. Lê sem trava, projeta fora da transação
+ * (sem provedor, só `sharp`), confere sob a trava que a face não mudou e grava o template. Idempotente: repetir o job
+ * com a cena em dia só atualiza `sceneRevision` (PV-12, PV-13). Uma face que falha não impede a outra: o erro da
+ * primeira é relançado no fim, para a fila repetir o job.
  */
 @Injectable()
 export class SceneTemplateSyncProcessor {
@@ -59,40 +62,40 @@ export class SceneTemplateSyncProcessor {
   ) {}
 
   async process(job: TemplateSyncJob, _jobId?: string): Promise<void> {
-    const current = await readCurrentScene(this.dataSource.manager, job.sceneId);
-    if (!current) return;
-    try {
-      await this.sync(current);
-    } catch (error) {
-      await this.recordFailure(current, error);
-      throw error;
+    const faces = await readCurrentFaces(this.dataSource.manager, job.sceneId);
+    const failures: unknown[] = [];
+    for (const current of faces) {
+      try {
+        await this.sync(current);
+      } catch (error) {
+        await this.recordFailure(current, error);
+        failures.push(error);
+      }
     }
+    if (failures.length > 0) throw failures[0];
   }
 
-  private async sync(current: CurrentScene): Promise<void> {
+  private async sync(current: CurrentFace): Promise<void> {
     const manager = this.dataSource.manager;
     const source = projectionSourceOf(current);
-    const { scene, version } = current;
-    const existing = scene.approvedTemplateId
-      ? await manager.findOneBy(Template, { id: scene.approvedTemplateId })
-      : null;
+    const { scene, face, version } = current;
+    const templateId = faceTemplateIdOf(scene, face);
+    const existing = templateId ? await manager.findOneBy(Template, { id: templateId }) : null;
     const projected = await this.project(
       planFor(existing, source.keys),
       { current, source },
       existing,
     );
-    const read = {
-      versionId: version.id,
-      revision: scene.revision,
-      approvedTemplateId: scene.approvedTemplateId,
-    };
+    const read = { versionId: version.id, revision: scene.revision, templateId };
     await this.locks
       .run(
         scene.id,
         async ({ manager: tx, scene: locked }) => {
-          if (isStale(locked, read)) return;
+          const lockedFace = await loadFace(tx, scene.id, face.index);
+          if (isStale(locked, lockedFace, read)) return;
           await writeSceneTemplate(tx, {
             scene: locked,
+            face: lockedFace,
             versionId: version.id,
             name: source.name,
             projected,
@@ -110,7 +113,7 @@ export class SceneTemplateSyncProcessor {
 
   private async project(
     plan: SyncPlan,
-    { current, source }: { current: CurrentScene; source: ProjectionSource },
+    { current, source }: { current: CurrentFace; source: ProjectionSource },
     existing: Template | null,
   ): Promise<ProjectedTemplate> {
     const manager = this.dataSource.manager;
@@ -121,6 +124,9 @@ export class SceneTemplateSyncProcessor {
           ...config,
           source: {
             ...config.source,
+            // Template anterior às faces ganha a face no primeiro `touch`, sem nova projeção.
+            faceKey: source.faceKey,
+            faceIndex: source.faceIndex,
             versionId: source.versionId,
             sceneRevision: source.sceneRevision,
           },
@@ -148,7 +154,7 @@ export class SceneTemplateSyncProcessor {
     );
   }
 
-  private async masterOf(manager: EntityManager, current: CurrentScene): Promise<Buffer> {
+  private async masterOf(manager: EntityManager, current: CurrentFace): Promise<Buffer> {
     const master = await readVersionMaster(manager, this.files, current.version);
     if (!master) throw new Error('Master da versão ausente');
     return master;
@@ -167,7 +173,7 @@ export class SceneTemplateSyncProcessor {
   }
 
   /** Grava a falha na versão atual (uma por tentativa; ao somar `MAX_SYNC_ATTEMPTS` a varredura para) e no log. */
-  private async recordFailure(current: CurrentScene, error: unknown): Promise<void> {
+  private async recordFailure(current: CurrentFace, error: unknown): Promise<void> {
     const { scene, version } = current;
     const previous = version.metrics.templateSync as TemplateSyncFailure | undefined;
     const attempts = previous?.sceneRevision === scene.revision ? previous.attempts + 1 : 1;

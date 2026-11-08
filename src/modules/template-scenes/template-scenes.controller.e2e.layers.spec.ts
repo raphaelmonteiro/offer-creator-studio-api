@@ -2,9 +2,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as sharp from 'sharp';
 import { ConfigService } from '@nestjs/config';
-import { TemplateScene } from './entities/template-scene.entity';
 import { SceneFilesService } from './services/scene-files.service';
-import { insertReadyVersion, insertScene } from './testing/scene-fixtures';
+import { insertReadyVersion, insertScene, pointFace } from './testing/scene-fixtures';
 import { E2E_ADMIN_TOKEN } from './testing/scene-e2e-app';
 import { useE2eHarness } from './testing/scene-e2e-harness';
 import { describeIfSceneDb } from './testing/scene-test-db';
@@ -156,10 +155,10 @@ describeIfSceneDb(
           }
           ready.push(item);
         }
-        await h.dataSource.manager.update(
-          TemplateScene,
-          { id: scene.id },
-          { currentVersionId: ready[5].version.id },
+        await pointFace(
+          h.dataSource,
+          { id: scene.id, currentVersionId: null },
+          ready[5].version.id,
         );
         await h.dataSource.query(
           `UPDATE template_scene_assets SET "expiresAt" = now() - interval '1 minute' WHERE "versionId" = $1`,

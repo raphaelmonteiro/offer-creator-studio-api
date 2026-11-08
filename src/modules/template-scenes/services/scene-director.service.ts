@@ -3,7 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { llmCostUsd, llmPricesFor } from '../../ai/openai-llm-pricing';
 import { isOpenAiQuotaError } from '../../../shared/providers/openai-errors';
 import { DIRECTOR_JSON_SCHEMA } from '../domain/scene-director-schema';
-import { DIRECTOR_INSTRUCTIONS } from '../domain/scene-director-prompt';
+import { directorInstructions } from '../domain/scene-director-prompt';
+import { SceneLayout } from '../domain/scene-faces';
 import {
   DirectorScript,
   SCENE_DIRECTOR_CLIENT,
@@ -40,6 +41,8 @@ export interface DirectorRunInput {
   image: Buffer | null;
   script: DirectorScript;
   correlationId: string;
+  /** Layout da cena: a classe `fazer_verso` só entra nas instruções da cena de frente e verso (PV-14). */
+  layout?: SceneLayout;
 }
 
 /**
@@ -83,7 +86,7 @@ export class SceneDirectorService {
       const outcome = await Promise.race([
         this.client.plan({
           model,
-          instructions: DIRECTOR_INSTRUCTIONS,
+          instructions: directorInstructions(input.layout),
           text: input.text,
           image: input.image,
           jsonSchema: DIRECTOR_JSON_SCHEMA,

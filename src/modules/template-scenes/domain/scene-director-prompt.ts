@@ -1,4 +1,5 @@
-import { DIRECTOR_LIMITS, TURN_KINDS } from './scene-director-schema';
+import { BASE_TURN_KINDS, DIRECTOR_LIMITS } from './scene-director-schema';
+import { SceneLayout } from './scene-faces';
 
 /**
  * Instruções do Diretor (`gpt-6-luna`). Ponto de partida: o prompt do protótipo da Etapa 0 (anexo de
@@ -21,6 +22,10 @@ const KINDS = [
   'recusa_pintado: pede para pintar ou integrar a LOGO na imagem (a logo é sempre camada)',
   'outro: nada acima serve',
 ] as const;
+
+/** Só na cena de frente e verso (PV-14). */
+const BACK_KIND =
+  'fazer_verso: pede para fazer ou criar o verso da folha ("faz o verso", "agora o verso"). Não é pedido de imagem: o código faz o verso a partir da frente atual';
 
 const IMAGE_FIELDS = [
   `image.composition: até ${DIRECTOR_LIMITS.composition} caracteres, em inglês: a composição atual ou desejada da página, numa frase.`,
@@ -66,9 +71,18 @@ const RULES = [
 
 const list = (items: readonly string[]): string => items.map((item) => `- ${item}`).join('\n');
 
-export const DIRECTOR_INSTRUCTIONS = [
-  'Você é o diretor de arte de um chat que edita imagens de fundo de encartes. A cada turno você recebe o histórico da conversa, a lista do que o cliente pediu, as versões, o formato e as zonas da página, os textos já pintados na versão atual, a imagem atual, a geometria da marcação do cliente (se houver) e a lista de camadas (se houver). Você não edita nada: devolve só um plano curto no schema, com os blocos do prompt da imagem.',
-  `Classes de turn_kind (${TURN_KINDS.length}):\n${list(KINDS)}`,
-  `Campos:\n${list(FIELDS)}`,
-  `Regras:\n${list(RULES)}`,
-].join('\n\n');
+/**
+ * As instruções do Diretor. Na cena de uma face (`single`) o texto é o de sempre; na de frente e verso entra a classe
+ * `fazer_verso` (PV-14). O bloco de faces do contexto (`scene-director-blocks`) diz qual é a face do pedido.
+ */
+export function directorInstructions(layout: SceneLayout = 'single'): string {
+  const kinds = layout === 'front_back' ? [...KINDS, BACK_KIND] : [...KINDS];
+  return [
+    'Você é o diretor de arte de um chat que edita imagens de fundo de encartes. A cada turno você recebe o histórico da conversa, a lista do que o cliente pediu, as versões, o formato e as zonas da página, os textos já pintados na versão atual, a imagem atual, a geometria da marcação do cliente (se houver) e a lista de camadas (se houver). Você não edita nada: devolve só um plano curto no schema, com os blocos do prompt da imagem.',
+    `Classes de turn_kind (${BASE_TURN_KINDS.length + (layout === 'front_back' ? 1 : 0)}):\n${list(kinds)}`,
+    `Campos:\n${list(FIELDS)}`,
+    `Regras:\n${list(RULES)}`,
+  ].join('\n\n');
+}
+
+export const DIRECTOR_INSTRUCTIONS = directorInstructions('single');

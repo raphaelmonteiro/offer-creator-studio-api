@@ -1,4 +1,3 @@
-import { sceneZonesFor } from '../domain/scene-formats';
 import { renderMarkup } from '../domain/scene-markup';
 import { Rect } from '../domain/scene.types';
 import { markingOf } from '../services/scene-director-context';
@@ -16,12 +15,12 @@ export interface MarkupInfo {
  * marcação sozinho (D4), e `targetElementId` não é marcação. O PNG tem o tamanho da imagem enviada.
  */
 export async function markupFor(
-  ctx: Pick<TurnContext, 'requestedRegion' | 'requestedMask' | 'formatId'>,
+  ctx: Pick<TurnContext, 'requestedRegion' | 'requestedMask' | 'zones'>,
   size: { width: number; height: number },
 ): Promise<MarkupInfo | null> {
   const marking = markingOf(ctx, size.height / size.width);
   if (!marking) return null;
   const spec = ctx.requestedMask ?? { kind: 'rect' as const, rect: marking.box };
-  const png = await renderMarkup(spec, size.width, size.height, sceneZonesFor(ctx.formatId));
+  const png = await renderMarkup(spec, size.width, size.height, ctx.zones);
   return { png, kind: marking.kind, box: marking.box };
 }

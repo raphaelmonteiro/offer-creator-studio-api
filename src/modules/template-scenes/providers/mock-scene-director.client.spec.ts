@@ -189,4 +189,29 @@ describe('MockSceneDirectorClient', () => {
     expect(edit.plan.turn_kind).toBe('pedido_item');
     expect(edit.plan.image?.change).toContain('2027');
   });
+
+  describe('fazer o verso (PV-14)', () => {
+    it('na cena de frente e verso, "faz o verso" vira o plano fazer_verso, sem imagem', async () => {
+      const { plan: verso } = await plan('agora faz o verso', { layout: 'front_back' });
+      expect(verso).toMatchObject({
+        turn_kind: 'fazer_verso',
+        will_change_image: false,
+        image: null,
+        requests: [],
+      });
+    });
+
+    it('o que vem depois de "com" é o pedido extra, em aberto', async () => {
+      const { plan: verso } = await plan('faz o verso com bandeirinhas no topo', {
+        layout: 'front_back',
+      });
+      expect(verso.turn_kind).toBe('fazer_verso');
+      expect(verso.requests.map((request) => request.text)).toEqual(['bandeirinhas no topo']);
+    });
+
+    it('na cena de uma face, a mesma frase é um pedido de imagem comum', async () => {
+      const { plan: comum } = await plan('faz o verso', { layout: 'single' });
+      expect(comum.turn_kind).not.toBe('fazer_verso');
+    });
+  });
 });

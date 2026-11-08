@@ -12,11 +12,21 @@ export async function addAssistantMessage(
     manager.create(TemplateSceneMessage, {
       sceneId: params.sceneId,
       versionId: params.versionId,
+      // A resposta é da face da versão que ela fecha (a versão já está gravada).
+      faceIndex: await faceIndexOfVersion(manager, params.versionId),
       role: 'assistant',
       content: params.content,
       status: params.status,
     }),
   );
+}
+
+async function faceIndexOfVersion(manager: EntityManager, versionId: string): Promise<number> {
+  const version = await manager.findOne(TemplateSceneVersion, {
+    where: { id: versionId },
+    select: { faceIndex: true },
+  });
+  return version?.faceIndex ?? 0;
 }
 
 /** A mensagem do usuário que originou a versão passa de `queued` ao estado final. */

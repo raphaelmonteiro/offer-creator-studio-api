@@ -5,9 +5,11 @@ import { DataSource, EntityManager, In, Not } from 'typeorm';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
+import { DirectorFace } from '../domain/scene-director-faces';
 import { DirectorScript } from '../providers/scene-director-client';
 import {
   boxText,
+  facesBlock,
   formatBlock,
   HistoryEntry,
   historyBlock,
@@ -21,6 +23,7 @@ import {
   versionsBlock,
 } from './scene-director-blocks';
 import { DisplayedVersion, loadDisplayedVersions } from './scene-display-number';
+import { currentVersionOf, faceHasImage, loadFaces } from './scene-faces';
 import { SceneFilesService } from './scene-files.service';
 import { readVersionMaster } from './scene-master';
 
@@ -48,12 +51,15 @@ export interface DirectorContext {
   layerTexts: string[];
   /** Nome de cada camada da cena (validação 9: citar o nome entre aspas no anúncio não é frase a pintar). */
   layerNames: string[];
+  /** A face do pedido e o estado das faces: zonas, `fazer_verso` e o pedido no verso vazio (PV-9, PV-14). */
+  face?: DirectorFace;
 }
 
 /**
  * Contexto do Diretor, tudo do nosso banco (D-23): últimas 30 mensagens com a versão que gerou cada uma e
  * a marcação usada, a lista do que o cliente pediu, o resumo das versões com o número exibido, a imagem
- * atual em JPEG, a marcação desta mensagem, as camadas e o elemento selecionado (só uma dica de camada).
+ * atual em JPEG, a marcação desta mensagem, as camadas e o elemento selecionado (só uma dica de camada). Tudo da face
+ * do pedido (imagem, camadas, zonas, versões); a conversa e a lista de pedidos são da cena inteira, com o rótulo da face.
  * Texto de mensagem, de camada e de imagem é dado, nunca instrução.
  */
 @Injectable()
@@ -65,10 +71,11 @@ export class SceneDirectorContextService {
 
   async build(scene: TemplateScene, version: TemplateSceneVersion): Promise<DirectorContext> {
     const manager = this.dataSource.manager;
-    const [current, messages, versions, currentMessage, clientMessages] = await Promise.all([
-      scene.currentVersionId
-        ? manager.findOne(TemplateSceneVersion, { where: { id: scene.currentVersionId } })
-        : null,
+    const faces = await loadFaces(manager, scene.id);
+    const face = faces.find((item) => item.index === version.faceIndex) ?? faces[0];
+    const frontBack = scene.layout === 'front_back';
+    const [current, messages, allVersions, currentMessage, clientMessages] = await Promise.all([
+      currentVersionOf(manager, face),
       this.recentMessages(manager, scene.id, version.id),
       loadDisplayedVersions(manager, scene.id),
       manager.findOne(TemplateSceneMessage, {
@@ -78,16 +85,23 @@ export class SceneDirectorContextService {
       this.clientMessages(manager, scene.id),
     ]);
     const aspect = scene.heightPx / scene.widthPx;
-    const history = await this.history(manager, messages, versions, aspect);
+    const versions = allVersions.filter((item) => item.faceIndex === face.index);
+    const history = await this.history(
+      manager,
+      { messages, versions: allVersions, aspect },
+      frontBack,
+    );
+    const faceState = await this.faceState(manager, scene, { face, current });
     const layers = current?.elements ?? [];
     const marking = markingOf(version, aspect);
     const content = currentMessage?.content ?? '';
     const attachments = currentMessage?.attachments ?? [];
     const text = [
       historyBlock(history),
-      briefBlock(scene.brief ?? []),
-      versionsBlock(versions, scene.currentVersionId),
-      formatBlock(scene),
+      briefBlock(scene.brief ?? [], frontBack),
+      versionsBlock(versions, face.currentVersionId, frontBack ? face.key : 'single'),
+      ...(frontBack ? [facesBlock({ key: face.key, hasImage: faceState.hasImage })] : []),
+      formatBlock(scene, face.zones),
       paintedBlock(paintedLinesOf(current)),
       marking
         ? `Marcação do cliente na imagem atual (frações 0..1): tipo=${marking.kind} ${boxText(marking.box)}`
@@ -118,7 +132,10 @@ export class SceneDirectorContextService {
       paintedText: paintedTextOf(current),
       layerTexts: layers.flatMap((l) => (l.kind === 'text' && l.text ? [l.text] : [])),
       layerNames: layers.map((l) => l.name),
+      face: faceState,
       script: {
+        layout: scene.layout,
+        face: face.key,
         message: content,
         hasImage: Boolean(current?.masterAssetId),
         marked: marking !== null,
@@ -150,12 +167,33 @@ export class SceneDirectorContextService {
     return rows.map((row) => row.content);
   }
 
+  /** A face do pedido e o estado das duas faces (a frente pronta e o verso pronto). */
+  private async faceState(
+    manager: EntityManager,
+    scene: TemplateScene,
+    input: {
+      face: { key: DirectorFace['key']; zones: DirectorFace['zones'] };
+      current: TemplateSceneVersion | null;
+    },
+  ): Promise<DirectorFace> {
+    const { face, current } = input;
+    const frontBack = scene.layout === 'front_back';
+    return {
+      layout: scene.layout,
+      key: face.key,
+      zones: face.zones,
+      hasImage: current?.status === 'ready' && Boolean(current.masterAssetId),
+      frontReady: frontBack ? await faceHasImage(manager, scene.id, 0) : true,
+      backReady: frontBack ? await faceHasImage(manager, scene.id, 1) : false,
+    };
+  }
+
   private async history(
     manager: EntityManager,
-    messages: TemplateSceneMessage[],
-    versions: DisplayedVersion[],
-    aspect: number,
+    input: { messages: TemplateSceneMessage[]; versions: DisplayedVersion[]; aspect: number },
+    frontBack: boolean,
   ): Promise<HistoryEntry[]> {
+    const { messages, versions, aspect } = input;
     const ids = [...new Set(messages.map((m) => m.versionId).filter(Boolean))] as string[];
     const sources = ids.length ? await manager.findBy(TemplateSceneVersion, { id: In(ids) }) : [];
     const byId = new Map(sources.map((v) => [v.id, v]));
@@ -166,6 +204,7 @@ export class SceneDirectorContextService {
         message,
         displayNumber: message.versionId ? (display.get(message.versionId) ?? null) : null,
         marking: message.role === 'user' && source ? markingOf(source, aspect) : null,
+        ...(frontBack ? { faceLabel: message.faceIndex === 1 ? 'Verso' : 'Frente' } : {}),
       };
     });
   }

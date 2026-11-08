@@ -1,9 +1,8 @@
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { TemplateScene } from './entities/template-scene.entity';
 import { SceneFilesService } from './services/scene-files.service';
-import { insertReadyVersion, insertScene } from './testing/scene-fixtures';
+import { insertReadyVersion, insertScene, pointFace } from './testing/scene-fixtures';
 import { E2E_CDN_URL } from './testing/scene-e2e-app';
 import { useE2eHarness } from './testing/scene-e2e-harness';
 import { solidPng } from './testing/scene-template-fixtures';
@@ -62,11 +61,7 @@ describeIfSceneDb(
         path.basename(master.url),
         await solidPng(384, 768, [20, 120, 220]),
       );
-      await h.dataSource.manager.update(
-        TemplateScene,
-        { id: scene.id },
-        { currentVersionId: version.id },
-      );
+      await pointFace(h.dataSource, { id: scene.id, currentVersionId: null }, version.id);
       return { scene, version, master, files };
     }
 

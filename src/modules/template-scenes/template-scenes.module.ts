@@ -10,6 +10,7 @@ import { OpenAiVisionService } from '../ai/openai-vision.service';
 import { TemplateScene } from './entities/template-scene.entity';
 import { TemplateSceneAsset } from './entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from './entities/template-scene-message.entity';
+import { TemplateSceneFace } from './entities/template-scene-face.entity';
 import { TemplateSceneVersion } from './entities/template-scene-version.entity';
 import { SceneCallRunner } from './processors/scene-call-runner';
 import { SceneDirectorJob, SceneDirectorProcessor } from './processors/scene-director.processor';
@@ -18,6 +19,7 @@ import {
   SceneTemplateSyncProcessor,
   TemplateSyncJob,
 } from './processors/scene-template-sync.processor';
+import { SceneDeriveFaceHandler } from './processors/scene-derive-face.handler';
 import { SceneRedrawHandler } from './processors/scene-redraw.handler';
 import { SceneTurnJob, SceneTurnProcessor } from './processors/scene-turn.processor';
 import { SceneTurnSupport } from './processors/scene-turn-support';
@@ -31,6 +33,7 @@ import { SCENE_IMAGE_PROVIDER } from './providers/scene-image-provider';
 import { createSceneVisionClient, SCENE_VISION_CLIENT } from './providers/scene-vision-client';
 import { SceneDirectorContextService } from './services/scene-director-context';
 import { SceneDirectorService } from './services/scene-director.service';
+import { SceneFacesService } from './services/scene-faces.service';
 import { SceneFilesService } from './services/scene-files.service';
 import { SceneLockService } from './services/scene-lock.service';
 import { SceneLogoService } from './services/scene-logo.service';
@@ -55,6 +58,7 @@ import { TemplateScenesController } from './template-scenes.controller';
   imports: [
     TypeOrmModule.forFeature([
       TemplateScene,
+      TemplateSceneFace,
       TemplateSceneVersion,
       TemplateSceneAsset,
       TemplateSceneMessage,
@@ -76,6 +80,7 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneFilesService,
     SceneLogoService,
     SceneTurnService,
+    SceneFacesService,
     SceneTurnState,
     SceneTurnSupport,
     SceneCallRunner,
@@ -85,6 +90,7 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneDirectorState,
     SceneDirectorProcessor,
     SceneRedrawHandler,
+    SceneDeriveFaceHandler,
     SceneTurnProcessor,
     SceneReconcilerService,
     SceneTemplateFilesService,

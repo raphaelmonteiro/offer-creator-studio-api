@@ -84,6 +84,10 @@ export function useSyncHarness() {
       `UPDATE template_scenes SET "currentVersionId" = $1, revision = revision + 1 WHERE id = $2`,
       [versionId, sceneId],
     );
+    await base.dataSource.query(
+      `UPDATE template_scene_faces SET "currentVersionId" = $1 WHERE "sceneId" = $2 AND "index" = 0`,
+      [versionId, sceneId],
+    );
   }
 
   const bumpRevision = (sceneId: string) =>

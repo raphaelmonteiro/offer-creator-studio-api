@@ -9,6 +9,7 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { SceneCallRunner } from '../processors/scene-call-runner';
+import { SceneDeriveFaceHandler } from '../processors/scene-derive-face.handler';
 import { SceneRedrawHandler } from '../processors/scene-redraw.handler';
 import { MockSceneVisionClient } from '../providers/mock-scene-vision.client';
 import { SceneVisionClient } from '../providers/scene-vision-client';
@@ -30,7 +31,13 @@ import { SceneElement } from '../domain/scene.types';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { buildSceneOutputs } from '../services/scene-output';
 import { directorPlan } from './scene-director-fixtures';
-import { insertAsset, insertMessage, insertScene, insertVersion } from './scene-fixtures';
+import {
+  insertAsset,
+  insertMessage,
+  insertScene,
+  insertVersion,
+  pointFace,
+} from './scene-fixtures';
 import { syntheticScenePng } from './synthetic-scene';
 import { deleteTestScenes, openSceneTestDb } from './scene-test-db';
 import { fakeQueue } from './scene-test-helpers';
@@ -74,12 +81,14 @@ export function useProcessorHarness() {
     parentVersionId: string | null,
     masterPng?: Buffer,
     elements: SceneElement[] = [],
+    extra: Partial<TemplateSceneVersion> = {},
   ) {
     const png = masterPng ?? (await syntheticScenePng(1024, 2048));
     const version = await insertVersion(h.dataSource, scene.id, {
       number,
       parentVersionId,
       elements,
+      ...extra,
     });
     const outputs = await buildSceneOutputs(png);
     const assets: TemplateSceneAsset[] = [];
@@ -121,6 +130,7 @@ export function useProcessorHarness() {
       return new SceneTurnProcessor(
         h.state,
         new SceneRedrawHandler(support, calls, vision, provider),
+        new SceneDeriveFaceHandler(support, calls, provider),
       );
     },
     /** Cena folheto 1920x3840 com uma versão `queued` e a mensagem do pedido. */
@@ -163,8 +173,7 @@ export function useProcessorHarness() {
       createdScenes.push(scene.id);
       const master = await syntheticScenePng(width, height);
       const made = await readyVersionLike(scene, 1, null, master, options.elements ?? []);
-      scene.currentVersionId = made.version.id;
-      await h.dataSource.manager.save(scene);
+      await pointFace(h.dataSource, scene, made.version.id);
       return {
         scene,
         master,

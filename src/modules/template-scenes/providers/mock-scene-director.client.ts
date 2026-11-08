@@ -2,6 +2,8 @@ import type { DirectorCompletionResult } from '../../ai/openai-director.service'
 import type { DirectorImage, DirectorPlan } from '../domain/scene-director-schema';
 import { fold } from '../../../shared/text/fold';
 import {
+  BACK_ASK,
+  backPlan,
   clean,
   contradictionPlan,
   EMPTY,
@@ -41,6 +43,7 @@ const LOGO_ASK = /\b(?:integra\w*|pinta\w*|desenha\w*) a logo\b/;
 function planFor(script: DirectorScript, message: string): DirectorPlan {
   const folded = fold(message);
   if (has(folded, LOGO_ASK)) return logoRefusal();
+  if (script.layout === 'front_back' && has(folded, BACK_ASK)) return backPlan(message);
   const direct = undoPlan(folded) ?? layerPlan(script, folded, message);
   if (direct) return direct;
   if (has(folded, /\b(obrigad[oa]|otimo|valeu)\b/) && script.hasImage) {

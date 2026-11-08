@@ -11,7 +11,9 @@ import {
   SceneVersionStatus,
   SceneZones,
 } from '../domain/scene.types';
+import { FaceKey, faceKeyOf, SceneLayout } from '../domain/scene-faces';
 import { TemplateScene } from '../entities/template-scene.entity';
+import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
@@ -35,8 +37,10 @@ export interface SceneVersionView {
   id: string;
   /** Número interno: toda mensagem consome um. A tela e o Diretor usam só `displayNumber`. */
   number: number;
+  /** Face da versão (`single`, `front` ou `back`). */
+  faceKey: FaceKey;
   /**
-   * Posição entre as versões `ready` com imagem, em ordem de `number`, na cena inteira (nunca sobre a página).
+   * Posição entre as versões `ready` com imagem, em ordem de `number`, dentro da face (nunca sobre a página).
    * `null` na versão sem imagem (resposta, falha, parada, leitura ou fila).
    */
   displayNumber: number | null;
@@ -86,14 +90,32 @@ export interface SceneMessageView {
   attachments: Array<{ assetId: string; name?: string }>;
   status: SceneMessageStatus;
   versionId: string | null;
+  /** Face em que a mensagem foi feita (rótulo "Frente"/"Verso" no chat da cena de frente e verso). */
+  faceKey: FaceKey;
   createdByUserId: string | null;
   createdAt: string;
+}
+
+export interface SceneFaceView {
+  index: number;
+  key: FaceKey;
+  /** `Frente` ou `Verso`; nulo na face única. */
+  label: string | null;
+  zones: SceneZones;
+  widthPx: number;
+  heightPx: number;
+  /** Nulo na face sem versão atual (o verso antes de "Fazer o verso"). */
+  currentVersion: SceneCurrentVersionView | null;
+  /** Template da face no editor de encartes; nulo até a primeira versão `ready` ser projetada. */
+  templateId: string | null;
 }
 
 export interface SceneSummaryView {
   id: string;
   name: string;
   formatId: string;
+  /** `single` (uma face) ou `front_back`. */
+  layout: SceneLayout;
   artWidthCm: number;
   artHeightCm: number;
   widthPx: number;
@@ -107,12 +129,16 @@ export interface SceneSummaryView {
 }
 
 export interface SceneDetailView extends SceneSummaryView {
+  /** Zonas da face 0 (as da cena de uma face; a frente na de frente e verso). */
   zones: SceneZones;
+  /** Versão atual da face 0, para os consumidores que não conhecem faces. */
   currentVersion: SceneCurrentVersionView | null;
+  /** Uma entrada por face, em ordem de índice. */
+  faces: SceneFaceView[];
   /** Versão `queued`/`running`, para a tela mostrar leitura, janela, etapa e "Parar" depois de recarregar. */
   activeVersion: SceneVersionView | null;
   messages: SceneMessageView[];
-  /** Só as versões `ready` com imagem, com `displayNumber`; o filtro vale também na paginação. */
+  /** Só as versões `ready` com imagem da face pedida (padrão: face 0), com `displayNumber`; o filtro vale também na paginação. */
   versions: {
     items: SceneVersionView[];
     total: number;
@@ -126,6 +152,7 @@ export interface SceneListItemView {
   id: string;
   name: string;
   formatId: string;
+  layout: SceneLayout;
   previewUrl: string | null;
   updatedAt: string;
   totalCostUsd: number;
@@ -178,6 +205,7 @@ export function toVersionView(
   version: TemplateSceneVersion,
   assets: ReadonlyMap<string, TemplateSceneAsset>,
   displayNumbers: ReadonlyMap<string, number> = new Map(),
+  layout: SceneLayout = 'single',
 ): SceneVersionView {
   const master = version.masterAssetId ? assets.get(version.masterAssetId) : undefined;
   const preview = version.previewAssetId ? assets.get(version.previewAssetId) : undefined;
@@ -185,6 +213,7 @@ export function toVersionView(
   return {
     id: version.id,
     number: version.number,
+    faceKey: faceKeyOf(layout, version.faceIndex ?? 0),
     displayNumber: displayNumbers.get(version.id) ?? null,
     windowEndsAt: windowEndsAtOf(version),
     judge: judgeOf(version),
@@ -216,8 +245,9 @@ export function toCurrentVersionView(
   version: TemplateSceneVersion,
   assets: ReadonlyMap<string, TemplateSceneAsset>,
   displayNumbers: ReadonlyMap<string, number> = new Map(),
+  layout: SceneLayout = 'single',
 ): SceneCurrentVersionView {
-  const base = toVersionView(version, assets, displayNumbers);
+  const base = toVersionView(version, assets, displayNumbers, layout);
   const live = (id: string | null) => {
     const asset = id ? assets.get(id) : undefined;
     return asset && !asset.purgedAt ? asset : undefined;
@@ -241,9 +271,13 @@ export function toCurrentVersionView(
   };
 }
 
-export function toMessageView(message: TemplateSceneMessage): SceneMessageView {
+export function toMessageView(
+  message: TemplateSceneMessage,
+  layout: SceneLayout = 'single',
+): SceneMessageView {
   return {
     id: message.id,
+    faceKey: faceKeyOf(layout, message.faceIndex ?? 0),
     role: message.role,
     content: message.content,
     attachments: message.attachments,
@@ -259,6 +293,7 @@ export function toSummaryView(scene: TemplateScene): SceneSummaryView {
     id: scene.id,
     name: scene.name,
     formatId: scene.formatId,
+    layout: scene.layout ?? 'single',
     artWidthCm: scene.artWidthCm,
     artHeightCm: scene.artHeightCm,
     widthPx: scene.widthPx,
@@ -276,4 +311,21 @@ export function toSummaryView(scene: TemplateScene): SceneSummaryView {
 export interface SceneMessagesPageView {
   items: SceneMessageView[];
   hasMore: boolean;
+}
+
+/** A face na API: as zonas e a versão atual dela, já em view. */
+export function toFaceView(
+  face: TemplateSceneFace,
+  currentVersion: SceneCurrentVersionView | null,
+): SceneFaceView {
+  return {
+    index: face.index,
+    key: face.key,
+    label: face.label,
+    zones: face.zones,
+    widthPx: face.widthPx,
+    heightPx: face.heightPx,
+    currentVersion,
+    templateId: face.templateId,
+  };
 }

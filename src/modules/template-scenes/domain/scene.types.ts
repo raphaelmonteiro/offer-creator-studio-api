@@ -14,6 +14,8 @@ export const SCENE_VERSION_OPERATIONS = [
   'flatten',
   'manual',
   'restore',
+  /** Verso derivado da frente por edição (change add-template-scene-faces). */
+  'derive_face',
 ] as const;
 export type SceneVersionOperation = (typeof SCENE_VERSION_OPERATIONS)[number];
 

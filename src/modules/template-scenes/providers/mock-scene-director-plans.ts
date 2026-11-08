@@ -246,3 +246,20 @@ export function contradictionPlan(message: string): DirectorPlan {
       : 'Esses pedidos não podem valer juntos. Qual deles você quer?';
   return { ...EMPTY, turn_kind: 'outro', will_change_image: false, reply };
 }
+
+/** O pedido de fazer o verso ("faz o verso", "agora cria o verso"): só vale na cena de frente e verso. */
+export const BACK_ASK = /\b(?:faz|fazer|faca|cria|criar|gera|gerar)\w* (?:o |um )?verso\b/;
+
+/**
+ * Plano de `fazer_verso`: sem imagem (o código deriva o verso). O que vier depois de "com" ("faz o verso com
+ * bandeirinhas") é o pedido extra, que fica em aberto no brief.
+ */
+export function backPlan(message: string): DirectorPlan {
+  const extra = /\bverso\s+com\s+(.+)$/i.exec(message)?.[1]?.trim();
+  return {
+    ...EMPTY,
+    turn_kind: 'fazer_verso',
+    reply: 'Vou fazer o verso a partir da frente.',
+    requests: extra ? [openRequest(extra)] : [],
+  };
+}

@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { FACE_KEYS, FaceKey } from '../domain/scene-faces';
 import { SCENE_LIMITS } from '../domain/scene.types';
 
 export class ListScenesQueryDto {
@@ -34,6 +35,15 @@ export class GetSceneQueryDto {
   @IsInt()
   @Min(1)
   versionsPage?: number;
+
+  @ApiPropertyOptional({
+    enum: FACE_KEYS,
+    description:
+      'Face de onde vem a página de versões; sem ela, a face 0. `currentVersion` e `zones` do topo seguem os da face 0',
+  })
+  @IsOptional()
+  @IsIn(FACE_KEYS)
+  face?: FaceKey;
 }
 
 export class ListMessagesQueryDto {

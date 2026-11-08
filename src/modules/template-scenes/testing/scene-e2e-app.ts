@@ -24,6 +24,7 @@ import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-q
 import { SceneCallRunner } from '../processors/scene-call-runner';
 import { SceneDirectorProcessor } from '../processors/scene-director.processor';
 import { SceneDirectorState } from '../processors/scene-director-state';
+import { SceneDeriveFaceHandler } from '../processors/scene-derive-face.handler';
 import { SceneRedrawHandler } from '../processors/scene-redraw.handler';
 import { SceneTemplateSyncProcessor } from '../processors/scene-template-sync.processor';
 import { SceneTurnProcessor } from '../processors/scene-turn.processor';
@@ -38,6 +39,7 @@ import { SCENE_VISION_CLIENT } from '../providers/scene-vision-client';
 import { SceneDirectorContextService } from '../services/scene-director-context';
 import { SceneDirectorService } from '../services/scene-director.service';
 import { SceneVisionService } from '../services/scene-vision.service';
+import { SceneFacesService } from '../services/scene-faces.service';
 import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
 import { SceneLogoService } from '../services/scene-logo.service';
@@ -125,12 +127,14 @@ export async function createSceneE2eApp(
       SceneLogoService,
       SceneVersionsService,
       SceneTurnService,
+      SceneFacesService,
       TemplateScenesService,
       SceneTurnState,
       SceneTurnSupport,
       SceneCallRunner,
       SceneVisionService,
       SceneRedrawHandler,
+      SceneDeriveFaceHandler,
       SceneDirectorService,
       SceneDirectorContextService,
       SceneDirectorState,
