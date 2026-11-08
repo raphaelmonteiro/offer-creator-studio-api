@@ -1,4 +1,6 @@
 import { DirectorImage, DirectorPlan } from '../domain/scene-director-schema';
+import { DirectorContext } from '../services/scene-director-context';
+import { SceneDirectorService } from '../services/scene-director.service';
 
 /** Blocos de imagem válidos mínimos (D-51); os testes sobrescrevem o que importa. */
 export function directorImage(overrides: Partial<DirectorImage> = {}): DirectorImage {
@@ -49,3 +51,36 @@ export function directorPlan(overrides: PlanOverrides = {}): DirectorPlan {
 
 export const directorRaw = (overrides: PlanOverrides = {}): string =>
   JSON.stringify(directorPlan(overrides));
+
+/** Contexto mínimo do Diretor para a mensagem, com uma cena que já tem imagem; os testes trocam o que importa. */
+export const directorContextFor = (
+  message: string,
+  over: Partial<DirectorContext> = {},
+): DirectorContext => ({
+  text: '',
+  image: null,
+  script: {
+    message,
+    hasImage: true,
+    marked: false,
+    openRequests: [],
+    layers: [],
+    hasLogoAttachment: false,
+  },
+  clientMessages: [message],
+  briefItems: [],
+  paintedText: [],
+  ...over,
+});
+
+/** Diretor simulado que devolve sempre o mesmo plano, com o `run` espiável. */
+export const directorReturning = (plan: PlanOverrides) => {
+  const run = jest.fn().mockResolvedValue({
+    ok: true,
+    text: JSON.stringify(directorPlan(plan)),
+    costUsd: 0.0004,
+    requestId: 'req',
+    latencyMs: 5,
+  });
+  return { director: { run } as unknown as SceneDirectorService, run };
+};

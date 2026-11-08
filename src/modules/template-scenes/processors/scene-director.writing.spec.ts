@@ -1,40 +1,18 @@
 import { decideTurn } from '../domain/scene-director-decision';
-import { DirectorContext } from '../services/scene-director-context';
-import { SceneDirectorService } from '../services/scene-director.service';
-import { directorPlan, PlanOverrides } from '../testing/scene-director-fixtures';
+import {
+  directorContextFor,
+  directorPlan,
+  directorReturning,
+  PlanOverrides,
+} from '../testing/scene-director-fixtures';
 import { runDirector } from './scene-director-run';
 
 /**
  * D-51: o código não recusa pedido de escrita nem faz pergunta de escrita (a medida 1.45 mostrou que o detector só
  * causava falsa recusa). O modelo simulado devolve um plano de imagem para cada frase, e a frase chega à imagem.
  */
-const contextFor = (message: string, over: Partial<DirectorContext> = {}): DirectorContext => ({
-  text: '',
-  image: null,
-  script: {
-    message,
-    hasImage: true,
-    marked: false,
-    openRequests: [],
-    layers: [],
-    hasLogoAttachment: false,
-  },
-  clientMessages: [message],
-  briefItems: [],
-  paintedText: [],
-  ...over,
-});
-
-const modelReturning = (plan: PlanOverrides) => {
-  const run = jest.fn().mockResolvedValue({
-    ok: true,
-    text: JSON.stringify(directorPlan(plan)),
-    costUsd: 0.0004,
-    requestId: 'req',
-    latencyMs: 5,
-  });
-  return { director: { run } as unknown as SceneDirectorService, run };
-};
+const contextFor = directorContextFor;
+const modelReturning = directorReturning;
 
 const imagePlan = (over: PlanOverrides = {}): PlanOverrides => ({
   turn_kind: 'pedido_item',

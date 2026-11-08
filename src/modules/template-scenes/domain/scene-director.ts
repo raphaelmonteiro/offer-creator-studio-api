@@ -78,6 +78,14 @@ function regionProblem(plan: DirectorPlan, ctx: DirectorValidationContext): stri
     : null;
 }
 
+/** Só o par `recusa_pintado` com `refusal: painted_logo` é recusa (R62); um sem o outro é saída inválida. */
+function refusalProblem(plan: DirectorPlan): string | null {
+  const refuses = plan.turn_kind === 'recusa_pintado';
+  if (refuses && plan.refusal === 'painted_logo') return null;
+  if (refuses) return 'recusa_pintado sem refusal: painted_logo';
+  return plan.refusal ? 'refusal preenchido em turn_kind que não é recusa_pintado' : null;
+}
+
 function requestProblem(plan: DirectorPlan, ctx: DirectorValidationContext): string | null {
   for (const request of plan.requests) {
     // "Esquece isso" não nomeia o item: o `text` do `drop` genérico não precisa ter palavra do cliente.
@@ -124,6 +132,7 @@ export function parseDirector(raw: string, ctx: DirectorValidationContext): Dire
   }
   const plan = parsed.data;
   const problem =
+    refusalProblem(plan) ??
     layerOpProblem(plan) ??
     textProblem(plan, ctx) ??
     regionProblem(plan, ctx) ??
