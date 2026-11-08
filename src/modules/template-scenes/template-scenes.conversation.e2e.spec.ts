@@ -101,7 +101,7 @@ describeIfSceneDb('Conversa da cena de template (e2e, banco chroma_x_e2e)', () =
     expect(done.messages.at(-1).content).toContain(
       'Conferi o texto letra por letra: “Promoção de Páscoa”.',
     );
-    expect(done.messages.at(-1).content).not.toContain('Não pinto');
+    expect(done.messages.at(-1).content).not.toMatch(/N[ãa]o\spinto/);
   });
 
   it('refação do texto: o juiz lê errado na primeira imagem, a segunda acerta, e uma só versão nasce', async () => {
