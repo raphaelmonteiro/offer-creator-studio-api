@@ -7,7 +7,6 @@ import {
   unusableAnswer,
   wantsImage,
 } from '../domain/scene-director-decision';
-import { CLASH_RETRY_REASON, findClash } from '../domain/scene-director-clash';
 import { checkAnnouncement } from '../domain/scene-director-announce';
 import { applyNumberRule, NumberPatch } from '../domain/scene-director-number';
 import { DirectorPlan } from '../domain/scene-director-schema';
@@ -36,10 +35,8 @@ export interface Problem {
   instruction?: boolean;
   text?: boolean;
   announcement?: boolean;
-  contradiction?: boolean;
 }
 
-/** As perguntas de desfecho fixo; a da contradição leva as duas frases e tem desfecho próprio (B5). */
 export const QUESTION_OUTCOMES = {
   number: 'number_question',
   instruction: 'instruction_question',
@@ -49,8 +46,7 @@ export const QUESTION_OUTCOMES = {
 export type Checked =
   | { plan: DirectorPlan; patches?: PlanPatches }
   | Problem
-  | { question: keyof typeof QUESTION_OUTCOMES }
-  | { question: 'contradiction'; lines: [string, string] };
+  | { question: keyof typeof QUESTION_OUTCOMES };
 
 const INSTRUCTION_RETRY_REASON =
   'o plano chama a imagem sem dizer o que mudar: preencha image.change com a mudança desta rodada';
@@ -82,28 +78,6 @@ function checkText(
   if (!final) return { reason: outside.reason, text: true };
   const stripped = stripTextOutsideBlock(image, sources);
   return { plan: { ...plan, image: stripped.image }, patches: { text: stripped.patches } };
-}
-
-/** Validação 10 (B5, PV-111): duas frases novas no mesmo bloco sem pedido de linhas separadas. Refaz uma vez; persistindo, pergunta. */
-function checkClash(plan: DirectorPlan, context: DirectorContext, final: boolean): Checked | null {
-  const found = findClash(plan, {
-    message: context.script.message,
-    known: [...context.paintedText, ...context.layerTexts],
-  });
-  if (found.clash === false) return null;
-  return final
-    ? { question: 'contradiction', lines: found.lines }
-    : { reason: CLASH_RETRY_REASON, contradiction: true };
-}
-
-/** Texto de um plano que chama imagem: primeiro a disputa entre frases (10), depois texto pedido e fora do bloco (4). */
-function checkImageText(
-  plan: DirectorPlan,
-  input: { context: DirectorContext; sources: TextSources; final: boolean },
-): Checked & { patches?: PlanPatches } {
-  return (
-    checkClash(plan, input.context, input.final) ?? checkText(plan, input.sources, input.final)
-  );
 }
 
 /**
@@ -147,7 +121,7 @@ export function validate(text: string, context: DirectorContext, final: boolean)
     layerTexts: context.layerTexts,
   };
   const calls = callsImage(plan);
-  const texted = calls ? checkImageText(plan, { context, sources, final }) : { plan };
+  const texted = calls ? checkText(plan, sources, final) : { plan };
   if (!('plan' in texted)) return texted;
   const composition = calls
     ? checkComposition(texted.plan, context.clientMessages)

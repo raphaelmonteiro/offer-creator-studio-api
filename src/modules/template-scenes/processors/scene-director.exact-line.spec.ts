@@ -1,6 +1,5 @@
 import {
   directorContextFor,
-  directorRaw,
   directorReturning,
   PlanOverrides,
 } from '../testing/scene-director-fixtures';
@@ -104,55 +103,41 @@ describe('Texto da camada que vai ser pintada (D-55)', () => {
   });
 });
 
-describe('Duas frases para o mesmo lugar (B5, D-59)', () => {
-  const OWNER =
-    'cria uma placa e escreve nela promoção de páscoa, e eu quero que o texto oferta de páscoa fique como se fosse parte da placa';
-  const both = imagePlan({ exact_text: ['promoção de páscoa', 'oferta de páscoa'] });
-
-  it('persistindo, a pergunta cita as duas frases, sem imagem, depois de refazer uma vez', async () => {
-    const result = await run(both, directorContextFor(OWNER));
-    expect(result.calls).toBe(2);
-    expect(result.outcome).toEqual({
-      kind: 'contradiction_question',
-      lines: ['promoção de páscoa', 'oferta de páscoa'],
+/** R84 e R85: sem trava de código (PV-111 revisado), a contradição é só do prompt; duas linhas não viram "qual das duas". */
+describe('Duas linhas sem trava de código (R84, R85)', () => {
+  const placa = (lines: string[]) =>
+    imagePlan({
+      exact_text: lines,
+      what_to_change: 'Add a wooden sign with the requested lettering',
     });
-    expect(questionReply(result.outcome)).toBe(
-      'Qual vai na imagem: “promoção de páscoa” ou “oferta de páscoa”? Nada foi alterado.',
-    );
-  });
 
-  it('a refação com a observação serve: o Diretor que pergunta na segunda chamada passa', async () => {
-    const model = directorReturning(both);
-    const answer = (text: string) => ({
-      ok: true,
-      text,
-      costUsd: 0.0004,
-      requestId: 'r',
-      latencyMs: 5,
+  it('R84: "sim, faz" com item de duas linhas pedido em turno anterior gera plano, sem refação', async () => {
+    const context = directorContextFor('sim, faz', {
+      clientMessages: ['coloca uma placa com "Oferta de Páscoa" e embaixo "Compre já"'],
     });
-    model.run.mockResolvedValueOnce(answer(directorRaw(both))).mockResolvedValueOnce(
-      answer(
-        directorRaw({
-          turn_kind: 'outro',
-          reply: 'Na placa vai “promoção de páscoa” ou “oferta de páscoa”?',
-        }),
-      ),
-    );
-    const { outcome } = await runDirector(model.director, {
-      context: directorContextFor(OWNER),
-      correlationId: 'c',
-    });
-    expect(model.run).toHaveBeenCalledTimes(2);
-    expect(String(model.run.mock.calls[1][0].text)).toContain('mesmo lugar');
-    expect(outcome.kind).toBe('plan');
-  });
-
-  it('duas linhas pedidas como tal seguem na primeira chamada', async () => {
-    const message = 'coloca uma placa com "Oferta de Páscoa" e embaixo "Compre já"';
-    const result = await run(
-      imagePlan({ exact_text: ['Oferta de Páscoa', 'Compre já'] }),
-      directorContextFor(message),
-    );
+    const result = await run(placa(['Oferta de Páscoa', 'Compre já']), context);
     expect(result).toMatchObject({ calls: 1, outcome: { kind: 'plan' } });
+  });
+
+  it('R84: resposta a pergunta, com as duas linhas pedidas antes, gera plano', async () => {
+    const context = directorContextFor('Oferta de Páscoa e Compre já', {
+      clientMessages: ['coloca uma placa com título e subtítulo', 'Oferta de Páscoa e Compre já'],
+    });
+    const result = await run(placa(['Oferta de Páscoa', 'Compre já']), context);
+    expect(result).toMatchObject({ calls: 1, outcome: { kind: 'plan' } });
+  });
+
+  it('R85: linhas inventadas pelo Diretor voltam a perguntar o texto exato', async () => {
+    const context = directorContextFor('coloca uma placa de oferta no rodapé');
+    const result = await run(placa(['Oferta', 'Aproveite']), context);
+    expect(result).toMatchObject({ calls: 2, outcome: { kind: 'exact_text_question' } });
+    expect(questionReply(result.outcome)).toContain('Qual é o texto exato');
+  });
+
+  it('R85: frase única quebrada pelo Diretor em duas linhas não vira "qual das duas"', async () => {
+    const context = directorContextFor('coloca uma placa escrita Promoção de Páscoa imperdível');
+    const result = await run(placa(['Promoção de Páscoa', 'imperdível']), context);
+    expect(result.outcome.kind).not.toBe('contradiction_question');
+    expect(questionReply(result.outcome) ?? '').not.toContain('Qual vai na imagem');
   });
 });

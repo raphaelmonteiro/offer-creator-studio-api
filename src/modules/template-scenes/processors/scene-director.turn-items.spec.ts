@@ -82,38 +82,6 @@ describeIfSceneDb(
       });
     });
 
-    describe('Duas frases para o mesmo lugar (B5, PV-111)', () => {
-      const twoLines = async () =>
-        directorAnswer({
-          turn_kind: 'pedido_item',
-          will_change_image: true,
-          reply: 'Vou acrescentar a placa com as duas frases.',
-          what_to_change: 'Add a wooden sign with the requested lettering',
-          exact_text: ['promoção de páscoa', 'oferta de páscoa'],
-        });
-
-      it('Diretor que insiste nas duas frases: pergunta citando as duas, rejected e sem job de imagem', async () => {
-        const { scene, version } = await h.runTurn(
-          'cria uma placa e escreve nela promoção de páscoa, e eu quero que o texto oferta de páscoa fique como se fosse parte da placa',
-          twoLines,
-        );
-        expect(version.status).toBe('rejected');
-        expect(await lastReply(scene.id)).toBe(
-          'Qual vai na imagem: “promoção de páscoa” ou “oferta de páscoa”? Nada foi alterado.',
-        );
-        expect(imageJobs()).toHaveLength(0);
-      });
-
-      it('duas linhas pedidas como tal ("embaixo") seguem para a imagem', async () => {
-        const { version } = await h.runTurn(
-          'coloca uma placa com promoção de páscoa e embaixo oferta de páscoa',
-          twoLines,
-        );
-        expect(version.status).toBe('queued');
-        expect(imageJobs()).toHaveLength(1);
-      });
-    });
-
     describe('Item de turno anterior', () => {
       it('Voltar outro dia: "sim, faz" executa o item em aberto, que passa a ser da mensagem atual', async () => {
         const { scene } = await h.readyScene();
@@ -146,6 +114,35 @@ describeIfSceneDb(
         expect(item).toMatchObject({ id: 'p1', status: 'open' });
         const message = (await h.messagesOf(scene.id)).find((m) => m.versionId === sent.versionId);
         expect(item.sourceMessageId).toBe(message?.id);
+      });
+
+      it('R84: "sim, faz" com item de duas linhas pedido em turno anterior gera imagem, sem pergunta de contradição', async () => {
+        const { scene } = await h.readyScene();
+        const earlier = await insertMessage(h.dataSource, scene.id, {
+          content: 'coloca uma placa com “Oferta de Páscoa” e embaixo “Compre já”',
+          role: 'user',
+        });
+        await h.dataSource.manager.update(
+          TemplateScene,
+          { id: scene.id },
+          { brief: [{ ...OLD, text: 'placa com duas linhas', sourceMessageId: earlier.id }] },
+        );
+        const sent = await h.post(scene.id, 'sim, faz');
+        const { client } = h.directorClient(async () =>
+          directorAnswer({
+            turn_kind: 'pedido_item',
+            will_change_image: true,
+            reply: 'Vou colocar a placa com as duas linhas.',
+            what_to_change: 'Add a wooden sign with the requested lettering',
+            exact_text: ['Oferta de Páscoa', 'Compre já'],
+            requests: [{ id: 'p1', text: 'placa com duas linhas', action: 'open', quote: null }],
+          }),
+        );
+        await h
+          .directorProcessor(client)
+          .process({ sceneId: scene.id, versionId: sent.versionId }, 'job-d');
+        expect((await h.versionOf(sent.versionId)).status).toBe('queued');
+        expect(await lastReply(scene.id)).not.toContain('Qual vai na imagem');
       });
 
       it('Voltar outro dia com outro pedido: o Diretor recebe o item como do turno anterior, e o pedido novo vale', async () => {

@@ -33,10 +33,6 @@ export const NUMBER_QUESTION = 'O que você quer mudar na imagem?';
 export const EXACT_TEXT_QUESTION =
   'Qual é o texto exato que vai na imagem? Escreva do jeito que deve aparecer.';
 
-/** Duas frases diferentes para o mesmo lugar, duas vezes (D-59, B5): uma pergunta citando as duas, sem imagem. */
-export const contradictionQuestion = (first: string, second: string): string =>
-  `Qual vai na imagem: “${first}” ou “${second}”? Nada foi alterado.`;
-
 /** "Esquece isso" sem item em aberto (validação 3). */
 export const NO_OPEN_REQUEST_REPLY = 'Não há pedido em aberto para esquecer. Nada foi alterado.';
 

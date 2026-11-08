@@ -23,8 +23,6 @@ export type DirectorOutcome =
   | { kind: 'exact_text_question' }
   /** O plano chamaria a imagem sem instrução, duas vezes: pergunta o que mudar, sem imagem (G2). */
   | { kind: 'instruction_question' }
-  /** Duas frases diferentes para o mesmo lugar, duas vezes: pergunta qual fica, citando as duas, sem imagem (B5). */
-  | { kind: 'contradiction_question'; lines: [string, string] }
   /** O plano pediu composição que o cliente não pediu, duas vezes: vira pergunta, sem imagem. */
   | { kind: 'composition_question'; labels: string[] }
   /** Falha, tempo esgotado, quota ou saída inválida duas vezes. */
@@ -50,7 +48,6 @@ const failedCall = (attempt: number, problem: string): DirectorCallRecord => ({
 
 /** Por que a tentativa não serviu, para `metrics.director.calls[].problem`. */
 function problemLabel(problem: Problem): string {
-  if (problem.contradiction) return 'contradiction';
   if (problem.text) return 'text';
   if (problem.groups) return 'composition';
   if (problem.number) return 'number';
@@ -59,17 +56,9 @@ function problemLabel(problem: Problem): string {
   return 'invalid';
 }
 
-/** O desfecho de uma tentativa que terminou em pergunta; a da contradição leva as duas frases (B5). */
-function questionOutcome(checked: Extract<Checked, { question: string }>): DirectorOutcome {
-  if (checked.question === 'contradiction') {
-    return { kind: 'contradiction_question', lines: checked.lines };
-  }
-  return { kind: QUESTION_OUTCOMES[checked.question] };
-}
-
 /** O desfecho de uma tentativa que serviu: a pergunta ao cliente ou o plano. */
 function acceptedOutcome(checked: Extract<Checked, { question: string } | { plan: DirectorPlan }>) {
-  if ('question' in checked) return questionOutcome(checked);
+  if ('question' in checked) return { kind: QUESTION_OUTCOMES[checked.question] } as const;
   return {
     kind: 'plan',
     plan: checked.plan,
