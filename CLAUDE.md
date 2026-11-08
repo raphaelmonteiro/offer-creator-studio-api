@@ -650,10 +650,19 @@ reclamação e imagem nova; "Parar" é o `cancel` de uma versão `queued`). O cu
 - Juiz (`SceneVisionService`, D-51): imagens inteiras antes e depois, mensagem, plano e itens em aberto, mais o **texto esperado** (as linhas
   de `exact_text` ou o texto já pintado da versão atual) e o recorte da região na resolução da master. Ele **transcreve** o texto
   (`texto_lido`) e o **código** compara com a linha pedida (`domain/scene-text-check.ts`: acento, cedilha, caixa, vírgula e `R$` contam). Texto
-  diferente leva a **uma** refação por mensagem (step `retrying_text`, `processors/scene-redraw.handler.ts`), da mesma base, com a linha de
+  diferente leva a **uma** refação por mensagem (step `retrying_text`, `processors/scene-redraw-conclude.ts`), da mesma base, com a linha de
   correção no prompt, dentro de `TEMPLATE_SCENE_MAX_PAID_CALLS_PER_MESSAGE`; a primeira imagem é descartada (`metrics.textCheck.attempts`),
-  `metrics.paintedText` é gravado e herdado, e `judge` fica no máximo `parcial` com texto errado. O resultado é **sempre aplicado** (D-26), o
-  texto ao cliente sai do que ele conferiu (`afterImageReply`, sem prefixo fixo), e só o juiz fecha ou reabre um item da lista (G9).
+  e `judge` fica no máximo `parcial` com texto errado. Provedor que falha na segunda imagem não falha a versão: a primeira, já paga, vale. Com
+  limite 3 a segunda imagem vale sem segundo juiz, e o chat diz que não a conferiu. O resultado é **sempre aplicado** (D-26), o texto ao
+  cliente sai do que ele conferiu (`afterImageReply`, sem prefixo fixo), e só o juiz fecha ou reabre um item da lista (G9); "Ainda falta: X.
+  Quer que eu faça agora?" sai de `nao_vistos`.
+- **Texto pintado por versão (D-56, rodada 6):** `metrics.paintedText` guarda `{text, zone, unchecked?}` (`domain/scene-painted-text.ts`).
+  Redesenho grava as linhas esperadas lidas iguais (as da rodada, com a zona dela, e as mantidas); camada pelo chat, camada à mão e
+  desfazer copiam o campo (da atual, ou da origem). O bloco 8 manda manter a linha herdada que a rodada não substitui (mesma zona, texto
+  novo e linha não repetida substituem). Linha enviada ao modelo que o juiz não pôde ler fica `unchecked`, e a rodada seguinte a mantém.
+- **Texto pintado na validação 4a (rodada 6):** a linha vale só como frase inteira (aspas iguais; palavras inteiras fora de aspas; junção
+  com o já pintado, sem palavras de dentro das aspas e sem preço invertido; ou texto inteiro de uma camada de texto, D-55). Validação 9: o
+  anúncio só promete o que o plano traz (`domain/scene-director-announce.ts`).
 - **Camadas pelo chat (D-51, D-55):** `set_text` com `position` (zona e lado) e cor `#1f1f1f` ou `#ffffff` pela luminância da master sob a
   caixa; a resposta vem da **diferença** das camadas (`domain/scene-layer-diff.ts`), e sem diferença nenhuma versão nasce. `layer_ops` de plano
   com imagem entram na versão nova (`processors/scene-plan-layers.ts`); pintar uma frase que é camada de texto tira a camada na mesma versão.
