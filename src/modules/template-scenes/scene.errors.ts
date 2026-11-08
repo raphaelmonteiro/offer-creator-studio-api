@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
+import type { FaceKey } from './domain/scene-faces';
 
 /** Erros da API da cena: envelope `{code, message, details}` com mensagem em pt-BR. */
 function sceneError(
@@ -77,7 +78,9 @@ export const sceneLayoutUnsupported = (formatId: string, layout: string) =>
   sceneError(
     HttpStatus.UNPROCESSABLE_ENTITY,
     'SCENE_LAYOUT_UNSUPPORTED',
-    'Este formato não aceita frente e verso. Escolha um formato em retrato.',
+    layout === 'tabloid'
+      ? 'O jornal de 4 páginas só existe no formato folheto 54x40.'
+      : 'Este formato não aceita frente e verso. Escolha um formato em retrato.',
     { formatId, layout },
   );
 
@@ -86,18 +89,25 @@ export const faceNotFound = (face: string) =>
     face,
   });
 
-export const frontNotReady = () =>
+/** `faceKey` só vai em `details` na derivação da Interna (PV-T5); a do verso responde como sempre. */
+export const frontNotReady = (faceKey?: FaceKey) =>
   sceneError(
     HttpStatus.UNPROCESSABLE_ENTITY,
     'FRONT_NOT_READY',
-    'Faça a frente primeiro: o verso nasce dela.',
+    faceKey === 'inner'
+      ? 'Faça a externa primeiro: a interna nasce dela.'
+      : 'Faça a frente primeiro: o verso nasce dela.',
+    faceKey ? { faceKey } : undefined,
   );
 
-export const backAlreadyExists = () =>
+export const backAlreadyExists = (faceKey?: FaceKey) =>
   sceneError(
     HttpStatus.CONFLICT,
     'BACK_ALREADY_EXISTS',
-    'O verso já existe e nasce da frente. Peça os ajustes na aba Verso, ou volte a uma versão anterior dele.',
+    faceKey === 'inner'
+      ? 'A interna já existe e nasce da externa. Peça os ajustes na aba Interna, ou volte a uma versão anterior dela.'
+      : 'O verso já existe e nasce da frente. Peça os ajustes na aba Verso, ou volte a uma versão anterior dele.',
+    faceKey ? { faceKey } : undefined,
   );
 
 export const regionTooSmall = () =>

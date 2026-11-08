@@ -74,6 +74,8 @@ export interface TemplateSceneSource {
   fingerprint: string;
   projectionVersion: number;
   syncedAt: string;
+  /** Jornal (D-3): a dobra e a faixa de segurança, em px da folha; só dado, nenhum elemento visível. */
+  fold?: { xPx: number; safeFromPx: number; safeToPx: number };
 }
 
 export interface SceneTemplateConfiguration {
