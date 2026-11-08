@@ -8,6 +8,7 @@ import { SceneElement } from '../domain/scene.types';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { bumpRevision } from '../services/scene-lock.service';
+import { closeTurnBrief } from '../services/scene-turn-brief';
 import { SceneFilesService } from '../services/scene-files.service';
 import { readVersionMaster } from '../services/scene-master';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
@@ -39,7 +40,8 @@ async function saveLayerVersion(
   current: TemplateSceneVersion,
   input: { elements: SceneElement[]; changed: string[] },
 ): Promise<void> {
-  const { manager, version } = target;
+  const { manager, scene, version } = target;
+  await closeTurnBrief(manager, scene, version);
   Object.assign(version, {
     operation: 'set_layer' as const,
     status: 'ready' as const,

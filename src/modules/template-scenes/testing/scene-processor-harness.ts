@@ -195,6 +195,25 @@ export function useProcessorHarness() {
       });
       return version;
     },
+    /**
+     * Grava a lista do que o cliente pediu. `sourceMessageId: 'turn'` vira a mensagem do cliente da versão (item do
+     * turno, D-59); qualquer outro valor fica como está (item de outro turno).
+     */
+    async setBrief(sceneId: string, versionId: string, brief: TemplateScene['brief']) {
+      const message = await h.dataSource.manager.findOneByOrFail(TemplateSceneMessage, {
+        versionId,
+        role: 'user',
+      });
+      await h.dataSource.manager.update(
+        TemplateScene,
+        { id: sceneId },
+        {
+          brief: brief.map((item) =>
+            item.sourceMessageId === 'turn' ? { ...item, sourceMessageId: message.id } : item,
+          ),
+        },
+      );
+    },
     trackScene: (id: string) => createdScenes.push(id),
     job: (sceneId: string, versionId: string) => ({ sceneId, versionId }),
     versionOf: (id: string) => h.dataSource.manager.findOneByOrFail(TemplateSceneVersion, { id }),

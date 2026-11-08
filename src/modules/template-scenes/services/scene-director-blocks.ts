@@ -100,11 +100,14 @@ export function paintedBlock(lines: PaintedLine[]): string {
 
 export function briefBlock(brief: BriefItem[]): string {
   const open = brief.filter((item) => item.status === 'open');
-  const closed = brief.filter((item) => item.status !== 'open').slice(-10);
+  // Item superado (D-59) já ficou para trás: não é contexto nem pendência.
+  const closed = brief
+    .filter((item) => item.status === 'done' || item.status === 'dropped')
+    .slice(-10);
   const lines = [
     open.length
-      ? `Pedidos do cliente ainda em aberto:\n${open.map((i) => `- ${i.id}: ${oneLine(i.text)}`).join('\n')}`
-      : 'Pedidos do cliente ainda em aberto: nenhum.',
+      ? `Pedidos do cliente em aberto, do turno anterior (execute só o que a mensagem atual pede):\n${open.map((i) => `- ${i.id}: ${oneLine(i.text)}`).join('\n')}`
+      : 'Pedidos do cliente em aberto, do turno anterior: nenhum.',
   ];
   if (closed.length) {
     lines.push(

@@ -130,7 +130,7 @@ describeIfSceneDb('Uma mudança por rodada (banco chroma_x_e2e)', () => {
     expect(replies[0].content).toMatch(/Ainda falta: uma ponte\. Quer que eu faça agora\?$/);
   });
 
-  it('Item aberto de outra mensagem não vira pergunta de agora', async () => {
+  it('Pedido de turno anterior não é cobrado: item aberto de outra mensagem não vira pergunta nem "Ainda falta"', async () => {
     const { scene } = await h.readyScene();
     await h.dataSource.manager.update(
       TemplateScene,
@@ -153,7 +153,8 @@ describeIfSceneDb('Uma mudança por rodada (banco chroma_x_e2e)', () => {
       where: { versionId: queued.id, role: 'assistant' },
     });
     expect(replies[0].content).not.toContain('Quer que eu faça agora?');
-    expect(replies[0].content).toContain('Ainda falta parte do que você pediu.');
+    expect(replies[0].content).not.toContain('Ainda falta');
+    expect((await h.sceneOf(scene.id)).brief[0].status).toBe('superseded');
   });
 
   it('"Continua" executa o que falta: o plano da rodada é a placa, com "Oferta" no bloco de texto exato', async () => {

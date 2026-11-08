@@ -7,7 +7,7 @@ import {
   SceneZones,
 } from '../domain/scene.types';
 import { sceneZonesFor } from '../domain/scene-formats';
-import { openItems } from '../domain/scene-brief';
+import { openItems, turnItems } from '../domain/scene-brief';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { PaintedLine } from '../domain/scene-painted-text';
 import { paintedLinesOf } from '../services/scene-director-blocks';
@@ -61,10 +61,13 @@ export interface TurnContext {
   parent: TurnParent | null;
   /** Logos anexadas à mensagem, ainda em disco: as camadas do plano com imagem usam (defeito b). */
   attachments: TurnAttachmentAsset[];
-  /** Textos dos itens em aberto da lista do que o cliente pediu, no momento da chamada (o juiz os confere depois). */
+  /**
+   * Itens em aberto no momento da chamada: os do turno e o que sobrou do turno anterior (os mais velhos já ficaram
+   * superados ao fim dos turnos). A frase de pedidos em aberto da imagem nova usa esta lista.
+   */
   openItems: Array<{ id: string; text: string; sourceMessageId?: string }>;
-  /** Itens já dados como feitos (os mais recentes): o juiz confere se ainda aparecem depois do redesenho. */
-  doneItems: Array<{ id: string; text: string }>;
+  /** Só os itens do turno (D-59): o juiz recebe e cobra estes, nunca o item de turno anterior nem o feito. */
+  turnItems: Array<{ id: string; text: string }>;
 }
 
 /** Monta o contexto do turno a partir da versão `queued` (leitura sob o lock da cena). */
@@ -109,10 +112,10 @@ export async function loadTurnContext(
       text: item.text,
       sourceMessageId: item.sourceMessageId,
     })),
-    doneItems: (scene.brief ?? [])
-      .filter((item) => item.status === 'done')
-      .slice(-10)
-      .map((item) => ({ id: item.id, text: item.text })),
+    turnItems: turnItems(scene.brief ?? [], message?.id ?? '').map((item) => ({
+      id: item.id,
+      text: item.text,
+    })),
   };
 }
 

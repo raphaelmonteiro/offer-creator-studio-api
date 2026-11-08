@@ -647,15 +647,20 @@ reclamação e imagem nova; "Parar" é o `cancel` de uma versão `queued`). O cu
   (`processors/scene-prompt.ts`) monta **oito blocos em ordem fixa** (ação, formato e uso, composição, estilo, "Make exactly one change",
   região com as medidas de `computeSceneZones` em px por `domain/scene-zone-bands.ts`, preservação, texto), sem a linha de pedidos em aberto
   (D-54). A primeira imagem e a imagem nova ficam com `buildGeneratePrompt` (D-38, D-52); com texto pedido, só a linha `Regras:` muda.
-- Juiz (`SceneVisionService`, D-51): imagens inteiras antes e depois, mensagem, plano e itens em aberto, mais o **texto esperado** (as linhas
+- Juiz (`SceneVisionService`, D-51): imagens inteiras antes e depois, mensagem, plano e **só os itens do turno** (D-59), mais o **texto esperado** (as linhas
   de `exact_text` ou o texto já pintado da versão atual) e o recorte da região na resolução da master. Ele **transcreve** o texto
   (`texto_lido`) e o **código** compara com a linha pedida (`domain/scene-text-check.ts`: acento, cedilha, caixa, vírgula e `R$` contam). Texto
   diferente leva a **uma** refação por mensagem (step `retrying_text`, `processors/scene-redraw-conclude.ts`), da mesma base, com a linha de
   correção no prompt, dentro de `TEMPLATE_SCENE_MAX_PAID_CALLS_PER_MESSAGE`; a primeira imagem é descartada (`metrics.textCheck.attempts`),
   e `judge` fica no máximo `parcial` com texto errado. Provedor que falha na segunda imagem não falha a versão: a primeira, já paga, vale. Com
   limite 3 a segunda imagem vale sem segundo juiz, e o chat diz que não a conferiu. O resultado é **sempre aplicado** (D-26), o texto ao
-  cliente sai do que ele conferiu (`afterImageReply`, sem prefixo fixo), e só o juiz fecha ou reabre um item da lista (G9); "Ainda falta: X.
+  cliente sai do que ele conferiu (`afterImageReply`, sem prefixo fixo), e só o juiz fecha um item da lista (G9; ele **não reabre** item feito, D-59); "Ainda falta: X.
   Quer que eu faça agora?" sai de `nao_vistos`.
+- **Sempre para a frente (D-59):** `brief` ganha o estado `superseded`. Item do turno é o da mensagem atual (aberto por ela, ou do turno
+  anterior que o Diretor devolve com o mesmo `id`, e que passa a ser dela). Ao fim de todo turno (`services/scene-turn-brief.ts`, chamado por
+  `readyVersion`, `rejectVersion`, `failVersion`, `cancelVersion`, desfazer, camada e o cancelamento na janela) o item aberto que não é do turno
+  vira `superseded`; Parar fecha também os do turno parado e do anterior. O juiz recebe só os itens do turno e ignora `id` fora dele, então
+  "Ainda falta" só sai sobre a mensagem atual e uma vez. Mensagem que se contradiz vira pergunta sem imagem (regra do prompt do Diretor).
 - **Texto pintado por versão (D-56, rodada 6):** `metrics.paintedText` guarda `{text, zone, unchecked?}` (`domain/scene-painted-text.ts`).
   Redesenho grava as linhas esperadas lidas iguais (as da rodada, com a zona dela, e as mantidas); camada pelo chat, camada à mão e
   desfazer copiam o campo (da atual, ou da origem). O bloco 8 manda manter a linha herdada que a rodada não substitui (mesma zona, texto

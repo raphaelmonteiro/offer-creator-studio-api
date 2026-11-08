@@ -2,11 +2,13 @@ import { EntityManager } from 'typeorm';
 import { Rect, SceneElement } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
+import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { publishSceneEvent } from '../services/scene-events';
 import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
+import { closeTurnBrief } from '../services/scene-turn-brief';
 import { cancelVersion, emitVersionEvent } from './scene-turn-finish';
 import { applyJudgeVerdict, JudgeBriefVerdict } from '../domain/scene-brief';
 
@@ -91,10 +93,18 @@ export async function readyVersion(
   version.elements = extra.elements ?? target.parentElements;
   version.metrics = { ...version.metrics, ...extra.metrics };
   if (extra.judge) {
-    const judged = applyJudgeVerdict(scene.brief ?? [], extra.judge, new Date());
+    const message = await manager.findOne(TemplateSceneMessage, {
+      where: { versionId: version.id, role: 'user' },
+      order: { createdAt: 'ASC' },
+    });
+    const judged = applyJudgeVerdict(scene.brief ?? [], extra.judge, {
+      messageId: message?.id ?? '',
+      now: new Date(),
+    });
     scene.brief = judged.brief;
     version.metrics = { ...version.metrics, judgeBrief: judged.changes };
   }
+  await closeTurnBrief(manager, scene, version);
   if (extra.requestedRegion !== undefined) version.requestedRegion = extra.requestedRegion;
   await manager.save(version);
   // O resultado é sempre a versão atual, inclusive com o juiz reprovando (D-26): "Voltar para a anterior" é do cliente.
@@ -121,6 +131,7 @@ export async function rejectVersion(
 ): Promise<void> {
   version.status = 'rejected';
   version.step = 'done';
+  await closeTurnBrief(manager, scene, version);
   await manager.save(version);
   await settleUserMessage(manager, version.id, 'done');
   await addAssistantMessage(manager, {

@@ -24,6 +24,7 @@ import {
   requestedTargetOf,
 } from './scene-message-target';
 import { addAssistantMessage, settleUserMessage } from './scene-messages';
+import { closeTurnBrief } from './scene-turn-brief';
 import {
   assertExpectedRevision,
   assertSceneIdle,
@@ -165,7 +166,7 @@ export class SceneTurnService {
       if (!version.cancelRequestedAt) {
         const wasQueued = version.status === 'queued';
         version.cancelRequestedAt = new Date();
-        if (wasQueued) await this.cancelQueued(manager, version);
+        if (wasQueued) await this.cancelQueued(manager, scene, version);
         else await manager.save(version);
         await bumpRevision(manager, scene);
         await publishSceneEvent(manager, {
@@ -188,8 +189,14 @@ export class SceneTurnService {
     });
   }
 
-  private async cancelQueued(manager: EntityManager, version: TemplateSceneVersion): Promise<void> {
+  private async cancelQueued(
+    manager: EntityManager,
+    scene: TemplateScene,
+    version: TemplateSceneVersion,
+  ): Promise<void> {
     version.status = 'cancelled';
+    // Parar na janela fecha o pedido do turno e o que sobrou do anterior (D-59).
+    await closeTurnBrief(manager, scene, version, { stopped: true });
     await manager.save(version);
     await settleUserMessage(manager, version.id, 'failed');
     await addAssistantMessage(manager, {

@@ -4,6 +4,7 @@ import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
 import { restoreInto } from '../services/scene-restore';
 import { pruneSceneAssets } from '../services/scene-retention';
+import { closeTurnBrief } from '../services/scene-turn-brief';
 import { resolveUndo } from '../services/scene-undo';
 import { DirectorTarget, rejectTarget } from './scene-director-target';
 import { emitVersionEvent } from './scene-turn-finish';
@@ -22,6 +23,7 @@ export async function applyUndoEffect(
     await rejectTarget(target, resolution.reply);
     return;
   }
+  await closeTurnBrief(manager, scene, version);
   await restoreInto(manager, scene, resolution.source, { reading: version });
   scene.currentVersionId = version.id;
   await pruneSceneAssets(manager, scene);

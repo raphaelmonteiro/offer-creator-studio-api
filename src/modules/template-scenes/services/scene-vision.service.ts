@@ -56,8 +56,6 @@ export interface JudgePromptInput {
   message: string;
   plan: { image?: { change?: string } | null };
   openItems: Array<{ id: string; text: string }>;
-  /** Itens dados como feitos antes: o juiz diz se ainda aparecem depois do redesenho. */
-  doneItems?: Array<{ id: string; text: string }>;
   /** A cena tinha imagem antes: o juiz recebe ANTES e DEPOIS. Na primeira imagem, só DEPOIS. */
   hasBefore: boolean;
   /** Linhas de texto que devem estar na imagem: as da rodada e as já pintadas e conferidas (D-51, D-56). */
@@ -98,16 +96,13 @@ export function buildVisionPrompt(input: JudgePromptInput): string {
   const list = (items: Array<{ id: string; text: string }>): string =>
     items.map((item) => `- ${item.id}: ${oneLine(item.text)}`).join('\n');
   const items = input.openItems.length ? list(input.openItems) : 'nenhum';
-  const done = input.doneItems?.length
-    ? `\nPedidos que já pareciam atendidos (id: texto); diga em "vistos" ou "nao_vistos" se o resultado ainda aparece na imagem DEPOIS:\n${list(input.doneItems)}`
-    : '';
   return [
     input.hasBefore
       ? 'Você confere o resultado de uma edição de imagem de encarte: a primeira imagem é ANTES e a segunda é DEPOIS.'
       : 'Você confere uma imagem de encarte recém-criada: só há a imagem DEPOIS.',
     `Mensagem do cliente: "${oneLine(input.message)}".`,
     `Plano do sistema (pode estar errado: confira contra a MENSAGEM DO CLIENTE, não contra o plano): ${plan || 'sem plano'}.`,
-    `Pedidos do cliente ainda em aberto (id: texto):\n${items}${done}`,
+    `Pedidos desta mensagem ainda em aberto (id: texto):\n${items}`,
     'Ano, data ou número citado na mensagem do cliente é contexto, não pedido de imagem: não cobre como faltando e não diga em "mudou" que o ano ou o número não aparece.',
     ...textRequest(input),
     'Responda só com JSON no formato {"atendeu": "sim"|"parcial"|"nao", "mudou": string, "vistos": string[], "nao_vistos": string[], "faltou": string, "texto_lido": [{"pedido": string, "lido": string}], "texto_extra": string, "emenda": boolean, "emenda_descricao": string}.',
@@ -158,7 +153,7 @@ function parseAssessment(raw: string, input: JudgePromptInput): Parsed | null {
     if (!readText || ((input.expectedText?.length ?? 0) > 0 && !Array.isArray(json.texto_lido))) {
       return null;
     }
-    const known = new Set([...input.openItems, ...(input.doneItems ?? [])].map((item) => item.id));
+    const known = new Set(input.openItems.map((item) => item.id));
     const seen = ids(json.vistos, known);
     return {
       changed: json.mudou.trim().slice(0, 300),

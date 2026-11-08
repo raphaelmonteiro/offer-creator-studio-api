@@ -207,6 +207,47 @@ describeIfSceneDb('Janela de 5 s com Parar (banco chroma_x_e2e)', () => {
       await expect(h.post(scene.id, 'outra')).resolves.toBeDefined();
     });
 
+    it('Parar na janela fecha o pedido do turno e o do turno anterior, e o pedido seguinte não cobra nenhum (B2)', async () => {
+      const older = {
+        id: 'p1',
+        text: 'um rio no meio',
+        status: 'open' as const,
+        sourceMessageId: 'm-anterior',
+        updatedAt: '2026-11-06T12:00:00.000Z',
+      };
+      const { scene, version } = await h.runTurn(
+        'coloca um trator vermelho no campo',
+        imagePlan('pedido_item', 'trator vermelho no campo'),
+        { brief: [older] },
+      );
+      expect((await h.sceneOf(scene.id)).brief.map((item) => item.status)).toEqual([
+        'open',
+        'open',
+      ]);
+
+      await h.turns().cancel(scene.id, version.id);
+
+      const stopped = await h.sceneOf(scene.id);
+      expect(stopped.brief.map((item) => [item.id, item.status])).toEqual([
+        ['p1', 'superseded'],
+        ['p2', 'superseded'],
+      ]);
+      expect((await h.versionOf(version.id)).metrics.briefSuperseded).toEqual(['p1', 'p2']);
+    });
+
+    it('Parar repetido não muda a lista de novo', async () => {
+      const { scene, version } = await h.runTurn(
+        'coloca um trator vermelho no campo',
+        imagePlan('pedido_item', 'trator vermelho no campo'),
+      );
+      await h.turns().cancel(scene.id, version.id);
+      const once = (await h.sceneOf(scene.id)).brief;
+      await expect(h.turns().cancel(scene.id, version.id)).rejects.toMatchObject({
+        response: { code: 'VERSION_NOT_CANCELLABLE' },
+      });
+      expect((await h.sceneOf(scene.id)).brief).toEqual(once);
+    });
+
     it('Mensagem durante a janela: 409 SCENE_BUSY', async () => {
       const { scene } = await h.runTurn(
         'deixa tudo mais quente',

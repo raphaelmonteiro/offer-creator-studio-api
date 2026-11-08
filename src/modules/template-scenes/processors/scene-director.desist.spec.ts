@@ -53,8 +53,9 @@ describeIfSceneDb(
       const { scene } = await h.runTurn('deixa pra la', turn([drop('p2', 'deixa pra la')]), {
         brief: [entry('p1', 'coelho'), entry('p2', 'rio')],
       });
+      // D-59: o coelho era de turno anterior e a mensagem não o pede, então fica superado (não desistido).
       expect(await statuses(scene.id)).toEqual([
-        ['p1', 'open'],
+        ['p1', 'superseded'],
         ['p2', 'dropped'],
       ]);
       expect(await lastReply(scene.id)).toContain('Tirei da lista: rio.');
@@ -97,7 +98,7 @@ describeIfSceneDb(
       expect(await lastReply(scene.id)).toContain('Tirei da lista: flor.');
     });
 
-    it('Citação sem palavra do item: "de" em "muda a cor de fundo" é saída inválida, e o item continua aberto', async () => {
+    it('Citação sem palavra do item: "de" em "muda a cor de fundo" é saída inválida, e o item de turno anterior fica superado', async () => {
       const { scene, version, plan } = await h.runTurn(
         'muda a cor de fundo',
         turn([drop('p1', 'de', 'coelho')]),
@@ -105,7 +106,8 @@ describeIfSceneDb(
       );
       expect(plan).toHaveBeenCalledTimes(2);
       expect(version).toMatchObject({ status: 'failed', errorCode: 'DIRECTOR_UNAVAILABLE' });
-      expect(await statuses(scene.id)).toEqual([['p1', 'open']]);
+      // D-59: a falha também encerra o turno, e o item de turno anterior fica superado.
+      expect(await statuses(scene.id)).toEqual([['p1', 'superseded']]);
     });
   },
 );

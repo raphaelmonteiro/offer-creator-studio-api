@@ -3,7 +3,12 @@ import { AddBriefToTemplateScenes1767300000000 } from '../../../migrations/17673
 import { TemplateScene } from '../entities/template-scene.entity';
 import { insertScene } from '../testing/scene-fixtures';
 import { describeIfSceneDb, deleteTestScenes, openSceneTestDb } from '../testing/scene-test-db';
-import { applyDirectorRequests, applyJudgeVerdict, openItems } from './scene-brief';
+import {
+  applyDirectorRequests,
+  applyJudgeVerdict,
+  openItems,
+  supersedeAtTurnEnd,
+} from './scene-brief';
 import { DirectorRequest } from './scene-director-schema';
 
 const NOW = new Date('2026-11-06T12:00:00.000Z');
@@ -68,7 +73,10 @@ describeIfSceneDb('scene-brief com banco (chroma_x_e2e)', () => {
     await dataSource.manager.save(scene);
 
     const verdict = { seen: [], notSeen: ['p1'] };
-    const judged = applyJudgeVerdict((await reload(scene.id)).brief, verdict, LATER);
+    const judged = applyJudgeVerdict((await reload(scene.id)).brief, verdict, {
+      messageId: 'm1',
+      now: LATER,
+    });
     scene.brief = judged.brief;
     await dataSource.manager.save(scene);
 
@@ -81,7 +89,11 @@ describeIfSceneDb('scene-brief com banco (chroma_x_e2e)', () => {
     scene.brief = applyDirectorRequests([], [open('rio')], ctx()).brief;
     await dataSource.manager.save(scene);
 
-    scene.brief = applyJudgeVerdict(scene.brief, { seen: ['p1'], notSeen: [] }, LATER).brief;
+    scene.brief = applyJudgeVerdict(
+      scene.brief,
+      { seen: ['p1'], notSeen: [] },
+      { messageId: 'm1', now: LATER },
+    ).brief;
     await dataSource.manager.save(scene);
 
     const next = await reload(scene.id);
@@ -120,6 +132,29 @@ describeIfSceneDb('scene-brief com banco (chroma_x_e2e)', () => {
     } finally {
       await otherSession.destroy();
     }
+  });
+
+  it('Voltar outro dia com outro pedido: o pedido novo vale, e o item de ontem fica superado e gravado', async () => {
+    const scene = await sceneWithBrief();
+    scene.brief = applyDirectorRequests([], [open('rio')], ctx('m1', NOW)).brief;
+    await dataSource.manager.save(scene);
+
+    const otherSession = await openSceneTestDb();
+    try {
+      const loaded = await otherSession.manager.findOneByOrFail(TemplateScene, { id: scene.id });
+      const turn = applyDirectorRequests(loaded.brief, [open('mais ovos')], ctx('m9', LATER));
+      loaded.brief = supersedeAtTurnEnd(turn.brief, { messageId: 'm9', now: LATER }).brief;
+      await otherSession.manager.save(loaded);
+    } finally {
+      await otherSession.destroy();
+    }
+
+    const next = await reload(scene.id);
+    expect(next.brief.map((item) => [item.id, item.status])).toEqual([
+      ['p1', 'superseded'],
+      ['p2', 'open'],
+    ]);
+    expect(openItems(next.brief).map((item) => item.id)).toEqual(['p2']);
   });
 
   it('migration: down remove a coluna, up recria com o padrão [] e é idempotente', async () => {

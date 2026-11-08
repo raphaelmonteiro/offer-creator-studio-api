@@ -55,6 +55,42 @@ describeIfSceneDb(
       expect(messages[1].content).toBe('Geração cancelada.');
     });
 
+    it('Parar durante a imagem: os itens do turno parado e do anterior ficam superados (B2)', async () => {
+      const { scene, version } = await queuedScene('cancela com itens');
+      await h.setBrief(scene.id, version.id, [
+        {
+          id: 'p1',
+          text: 'um rio no meio',
+          status: 'open',
+          sourceMessageId: 'm-anterior',
+          updatedAt: '2026-11-06T12:00:00.000Z',
+        },
+        {
+          id: 'p2',
+          text: 'trator vermelho no campo',
+          status: 'open',
+          sourceMessageId: 'turn',
+          updatedAt: '2026-11-06T12:00:00.000Z',
+        },
+      ]);
+      const { provider } = fakeProvider(async () => {
+        await h.dataSource.manager.update(
+          TemplateSceneVersion,
+          { id: version.id },
+          { cancelRequestedAt: new Date() },
+        );
+        return okResult(0.12);
+      });
+
+      await processorWith(provider).process(job(scene.id, version.id));
+
+      expect((await versionOf(version.id)).status).toBe('cancelled');
+      expect((await sceneOf(scene.id)).brief.map((item) => [item.id, item.status])).toEqual([
+        ['p1', 'superseded'],
+        ['p2', 'superseded'],
+      ]);
+    });
+
     it('cancelamento pedido antes de o worker pegar: cancela sem chamar o provedor', async () => {
       const { provider, generate } = fakeProvider(() => okResult());
       const { scene, version } = await queuedScene('cancela antes', {

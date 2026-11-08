@@ -20,6 +20,7 @@ import { DirectorContext } from '../services/scene-director-context';
 import { displayNumbersOf } from '../services/scene-display-number';
 import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
+import { keepOpenItems } from '../services/scene-turn-brief';
 import { addDirectorCost, DirectorCallRecord, summarizeDirectorCalls } from './scene-director-cost';
 import { planMetrics } from './scene-director-plan-metrics';
 import { DirectorRunResult } from './scene-director-run';
@@ -160,6 +161,7 @@ export class SceneDirectorState {
       return;
     }
     if (dropped.kind === 'ask') {
+      await keepOpenItems(manager, scene, version);
       await this.reject(target, whichToForgetReply(dropped.items));
       return;
     }

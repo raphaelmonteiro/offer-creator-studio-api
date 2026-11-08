@@ -1,4 +1,5 @@
 import { QUEUES } from '../../../shared/queue/animation-queue.service';
+import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 import { errorOf } from '../testing/scene-test-helpers';
@@ -55,6 +56,47 @@ describeIfSceneDb('SceneDirectorProcessor: parar e cenas em paralelo (banco chro
       expect((version.metrics.director as { calls: unknown[] }).calls).toHaveLength(1);
       const assistants = (await messagesOf(scene.id)).filter((m) => m.role === 'assistant');
       expect(assistants.map((m) => m.content)).toEqual(['Geração cancelada.']);
+    });
+
+    it('Parar durante a leitura fecha o item de turno anterior e não abre item do plano descartado', async () => {
+      const { scene } = await h.readyScene();
+      await h.dataSource.manager.update(
+        TemplateScene,
+        { id: scene.id },
+        {
+          brief: [
+            {
+              id: 'p1',
+              text: 'um rio no meio',
+              status: 'open',
+              sourceMessageId: 'm-anterior',
+              updatedAt: '2026-11-06T12:00:00.000Z',
+            },
+          ],
+        },
+      );
+      const sent = await h.post(scene.id, 'coloca um trator vermelho no campo');
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const { client, plan } = h.directorClient(async () => {
+        await gate;
+        return directorAnswer({
+          turn_kind: 'pedido_item',
+          will_change_image: true,
+          reply: 'Vou colocar o trator.',
+          what_to_change: 'colocar um trator vermelho',
+          requests: [{ id: null, text: 'trator vermelho no campo', action: 'open', quote: null }],
+        });
+      });
+      const running = h.directorProcessor(client).process(job(scene.id, sent.versionId));
+      while (plan.mock.calls.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+
+      await h.turns().cancel(scene.id, sent.versionId);
+      release();
+      await running;
+
+      const stored = await h.sceneOf(scene.id);
+      expect(stored.brief.map((item) => [item.id, item.status])).toEqual([['p1', 'superseded']]);
     });
 
     it('Parar antes de o job começar: o Diretor nem é chamado, e nada é cobrado', async () => {

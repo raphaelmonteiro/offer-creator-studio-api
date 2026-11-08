@@ -6,6 +6,7 @@ import { CANCELLED_REPLY, failureReply, NO_LAYER_CHANGED } from '../scene-texts'
 import { publishSceneEvent, SceneEventKind } from '../services/scene-events';
 import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
+import { closeTurnBrief } from '../services/scene-turn-brief';
 
 /** Fechamentos da versão (cancelada ou falha) sob o lock da cena: estado, chat, `revision` e evento. */
 
@@ -40,6 +41,8 @@ export async function cancelVersion(
 ): Promise<void> {
   version.status = 'cancelled';
   version.cancelRequestedAt = version.cancelRequestedAt ?? new Date();
+  // Parar fecha o pedido do turno parado e o que sobrou do anterior (D-59).
+  await closeTurnBrief(manager, scene, version, { stopped: true });
   await manager.save(version);
   await settleUserMessage(manager, version.id, 'failed');
   await addAssistantMessage(manager, {
@@ -60,6 +63,7 @@ export async function failVersion(
 ): Promise<void> {
   version.status = 'failed';
   version.errorCode = code;
+  await closeTurnBrief(manager, scene, version);
   await manager.save(version);
   await settleUserMessage(manager, version.id, 'failed');
   await addAssistantMessage(manager, {

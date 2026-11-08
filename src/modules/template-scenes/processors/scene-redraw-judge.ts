@@ -49,7 +49,7 @@ function markGone(lines: TextLine[], inherited: boolean[]): TextLine[] {
 
 /** O que o juiz viu, em fatos para o texto ao cliente (já sem promessa de preservação). */
 function factsOf(assessment: VisionOk, ctx: TurnContext): NonNullable<JudgedResult['facts']> {
-  const labelOf = new Map([...ctx.openItems, ...ctx.doneItems].map((item) => [item.id, item.text]));
+  const labelOf = new Map(ctx.turnItems.map((item) => [item.id, item.text]));
   return {
     satisfied: assessment.satisfied,
     changed: safeChanged(assessment.changed),
@@ -102,8 +102,7 @@ export async function judgeResult(
       vision.assess({
         message: ctx.request,
         plan: input.plan,
-        openItems: ctx.openItems,
-        doneItems: ctx.doneItems,
+        openItems: ctx.turnItems,
         hasBefore: Boolean(input.before),
         expectedText: text.expected,
         knownText: text.known,
