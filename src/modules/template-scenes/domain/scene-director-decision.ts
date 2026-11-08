@@ -6,7 +6,7 @@ import {
 } from './scene-director-schema';
 import { emptyImage, imageChange } from './scene-director-image';
 import { NO_IMAGE_REPLY, NO_INSTRUCTION_REPLY } from '../scene-texts';
-import { FIXED_ANSWER, replyIsForbidden, safeReply } from './scene-director-phrases';
+import { replyIsForbidden, safeReply } from './scene-director-phrases';
 import { fold } from '../../../shared/text/fold';
 
 /**
