@@ -83,6 +83,55 @@ describeIfSceneDb('Conversa da cena de template (e2e, banco chroma_x_e2e)', () =
     });
   });
 
+  it('placa com frase na área marcada: uma imagem com markup, sem janela, e o texto conferido letra por letra', async () => {
+    const { id, ready } = await sceneWithImage('E2E conversa placa');
+    const sent = await message(
+      id,
+      'coloca uma placa de madeira com a frase "Promoção de Páscoa" #plano-texto',
+      ready.revision,
+      { region: { x: 0.1, y: 0.88, w: 0.5, h: 0.08 } },
+    );
+    expect(sent.status).toBe(202);
+    const done = await waitForScene(id, (s) => s.currentVersion?.number === 2 && idle(s));
+    expect(done.currentVersion).toMatchObject({
+      operation: 'redraw',
+      windowEndsAt: null,
+      judge: 'sim',
+    });
+    expect(done.messages.at(-1).content).toContain(
+      'Conferi o texto letra por letra: “Promoção de Páscoa”.',
+    );
+    expect(done.messages.at(-1).content).not.toContain('Não pinto');
+  });
+
+  it('refação do texto: o juiz lê errado na primeira imagem, a segunda acerta, e uma só versão nasce', async () => {
+    const { id, ready } = await sceneWithImage('E2E conversa refação');
+    await message(
+      id,
+      'coloca uma placa com a frase "Promoção de Páscoa" no rodapé #plano-texto #juiz-texto-errado',
+      ready.revision,
+    );
+    const done = await waitForScene(id, (s) => s.currentVersion?.number === 2 && idle(s), 60_000);
+    expect(done.currentVersion).toMatchObject({ displayNumber: 2, judge: 'sim' });
+    expect(done.messages.at(-1).content).toContain('Conferi o texto letra por letra');
+    expect(done.messages.at(-1).content).not.toContain('saiu diferente');
+    expect(done.versions.items.map((v: Scene) => v.displayNumber)).toEqual([2, 1]);
+  });
+
+  it('refação que não resolve: a segunda imagem vale, judge parcial, e o chat diz o que pediu e o que leu', async () => {
+    const { id, ready } = await sceneWithImage('E2E conversa refação 2');
+    await message(
+      id,
+      'coloca uma placa com a frase "Promoção de Páscoa" no rodapé #plano-texto #juiz-texto-errado-2',
+      ready.revision,
+    );
+    const done = await waitForScene(id, (s) => s.currentVersion?.number === 2 && idle(s), 60_000);
+    expect(done.currentVersion).toMatchObject({ judge: 'parcial' });
+    expect(done.messages.at(-1).content).toContain(
+      'Pedi “Promoção de Páscoa” e li “Promocao de Pascoa”.',
+    );
+  });
+
   it('Parar: dentro da janela a versão é cancelada, nenhuma imagem sai e a atual não muda', async () => {
     const { id, ready } = await sceneWithImage('E2E conversa parar');
     const sent = await message(id, 'deixa tudo mais quente', ready.revision);
@@ -171,6 +220,32 @@ describeIfSceneDb('Conversa da cena de template (e2e, banco chroma_x_e2e)', () =
     });
     const next = await message(id, 'agora tira o coelho', done.revision);
     expect(next.status).toBe(202);
+  });
+
+  it('camada sem mudança (cena 9cb42bb7, versão 9): mover a logo para onde ela já está não cria versão e diz que nada mudou', async () => {
+    const { id, ready } = await sceneWithImage('E2E conversa camada igual');
+    const png = await sharp({ create: { width: 40, height: 20, channels: 4, background: '#f00' } })
+      .png()
+      .toBuffer();
+    const logo = await authed(http().post(`/v1/template-scenes/${id}/assets/logo`)).attach(
+      'file',
+      png,
+      { filename: 'logo.png', contentType: 'image/png' },
+    );
+    const fresh = await get(`/${id}`);
+    await message(id, 'coloca a logo à esquerda no cabeçalho', fresh.body.data.revision, {
+      attachments: [{ assetId: logo.body.data.assetId }],
+    });
+    const placed = await waitForScene(
+      id,
+      (s) => s.currentVersion?.operation === 'set_layer' && idle(s),
+    );
+    await message(id, 'passa a logo para a esquerda', placed.revision);
+    const done = await waitForScene(id, (s) => s.revision > placed.revision + 1 && idle(s));
+    expect(done.currentVersion.id).toBe(placed.currentVersion.id);
+    expect(done.messages.at(-1).content).toContain('nada mudou');
+    expect(done.messages.at(-1).content).not.toContain('Alterado apenas');
+    expect(ready.currentVersion.master.id).toBe(done.currentVersion.master.id);
   });
 
   describe('histórico e acesso negado da rota nova', () => {
