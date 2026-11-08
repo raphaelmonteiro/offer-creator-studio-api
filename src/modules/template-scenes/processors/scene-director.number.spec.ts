@@ -133,6 +133,19 @@ describeIfSceneDb(
       ]);
     });
 
+    it('Segunda mudança com número não some: o item da placa com "Feliz 2027" abre (D-54)', async () => {
+      const { scene, plan } = await h.runTurn(
+        'tira o coelho e coloca uma placa com "Feliz 2027"',
+        item('Remove the bunny', {
+          requests: [open('placa com a frase Feliz 2027')],
+        }),
+      );
+      expect(plan).toHaveBeenCalledTimes(1);
+      expect((await h.sceneOf(scene.id)).brief.map((entry) => entry.text)).toEqual([
+        'placa com a frase Feliz 2027',
+      ]);
+    });
+
     it('Inventário com o ano: o item sai do plano, sem refazer', async () => {
       const { version, plan } = await h.runTurn(
         'mais flores, mantem os ovos com 2027',

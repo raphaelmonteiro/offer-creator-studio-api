@@ -55,6 +55,16 @@ describe('scene-brief', () => {
       expect(changes.opened).toEqual(['p1']);
     });
 
+    it('Número que o cliente pediu para pintar abre o item (rodada 6, D-54)', () => {
+      const message = 'tira o coelho e coloca uma placa com "Feliz 2027"';
+      const { brief } = applyDirectorRequests(
+        [],
+        [open('placa com a frase Feliz 2027'), open('indicação do ano 2027')],
+        ctx('m1', NOW, message),
+      );
+      expect(brief.map((item) => item.text)).toEqual(['placa com a frase Feliz 2027']);
+    });
+
     it('R8: "rio" não casa com "cenário colorido": vira item novo, e o outro não muda', () => {
       const colorido: BriefItem = { ...RIO, id: 'p1', text: 'cenário colorido' };
       const { brief, changes } = applyDirectorRequests([colorido], [open('rio')], ctx());

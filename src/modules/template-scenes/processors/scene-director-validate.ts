@@ -105,7 +105,11 @@ export function validate(text: string, context: DirectorContext, final: boolean)
     : { ok: true as const };
   if (composition.ok === false) return { reason: composition.reason, groups: composition.groups };
   const written = calls
-    ? applyNumberRule(texted.plan, { final, paintedText: context.paintedText })
+    ? applyNumberRule(texted.plan, {
+        final,
+        paintedText: context.paintedText,
+        message: context.script.message,
+      })
     : { kind: 'ok' as const, plan: texted.plan, patches: [] as NumberPatch[] };
   if (written.kind === 'retry') return { reason: written.reason, number: true };
   if (written.kind === 'question') return { question: 'number' };

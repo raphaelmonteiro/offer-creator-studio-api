@@ -1,4 +1,5 @@
 import { fold } from '../../../shared/text/fold';
+import { quotedContents } from './scene-exact-text';
 
 /**
  * Detector único de ano, data e número escrito (D-42, validação 7), sobre os blocos em inglês e os pedidos em pt-BR.
@@ -108,4 +109,28 @@ export function stripNumberClauses(text: string, options: WrittenNumberOptions =
     out += clause.text;
   });
   return out.trim();
+}
+
+const NUMERIC = /\d+(?:[.,/]\d+)*/g;
+const PAINT_VERB =
+  /\b(?:escrev\w*|escrito|coloc\w*|poe|bot\w*|pint\w*)\s+(?:(?:o|a|um|uma|esse|este|numero|ano|data|de)\s+)*(\d+(?:[.,/]\d+)*)/g;
+
+/**
+ * Números que o cliente pediu para pintar na mensagem atual (rodada 6, D-54): literais dentro de um trecho entre
+ * aspas, ou logo depois de verbo de escrever ou colocar.
+ */
+function numbersToPaint(message: string): Set<string> {
+  const found = quotedContents(message).flatMap((content) => content.match(NUMERIC) ?? []);
+  for (const match of fold(message).matchAll(PAINT_VERB)) found.push(match[1]);
+  return new Set(found);
+}
+
+/**
+ * O item de `requests` com número não abre (D-42: o juiz relataria "Ainda não vi: 2027"), salvo o número que o
+ * cliente pediu para pintar na mensagem atual, que abre como qualquer outro (rodada 6, D-54).
+ */
+export function numberKeepsOutOfList(text: string, message = ''): boolean {
+  if (!hasWrittenNumber(text, { removal: true })) return false;
+  const toPaint = numbersToPaint(message);
+  return !(fold(text).match(NUMERIC) ?? []).some((number) => toPaint.has(number));
 }

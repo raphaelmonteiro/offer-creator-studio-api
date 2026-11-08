@@ -1,6 +1,6 @@
 import { fold } from '../../../shared/text/fold';
 import { DirectorPlan } from './scene-director-schema';
-import { hasWrittenNumber, stripNumberClauses } from './scene-written-number';
+import { hasWrittenNumber, numberKeepsOutOfList, stripNumberClauses } from './scene-written-number';
 
 /**
  * Validação 7 (D-42, ajustada por D-51): nenhum bloco de contexto do prompt pede ano, data ou número escrito. O
@@ -42,7 +42,8 @@ export const NUMBER_RETRY_REASON =
 const removalOf = (field: NumberField): { removal: boolean } => ({ removal: field === 'change' });
 
 /** Passo 1: item de `preserve` e de `requests` com número sai do plano, sem refazer. */
-function withoutNumberItems(plan: DirectorPlan, painted: string[]): DirectorPlan {
+function withoutNumberItems(plan: DirectorPlan, options: NumberOptions): DirectorPlan {
+  const painted = options.paintedText ?? [];
   if (!plan.image) return plan;
   // O item que cita texto já pintado e conferido fica: o número dele é o que deve continuar na imagem.
   const keepsPainted = (item: string): boolean =>
@@ -51,18 +52,22 @@ function withoutNumberItems(plan: DirectorPlan, painted: string[]): DirectorPlan
     (item) => !hasWrittenNumber(item) || keepsPainted(item),
   );
   const requests = plan.requests.filter(
-    (request) => request.action !== 'open' || !hasWrittenNumber(request.text, { removal: true }),
+    (request) => request.action !== 'open' || !numberKeepsOutOfList(request.text, options.message),
   );
   return preserve.length === plan.image.preserve.length && requests.length === plan.requests.length
     ? plan
     : { ...plan, image: { ...plan.image, preserve }, requests };
 }
 
-export function applyNumberRule(
-  plan: DirectorPlan,
-  options: { final: boolean; paintedText?: string[] },
-): NumberRuleResult {
-  const cleaned = withoutNumberItems(plan, options.paintedText ?? []);
+interface NumberOptions {
+  final: boolean;
+  paintedText?: string[];
+  /** A mensagem atual do cliente, literal: o número que ela pede para pintar não é contexto (D-54). */
+  message?: string;
+}
+
+export function applyNumberRule(plan: DirectorPlan, options: NumberOptions): NumberRuleResult {
+  const cleaned = withoutNumberItems(plan, options);
   const image = cleaned.image;
   if (NOT_PAINTED_TURNS.has(cleaned.turn_kind) || !image) {
     return { kind: 'ok', plan: cleaned, patches: [] };

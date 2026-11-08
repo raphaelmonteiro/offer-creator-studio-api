@@ -1,6 +1,6 @@
 import { fold } from '../../../shared/text/fold';
 import { DirectorRequest } from './scene-director-schema';
-import { hasWrittenNumber } from './scene-written-number';
+import { numberKeepsOutOfList } from './scene-written-number';
 import { mentionsWords, sameWholeWord, significantWords } from './scene-words';
 
 /**
@@ -90,8 +90,9 @@ export function applyDirectorRequests(
   const next = brief.map((item) => ({ ...item }));
   const updatedAt = ctx.now.toISOString();
   for (const request of requests) {
-    // Ano, data e número escrito não abrem pedido (D-42): o juiz relataria "Ainda não vi na imagem: 2027".
-    if (request.action === 'open' && hasWrittenNumber(request.text, { removal: true })) continue;
+    // Ano, data e número escrito não abrem pedido (D-42): o juiz relataria "Ainda não vi na imagem: 2027". Salvo o
+    // número que o cliente pediu para pintar (D-54).
+    if (request.action === 'open' && numberKeepsOutOfList(request.text, ctx.message)) continue;
     const found = findItem(next, request);
     if (request.action === 'drop') {
       if (found && found.status !== 'dropped') {

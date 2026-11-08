@@ -39,6 +39,42 @@ describe('Validação 7 nos blocos (D-51, R54, R55)', () => {
     ]);
   });
 
+  describe('Item de requests com número a pintar abre (rodada 6, D-54)', () => {
+    const open = (text: string) => [{ id: null, text, action: 'open' as const, quote: null }];
+    const kept = (message: string, text: string): string[] => {
+      const result = applyNumberRule(
+        plan({ what_to_change: 'Remove the bunny', requests: open(text) }),
+        {
+          final: false,
+          message,
+        },
+      );
+      return result.kind === 'ok' ? result.plan.requests.map((request) => request.text) : [];
+    };
+
+    it('Segunda mudança com número não some: o número está entre aspas na mensagem', () => {
+      const text = 'placa com a frase Feliz 2027';
+      expect(kept('tira o coelho e coloca uma placa com "Feliz 2027"', text)).toEqual([text]);
+      expect(kept('tira o coelho e coloca uma placa com “Feliz 2027”', text)).toEqual([text]);
+    });
+
+    it.each([
+      ['tira o coelho e coloca 2027 em cima', '2027 em cima'],
+      ['tira o coelho e escreve o número 99 no canto', 'número 99 no canto'],
+      ['tira o coelho e põe 12/04 na placa', 'placa com 12/04'],
+    ])('o número logo depois de verbo de escrever ou colocar: "%s"', (message, text) => {
+      expect(kept(message, text)).toEqual([text]);
+    });
+
+    it('ano de contexto continua sem abrir item, e o número de outra mensagem não vale', () => {
+      expect(kept('tira o coelho, é para o template de 2027', 'coelho para 2027')).toEqual([]);
+      expect(kept('tira o coelho e coloca uma placa com "Feliz 2028"', 'placa com 2027')).toEqual(
+        [],
+      );
+      expect(kept('tira o coelho e coloca uma placa', 'indicação do ano 2027')).toEqual([]);
+    });
+  });
+
   it('o Diretor é refeito uma vez e, persistindo, só o trecho com o número sai', () => {
     const withYear = plan({ what_to_change: 'Easter eggs and a bunny and the year 2027' });
     expect(applyNumberRule(withYear, { final: false })).toMatchObject({ kind: 'retry' });

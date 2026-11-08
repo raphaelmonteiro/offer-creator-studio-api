@@ -30,6 +30,10 @@ const outsideQuotes = (message: string): string => message.replace(QUOTED, ' | '
 const TOKEN = /\p{N}+(?:[.,]\p{N}+)*|\p{L}+/gu;
 const tokensOf = (text: string): string[] => text.match(TOKEN) ?? [];
 
+/** Os conteúdos dos trechos entre aspas (retas, tipográficas ou francesas) de um texto. */
+export const quotedContents = (text: string): string[] =>
+  [...text.matchAll(QUOTED_CAPTURE)].map((m) => m[1] ?? m[2] ?? m[3] ?? '');
+
 const typographic = (text: string): string =>
   collapse(text.replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'"));
 
@@ -62,9 +66,7 @@ function inWholeWords(folded: string, message: string): boolean {
 
 /** Entre aspas: a linha é igual, letra por letra, ao conteúdo inteiro de um trecho entre aspas. */
 function equalsQuoted(text: string, message: string): boolean {
-  return [...message.matchAll(QUOTED_CAPTURE)].some(
-    (m) => typographic(m[1] ?? m[2] ?? m[3] ?? '') === text,
-  );
+  return quotedContents(message).some((content) => typographic(content) === text);
 }
 
 /**
