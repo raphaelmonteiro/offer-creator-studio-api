@@ -59,7 +59,7 @@ describe('scene-brief', () => {
       const message = 'tira o coelho e coloca uma placa com "Feliz 2027"';
       const { brief } = applyDirectorRequests(
         [],
-        [open('placa com a frase Feliz 2027'), open('indicação do ano 2027')],
+        [open('placa com a frase Feliz 2027'), open('indicação do ano 2028')],
         ctx('m1', NOW, message),
       );
       expect(brief.map((item) => item.text)).toEqual(['placa com a frase Feliz 2027']);
