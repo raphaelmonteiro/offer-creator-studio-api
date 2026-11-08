@@ -117,7 +117,8 @@ describe('prompt do Diretor', () => {
     expect(DIRECTOR_INSTRUCTIONS).toContain('Camada de texto NÃO está pintada na imagem');
     expect(DIRECTOR_INSTRUCTIONS).toContain('Liste TODAS as linhas');
     expect(DIRECTOR_INSTRUCTIONS).toContain('Uma mudança principal por rodada');
-    expect(DIRECTOR_INSTRUCTIONS).toContain('near the very bottom edge');
+    expect(DIRECTOR_INSTRUCTIONS).toContain('at the very bottom of the page');
+    expect(DIRECTOR_INSTRUCTIONS).not.toContain('bottom edge');
     expect(DIRECTOR_INSTRUCTIONS).toContain('sem aspas em volta');
   });
 
