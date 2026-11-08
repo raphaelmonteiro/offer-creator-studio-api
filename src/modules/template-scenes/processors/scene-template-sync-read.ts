@@ -1,54 +1,69 @@
 import { EntityManager, In } from 'typeorm';
+import { faceTemplateName } from '../domain/scene-faces';
 import { findSceneFormat } from '../domain/scene-formats';
 import { projectionKeys } from '../domain/scene-template-keys';
 import { SceneTemplateConfiguration, TemplateImageUrls } from '../domain/scene-template.types';
 import { SceneElement } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
+import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { Template } from '../../templates/entities/template.entity';
+import { currentVersionOf, loadFaces } from '../services/scene-faces';
 import { ProjectionSource } from '../services/scene-template-projection';
 
-/** A cena e a versão atual `ready` com master, lidas sem trava. */
-export interface CurrentScene {
+/** A cena, uma face e a versão atual `ready` com master dela, lidas sem trava. */
+export interface CurrentFace {
   scene: TemplateScene;
+  face: TemplateSceneFace;
   version: TemplateSceneVersion & { masterAssetId: string };
 }
 
 /**
- * `null` para cena inexistente ou excluída, sem versão atual, versão que não está `ready` ou sem master (cena sem
+ * As faces da cena que têm imagem pronta, uma entrada por face (D-8): a versão atual `ready` com master. Lista vazia
+ * para cena inexistente ou excluída e para face sem versão atual, versão que não está `ready` ou sem master (face sem
  * imagem não tem template, D-9).
  */
-export async function readCurrentScene(
+export async function readCurrentFaces(
   manager: EntityManager,
   sceneId: string,
-): Promise<CurrentScene | null> {
+): Promise<CurrentFace[]> {
   const scene = await manager.findOneBy(TemplateScene, { id: sceneId });
-  if (!scene?.currentVersionId) return null;
-  const version = await manager.findOneBy(TemplateSceneVersion, { id: scene.currentVersionId });
-  if (!version || version.status !== 'ready' || !version.masterAssetId) return null;
-  return { scene, version: version as CurrentScene['version'] };
+  if (!scene) return [];
+  const current: CurrentFace[] = [];
+  for (const face of await loadFaces(manager, sceneId)) {
+    const version = await currentVersionOf(manager, face);
+    if (version?.status === 'ready' && version.masterAssetId) {
+      current.push({ scene, face, version: version as CurrentFace['version'] });
+    }
+  }
+  return current;
 }
 
-/** O que a projeção lê da cena, com as duas impressões digitais de PV-12. */
-export function projectionSourceOf(current: CurrentScene): ProjectionSource {
-  const { scene, version } = current;
+/** O que a projeção lê da face, com as duas impressões digitais de PV-12. */
+export function projectionSourceOf(current: CurrentFace): ProjectionSource {
+  const { scene, face, version } = current;
   const format = findSceneFormat(scene.formatId);
   if (!format) throw new Error(`Formato da cena sem medidas: ${scene.formatId}`);
+  const name = faceTemplateName(scene.name, face);
   return {
     sceneId: scene.id,
-    name: scene.name,
+    name,
+    faceKey: face.key,
+    faceIndex: face.index,
+    zones: face.zones,
     format,
-    widthPx: scene.widthPx,
-    heightPx: scene.heightPx,
+    widthPx: face.widthPx,
+    heightPx: face.heightPx,
     versionId: version.id,
     sceneRevision: scene.revision,
     elements: version.elements,
     keys: projectionKeys({
       formatId: scene.formatId,
-      name: scene.name,
+      name,
       masterAssetId: version.masterAssetId,
       elements: version.elements,
+      face: { key: face.key, zones: face.zones },
     }),
   };
 }
@@ -66,10 +81,12 @@ export function planFor(existing: Template | null, keys: ProjectionSource['keys'
 /** As URLs das imagens do template existente, reaproveitadas quando só as camadas mudam. */
 export function imageUrlsOf(template: Template): TemplateImageUrls {
   const config = template.configuration as SceneTemplateConfiguration;
+  const imageOf = (section: SceneTemplateConfiguration['header']): string | undefined =>
+    section.background.type === 'image' ? section.background.imageUrl : undefined;
   return {
     full: config.bodyBackground.imageUrl,
-    header: config.header.background.imageUrl,
-    footer: config.footer.background.imageUrl,
+    header: imageOf(config.header),
+    footer: imageOf(config.footer),
     thumbnail: template.thumbnailUrl as string,
   };
 }

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager, In } from 'typeorm';
 import { Template } from '../../templates/entities/template.entity';
 import { CreateSceneDto } from '../dto/create-scene.dto';
 import { acceptsFrontBack, FaceKey } from '../domain/scene-faces';
@@ -92,10 +92,7 @@ export class TemplateScenesService {
         busy.cancelRequestedAt = new Date();
         await manager.save(busy);
       }
-      if (scene.approvedTemplateId) {
-        await manager.delete(Template, { id: scene.approvedTemplateId });
-        scene.approvedTemplateId = null;
-      }
+      await this.removeTemplates(manager, scene);
       const revision = await bumpRevision(manager, scene);
       await manager.softDelete(TemplateScene, { id: sceneId });
       if (busy) {
@@ -112,6 +109,20 @@ export class TemplateScenesService {
         });
       }
     });
+  }
+
+  /** Apaga o template de cada face (e o que a cena apontava), mantendo os arquivos; zera os ponteiros. */
+  private async removeTemplates(manager: EntityManager, scene: TemplateScene): Promise<void> {
+    const faces = await manager.find(TemplateSceneFace, { where: { sceneId: scene.id } });
+    const ids = [
+      ...new Set(
+        [scene.approvedTemplateId, ...faces.map((face) => face.templateId)].filter(Boolean),
+      ),
+    ] as string[];
+    if (ids.length === 0) return;
+    await manager.delete(Template, { id: In(ids) });
+    await manager.update(TemplateSceneFace, { sceneId: scene.id }, { templateId: null });
+    scene.approvedTemplateId = null;
   }
 }
 

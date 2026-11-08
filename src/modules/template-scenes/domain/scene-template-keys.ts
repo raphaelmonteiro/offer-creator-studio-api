@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
-import { SceneElement } from './scene.types';
+import { FaceKey } from './scene-faces';
+import { SceneElement, SceneZones } from './scene.types';
 
 /** Sobe quando o algoritmo da projeção muda: invalida a impressão digital de todos os templates de cena. */
 export const PROJECTION_VERSION = 1;
@@ -35,6 +36,12 @@ export interface ProjectionKeysInput {
   name: string;
   masterAssetId: string;
   elements: SceneElement[];
+  /**
+   * Face do template: frente e verso entram na impressão digital com a chave e as zonas (a imagem projetada depende
+   * delas). A face única fica de fora, para as chaves dos templates anteriores às faces continuarem as mesmas e a
+   * cena migrada não ser projetada de novo só por isso.
+   */
+  face?: { key: FaceKey; zones: SceneZones };
 }
 
 export interface ProjectionKeys {
@@ -58,11 +65,16 @@ export function projectionKeys(input: ProjectionKeysInput): ProjectionKeys {
       rotation,
       z,
     }));
+  const faced =
+    input.face && input.face.key !== 'single'
+      ? { face: input.face.key, zones: input.face.zones }
+      : {};
   const pictorialKey = sha1({
     version: PROJECTION_VERSION,
     format: input.formatId,
     master: input.masterAssetId,
     flattened,
+    ...faced,
   });
   const layers = input.elements.filter(isLayer).sort(byLayerOrder);
   return { pictorialKey, fingerprint: sha1({ pictorialKey, layers, name: input.name }) };

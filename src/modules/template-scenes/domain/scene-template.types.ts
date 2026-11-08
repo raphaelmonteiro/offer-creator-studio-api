@@ -3,6 +3,8 @@
  * de encartes lê (`frontend/src/types/template.ts`): seções em cm e elementos em px de prévia a 72 DPI.
  */
 
+import { FaceKey } from './scene-faces';
+
 export interface TemplateImageBackground {
   type: 'image';
   imageUrl: string;
@@ -41,12 +43,21 @@ export interface TemplateTextElement extends TemplateElementBase {
 
 export type TemplateElement = TemplateImageElement | TemplateTextElement;
 
+/** Fundo da seção de altura 0 (a face não tem a zona, PV-11): o mesmo que o editor usa para "sem seção". */
+export interface TemplateSolidBackground {
+  type: 'solid';
+  color: 'transparent';
+  /** Sem imagem: o campo existe só para quem lê `background.imageUrl` sem olhar o tipo. */
+  imageUrl?: undefined;
+}
+
 export interface TemplateSection {
   id: 'header' | 'footer';
   name: string;
   widthCm: number;
+  /** 0 na zona que a face não tem: o editor trata como altura 0 e a página usa o miolo até a borda. */
   heightCm: number;
-  background: TemplateImageBackground;
+  background: TemplateImageBackground | TemplateSolidBackground;
   elements: TemplateElement[];
 }
 
@@ -54,6 +65,9 @@ export interface TemplateSection {
 export interface TemplateSceneSource {
   kind: 'template-scene';
   sceneId: string;
+  /** Face do template (`single`, `front`, `back`); ausente em template anterior às faces, que vale a face 0. */
+  faceKey?: FaceKey;
+  faceIndex?: number;
   versionId: string;
   sceneRevision: number;
   pictorialKey: string;
@@ -73,7 +87,8 @@ export interface SceneTemplateConfiguration {
 /** URLs das imagens de uma projeção pictórica (reaproveitadas quando só as camadas mudam). */
 export interface TemplateImageUrls {
   full: string;
-  header: string;
-  footer: string;
+  /** Ausente na face sem a zona (seção de altura 0, sem fatia de imagem, PV-11). */
+  header?: string;
+  footer?: string;
   thumbnail: string;
 }

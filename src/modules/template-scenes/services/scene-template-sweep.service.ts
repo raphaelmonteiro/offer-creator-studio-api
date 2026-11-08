@@ -11,40 +11,52 @@ export const TEMPLATE_SWEEP_INTERVAL_MS = 60 * 1000;
 export const TEMPLATE_SWEEP_BATCH = 20;
 
 /**
- * Cenas com versão atual `ready` e sem template, ou com o template atrás da `revision` da cena, e que ainda não
- * somaram `MAX_SYNC_ATTEMPTS` falhas na `revision` atual (PV-15, PV-16). A comparação com a falha usa a mesma
- * `sceneRevision` gravada pelo job: cena que mudou volta a ser tentada.
+ * Cenas com alguma face de versão atual `ready` e sem template, ou com o template atrás da `revision` da cena, e que
+ * ainda não somaram `MAX_SYNC_ATTEMPTS` falhas na `revision` atual (PV-15, PV-16). A comparação com a falha usa a mesma
+ * `sceneRevision` gravada pelo job: cena que mudou volta a ser tentada. O template da face 0 também vale pelo
+ * `approvedTemplateId` da cena (espelho), como no job.
  */
 const STALE_SCENES_SQL = `
   SELECT s.id
     FROM template_scenes s
-    JOIN template_scene_versions v ON v.id = s."currentVersionId" AND v.status = 'ready'
-         AND v."masterAssetId" IS NOT NULL
-    LEFT JOIN templates t ON t.id = s."approvedTemplateId"
    WHERE s."deletedAt" IS NULL
-     AND (t.id IS NULL
-          OR COALESCE((t.configuration->'source'->>'sceneRevision')::int, -1) < s.revision)
-     AND NOT (COALESCE((v.metrics->'templateSync'->>'attempts')::int, 0) >= $1
-              AND COALESCE((v.metrics->'templateSync'->>'sceneRevision')::int, -1) = s.revision)
+     AND EXISTS (
+       SELECT 1
+         FROM template_scene_faces f
+         JOIN template_scene_versions v ON v.id = f."currentVersionId" AND v.status = 'ready'
+              AND v."masterAssetId" IS NOT NULL
+         LEFT JOIN templates t
+                ON t.id = COALESCE(f."templateId", CASE WHEN f."index" = 0 THEN s."approvedTemplateId" END)
+        WHERE f."sceneId" = s.id
+          AND (t.id IS NULL
+               OR COALESCE((t.configuration->'source'->>'sceneRevision')::int, -1) < s.revision)
+          AND NOT (COALESCE((v.metrics->'templateSync'->>'attempts')::int, 0) >= $1
+                   AND COALESCE((v.metrics->'templateSync'->>'sceneRevision')::int, -1) = s.revision))
    ORDER BY s."createdAt" ASC
    LIMIT $2`;
 
 /**
- * Template de cena excluída que ainda existe (exclusão que escapou). Só apaga o que o marcador liga àquela cena, e
- * zera o ponteiro da cena.
+ * Template de cena excluída que ainda existe (exclusão que escapou): o de qualquer face e o que a cena apontava. Só
+ * apaga o que o marcador liga àquela cena, e zera os ponteiros da cena e das faces.
  */
 const ORPHAN_TEMPLATES_SQL = `
   WITH gone AS (
     DELETE FROM templates t USING template_scenes s
      WHERE s."deletedAt" IS NOT NULL
-       AND s."approvedTemplateId" = t.id
+       AND (t.id = s."approvedTemplateId"
+            OR EXISTS (SELECT 1 FROM template_scene_faces f
+                        WHERE f."sceneId" = s.id AND f."templateId" = t.id))
        AND t.configuration->'source'->>'kind' = 'template-scene'
        AND t.configuration->'source'->>'sceneId' = s.id::text
-    RETURNING s.id AS "sceneId"
+    RETURNING t.id AS "templateId", s.id AS "sceneId"
+  ), faces AS (
+    UPDATE template_scene_faces SET "templateId" = NULL
+     WHERE "templateId" IN (SELECT "templateId" FROM gone)
+  ), scenes AS (
+    UPDATE template_scenes SET "approvedTemplateId" = NULL
+     WHERE id IN (SELECT "sceneId" FROM gone)
   )
-  UPDATE template_scenes SET "approvedTemplateId" = NULL
-   WHERE id IN (SELECT "sceneId" FROM gone)
-  RETURNING id`;
+  SELECT "templateId" FROM gone`;
 
 /**
  * Varredura do worker (no boot e a cada minuto, só com a flag da cena ligada): enfileira o job de sincronização das
