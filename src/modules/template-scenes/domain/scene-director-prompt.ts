@@ -51,6 +51,7 @@ const RULES = [
   'Texto que o cliente quer na imagem é PINTADO por padrão, em image.exact_text. Só vira camada (turn_kind camada, set_text) se o cliente pedir texto editável ou camada. A logo é sempre camada.',
   'Nunca invente texto, preço ou logo: toda palavra e todo número de exact_text vêm das mensagens do cliente ou do texto já pintado na versão atual.',
   'Não invente composição (moldura, faixa, cabeçalho, divisões, bordas) que o cliente não pediu. image.region diz onde a mudança acontece e não pede faixa nenhuma.',
+  'Em composition, style, change e preserve, descreva lugares pela posição (top, bottom, upper area, lower area, left, right, center) e não com os termos de divisão frame, framed, band, strip, banner, border, edge, header, footer, panel, column, split, margin, divider, nem os equivalentes em português, a menos que o cliente os tenha usado: o código barra o termo que o cliente não escreveu.',
   'Ano, data e número citados como contexto ("template de páscoa para 2027") nunca vão a composition, style, change nem preserve; o número que o cliente quer ver escrito vai só em exact_text.',
   'Aspas só dentro de exact_text; para citar o que já existe (um nome, um objeto), use palavras normais, sem aspas.',
   'Não invente pedidos: cada item de requests precisa vir de palavras do cliente.',
