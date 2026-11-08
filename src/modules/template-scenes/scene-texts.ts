@@ -77,6 +77,8 @@ export interface TextFacts {
   tried: 1 | 2;
   /** Não refez porque o limite de chamadas pagas do pedido não deixou. */
   limited: boolean;
+  /** A segunda chamada de imagem falhou no provedor, e a primeira imagem foi aplicada. */
+  secondFailed?: boolean;
 }
 
 /** O que o juiz conferiu, em fatos; o texto ao cliente sai disto, nunca do modelo de imagem nem do Diretor. */
@@ -116,6 +118,16 @@ function seamNote(description: string): string {
   return `Na conferência, vi o que parece uma emenda ou um objeto flutuando${detail ? `: ${detail}` : ''}. Diga o que ajustar ou peça para voltar.`;
 }
 
+/** Quantas vezes o código tentou, e por que parou antes da segunda. */
+function triedNote(text: TextFacts): string {
+  if (text.limited) {
+    return 'Tentei uma vez e não refiz porque atingi o limite de chamadas deste pedido.';
+  }
+  return text.secondFailed
+    ? 'Tentei refazer, mas a segunda tentativa falhou.'
+    : 'Tentei duas vezes.';
+}
+
 /** Texto certo, ou o que saiu diferente do pedido, com o que foi tentado (D-51, G3b). */
 function textNote(text: TextFacts): string {
   const wrong = text.lines.filter((line) => !line.ok);
@@ -127,9 +139,7 @@ function textNote(text: TextFacts): string {
       ? `Pedi ${quoted(line.asked)} e li ${quoted(line.read)}.`
       : `Não encontrei na imagem o texto ${quoted(line.asked)}.`,
   );
-  const tried = text.limited
-    ? 'Tentei uma vez e não refiz porque atingi o limite de chamadas deste pedido.'
-    : 'Tentei duas vezes.';
+  const tried = triedNote(text);
   return `O texto na imagem saiu diferente do pedido. ${seen.join(' ')} ${tried} Posso tentar de novo, ou colocar a frase como camada de texto exata.`;
 }
 
@@ -142,6 +152,14 @@ function missingNote(facts: JudgeFacts): string | null {
   return facts.missingAny ? 'Ainda falta parte do que você pediu.' : null;
 }
 
+/** A segunda imagem foi aplicada sem a segunda conferência: o chat não diz que o texto está certo (rodada 6). */
+function unconferredRedoNote(redo: { asked: string[]; limit: boolean }): string {
+  const why = redo.limit
+    ? 'não conferi a segunda tentativa: atingi o limite de chamadas deste pedido.'
+    : 'não consegui conferir a segunda tentativa.';
+  return `Refiz a imagem porque o texto saiu diferente do pedido, mas ${why} Veja se o texto ficou ${redo.asked.map(quoted).join(' / ')}.`;
+}
+
 /**
  * Resposta depois da imagem (G8): montada pelo código a partir do que o juiz conferiu. O resultado já foi aplicado
  * em todos os casos (D-26). Sem juiz (`null`), diz que não conseguiu conferir; com texto pedido, diz também que não
@@ -149,11 +167,12 @@ function missingNote(facts: JudgeFacts): string | null {
  */
 export function afterImageReply(
   facts: JudgeFacts | null,
-  options: { textAsked?: boolean } = {},
+  options: { textAsked?: boolean; redo?: { asked: string[]; limit: boolean } } = {},
 ): string {
   if (!facts) {
     const base =
       'Apliquei a imagem nova, mas não consegui conferir o resultado. Veja se ficou como pediu.';
+    if (options.redo) return `${base} ${unconferredRedoNote(options.redo)}`;
     return options.textAsked
       ? `${base} Não consegui conferir o texto; veja se ficou como pediu.`
       : base;

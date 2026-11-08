@@ -9,7 +9,8 @@ import {
 import { sceneZonesFor } from '../domain/scene-formats';
 import { openItems } from '../domain/scene-brief';
 import { DirectorPlan } from '../domain/scene-director-schema';
-import { paintedTextOf } from '../services/scene-director-context';
+import { PaintedLine } from '../domain/scene-painted-text';
+import { paintedLinesOf } from '../services/scene-director-blocks';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
@@ -23,8 +24,8 @@ export interface TurnParent {
   previewAssetId: string | null;
   /** `null` quando a master foi apagada pelo GC (ou nunca existiu). */
   masterUrl: string | null;
-  /** Linhas pintadas a pedido e conferidas na versão (`metrics.paintedText`), que o redesenho confere de novo (D-56). */
-  paintedText: string[];
+  /** Linhas pintadas a pedido na versão (`metrics.paintedText`), com zona, que o redesenho confere de novo (D-56). */
+  paintedText: PaintedLine[];
 }
 
 /** Logo (ou outra imagem) anexada à mensagem. */
@@ -132,7 +133,7 @@ async function loadParent(
     masterAssetId: parent.masterAssetId,
     previewAssetId: parent.previewAssetId,
     masterUrl: master && !master.purgedAt ? master.url : null,
-    paintedText: paintedTextOf(parent),
+    paintedText: paintedLinesOf(parent),
   };
 }
 

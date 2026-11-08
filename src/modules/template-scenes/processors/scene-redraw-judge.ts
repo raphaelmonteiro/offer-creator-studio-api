@@ -3,7 +3,7 @@ import { safeChanged, safeSeamDescription } from '../domain/scene-director-phras
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { hasTextError, TextLine } from '../domain/scene-text-check';
 import { JudgeFacts, TextFacts } from '../scene-texts';
-import { SceneVisionService } from '../services/scene-vision.service';
+import { SceneVisionService, VisionAssessment } from '../services/scene-vision.service';
 import * as sharp from 'sharp';
 import { SceneCallRunner } from './scene-call-runner';
 import { CropBox } from './scene-text-crop';
@@ -23,11 +23,16 @@ export interface TextPlan {
 export interface JudgedResult {
   /** `null` quando o juiz não pôde conferir (indisponível, limite de chamadas ou saída inválida). */
   facts: Omit<JudgeFacts, 'text'> | null;
+  /** Por que não houve conferência: o limite de chamadas do pedido, ou a saída do juiz não serviu. */
+  unavailable?: 'limit' | 'invalid';
   verdict?: JudgeBriefVerdict;
   record: Record<string, unknown>;
   /** A leitura comparada pelo código; vazia sem texto esperado ou sem juiz. */
   textLines: TextLine[];
 }
+
+/** A avaliação do juiz que serviu (`ok`). */
+type VisionOk = Extract<VisionAssessment, { ok: true }>;
 
 export interface JudgeDeps {
   calls: SceneCallRunner;
@@ -40,6 +45,44 @@ function markGone(lines: TextLine[], inherited: boolean[]): TextLine[] {
   return lines.map((line, index) =>
     inherited[index] && !line.read.trim() ? { ...line, ok: true, gone: true } : line,
   );
+}
+
+/** O que o juiz viu, em fatos para o texto ao cliente (já sem promessa de preservação). */
+function factsOf(assessment: VisionOk, ctx: TurnContext): NonNullable<JudgedResult['facts']> {
+  const labelOf = new Map([...ctx.openItems, ...ctx.doneItems].map((item) => [item.id, item.text]));
+  return {
+    satisfied: assessment.satisfied,
+    changed: safeChanged(assessment.changed),
+    missing: safeChanged(assessment.missing),
+    missingAny: assessment.notSeen.map((id) => labelOf.get(id)).filter(Boolean).length > 0,
+    extraText: safeChanged(assessment.extraText),
+    seam: assessment.seam,
+    seamDescription: safeSeamDescription(assessment.seamDescription),
+  };
+}
+
+/** O juiz não conferiu: não há fatos nem leitura, e o texto ao cliente diz que não conseguiu conferir. */
+const withoutJudge = (unavailable: 'limit' | 'invalid'): JudgedResult => ({
+  facts: null,
+  unavailable,
+  record: { available: false },
+  textLines: [],
+});
+
+/** O registro de auditoria da conferência, em `metrics.judge`. */
+function recordOf(assessment: VisionOk, textLines: TextLine[]): Record<string, unknown> {
+  return {
+    available: true,
+    satisfied: assessment.satisfied,
+    changed: assessment.changed,
+    seen: assessment.seen,
+    notSeen: assessment.notSeen,
+    missing: assessment.missing,
+    extraText: assessment.extraText,
+    textLines,
+    seam: assessment.seam,
+    seamDescription: assessment.seamDescription,
+  };
 }
 
 /**
@@ -75,36 +118,15 @@ export async function judgeResult(
       }),
   });
   if (call.status === 'over') return 'over';
-  if (call.status === 'skipped' || call.value.ok === false) {
-    return { facts: null, record: { available: false }, textLines: [] };
-  }
+  if (call.status === 'skipped') return withoutJudge('limit');
+  if (call.value.ok === false) return withoutJudge('invalid');
   const assessment = call.value;
   const textLines = markGone(assessment.textLines, text.inherited);
-  const labelOf = new Map([...ctx.openItems, ...ctx.doneItems].map((item) => [item.id, item.text]));
   return {
-    facts: {
-      satisfied: assessment.satisfied,
-      changed: safeChanged(assessment.changed),
-      missing: safeChanged(assessment.missing),
-      missingAny: assessment.notSeen.map((id) => labelOf.get(id)).filter(Boolean).length > 0,
-      extraText: safeChanged(assessment.extraText),
-      seam: assessment.seam,
-      seamDescription: safeSeamDescription(assessment.seamDescription),
-    },
+    facts: factsOf(assessment, ctx),
     verdict: { seen: assessment.seen, notSeen: assessment.notSeen },
     textLines,
-    record: {
-      available: true,
-      satisfied: assessment.satisfied,
-      changed: assessment.changed,
-      seen: assessment.seen,
-      notSeen: assessment.notSeen,
-      missing: assessment.missing,
-      extraText: assessment.extraText,
-      textLines,
-      seam: assessment.seam,
-      seamDescription: assessment.seamDescription,
-    },
+    record: recordOf(assessment, textLines),
   };
 }
 
@@ -119,9 +141,10 @@ export function effectiveSatisfied(
 /** Os fatos de texto que vão ao cliente: só as linhas que ainda estão na imagem. */
 export function textFactsOf(
   lines: TextLine[],
-  tried: 1 | 2,
-  limited: boolean,
+  applied: { tried: 1 | 2; limited: boolean; secondFailed: boolean },
 ): TextFacts | undefined {
   const present = lines.filter((line) => !line.gone);
-  return present.length ? { lines: present, tried, limited } : undefined;
+  if (!present.length) return undefined;
+  const { tried, limited, secondFailed } = applied;
+  return { lines: present, tried, limited, ...(secondFailed ? { secondFailed } : {}) };
 }

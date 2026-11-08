@@ -131,8 +131,8 @@ export interface EditPromptInput {
   heightPx: number;
   /** Linhas lidas diferente do pedido, na refação única. */
   corrections?: TextCorrection[];
-  /** Texto já pintado e conferido na versão atual: sem texto novo, é mantido como está (D-56). */
-  paintedText?: string[];
+  /** Texto já pintado na versão atual que esta rodada não substitui: é mantido como está (D-56, 4d). */
+  keepText?: string[];
 }
 
 const sentence = (text: string): string => {
@@ -182,20 +182,27 @@ function keepPaintedBlock(painted: string[], corrections: TextCorrection[]): str
   ].join('\n');
 }
 
-/** Bloco 8 (validação 4d): texto exato, com a linha de correção da refação, ou a regra de "sem texto". */
+const KEEP_IN_PLACE =
+  'Keep the text already painted on the image exactly as it is, in the same place:';
+
+/**
+ * Bloco 8 (validação 4d): texto exato da rodada com a linha de correção da refação, o texto a manter (PV-82, R65) e a
+ * regra de "sem texto". Nenhum caso com texto termina sem "No other text".
+ */
 export function textBlock(
   lines: string[],
   corrections: TextCorrection[] = [],
-  painted: string[] = [],
+  keep: string[] = [],
 ): string {
-  if (lines.length === 0 && painted.length > 0) return keepPaintedBlock(painted, corrections);
+  if (lines.length === 0 && keep.length > 0) return keepPaintedBlock(keep, corrections);
   if (lines.length === 0) return 'No text, no letters, no numbers, no logo, no watermark.';
   const numbered = lines.map((line, index) => `Line ${index + 1}: “${cleanRequest(line)}”`);
-  const fixes = correctionLines(corrections);
+  const kept = keep.map((line) => `“${cleanRequest(line)}”`);
   return [
-    ...fixes,
+    ...correctionLines(corrections),
     'Put this exact Portuguese text, copied character by character, with the same accents, cedilla, uppercase and lowercase letters, punctuation and currency format:',
     ...numbered,
+    ...(kept.length ? [KEEP_IN_PLACE, ...kept] : []),
     'Never invent or add text, prices or logos. No other text, no logo, no watermark.',
   ].join('\n');
 }
@@ -233,7 +240,7 @@ export function buildEditPrompt(input: EditPromptInput): string {
     `Make exactly one change: ${sentence(image.change)}`,
     regionText(input),
     `${keep.length ? `Preserve: ${keep.join('; ')}. ` : ''}Do not change or remove any other element.`,
-    textBlock(image.exact_text, input.corrections, input.paintedText),
+    textBlock(image.exact_text, input.corrections, input.keepText),
   ]
     .filter(Boolean)
     .join('\n');

@@ -1,5 +1,6 @@
 import { SceneVisionClient } from '../providers/scene-vision-client';
-import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
+import { visionReadings } from '../testing/scene-vision-fake';
+import { runTextRound, TextRoundOptions } from '../testing/scene-text-round';
 import { directorPlan } from '../testing/scene-director-fixtures';
 import { judgeOf } from '../services/scene-views';
 import { useProcessorHarness } from '../testing/scene-processor-harness';
@@ -15,74 +16,27 @@ const sign = (exact: string[] = [ASKED]) =>
   });
 
 /** O juiz devolve uma leitura por chamada, na ordem; a última se repete. */
-const judgeReading = (reads: Array<string | null>, extra: Record<string, unknown> = {}) => {
-  let call = 0;
-  const compare = jest.fn(async () => {
-    const lido = reads[Math.min(call, reads.length - 1)];
-    call += 1;
-    return {
-      text: JSON.stringify({
-        atendeu: 'sim',
-        mudou: 'A placa apareceu.',
-        vistos: [],
-        nao_vistos: [],
-        faltou: '',
-        texto_lido: lido === null ? [] : [{ pedido: ASKED, lido }],
-        texto_extra: '',
-        emenda: false,
-        emenda_descricao: '',
-        ...extra,
-      }),
-      usage: { prompt_tokens: 3000, completion_tokens: 200 },
-      requestId: 'req_judge',
-      latencyMs: 500,
-    };
-  });
-  return { client: { compare } as SceneVisionClient, compare };
-};
+const judgeReading = (reads: Array<string | null>, extra: Record<string, unknown> = {}) =>
+  visionReadings(
+    reads.map((lido) => (lido === null ? [] : [{ pedido: ASKED, lido }])),
+    extra,
+  );
 
 describeIfSceneDb('Texto pintado conferido letra por letra (banco chroma_x_e2e)', () => {
   jest.setTimeout(60_000);
   const h = useProcessorHarness();
 
-  async function run(
+  const run = (
     judge: { client: SceneVisionClient; compare?: jest.Mock },
-    options: {
-      plan?: ReturnType<typeof sign>;
-      env?: Record<string, string>;
-      painted?: string[];
-      metrics?: Record<string, unknown>;
-    } = {},
-  ) {
-    const { scene } = await h.readyScene();
-    if (options.painted) {
-      const current = await h.versionOf(scene.currentVersionId as string);
-      await h.dataSource.manager.update(
-        'template_scene_versions',
-        { id: current.id },
-        { metrics: { ...current.metrics, paintedText: options.painted } },
-      );
-    }
-    const fresh = await h.sceneOf(scene.id);
-    const queued = await h.queueRedraw(fresh, {
-      plan: options.plan ?? sign(),
-      request: 'coloca uma placa com a frase "Promoção de Páscoa"',
-    });
-    const { provider, edit } = h.fakeProvider(() => h.okResult(0.1));
-    await h.processorWith(provider, options.env, judge.client).process(h.job(scene.id, queued.id));
-    const messages = await h.dataSource.manager.find(TemplateSceneMessage, {
-      where: { sceneId: scene.id, versionId: queued.id, role: 'assistant' },
-    });
-    const version = await h.versionOf(queued.id);
-    return { scene, version, edit, reply: messages[0]?.content ?? '', judge };
-  }
+    options: Partial<TextRoundOptions> & { env?: Record<string, string> } = {},
+  ) => runTextRound(h, judge, { plan: sign(), ...options }).then((round) => ({ ...round, judge }));
 
   it('Texto certo: uma só chamada de imagem, e o chat diz que conferiu letra por letra', async () => {
     const { version, edit, reply } = await run(judgeReading([ASKED]));
     expect(edit).toHaveBeenCalledTimes(1);
     expect(version.status).toBe('ready');
     expect(reply).toContain(`Conferi o texto letra por letra: “${ASKED}”.`);
-    expect(version.metrics.paintedText).toEqual([ASKED]);
+    expect(version.metrics.paintedText).toEqual([{ text: ASKED, zone: 'whole' }]);
     expect(judgeOf(version)).toBe('sim');
   });
 

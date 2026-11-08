@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { SceneCallRecord } from '../domain/scene.types';
+import { SceneCallRecord, SceneFailureCode } from '../domain/scene.types';
 import { SceneGenerateResult, SceneProviderError } from '../providers/scene-image-provider';
 import { VisionAssessment } from '../services/scene-vision.service';
 import { CallOutcome, SceneTurnState, TurnContext } from './scene-turn-state';
@@ -15,6 +15,14 @@ export interface ImageCallSpec {
   size: string;
   run: () => Promise<SceneGenerateResult>;
 }
+
+/** A segunda chamada de imagem falhou no provedor: a versão não falha, e o custo fica registrado (rodada 6). */
+export interface FailedRetry {
+  failed: { code: SceneFailureCode; costUsd: number | null };
+}
+
+/** O que a refação devolve: a imagem, "sem vaga", "o provedor falhou" ou "o turno acabou" (`null`). */
+export type RetryResult = SceneGenerateResult | FailedRetry | 'limit' | null;
 
 /** Resultado de uma chamada opcional: valor, "pulada pelo limite" ou "o turno acabou". */
 export type OptionalCall<T> =
@@ -59,27 +67,26 @@ export class SceneCallRunner {
 
   /** `null` = o turno acabou (cancelado, limite, falha do provedor); a versão já foi fechada. */
   async imageCall(ctx: TurnContext, spec: ImageCallSpec): Promise<SceneGenerateResult | null> {
-    const result = await this.runImageCall(ctx, spec, 'fail');
-    return result === 'limit' ? null : result;
+    const result = await this.runImageCall(ctx, spec, 'first');
+    return result === null || result === 'limit' || 'failed' in result ? null : result;
   }
 
   /**
    * A segunda chamada de imagem da refação do texto (D-51). No limite de chamadas pagas do pedido, devolve `'limit'`
-   * sem falhar a versão: a primeira imagem vale, e o chat diz que não refez. `null` = o turno acabou.
+   * sem falhar a versão: a primeira imagem vale, e o chat diz que não refez. Se o provedor falha, devolve `failed`
+   * com o custo, também sem falhar a versão (rodada 6): a primeira imagem, já paga, vale. `null` = o turno acabou.
    */
-  retryImageCall(
-    ctx: TurnContext,
-    spec: ImageCallSpec,
-  ): Promise<SceneGenerateResult | 'limit' | null> {
-    return this.runImageCall(ctx, spec, 'skip');
+  retryImageCall(ctx: TurnContext, spec: ImageCallSpec): Promise<RetryResult> {
+    return this.runImageCall(ctx, spec, 'retry');
   }
 
   private async runImageCall(
     ctx: TurnContext,
     spec: ImageCallSpec,
-    onLimit: 'fail' | 'skip',
-  ): Promise<SceneGenerateResult | 'limit' | null> {
+    mode: 'first' | 'retry',
+  ): Promise<RetryResult> {
     const call = this.pending(spec);
+    const onLimit = mode === 'first' ? 'fail' : 'skip';
     const reserved = await this.state.reserveCall(ctx, call, this.maxPaidCalls(), onLimit);
     if (reserved === 'limit') return 'limit';
     if (reserved !== 'ok') return null;
@@ -97,6 +104,8 @@ export class SceneCallRunner {
         costUsd: failure.costUsd,
         errorCode: failure.code,
       });
+      if (mode === 'retry')
+        return { failed: { code: failure.code, costUsd: failure.costUsd ?? null } };
       await this.state.fail(ctx, failure.code);
       return null;
     }

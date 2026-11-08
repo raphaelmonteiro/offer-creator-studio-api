@@ -71,6 +71,65 @@ describeIfSceneDb('Uma mudança por rodada (banco chroma_x_e2e)', () => {
     expect((await h.sceneOf(scene.id)).brief[0].status).toBe('open');
   });
 
+  it('Item feito não é oferecido: com o juiz em "sim" e sem ids, a resposta não pergunta se faz agora (R68)', async () => {
+    const { scene } = await h.readyScene();
+    const queued = await h.queueRedraw(await h.sceneOf(scene.id), {
+      plan: directorPlan({
+        turn_kind: 'pedido_item',
+        will_change_image: true,
+        what_to_change: 'Add a wooden sign near the bottom',
+      }),
+      request: 'coloca uma placa de madeira no rodapé',
+    });
+    const message = (await h.messagesOf(scene.id)).find((m) => m.versionId === queued.id);
+    await h.dataSource.manager.update(
+      TemplateScene,
+      { id: scene.id },
+      { brief: [item('p1', 'placa de madeira no rodapé', message!.id)] },
+    );
+    const { provider } = h.fakeProvider(() => h.okResult(0.1));
+    await h
+      .processorWith(provider, undefined, judge({ vistos: [], nao_vistos: [] }))
+      .process(h.job(scene.id, queued.id));
+    const replies = await h.dataSource.manager.find(TemplateSceneMessage, {
+      where: { versionId: queued.id, role: 'assistant' },
+    });
+    expect(replies[0].content).not.toContain('Quer que eu faça agora?');
+    expect(replies[0].content).not.toContain('Ainda falta');
+  });
+
+  it('o item oferecido é o que o juiz pôs em nao_vistos, e não o primeiro aberto da mensagem (R68)', async () => {
+    const { scene } = await h.readyScene();
+    const queued = await h.queueRedraw(await h.sceneOf(scene.id), {
+      plan: directorPlan({
+        turn_kind: 'pedido_item',
+        will_change_image: true,
+        what_to_change: 'Remove the bunny',
+      }),
+      request: 'tira o coelho, coloca um rio e uma ponte',
+    });
+    const message = (await h.messagesOf(scene.id)).find((m) => m.versionId === queued.id);
+    await h.dataSource.manager.update(
+      TemplateScene,
+      { id: scene.id },
+      {
+        brief: [
+          item('p1', 'coelho fora', message!.id),
+          item('p2', 'um rio', message!.id),
+          item('p3', 'uma ponte', message!.id),
+        ],
+      },
+    );
+    const { provider } = h.fakeProvider(() => h.okResult(0.1));
+    await h
+      .processorWith(provider, undefined, judge({ vistos: ['p1'], nao_vistos: ['p3'] }))
+      .process(h.job(scene.id, queued.id));
+    const replies = await h.dataSource.manager.find(TemplateSceneMessage, {
+      where: { versionId: queued.id, role: 'assistant' },
+    });
+    expect(replies[0].content).toMatch(/Ainda falta: uma ponte\. Quer que eu faça agora\?$/);
+  });
+
   it('Item aberto de outra mensagem não vira pergunta de agora', async () => {
     const { scene } = await h.readyScene();
     await h.dataSource.manager.update(

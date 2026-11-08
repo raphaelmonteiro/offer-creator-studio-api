@@ -122,6 +122,38 @@ describe('afterImageReply: texto pintado e o que falta (D-51)', () => {
     );
   });
 
+  it('Falha do provedor na refação: o que pediu, o que leu, e que a segunda tentativa falhou', () => {
+    const lines = [line('Promoção de Páscoa', 'Promocão de Páscoa')];
+    const reply = afterImageReply({
+      ...base,
+      satisfied: 'parcial',
+      text: { lines, tried: 1, limited: false, secondFailed: true },
+    });
+    expect(reply).toContain('Pedi “Promoção de Páscoa” e li “Promocão de Páscoa”.');
+    expect(reply).toContain('Tentei refazer, mas a segunda tentativa falhou.');
+    expect(reply).not.toContain('Tentei duas vezes');
+  });
+
+  it('Limite 3, sem segunda conferência: não afirma que o texto está certo e pede para ver', () => {
+    const reply = afterImageReply(null, {
+      textAsked: true,
+      redo: { asked: ['Promoção de Páscoa', 'R$ 9,90'], limit: true },
+    });
+    expect(reply).toBe(
+      'Apliquei a imagem nova, mas não consegui conferir o resultado. Veja se ficou como pediu. Refiz a imagem porque o texto saiu diferente do pedido, mas não conferi a segunda tentativa: atingi o limite de chamadas deste pedido. Veja se o texto ficou “Promoção de Páscoa” / “R$ 9,90”.',
+    );
+    expect(reply).not.toContain('Conferi o texto');
+    expect(reply).not.toContain('Não consegui conferir o texto');
+  });
+
+  it('Segunda conferência que falhou sem ser o limite: não fala de limite', () => {
+    const reply = afterImageReply(null, { redo: { asked: ['Oferta'], limit: false } });
+    expect(reply).toContain(
+      'mas não consegui conferir a segunda tentativa. Veja se o texto ficou “Oferta”.',
+    );
+    expect(reply).not.toContain('limite');
+  });
+
   it('Juiz indisponível com texto pedido: não conseguiu conferir o texto', () => {
     expect(afterImageReply(null, { textAsked: true })).toBe(
       'Apliquei a imagem nova, mas não consegui conferir o resultado. Veja se ficou como pediu. Não consegui conferir o texto; veja se ficou como pediu.',
