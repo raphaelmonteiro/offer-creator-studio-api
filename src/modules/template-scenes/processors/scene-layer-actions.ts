@@ -96,6 +96,24 @@ function logoElement(
   };
 }
 
+/** Texto em camada no lugar pedido (D-51): `position` (zona e lado) vale como para a logo; sem ela, `placement`. */
+function textPosition(
+  action: Extract<LayerAction, { type: 'set_text' }>,
+  ctx: LayerContext,
+  elements: SceneElement[],
+): [number, number] {
+  const { position } = action;
+  if (!position) return textY(action.placement, ctx, elements);
+  const zone = ctx.zones[position.zone];
+  const x =
+    position.side === 'left'
+      ? SIDE_MARGIN + TEXT_WIDTH / 2
+      : position.side === 'right'
+        ? 1 - SIDE_MARGIN - TEXT_WIDTH / 2
+        : 0.5;
+  return [x, zone.y + zone.h / 2];
+}
+
 function textY(placement: string, ctx: LayerContext, elements: SceneElement[]): [number, number] {
   const logo = [...elements].reverse().find((e) => e.kind === 'logo');
   if (placement === 'below-logo' && logo) {
@@ -122,7 +140,7 @@ function textElements(
       changed: current.name,
     };
   }
-  const [x, y] = textY(action.placement, ctx, elements);
+  const [x, y] = textPosition(action, ctx, elements);
   const created: SceneElement = {
     id: randomUUID(),
     kind: 'text',

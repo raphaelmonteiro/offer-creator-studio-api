@@ -18,6 +18,7 @@ import {
 } from '../scene-texts';
 import { DirectorContext } from '../services/scene-director-context';
 import { displayNumbersOf } from '../services/scene-display-number';
+import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
 import { addDirectorCost, DirectorCallRecord, summarizeDirectorCalls } from './scene-director-cost';
 import { DirectorRunResult } from './scene-director-run';
@@ -50,6 +51,7 @@ export class SceneDirectorState {
     private readonly locks: SceneLockService,
     private readonly queue: AnimationQueueService,
     private readonly config: ConfigService,
+    private readonly files: SceneFilesService,
   ) {}
 
   windowSeconds(): number {
@@ -257,7 +259,7 @@ export class SceneDirectorState {
         await applyUndoEffect(target, decision.target);
         return;
       case 'layers':
-        await applyLayersEffect(target, decision.ops);
+        await applyLayersEffect(target, decision.ops, { files: this.files });
         return;
       case 'refuse':
         // Já tratada antes da lista (a recusa não abre pedidos), mas o tipo exige o ramo.

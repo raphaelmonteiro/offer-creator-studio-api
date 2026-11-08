@@ -48,6 +48,8 @@ const REMOVED = [
   'Não pinto',
   'PAINTED_QUESTION',
   'painted_question',
+  'layerReply',
+  'askedAboutImageReply',
   'buildGlobalPrompt',
   'buildRedrawPrompt',
 ];

@@ -11,6 +11,7 @@ import {
 import { afterImageReply } from '../scene-texts';
 import { SceneVisionService } from '../services/scene-vision.service';
 import { ImageCallSpec, SceneCallRunner } from './scene-call-runner';
+import { planLayers } from './scene-plan-layers';
 import { effectiveSatisfied, JudgedResult, judgeResult, textFactsOf } from './scene-redraw-judge';
 import { markupFor, MarkupInfo } from './scene-redraw-markup';
 import { buildEditPrompt, buildGeneratePrompt, planRequest, TextCorrection } from './scene-prompt';
@@ -276,8 +277,12 @@ export class SceneRedrawHandler implements TurnHandler {
           pendingItem: pendingItemOf(ctx, judged),
         }
       : null;
+    // Plano com imagem e camada (defeito b, D-55): as camadas entram na mesma versão, e a resposta junta as duas.
+    const layers = await planLayers(ctx, done.plan, applied.png);
+    const reply = afterImageReply(facts, { textAsked: expected.length > 0 });
     await this.support.finishWithImage(ctx, applied.png, {
-      reply: afterImageReply(facts, { textAsked: expected.length > 0 }),
+      reply: layers ? `${reply} ${layers.note}` : reply,
+      ...(layers ? { elements: layers.elements } : {}),
       judge: judged.verdict,
       metrics: {
         prompt: applied.prompt,

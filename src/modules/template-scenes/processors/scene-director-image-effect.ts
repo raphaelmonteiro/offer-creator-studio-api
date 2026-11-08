@@ -2,7 +2,9 @@ import { EntityManager } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TurnDecision } from '../domain/scene-director-decision';
 import { DirectorPlan } from '../domain/scene-director-schema';
-import { MARKING_DISCARDED_NOTE, REDRAW_NOTICE } from '../scene-texts';
+import { MARKING_DISCARDED_NOTE, PAINTED_LAYER_NOTE, REDRAW_NOTICE } from '../scene-texts';
+import { fold } from '../../../shared/text/fold';
+import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage } from '../services/scene-messages';
 import { publishQueued } from '../services/scene-turn-helpers';
@@ -16,6 +18,20 @@ async function alreadyNotified(manager: EntityManager, sceneId: string): Promise
     [sceneId],
   );
   return rows.length > 0;
+}
+
+/** A frase pintada nesta rodada é igual a uma camada de texto da versão atual (D-55)? A camada sai com a imagem. */
+async function paintsExistingLayer(
+  manager: EntityManager,
+  currentId: string | null,
+  plan: DirectorPlan,
+): Promise<boolean> {
+  const lines = (plan.image?.exact_text ?? []).map((line) => fold(line.trim()));
+  if (!currentId || lines.length === 0) return false;
+  const current = await manager.findOne(TemplateSceneVersion, { where: { id: currentId } });
+  return (current?.elements ?? []).some(
+    (element) => element.kind === 'text' && lines.includes(fold((element.text ?? '').trim())),
+  );
 }
 
 /** Grava o anúncio e o plano e publica o job de imagem, com `startAfterSeconds` quando há janela. */
@@ -49,6 +65,11 @@ export async function queueImageEffect(
   await manager.save(scene);
   const notes: string[] = [];
   if (decision.discardMarking) notes.push(MARKING_DISCARDED_NOTE);
+  if (
+    await paintsExistingLayer(manager, scene.currentVersionId, version.metrics.plan as DirectorPlan)
+  ) {
+    notes.push(PAINTED_LAYER_NOTE);
+  }
   if (decision.isEdit && !(await alreadyNotified(manager, scene.id))) {
     // D-35: o aviso fica gravado com a versão do anúncio, antes da janela, então "Parar" não o repete.
     notes.push(REDRAW_NOTICE);

@@ -1,7 +1,7 @@
 import { fold } from '../../../shared/text/fold';
 import { DirectorLayerOp } from './scene-director-schema';
 import { layerNamedIn } from './scene-layer-name';
-import { LayerAction, LayerTarget } from './scene-layer.types';
+import { LayerAction, LayerTarget, LogoPosition } from './scene-layer.types';
 import { SceneElement } from './scene.types';
 
 /**
@@ -60,6 +60,8 @@ function actionOf(op: DirectorLayerOp, input: LayerOpsInput): LayerAction | { re
       text: text.value,
       placement: text.placement,
       replace: replacing,
+      // D-51: zona e lado valem também para texto em camada, como para a logo (defeito c).
+      ...(op.position ? { position: op.position as LogoPosition } : {}),
       ...(replacing && hint?.kind === 'text' ? { elementId: hint.id } : {}),
     };
   }

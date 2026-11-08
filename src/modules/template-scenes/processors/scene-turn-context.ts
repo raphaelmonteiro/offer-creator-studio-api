@@ -58,6 +58,8 @@ export interface TurnContext {
   requestedMask: MaskShape | null;
   targetElementId: string | null;
   parent: TurnParent | null;
+  /** Logos anexadas à mensagem, ainda em disco: as camadas do plano com imagem usam (defeito b). */
+  attachments: TurnAttachmentAsset[];
   /** Textos dos itens em aberto da lista do que o cliente pediu, no momento da chamada (o juiz os confere depois). */
   openItems: Array<{ id: string; text: string; sourceMessageId?: string }>;
   /** Itens já dados como feitos (os mais recentes): o juiz confere se ainda aparecem depois do redesenho. */
@@ -100,6 +102,7 @@ export async function loadTurnContext(
     requestedMask: version.requestedMask,
     targetElementId: version.targetElementId,
     parent: await loadParent(manager, scene),
+    attachments: await loadAttachments(manager, scene.id, message),
     openItems: openItems(scene.brief ?? []).map((item) => ({
       id: item.id,
       text: item.text,

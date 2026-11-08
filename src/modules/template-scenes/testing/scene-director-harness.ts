@@ -60,7 +60,7 @@ export function useDirectorHarness() {
   ) => {
     const config = new ConfigService({ TEMPLATE_SCENE_MOCK_LATENCY_MS: '0', ...env });
     const locks = new SceneLockService(base.dataSource);
-    const state = new SceneDirectorState(locks, publish, config);
+    const state = new SceneDirectorState(locks, publish, config, base.files);
     const contexts = new SceneDirectorContextService(base.dataSource, base.files);
     return new SceneDirectorProcessor(state, contexts, new SceneDirectorService(config, client));
   };

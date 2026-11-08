@@ -1,24 +1,62 @@
 import { layerOpsToActions } from '../domain/scene-director-layers';
 import { DirectorLayerOp } from '../domain/scene-director-schema';
 import { sceneZonesFor } from '../domain/scene-formats';
+import { describeLayerDiff, noLayerChangeText } from '../domain/scene-layer-diff';
+import { LayerAction } from '../domain/scene-layer.types';
+import { SceneElement } from '../domain/scene.types';
+import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { layerReply } from '../scene-texts';
 import { bumpRevision } from '../services/scene-lock.service';
+import { SceneFilesService } from '../services/scene-files.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
 import { DirectorTarget, rejectTarget } from './scene-director-target';
 import { applyLayerActions } from './scene-layer-actions';
+import { colorNewTexts } from './scene-layer-color';
 import { loadAttachments } from './scene-turn-context';
 import { emitVersionEvent } from './scene-turn-finish';
 
+/** A master da versão atual em disco, ou `null` se foi apagada (a cor do texto cai no branco). */
+async function readMaster(
+  target: DirectorTarget,
+  current: TemplateSceneVersion,
+  files: SceneFilesService,
+): Promise<Buffer | null> {
+  if (!current.masterAssetId) return null;
+  const asset = await target.manager.findOne(TemplateSceneAsset, {
+    where: { id: current.masterAssetId },
+  });
+  if (!asset || asset.purgedAt) return null;
+  try {
+    return await files.read(asset.url);
+  } catch {
+    return null;
+  }
+}
+
+/** A camada que o primeiro pedido mirava, para dizer "já está lá" quando nada mudou. */
+function targetOfFirst(actions: LayerAction[], elements: SceneElement[]): SceneElement | null {
+  const first = actions[0];
+  if (!first || !('target' in first)) return null;
+  const { target } = first;
+  return (
+    ('elementId' in target
+      ? elements.find((element) => element.id === target.elementId)
+      : elements.find((element) => element.kind === target.kind)) ?? null
+  );
+}
+
 /**
  * Camadas pelo chat (logo e texto exatos) sem chamar o modelo de imagem e sem fila: a versão de leitura vira
- * `ready` com a master da atual e as camadas novas, sob o lock. Alvo ausente ou ambíguo termina `rejected`.
+ * `ready` com a master da atual e as camadas novas, sob o lock. Alvo ausente ou ambíguo termina `rejected`. A
+ * resposta vem da diferença entre as camadas antes e depois (D-51): sem diferença, nenhuma versão nasce e o chat diz
+ * que nada mudou.
  */
 export async function applyLayersEffect(
   target: DirectorTarget,
   ops: DirectorLayerOp[],
+  deps: { files: SceneFilesService },
 ): Promise<void> {
   const { manager, scene, version } = target;
   const current = await manager.findOneByOrFail(TemplateSceneVersion, {
@@ -35,14 +73,28 @@ export async function applyLayersEffect(
     hintElementId: version.targetElementId,
   });
   if (converted.ok === false) return rejectTarget(target, converted.reply);
+  const zones = sceneZonesFor(scene.formatId);
   const result = applyLayerActions(converted.actions, {
-    zones: sceneZonesFor(scene.formatId),
+    zones,
     widthPx: scene.widthPx,
     heightPx: scene.heightPx,
     elements: current.elements,
     attachments,
   });
   if (result.ok === false) return rejectTarget(target, result.reply);
+  const master = await readMaster(target, current, deps.files);
+  const elements = master
+    ? await colorNewTexts(current.elements, result.elements, {
+        master,
+        widthPx: scene.widthPx,
+        heightPx: scene.heightPx,
+      })
+    : result.elements;
+  const diff = describeLayerDiff(current.elements, elements, zones);
+  if (!diff.changed) {
+    const where = targetOfFirst(converted.actions, current.elements);
+    return rejectTarget(target, noLayerChangeText(where, zones));
+  }
   Object.assign(version, {
     operation: 'set_layer' as const,
     status: 'ready' as const,
@@ -50,7 +102,7 @@ export async function applyLayersEffect(
     parentVersionId: current.id,
     masterAssetId: current.masterAssetId,
     previewAssetId: current.previewAssetId,
-    elements: result.elements,
+    elements,
     metrics: { ...version.metrics, layer: { changed: result.changed } },
   });
   await manager.save(version);
@@ -60,7 +112,7 @@ export async function applyLayersEffect(
   await addAssistantMessage(manager, {
     sceneId: scene.id,
     versionId: version.id,
-    content: layerReply(result.changed),
+    content: diff.text as string,
     status: 'done',
   });
   await bumpRevision(manager, scene);

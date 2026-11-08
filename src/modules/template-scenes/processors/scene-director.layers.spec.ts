@@ -172,7 +172,10 @@ describeIfSceneDb('Camadas pelo chat, no consumer do Diretor (banco chroma_x_e2e
     expect(imageJobs()).toHaveLength(0);
     expect(done.metrics.calls).toBeUndefined();
     expect((await h.sceneOf(scene.id)).totalCostUsd - before).toBeCloseTo(0.000435, 6);
-    expect(await lastReply(scene.id)).toContain('Alterado apenas:');
+    expect(await lastReply(scene.id)).toContain(
+      'Coloquei a frase “Ofertas da semana” como camada de texto',
+    );
+    expect(await lastReply(scene.id)).not.toContain('Alterado apenas');
     const assets = await h.dataSource.manager.countBy(TemplateSceneAsset, {
       sceneId: scene.id,
       role: 'master',

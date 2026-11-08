@@ -6,6 +6,12 @@ import { TextLine } from './domain/scene-text-check';
 
 export const CANCELLED_REPLY = 'Geração cancelada.';
 
+/** Plano com imagem e camada: se a imagem falha ou é parada, nenhuma camada é alterada, e o chat diz (defeito b). */
+export const NO_LAYER_CHANGED = 'Nenhuma camada foi alterada.';
+
+/** Aviso da frase que já é camada e agora vai pintada (D-55): a camada de texto sai na mesma versão. */
+export const PAINTED_LAYER_NOTE = 'A frase vai ser pintada na imagem, e a camada de texto sai.';
+
 /** A logo é sempre camada (D-51, 4c): pedido de pintar ou integrar a logo não chama imagem. */
 export const PAINTED_REFUSAL_REPLIES = {
   painted_logo:
@@ -177,9 +183,6 @@ export const currentVersionReply = (displayNumber: number): string =>
 
 /** Marcação que não vale para imagem nova (`/images/generations` não recebe `markup`). */
 export const MARKING_DISCARDED_NOTE = 'A área marcada não vale para uma imagem nova.';
-
-export const layerReply = (changed: string[]): string =>
-  `Alterado apenas: ${changed.map((name) => name.toLowerCase()).join(', ')}. A imagem de fundo não mudou.`;
 
 const FAILURE_REPLIES: Record<SceneFailureCode, string> = {
   PROVIDER_QUOTA: 'O serviço de imagem está sem saldo. Avise o administrador.',

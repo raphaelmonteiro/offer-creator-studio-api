@@ -27,7 +27,7 @@ export type LayerTarget = { elementId: string } | { kind: LayerKind };
 /** Mudança exata numa camada (logo, texto, elemento adicionado), sem IA. */
 export type LayerAction =
   | ({ type: 'add_logo'; assetId: string } & LogoPosition)
-  | ({ type: 'set_text'; elementId?: string } & ParsedText)
+  | ({ type: 'set_text'; elementId?: string; position?: LogoPosition } & ParsedText)
   | { type: 'move'; target: LayerTarget; side: Side }
   | { type: 'resize'; target: LayerTarget; direction: 'bigger' | 'smaller' }
   | { type: 'remove'; target: LayerTarget };
