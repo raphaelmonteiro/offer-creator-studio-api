@@ -130,7 +130,11 @@ export interface SceneElement {
 }
 
 export type SceneZoneName = 'header' | 'body' | 'footer';
-export type SceneZones = Record<SceneZoneName, Rect>;
+/**
+ * Zonas da face. `fold` (change add-template-scene-tabloid, PV-T1) é a faixa de segurança da dobra do jornal; ausente
+ * em todas as outras cenas.
+ */
+export type SceneZones = Record<SceneZoneName, Rect> & { fold?: Rect };
 
 /** Uma chamada paga (ou a reserva dela) em `metrics.calls` da versão. */
 export interface SceneCallRecord {

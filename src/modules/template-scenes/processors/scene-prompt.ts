@@ -2,8 +2,11 @@ import { clientAsksForSplit } from '../domain/scene-director-composition';
 import { DirectorImage } from '../domain/scene-director-schema';
 import { backPreservationSentence, effectiveZone, FaceKey } from '../domain/scene-faces';
 import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
+import { isTabloidFace } from '../domain/scene-tabloid';
+import { tabloidPreservationSentence, tabloidRegionText } from '../domain/scene-tabloid-prompts';
 import { SceneZones } from '../domain/scene.types';
 import { zoneBands } from '../domain/scene-zone-bands';
+import { cleanRequest } from '../domain/scene-clean-text';
 
 export interface ScenePromptInput {
   /** Pedido literal do cliente, em português. */
@@ -28,20 +31,6 @@ export interface ScenePromptInput {
 
 const cm = (value: number): string => String(value).replace('.', ',');
 const cmEn = (value: number): string => String(value);
-
-const isControl = (char: string): boolean => {
-  const code = char.charCodeAt(0);
-  return code < 32 || code === 127;
-};
-
-/** Tira caracteres de controle e espaços repetidos do pedido (o texto continua literal). */
-function cleanRequest(request: string): string {
-  return [...request]
-    .map((char) => (isControl(char) ? ' ' : char))
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 /** D-16: a composição só entra se o cliente pedir; o resto é uma imagem única e contínua. */
 export const CONTINUOUS_IMAGE_RULE =
@@ -135,7 +124,7 @@ export interface EditPromptInput {
   corrections?: TextCorrection[];
   /** Zonas da face; sem elas, as do formato. A que a face não tem vale como miolo (PV-9). */
   zones?: SceneZones;
-  /** No verso, o prompt termina com a frase de preservação do verso (PV-9). */
+  /** No verso e no jornal, o prompt termina com a frase de preservação da face (PV-9, PV-T7). */
   faceKey?: FaceKey;
   /** Texto já pintado na versão atual que esta rodada não substitui: é mantido como está (D-56, 4d). */
   keepText?: string[];
@@ -158,6 +147,17 @@ function regionText(input: EditPromptInput): string {
   const { heightPx: H } = input;
   if (zone === 'marked') return `Make the change only inside the outlined area${on}.`;
   if (zone === 'whole' || !format || !zones) return 'The change may affect the whole image.';
+  if (isTabloidFace(input.faceKey)) {
+    // Jornal (PV-T3): a região em px com a meia largura; `center` vale como sem lado.
+    return `Make the change ${tabloidRegionText(input.faceKey, {
+      format,
+      zones,
+      widthPx: input.widthPx,
+      heightPx: H,
+      zone: zone as 'header' | 'footer' | 'body',
+      side: side ?? null,
+    })}`;
+  }
   const bands = zoneBands(zones, H);
   const printCm = cmEn(format.printHeightCm);
   if (zone === 'footer') {
@@ -169,7 +169,7 @@ function regionText(input: EditPromptInput): string {
   return `Make the change only inside the central product area${on}, between y = ${bands.headerEnd} px and y = ${bands.footerStart} px of ${H} px.`;
 }
 
-const correctionLines = (corrections: TextCorrection[]): string[] =>
+export const correctionLines = (corrections: TextCorrection[]): string[] =>
   corrections.map((fix) =>
     fix.read
       ? `A previous attempt rendered the text as “${cleanRequest(fix.read)}”. It must read exactly “${cleanRequest(fix.asked)}”.`
@@ -215,17 +215,24 @@ export function textBlock(
   ].join('\n');
 }
 
-/** Frase de preservação do verso (PV-9): só nas edições da face `back`, e sem a parte "sem texto" se há texto. */
-function backSentence(input: EditPromptInput): string {
+/**
+ * Frase de preservação da face (PV-9, PV-T7): a do verso, da Externa ou da Interna, no fim do prompt, e sem a parte
+ * "sem texto" se há texto. As outras faces não têm.
+ */
+function faceSentence(input: EditPromptInput): string {
   const format = findSceneFormat(input.formatId);
-  if (input.faceKey !== 'back' || !format || !input.zones) return '';
-  return backPreservationSentence({
+  const { faceKey } = input;
+  if (!format || !input.zones || (faceKey !== 'back' && !isTabloidFace(faceKey))) return '';
+  const sentenceInput = {
     format,
     widthPx: input.widthPx,
     heightPx: input.heightPx,
     zones: input.zones,
     withClientText: input.image.exact_text.length > 0 || (input.keepText?.length ?? 0) > 0,
-  });
+  };
+  return isTabloidFace(faceKey)
+    ? tabloidPreservationSentence(faceKey, sentenceInput)
+    : backPreservationSentence(sentenceInput);
 }
 
 /**
@@ -262,7 +269,7 @@ export function buildEditPrompt(input: EditPromptInput): string {
     regionText(input),
     `${keep.length ? `Preserve: ${keep.join('; ')}. ` : ''}Do not change or remove any other element.`,
     textBlock(image.exact_text, input.corrections, input.keepText),
-    backSentence(input),
+    faceSentence(input),
   ]
     .filter(Boolean)
     .join('\n');
