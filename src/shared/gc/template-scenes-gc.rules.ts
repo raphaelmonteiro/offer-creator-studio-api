@@ -2,8 +2,8 @@
  * Regras puras do GC dos arquivos da cena de template (change add-template-scene-persistence,
  * D-12 e PV-5). Tipos próprios: o `shared/` não importa o módulo da cena, que lê as tabelas por SQL.
  *
- * - Master e prévia ficam protegidas enquanto alguma das N versões `ready` mais recentes, uma
- *   versão aprovada ou a versão atual da cena as referenciar (versões `manual`/`restore` apontam
+ * - Master e prévia ficam protegidas enquanto alguma das N versões `ready` mais recentes **de cada face**, uma
+ *   versão aprovada ou a versão atual de cada face as referenciar (versões `manual`/`restore` apontam
  *   para a master da origem). Toda imagem conta, inclusive a que o juiz reprovou (D-26): ela é `ready` e
  *   ocupa uma das N vagas (D-20), por isso a atual é protegida à parte (R22).
  * - `raw_output`, `mask` e `crop` expiram após o TTL; logo e elementos não expiram.
@@ -17,6 +17,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface SceneGcVersion {
   id: string;
+  /** Face da versão; ausente vale 0 (cena de uma face e dados anteriores às faces). */
+  faceIndex?: number;
   number: number;
   status: string;
   masterAssetId: string | null;
@@ -56,18 +58,28 @@ export function sceneGcConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Scen
   };
 }
 
-/** Ids de master e prévia que o GC nunca apaga: as N `ready` mais novas, as aprovadas e a atual (D-20). */
+/**
+ * Ids de master e prévia que o GC nunca apaga: as N `ready` mais novas de cada face (PV-10), as aprovadas e a atual de
+ * cada face (D-20). `currentVersionIds` aceita uma só (a da cena) ou a lista das versões atuais das faces.
+ */
 export function selectProtectedSceneAssets(
   versions: readonly SceneGcVersion[],
   mastersKept: number,
-  currentVersionId: string | null = null,
+  currentVersionIds: string | readonly string[] | null = null,
 ): Set<string> {
-  const recent = versions
-    .filter((version) => version.status === 'ready')
-    .sort((a, b) => b.number - a.number)
-    .slice(0, mastersKept);
+  const faces = new Map<number, SceneGcVersion[]>();
+  for (const version of versions.filter((item) => item.status === 'ready')) {
+    const face = version.faceIndex ?? 0;
+    faces.set(face, [...(faces.get(face) ?? []), version]);
+  }
+  const recent = [...faces.values()].flatMap((group) =>
+    group.sort((a, b) => b.number - a.number).slice(0, mastersKept),
+  );
   const approved = versions.filter((version) => version.approvedAt !== null);
-  const current = versions.filter((version) => version.id === currentVersionId);
+  const currentIds = new Set(
+    typeof currentVersionIds === 'string' ? [currentVersionIds] : (currentVersionIds ?? []),
+  );
+  const current = versions.filter((version) => currentIds.has(version.id));
   const protectedIds = new Set<string>();
   for (const version of [...recent, ...approved, ...current]) {
     if (version.masterAssetId) protectedIds.add(version.masterAssetId);
@@ -82,6 +94,8 @@ export interface SceneGcInput {
   sceneDeletedAt: Date | null;
   /** Versão atual da cena: a master e a prévia dela nunca saem (D-20). */
   currentVersionId?: string | null;
+  /** Versões atuais das faces (a de cada face é protegida, PV-10); soma-se a `currentVersionId`. */
+  currentVersionIds?: readonly string[];
   now: Date;
   config: SceneGcConfig;
 }
@@ -98,13 +112,17 @@ export interface SceneGcSelection {
 /** O que o GC faz com os assets (ainda não apagados) de uma cena. */
 export function selectSceneAssetsToPurge(input: SceneGcInput): SceneGcSelection {
   const { assets, versions, sceneDeletedAt, currentVersionId = null, now, config } = input;
+  const currents = [
+    ...(currentVersionId ? [currentVersionId] : []),
+    ...(input.currentVersionIds ?? []),
+  ];
   const live = assets.filter((asset) => asset.purgedAt === null);
   const deletedLongAgo =
     sceneDeletedAt !== null &&
     now.getTime() - sceneDeletedAt.getTime() >= config.deletedRetentionMs;
   if (deletedLongAgo) return { purge: live, clearExpiry: [], wholeScene: true };
 
-  const protectedIds = selectProtectedSceneAssets(versions, config.mastersKept, currentVersionId);
+  const protectedIds = selectProtectedSceneAssets(versions, config.mastersKept, currents);
   const purge: SceneGcAsset[] = [];
   const clearExpiry: string[] = [];
   for (const asset of live) {

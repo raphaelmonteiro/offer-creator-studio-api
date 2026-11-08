@@ -42,6 +42,8 @@ export interface TemplateScenesGcSummary {
 interface SceneRow {
   deletedAt: Date | null;
   currentVersionId: string | null;
+  /** Versões atuais das faces (`template_scene_faces`): a de cada face nunca é apagada (PV-10). */
+  faceVersionIds: string[];
 }
 
 /**
@@ -123,6 +125,7 @@ export class TemplateScenesGcRunner {
         versions,
         sceneDeletedAt: scene.deletedAt,
         currentVersionId: scene.currentVersionId,
+        currentVersionIds: scene.faceVersionIds,
         now,
         config,
       });
@@ -153,17 +156,23 @@ export class TemplateScenesGcRunner {
   }
 
   private async lockScene(manager: EntityManager, sceneId: string): Promise<SceneRow | null> {
-    const rows: SceneRow[] = await manager.query(
+    const rows: Array<Omit<SceneRow, 'faceVersionIds'>> = await manager.query(
       `SELECT "deletedAt", "currentVersionId"::text AS "currentVersionId"
          FROM template_scenes WHERE id = $1 FOR UPDATE`,
       [sceneId],
     );
-    return rows[0] ?? null;
+    if (!rows[0]) return null;
+    const faces: Array<{ id: string }> = await manager.query(
+      `SELECT "currentVersionId"::text AS id FROM template_scene_faces
+        WHERE "sceneId" = $1 AND "currentVersionId" IS NOT NULL`,
+      [sceneId],
+    );
+    return { ...rows[0], faceVersionIds: faces.map((face) => face.id) };
   }
 
   private loadVersions(manager: EntityManager, sceneId: string): Promise<SceneGcVersion[]> {
     return manager.query(
-      `SELECT id::text AS id, number, status, "masterAssetId"::text AS "masterAssetId",
+      `SELECT id::text AS id, "faceIndex", number, status, "masterAssetId"::text AS "masterAssetId",
               "previewAssetId"::text AS "previewAssetId", "approvedAt"
          FROM template_scene_versions WHERE "sceneId" = $1`,
       [sceneId],
