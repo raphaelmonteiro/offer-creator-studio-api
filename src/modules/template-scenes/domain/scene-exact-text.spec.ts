@@ -5,6 +5,7 @@ import {
   exactLineAllowed,
   stripTextOutsideBlock,
   TextSources,
+  unquoteLine,
 } from './scene-exact-text';
 
 const sources = (messages: string[], paintedText: string[] = []): TextSources => ({
@@ -125,5 +126,27 @@ describe('Texto fora do bloco (validação 4b)', () => {
     for (const change of ['Add 50% off badge', 'Add a 30 reais tag', 'Add 20% de desconto']) {
       expect(checkTextOutsideBlock(directorImage({ change }), none).ok).toBe(false);
     }
+  });
+});
+
+describe('Aspas em volta da linha de exact_text (medida 1.59)', () => {
+  it.each([
+    ['“Promoção de Páscoa”', 'Promoção de Páscoa'],
+    ['"Fechado"', 'Fechado'],
+    ['«boa páscoa»', 'boa páscoa'],
+    ['  “De R$ 19,90”  ', 'De R$ 19,90'],
+    ['Feliz "Páscoa" 2027', 'Feliz "Páscoa" 2027'],
+    ['sem aspas', 'sem aspas'],
+  ])('"%s" vira "%s"', (line, expected) => {
+    expect(unquoteLine(line)).toBe(expected);
+  });
+
+  it('a linha embrulhada em aspas, sobre mensagem sem acento, passa depois de limpa', () => {
+    const sources = {
+      clientMessages: ['juntar o texto promoçao de pascoa na placa'],
+      paintedText: [],
+    };
+    expect(exactLineAllowed('“Promoção de Páscoa”', sources)).toBe(false);
+    expect(exactLineAllowed(unquoteLine('“Promoção de Páscoa”'), sources)).toBe(true);
   });
 });

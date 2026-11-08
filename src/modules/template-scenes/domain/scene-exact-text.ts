@@ -34,6 +34,16 @@ function allWordsKnown(line: string, sources: TextSources): boolean {
   return tokens.length > 0 && tokens.every((token) => known.has(token));
 }
 
+/**
+ * O Diretor às vezes devolve a linha já entre aspas (`“Fechado”`, `"boa páscoa"`): as aspas são dele, não do texto.
+ * Tira um par de aspas que envolve a linha inteira, retas, tipográficas ou francesas (medida 1.59).
+ */
+export function unquoteLine(line: string): string {
+  const text = line.trim();
+  const pair = /^(?:"([^"]*)"|“([^”]*)”|«([^»]*)»)$/.exec(text);
+  return pair ? (pair[1] ?? pair[2] ?? pair[3]).trim() : text;
+}
+
 /** Uma linha de `exact_text` é aceita (validação 4a)? */
 export function exactLineAllowed(line: string, sources: TextSources): boolean {
   const text = collapse(line);

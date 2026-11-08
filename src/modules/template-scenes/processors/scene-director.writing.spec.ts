@@ -108,6 +108,25 @@ describe('Escrever é pedido válido', () => {
     },
   );
 
+  it.each([
+    ['coloca um aviso de fechado', '"Fechado"', 'Fechado'],
+    ['um quadro com os dizeres boa páscoa', '“boa páscoa”', 'boa páscoa'],
+    ['juntar o texto promoçao de pascoa na placa', '“Promoção de Páscoa”', 'Promoção de Páscoa'],
+  ])(
+    '"%s": o Diretor embrulha a linha em aspas e o código as tira, sem refazer',
+    async (phrase, wrapped, clean) => {
+      const { director, run } = modelReturning(imagePlan({ exact_text: [wrapped] }));
+      const { outcome } = await runDirector(director, {
+        context: contextFor(phrase),
+        correlationId: 'c',
+      });
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(
+        (outcome as { plan: { image: { exact_text: string[] } } }).plan.image.exact_text,
+      ).toEqual([clean]);
+    },
+  );
+
   it('Pedido de escrita disfarçado: a placa sem exact_text segue, e nada é recusado', async () => {
     const { director } = modelReturning(imagePlan({ what_to_change: 'Add a welcome sign' }));
     const { outcome } = await runDirector(director, {

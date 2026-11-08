@@ -14,6 +14,7 @@ import {
   checkTextOutsideBlock,
   stripTextOutsideBlock,
   TextPatch,
+  unquoteLine,
   TextSources,
 } from '../domain/scene-exact-text';
 import { DirectorContext } from '../services/scene-director-context';
@@ -48,6 +49,13 @@ const INSTRUCTION_RETRY_REASON =
 
 const ANSWER_RETRY_REASON =
   'o plano diz que não muda a imagem, mas a resposta está vazia ou anuncia uma ação ("vou"): responda ao cliente sem prometer nada, ou chame a imagem de verdade preenchendo image.change';
+
+/** As linhas de `exact_text` sem as aspas com que o Diretor às vezes as embrulha (medida 1.59). */
+function withCleanExactText(plan: DirectorPlan): DirectorPlan {
+  if (!plan.image || plan.image.exact_text.length === 0) return plan;
+  const lines = plan.image.exact_text.map(unquoteLine).filter(Boolean);
+  return { ...plan, image: { ...plan.image, exact_text: lines } };
+}
 
 /** Texto pedido (4a) e texto fora do bloco (4b) de um plano que chama imagem. */
 function checkText(
@@ -84,18 +92,18 @@ export function validate(text: string, context: DirectorContext, final: boolean)
   if (parsed.plan.turn_kind === 'recusa_pintado' || parsed.plan.refusal) {
     return { plan: parsed.plan };
   }
+  const plan = withCleanExactText(parsed.plan);
   const sources = { clientMessages: context.clientMessages, paintedText: context.paintedText };
-  const calls = callsImage(parsed.plan);
-  const texted = calls ? checkText(parsed.plan, sources, final) : { plan: parsed.plan };
+  const calls = callsImage(plan);
+  const texted = calls ? checkText(plan, sources, final) : { plan };
   if (!('plan' in texted)) return texted;
-  const plan = texted.plan;
   const composition = calls
-    ? checkComposition(plan, context.clientMessages)
+    ? checkComposition(texted.plan, context.clientMessages)
     : { ok: true as const };
   if (composition.ok === false) return { reason: composition.reason, groups: composition.groups };
   const written = calls
-    ? applyNumberRule(plan, { final, paintedText: context.paintedText })
-    : { kind: 'ok' as const, plan, patches: [] as NumberPatch[] };
+    ? applyNumberRule(texted.plan, { final, paintedText: context.paintedText })
+    : { kind: 'ok' as const, plan: texted.plan, patches: [] as NumberPatch[] };
   if (written.kind === 'retry') return { reason: written.reason, number: true };
   if (written.kind === 'question') return { question: 'number' };
   const emptyAnswer = answersWithoutImage(written.plan) && unusableAnswer(written.plan.reply);
