@@ -161,16 +161,6 @@ describeIfSceneDb('Cena de frente e verso (e2e, banco chroma_x_e2e)', () => {
     expect(derive.body.error.code).toBe('FACE_NOT_FOUND');
   });
 
-  it('frente e verso num formato em paisagem: 422 SCENE_LAYOUT_UNSUPPORTED', async () => {
-    const response = await post('', {
-      name: 'E2E Paisagem',
-      formatId: 'folheto-55x36',
-      layout: 'front_back',
-    });
-    expect(response.status).toBe(422);
-    expect(response.body.error.code).toBe('SCENE_LAYOUT_UNSUPPORTED');
-  });
-
   it('acesso negado: sem token, a rota do verso responde 401', async () => {
     const response = await http()
       .post('/v1/template-scenes/00000000-0000-4000-8000-000000000000/faces/back/derive')

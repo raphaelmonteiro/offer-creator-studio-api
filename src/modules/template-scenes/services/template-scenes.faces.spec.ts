@@ -139,6 +139,24 @@ describeIfSceneDb('Faces da cena: criação e leitura (banco chroma_x_e2e)', () 
       expect(detail.currentVersion?.id).toBe(second.id);
     });
 
+    it('?face=front na cena de uma face vale como a face única (página de versões da face 0)', async () => {
+      const single = await create('Detalhe front', 'folheto-27x54');
+
+      const detail = await reads.loadDetail(single.id, 1, undefined, 'front');
+
+      expect(detail.faces.map((face) => face.key)).toEqual(['single']);
+      expect(detail.versions.items).toEqual([]);
+      expect(detail.versions.total).toBe(0);
+    });
+
+    it('?face=front na cena de frente e verso segue sendo a frente', async () => {
+      const { scene } = await frontBackWithFront();
+
+      const detail = await reads.loadDetail(scene.id, 1, undefined, 'front');
+
+      expect(detail.versions.items.map((version) => version.faceKey)).toEqual(['front', 'front']);
+    });
+
     it('?face=back traz a página de versões do verso; face que a cena não tem é 422', async () => {
       const { scene } = await frontBackWithFront();
 

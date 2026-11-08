@@ -59,7 +59,14 @@ export async function resolveFace(
   scene: Pick<TemplateScene, 'id'>,
   key?: FaceKey | null,
 ): Promise<TemplateSceneFace> {
-  const faces = await loadFaces(manager, scene.id);
+  return pickFace(await loadFaces(manager, scene.id), key);
+}
+
+/** `resolveFace` sobre as faces já lidas: sem `key`, a face 0; `front` vale para a face única; outra chave é 422. */
+export function pickFace<T extends Pick<TemplateSceneFace, 'key'>>(
+  faces: T[],
+  key?: FaceKey | null,
+): T {
   if (!key) return faces[0];
   const found = faces.find((face) => face.key === key);
   if (found) return found;

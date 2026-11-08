@@ -10,7 +10,7 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { sceneFormatUnsupported, sceneLayoutUnsupported, sceneNotFound } from '../scene.errors';
 import { publishSceneEvent } from './scene-events';
-import { faceKeyOfVersion, newFaces } from './scene-faces';
+import { faceKeyOfVersion, newFaces, setFaceTemplate } from './scene-faces';
 import { bumpRevision, findBusyVersion, SceneLockService } from './scene-lock.service';
 import { SceneReadService } from './scene-read.service';
 import { SceneDetailView, SceneListItemView, SceneMessagesPageView } from './scene-views';
@@ -121,8 +121,8 @@ export class TemplateScenesService {
     ] as string[];
     if (ids.length === 0) return;
     await manager.delete(Template, { id: In(ids) });
-    await manager.update(TemplateSceneFace, { sceneId: scene.id }, { templateId: null });
-    scene.approvedTemplateId = null;
+    // Cada face passa por `setFaceTemplate`: a face 0 também zera o espelho da cena (`approvedTemplateId`).
+    for (const face of faces) await setFaceTemplate(manager, scene, face.index, null);
   }
 }
 

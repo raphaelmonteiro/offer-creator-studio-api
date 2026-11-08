@@ -7,8 +7,8 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
-import { faceNotFound, invalidBody, sceneNotFound } from '../scene.errors';
-import { loadFaces } from './scene-faces';
+import { invalidBody, sceneNotFound } from '../scene.errors';
+import { loadFaces, pickFace } from './scene-faces';
 import { displayNumbersOf } from './scene-display-number';
 import {
   SceneDetailView,
@@ -42,8 +42,7 @@ export class SceneReadService {
     const scene = await manager.findOne(TemplateScene, { where: { id: sceneId } });
     if (!scene) throw sceneNotFound();
     const faces = await loadFaces(manager, sceneId);
-    const pageFace = faceKey ? faces.find((face) => face.key === faceKey) : faces[0];
-    if (!pageFace) throw faceNotFound(faceKey as string);
+    const pageFace = pickFace(faces, faceKey);
     const limit = SCENE_LIMITS.versionsPageSize;
     // O painel lista só as versões com imagem da face (o filtro entra na paginação); o número exibido vem da face inteira.
     const [pageVersions, totalVersions] = await manager.findAndCount(TemplateSceneVersion, {
