@@ -66,6 +66,19 @@ describe('Validação 7 nos blocos (D-51, R54, R55)', () => {
       expect(kept(message, text)).toEqual([text]);
     });
 
+    it('número sem aspas no objeto de colocar ou escrever, na mesma oração, abre o item (PV-105)', () => {
+      expect(kept('tira o coelho e coloca uma placa com 2027', 'placa com 2027')).toEqual([
+        'placa com 2027',
+      ]);
+      expect(kept('tira o coelho, escreve na placa o ano 2027', 'ano 2027 na placa')).toEqual([
+        'ano 2027 na placa',
+      ]);
+    });
+
+    it('o número de outra oração não vale: "tira o 2027 e coloca uma placa"', () => {
+      expect(kept('tira o 2027 e coloca uma placa', 'coelho para 2027')).toEqual([]);
+    });
+
     it('ano de contexto continua sem abrir item, e o número de outra mensagem não vale', () => {
       expect(kept('tira o coelho, é para o template de 2027', 'coelho para 2027')).toEqual([]);
       expect(kept('tira o coelho e coloca uma placa com "Feliz 2028"', 'placa com 2027')).toEqual(

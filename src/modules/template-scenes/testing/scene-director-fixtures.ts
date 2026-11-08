@@ -71,6 +71,7 @@ export const directorContextFor = (
   briefItems: [],
   paintedText: [],
   layerTexts: [],
+  layerNames: [],
   ...over,
 });
 

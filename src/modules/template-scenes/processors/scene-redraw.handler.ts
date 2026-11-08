@@ -13,6 +13,15 @@ import { TurnHandler } from './scene-turn-handler';
 import { SceneTurnSupport } from './scene-turn-support';
 import { TurnContext } from './scene-turn-state';
 
+interface EditInput {
+  ctx: TurnContext;
+  plan: DirectorPlan;
+  master: Buffer;
+  size: { width: number; height: number };
+  marking: Awaited<ReturnType<typeof markupFor>>;
+  text: ReturnType<typeof buildRoundText>;
+}
+
 /**
  * O job de imagem (`generate` e `redraw`): a chamada paga que o código monta a partir do plano do Diretor.
  * - `generate`: primeira imagem da cena e imagem nova, sem imagem de referência (`/images/generations`);
@@ -103,35 +112,12 @@ export class SceneRedrawHandler implements TurnHandler {
       return;
     }
     if (!(await state.advance(ctx, 'editing'))) return;
-    const { width, height } = await sharp(master).metadata();
-    const size = `${width}x${height}`;
-    const marking = await markupFor(ctx, { width: width as number, height: height as number });
+    const meta = await sharp(master).metadata();
+    const size = { width: meta.width as number, height: meta.height as number };
+    const marking = await markupFor(ctx, size);
     const text = buildRoundText(ctx, plan, marking?.box ?? null);
-    const build = (corrections: TextCorrection[] = []): Attempt => {
-      const prompt = buildEditPrompt({
-        image: plan.image as DirectorImage,
-        composition: plan.turn_kind === 'pedido_composicao',
-        marked: Boolean(marking),
-        formatId: ctx.formatId,
-        clientMessages: ctx.clientMessages,
-        widthPx: width as number,
-        heightPx: height as number,
-        corrections,
-        keepText: text.keep,
-      });
-      const model = this.support.model();
-      const run = () =>
-        this.provider.edit({
-          model,
-          prompt,
-          size,
-          quality: this.support.editQuality(),
-          correlationId: ctx.correlationId,
-          image: master,
-          ...(marking ? { markup: marking.png } : {}),
-        });
-      return { prompt, spec: { kind: 'edit', model, size, run } };
-    };
+    const build = (corrections: TextCorrection[] = []): Attempt =>
+      this.editAttempt({ ctx, plan, master, size, marking, text }, corrections);
     const attempt = build();
     const result = await this.calls.imageCall(ctx, attempt.spec);
     if (result) {
@@ -144,6 +130,36 @@ export class SceneRedrawHandler implements TurnHandler {
         text,
       });
     }
+  }
+
+  /** A chamada de edição sobre a master inteira, com a marcação e o texto a manter (a base de `build`). */
+  private editAttempt(input: EditInput, corrections: TextCorrection[]): Attempt {
+    const { ctx, plan, master, marking, text } = input;
+    const { width, height } = input.size;
+    const prompt = buildEditPrompt({
+      image: plan.image as DirectorImage,
+      composition: plan.turn_kind === 'pedido_composicao',
+      marked: Boolean(marking),
+      formatId: ctx.formatId,
+      clientMessages: ctx.clientMessages,
+      widthPx: width,
+      heightPx: height,
+      corrections,
+      keepText: text.keep,
+    });
+    const model = this.support.model();
+    const size = `${width}x${height}`;
+    const run = () =>
+      this.provider.edit({
+        model,
+        prompt,
+        size,
+        quality: this.support.editQuality(),
+        correlationId: ctx.correlationId,
+        image: master,
+        ...(marking ? { markup: marking.png } : {}),
+      });
+    return { prompt, spec: { kind: 'edit', model, size, run } };
   }
 
   private conclude(ctx: TurnContext, done: Concluding): Promise<void> {

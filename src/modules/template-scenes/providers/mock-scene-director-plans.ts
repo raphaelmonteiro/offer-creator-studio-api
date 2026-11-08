@@ -52,6 +52,33 @@ export const openRequest = (text: string): DirectorPlan['requests'][number] => (
   quote: null,
 });
 
+/** A operação sobre a camada que já existe (logo ou texto): tirar, mudar o tamanho ou mover. */
+function existingLayerOp(folded: string): DirectorPlan['layer_ops'][number] {
+  const kind = has(folded, /\blogo\b/) ? 'logo' : 'text';
+  const op = has(folded, /\b(tira|remove|apaga)\b/)
+    ? 'remove'
+    : has(folded, /\b(maior|menor)\b/)
+      ? 'resize'
+      : 'move';
+  const moveSide = has(folded, /\besquerda\b/)
+    ? 'left'
+    : has(folded, /\bdireita\b/)
+      ? 'right'
+      : 'toggle';
+  return {
+    op,
+    layer: {
+      kind,
+      name: null,
+      side: op === 'move' ? moveSide : null,
+      direction: op === 'resize' ? (has(folded, /\bmenor\b/) ? 'smaller' : 'bigger') : null,
+    },
+    text: null,
+    position: null,
+    replace: false,
+  };
+}
+
 export function layerPlan(
   script: DirectorScript,
   folded: string,
@@ -85,31 +112,7 @@ export function layerPlan(
     });
   }
   if (!ops.length && script.layers.length && has(folded, /\b(logo|texto)\b/)) {
-    const kind = has(folded, /\blogo\b/) ? 'logo' : 'text';
-    const op = has(folded, /\b(tira|remove|apaga)\b/)
-      ? 'remove'
-      : has(folded, /\b(maior|menor)\b/)
-        ? 'resize'
-        : 'move';
-    ops.push({
-      op,
-      layer: {
-        kind,
-        name: null,
-        side:
-          op === 'move'
-            ? has(folded, /\besquerda\b/)
-              ? 'left'
-              : has(folded, /\bdireita\b/)
-                ? 'right'
-                : 'toggle'
-            : null,
-        direction: op === 'resize' ? (has(folded, /\bmenor\b/) ? 'smaller' : 'bigger') : null,
-      },
-      text: null,
-      position: null,
-      replace: false,
-    });
+    ops.push(existingLayerOp(folded));
   }
   if (!ops.length && has(folded, /\b(logo)\b/) && !script.layers.length) {
     ops.push({

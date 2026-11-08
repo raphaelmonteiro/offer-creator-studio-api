@@ -1,7 +1,7 @@
 import { directorImage, directorPlan, PlanOverrides } from '../testing/scene-director-fixtures';
-import { checkAnnouncement } from './scene-director-announce';
+import { AnnounceSources, checkAnnouncement } from './scene-director-announce';
 
-const none = { paintedText: [], layerTexts: [] };
+const none: AnnounceSources = { paintedText: [], layerTexts: [] };
 const plan = (reply: string, over: PlanOverrides = {}) =>
   directorPlan({ turn_kind: 'pedido_item', will_change_image: true, reply, ...over });
 const bad = (reply: string, over: PlanOverrides = {}, sources = none) =>
@@ -136,6 +136,65 @@ describe('Anúncio contra o plano (validação 9)', () => {
         } as PlanOverrides),
       ).toBe(true);
     });
+  });
+
+  describe('Segunda mudança não feita (R74, D-54)', () => {
+    const removeOnly = { what_to_change: 'Remove the bunny' };
+
+    it.each([
+      'Vou tirar o coelho e colocar uma placa de madeira no rodapé.',
+      'Vou remover o coelho e colocar uma placa com a frase de oferta.',
+      'Vou tirar o coelho e pôr o texto como camada editável.',
+      'Vou tirar o coelho, colocar uma placa de madeira.',
+      'Vou tirar o coelho; colocar uma placa.',
+    ])('promessa da segunda mudança é barrada: "%s"', (reply) => {
+      expect(bad(reply, removeOnly)).toBe(false);
+    });
+
+    it('o mesmo anúncio sem a segunda mudança passa, e o texto fixo de "Ainda falta" não é anúncio', () => {
+      expect(bad('Vou tirar o coelho.', removeOnly)).toBe(true);
+      expect(bad('Vou remover o coelho do campo.', removeOnly)).toBe(true);
+    });
+
+    it('a isenção vale quando o plano de fato remove a placa ou a escrita', () => {
+      expect(
+        bad('Vou tirar a placa escrita do rodapé.', { what_to_change: 'Remove the board' }),
+      ).toBe(true);
+      expect(
+        bad('Vou tirar a placa do rodapé.', { what_to_change: 'Remove the wooden sign' }),
+      ).toBe(true);
+    });
+
+    it('verbo de tirar sem remoção no plano não isenta a placa nem a escrita', () => {
+      expect(bad('Vou tirar a placa do rodapé.', { what_to_change: 'Add more daisies' })).toBe(
+        false,
+      );
+      expect(bad('Vou tirar o texto escrito do rodapé.', { what_to_change: 'Add daisies' })).toBe(
+        false,
+      );
+      expect(bad('Vou tirar a placa e colocar flores.', { what_to_change: 'Add flowers' })).toBe(
+        false,
+      );
+    });
+
+    it('camada: o verbo de tirar não isenta a promessa com layer_ops vazio', () => {
+      expect(bad('Vou tirar o coelho e deixar o texto como camada.', removeOnly)).toBe(false);
+    });
+  });
+
+  it('nome de camada existente entre aspas não é frase a pintar (PV-103)', () => {
+    const move = {
+      op: 'move' as const,
+      layer: { kind: 'logo' },
+      text: null,
+      position: null,
+      replace: false,
+    };
+    const over = { what_to_change: 'More daisies', layer_ops: [move] } as PlanOverrides;
+    const reply = 'Vou colocar mais margaridas e mover a camada “Logo” para a direita.';
+    expect(bad(reply, over)).toBe(false);
+    expect(bad(reply, over, { paintedText: [], layerTexts: [], layerNames: ['Logo'] })).toBe(true);
+    expect(bad(reply.replace('Logo', 'Selo'), over, { ...none, layerNames: ['Logo'] })).toBe(false);
   });
 
   it('reply vazio não promete nada', () => {

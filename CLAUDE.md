@@ -662,7 +662,7 @@ reclamação e imagem nova; "Parar" é o `cancel` de uma versão `queued`). O cu
   novo e linha não repetida substituem). Linha enviada ao modelo que o juiz não pôde ler fica `unchecked`, e a rodada seguinte a mantém.
 - **Texto pintado na validação 4a (rodada 6):** a linha vale só como frase inteira (aspas iguais; palavras inteiras fora de aspas; junção
   com o já pintado, sem palavras de dentro das aspas e sem preço invertido; ou texto inteiro de uma camada de texto, D-55). Validação 9: o
-  anúncio só promete o que o plano traz (`domain/scene-director-announce.ts`).
+  anúncio só promete o que o plano traz (`domain/scene-director-announce.ts`): a segunda mudança não feita só aparece no texto "Ainda falta"; a isenção do verbo de tirar vale só na mesma oração (até `.`, `,`, `;` ou ` e `) e só se o plano de fato remove aquilo; nome de camada entre aspas não é frase.
 - **Camadas pelo chat (D-51, D-55):** `set_text` com `position` (zona e lado) e cor `#1f1f1f` ou `#ffffff` pela luminância da master sob a
   caixa; a resposta vem da **diferença** das camadas (`domain/scene-layer-diff.ts`), e sem diferença nenhuma versão nasce. `layer_ops` de plano
   com imagem entram na versão nova (`processors/scene-plan-layers.ts`); pintar uma frase que é camada de texto tira a camada na mesma versão.

@@ -21,6 +21,7 @@ import { displayNumbersOf } from '../services/scene-display-number';
 import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
 import { addDirectorCost, DirectorCallRecord, summarizeDirectorCalls } from './scene-director-cost';
+import { planMetrics } from './scene-director-plan-metrics';
 import { DirectorRunResult } from './scene-director-run';
 import { cancelVersion, failVersion } from './scene-turn-finish';
 import { droppedNoteOf, questionReply } from './scene-director-outcome-reply';
@@ -163,20 +164,7 @@ export class SceneDirectorState {
       return;
     }
     const { plan } = dropped;
-    version.metrics = {
-      ...version.metrics,
-      plan,
-      ...(outcome.patches
-        ? {
-            planPatched: true,
-            ...(outcome.patches.number ? { numberPatches: outcome.patches.number } : {}),
-            ...(outcome.patches.text ? { textPatches: outcome.patches.text } : {}),
-            ...(outcome.patches.announcement
-              ? { announcementPatch: outcome.patches.announcement }
-              : {}),
-          }
-        : {}),
-    };
+    version.metrics = planMetrics(version.metrics, plan, outcome.patches);
     const decision = this.decide(scene, { plan, context });
     if (decision.kind === 'refuse') {
       await this.reject(target, PAINTED_REFUSAL_REPLIES[decision.refusal]);

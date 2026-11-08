@@ -26,8 +26,8 @@ const QUOTED_CAPTURE = /"([^"]*)"|“([^”]*)”|«([^»]*)»/g;
 /** A mensagem sem os trechos entre aspas (cada um vira um separador que nenhuma linha contém). */
 const outsideQuotes = (message: string): string => message.replace(QUOTED, ' | ');
 
-/** Palavras e números (`19,90` é um só); `R$` entra como a letra `R`. Comparação literal, com acento e caixa. */
-const TOKEN = /\p{N}+(?:[.,]\p{N}+)*|\p{L}+/gu;
+/** Palavras e números (`19,90` é um só); `R$` é um símbolo único, e `R` sozinho não o vale (R77). Literal, com acento e caixa. */
+const TOKEN = /R\$|\p{N}+(?:[.,]\p{N}+)*|\p{L}+/gu;
 const tokensOf = (text: string): string[] => text.match(TOKEN) ?? [];
 
 /** Os conteúdos dos trechos entre aspas (retas, tipográficas ou francesas) de um texto. */
@@ -37,8 +37,8 @@ export const quotedContents = (text: string): string[] =>
 const typographic = (text: string): string =>
   collapse(text.replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'"));
 
-/** Preço depois de `de` e depois de `por`, em "de R$ 19,90 por R$ 9,90" (sem caixa). */
-const DE_POR = /\bde\s+R\$\s*(\d(?:[\d.,]*\d)?)\s+por\s+R\$\s*(\d(?:[\d.,]*\d)?)/i;
+/** Preço depois de `de` e depois de `por`, em "de R$ 19,90 por R$ 9,90" (sem caixa); o `R$` do segundo é opcional (R77). */
+const DE_POR = /\bde\s+R\$\s*(\d(?:[\d.,]*\d)?)\s+por\s+(?:R\$\s*)?(\d(?:[\d.,]*\d)?)/i;
 
 /** Valor numérico de "19,90", "1.299,90" ou "9.90". */
 function priceValue(raw: string): number {

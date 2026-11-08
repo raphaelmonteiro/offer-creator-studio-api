@@ -141,6 +141,18 @@ describe('Preço invertido (validação 4a, rodada 6)', () => {
     expect(exactLineAllowed('De R$ 9,90 por R$ 9,90', sources([message], painted))).toBe(false);
   });
 
+  it('R$ é um símbolo único: "R" sozinho não o vale (R77)', () => {
+    expect(exactLineAllowed('De R 19,90 por R 12,49', sources([message], painted))).toBe(false);
+    expect(exactLineAllowed('De R$ 19,90 por R$ 12,49', sources([message], painted))).toBe(true);
+  });
+
+  it('preço invertido sem R$ no segundo preço só passa se o cliente escreveu assim (PV-104)', () => {
+    expect(exactLineAllowed('De R$ 12,49 por 19,90', sources([message], painted))).toBe(false);
+    expect(
+      exactLineAllowed('De R$ 12,49 por 19,90', sources(['escreve de R$ 12,49 por 19,90'])),
+    ).toBe(true);
+  });
+
   it('o preço na ordem certa passa pela junção', () => {
     expect(exactLineAllowed('De R$ 19,90 por R$ 12,49', sources([message], painted))).toBe(true);
     expect(

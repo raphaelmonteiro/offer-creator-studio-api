@@ -46,6 +46,8 @@ export interface DirectorContext {
   paintedText: string[];
   /** Texto de cada camada de texto da versão atual: fonte só da linha igual a ele, inteira (D-55, validação 4a). */
   layerTexts: string[];
+  /** Nome de cada camada da cena (validação 9: citar o nome entre aspas no anúncio não é frase a pintar). */
+  layerNames: string[];
 }
 
 /**
@@ -115,6 +117,7 @@ export class SceneDirectorContextService {
       briefItems: (scene.brief ?? []).map((item) => ({ id: item.id, text: item.text })),
       paintedText: paintedTextOf(current),
       layerTexts: layers.flatMap((l) => (l.kind === 'text' && l.text ? [l.text] : [])),
+      layerNames: layers.map((l) => l.name),
       script: {
         message: content,
         hasImage: Boolean(current?.masterAssetId),

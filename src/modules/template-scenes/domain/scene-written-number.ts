@@ -112,16 +112,18 @@ export function stripNumberClauses(text: string, options: WrittenNumberOptions =
 }
 
 const NUMERIC = /\d+(?:[.,/]\d+)*/g;
-const PAINT_VERB =
-  /\b(?:escrev\w*|escrito|coloc\w*|poe|bot\w*|pint\w*)\s+(?:(?:o|a|um|uma|esse|este|numero|ano|data|de)\s+)*(\d+(?:[.,/]\d+)*)/g;
+const PAINT_VERB = /\b(?:escrev\w*|escrito|coloc\w*|poe|bot\w*|pint\w*)\b/;
 
 /**
  * Números que o cliente pediu para pintar na mensagem atual (rodada 6, D-54): literais dentro de um trecho entre
- * aspas, ou logo depois de verbo de escrever ou colocar.
+ * aspas, ou depois de verbo de escrever ou colocar na mesma oração ("coloca uma placa com 2027", PV-105).
  */
 function numbersToPaint(message: string): Set<string> {
   const found = quotedContents(message).flatMap((content) => content.match(NUMERIC) ?? []);
-  for (const match of fold(message).matchAll(PAINT_VERB)) found.push(match[1]);
+  for (const clause of fold(message).split(CLAUSE_SEPARATOR)) {
+    const verb = PAINT_VERB.exec(clause);
+    if (verb) found.push(...(clause.slice(verb.index + verb[0].length).match(NUMERIC) ?? []));
+  }
   return new Set(found);
 }
 
