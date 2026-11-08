@@ -6,6 +6,8 @@ import { generateFileName, getFileMimeType } from '../../common/utils/file.util'
 import * as fs from 'fs/promises';
 import { resolveUploadsDir } from '../../common/config/uploads-dir';
 
+export const DEFAULT_CDN_URL = 'http://localhost:3000/uploads';
+
 @Injectable()
 export class UploadsService {
   private uploadPath: string;
@@ -48,7 +50,7 @@ export class UploadsService {
     // Save file
     await fs.writeFile(filePath, file.buffer);
 
-    const baseUrl = this.configService.get<string>('CDN_URL', 'http://localhost:3000/uploads');
+    const baseUrl = this.configService.get<string>('CDN_URL', DEFAULT_CDN_URL);
     const url = `${baseUrl}/${folder}/${fileName}`;
 
     return {

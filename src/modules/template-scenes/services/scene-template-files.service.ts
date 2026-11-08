@@ -6,11 +6,9 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { pipeline } from 'stream/promises';
 import { resolveUploadsDir } from '../../../common/config/uploads-dir';
+import { DEFAULT_CDN_URL } from '../../uploads/uploads.service';
+import { FILENAME_PATTERN, UUID_PATTERN, writeFileAtomic } from './scene-file-io';
 import { SceneFilesService } from './scene-files.service';
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-const DEFAULT_CDN_URL = 'http://localhost:3000/uploads';
 
 /**
  * Arquivos do template de cena em `uploads/templates/scene-<sceneId>/` (PV-3): uma pasta nova por projeção
@@ -38,7 +36,7 @@ export class SceneTemplateFilesService {
     buffer: Buffer,
   ): Promise<string> {
     const relative = this.relative(sceneId, syncId, filename);
-    await this.writeAtomic(relative, buffer);
+    await writeFileAtomic(this.absolute(relative), (temp) => fs.writeFile(temp, buffer));
     return this.publicUrl(relative);
   }
 
@@ -55,18 +53,12 @@ export class SceneTemplateFilesService {
     const relative = this.relative(sceneId, 'logos', `${asset.id}${extension}`);
     const absolute = this.absolute(relative);
     if (!(await exists(absolute))) {
-      await fs.mkdir(path.dirname(absolute), { recursive: true });
-      const temp = `${absolute}.${randomUUID()}.tmp`;
-      try {
-        await pipeline(
+      await writeFileAtomic(absolute, (temp) =>
+        pipeline(
           createReadStream(this.sceneFiles.absolutePath(asset.url)),
           createWriteStream(temp),
-        );
-        await fs.rename(temp, absolute);
-      } catch (error) {
-        await fs.rm(temp, { force: true }).catch(() => undefined);
-        throw error;
-      }
+        ),
+      );
     }
     return this.publicUrl(relative);
   }
@@ -77,8 +69,8 @@ export class SceneTemplateFilesService {
   }
 
   private relative(sceneId: string, folder: string, filename: string): string {
-    const folderOk = folder === 'logos' || UUID.test(folder);
-    if (!UUID.test(sceneId) || !folderOk || !FILENAME.test(filename)) {
+    const folderOk = folder === 'logos' || UUID_PATTERN.test(folder);
+    if (!UUID_PATTERN.test(sceneId) || !folderOk || !FILENAME_PATTERN.test(filename)) {
       throw new Error('Caminho de arquivo do template da cena inválido');
     }
     return `templates/scene-${sceneId}/${folder}/${filename}`;
@@ -90,19 +82,6 @@ export class SceneTemplateFilesService {
 
   private publicUrl(relative: string): string {
     return `${this.cdnUrl}/${relative}`;
-  }
-
-  private async writeAtomic(relative: string, buffer: Buffer): Promise<void> {
-    const absolute = this.absolute(relative);
-    await fs.mkdir(path.dirname(absolute), { recursive: true });
-    const temp = `${absolute}.${randomUUID()}.tmp`;
-    try {
-      await fs.writeFile(temp, buffer);
-      await fs.rename(temp, absolute);
-    } catch (error) {
-      await fs.rm(temp, { force: true }).catch(() => undefined);
-      throw error;
-    }
   }
 }
 

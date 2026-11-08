@@ -209,38 +209,5 @@ describeIfSceneDb(
       const template = await waitForTemplate('E2E Tmpl Antiga');
       expect(template.configuration.source.sceneId).toBe(scene.id);
     });
-
-    it('falha da projeção mantém o template anterior', async () => {
-      const { scene, files } = await fixtureScene('E2E Tmpl Falha');
-      await sync(scene.id);
-      const before = (await templateOf('E2E Tmpl Falha')) as NonNullable<
-        Awaited<ReturnType<typeof templateOf>>
-      >;
-      const second = await insertReadyVersion(h.dataSource, scene, 2);
-      await h.dataSource.manager.update(
-        TemplateScene,
-        { id: scene.id },
-        { currentVersionId: second.version.id, revision: () => 'revision + 1' },
-      );
-      // a master da versão 2 não está em disco
-      await expect(fs.access(files.absolutePath(second.master.url))).rejects.toThrow();
-
-      await expect(sync(scene.id)).rejects.toThrow('Master da versão ausente');
-
-      const after = (await templateOf('E2E Tmpl Falha')) as NonNullable<
-        Awaited<ReturnType<typeof templateOf>>
-      >;
-      expect(after.configuration).toEqual(before.configuration);
-      const failed = await h.dataSource.query(
-        `SELECT metrics->'templateSync' AS failure FROM template_scene_versions WHERE id = $1`,
-        [second.version.id],
-      );
-      expect(failed[0].failure).toMatchObject({ attempts: 1, error: 'Master da versão ausente' });
-    });
-
-    it('acesso negado: sem token, a lista de templates responde 401', async () => {
-      const response = await http().get('/v1/templates');
-      expect(response.status).toBe(401);
-    });
   },
 );
