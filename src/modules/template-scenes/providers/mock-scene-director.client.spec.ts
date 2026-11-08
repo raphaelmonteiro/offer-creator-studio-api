@@ -114,6 +114,47 @@ describe('MockSceneDirectorClient', () => {
     expect((await plan('integra a logo na imagem')).plan.refusal).toBe('painted_logo');
   });
 
+  describe('#plano-contradicao (D-59)', () => {
+    const marker = MOCK_DIRECTOR_MARKERS.contradiction;
+    const expectQuestion = (p: Awaited<ReturnType<typeof plan>>['plan']) => {
+      expect(p).toMatchObject({
+        will_change_image: false,
+        image: null,
+        requests: [],
+        layer_ops: [],
+        refusal: null,
+      });
+      expect(p.reply.endsWith('?')).toBe(true);
+    };
+
+    it('mensagem do dono: a pergunta cita as duas frases, sem imagem e sem pedido', async () => {
+      const { plan: p } = await plan(
+        `cria uma placa e escreve nela promoção de páscoa, e eu quero que o texto oferta de páscoa fique como se fosse parte da placa ${marker}`,
+      );
+      expectQuestion(p);
+      expect(p.reply).toBe('Qual você quer: “promoção de páscoa” ou “oferta de páscoa”?');
+    });
+
+    it('colocar e tirar a mesma coisa: pergunta o que o cliente quer', async () => {
+      const { plan: p } = await plan(`coloca um coelho no rodapé e tira o coelho ${marker}`);
+      expectQuestion(p);
+      expect(p.reply).toBe('Qual você quer: “colocar coelho” ou “tirar coelho”?');
+    });
+
+    it('duas frases entre aspas viram as duas opções; sem opções claras a pergunta é genérica', async () => {
+      const quoted = await plan(`coloca "Oferta" e depois "Promoção" na placa ${marker}`);
+      expect(quoted.plan.reply).toBe('Qual você quer: “Oferta” ou “Promoção”?');
+      const vague = await plan(`faz do jeito certo ${marker}`);
+      expectQuestion(vague.plan);
+      expect(vague.plan.reply).toBe('Esses pedidos não podem valer juntos. Qual deles você quer?');
+    });
+
+    it('sem o marcador, a mesma mensagem segue o roteiro normal', async () => {
+      const { plan: p } = await plan('coloca um coelho no rodapé e tira o coelho');
+      expect(p.will_change_image).toBe(true);
+    });
+  });
+
   it('#plano-texto, #plano-texto-inventado, #plano-aspas-fora e #plano-moldura entregam o plano do modelo para o código validar', async () => {
     const text = (
       await plan(`coloca uma placa com "Oferta de Páscoa" ${MOCK_DIRECTOR_MARKERS.text}`)

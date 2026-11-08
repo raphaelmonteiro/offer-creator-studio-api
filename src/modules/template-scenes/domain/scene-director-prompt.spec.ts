@@ -30,3 +30,23 @@ describe('Exemplos do prompt do Diretor passam pela validação 5 (R67)', () => 
     }
   });
 });
+
+describe('Regras de D-59 no prompt do Diretor', () => {
+  const lineWith = (text: string) =>
+    DIRECTOR_INSTRUCTIONS.split('\n').find((line) => line.includes(text)) ?? '';
+
+  it('Mensagem que se contradiz: pergunta curta com as opções, sem imagem e sem pedido', () => {
+    const rule = lineWith('não podem valer juntas');
+    expect(rule).toContain('will_change_image false');
+    expect(rule).toContain('image nulo');
+    expect(rule).toContain('requests vazio');
+    expect(rule).toContain('pergunta curta que cita as opções');
+    expect(rule).toContain('Duas mudanças que podem valer juntas não são contradição');
+  });
+
+  it('Item do turno anterior: só é executado quando a mensagem atual o pede, com o mesmo id', () => {
+    const rule = lineWith('só os do turno anterior');
+    expect(rule).toContain('mesmo id');
+    expect(rule).toContain('Um pedido novo sobre outra coisa não arrasta o anterior');
+  });
+});

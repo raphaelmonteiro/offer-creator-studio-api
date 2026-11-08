@@ -1,4 +1,5 @@
 import type { DirectorImage, DirectorPlan } from '../domain/scene-director-schema';
+import { fold } from '../../../shared/text/fold';
 import type { DirectorScript } from './scene-director-client';
 
 /** Os planos que o Diretor simulado devolve por roteiro (D-23): camada, desfazer, imagem e a recusa da logo. */
@@ -203,4 +204,32 @@ export function logoRefusal(): DirectorPlan {
     reply: 'A logo fica como camada.',
     refusal: 'painted_logo',
   };
+}
+
+/**
+ * As duas opções de uma mensagem que se contradiz (D-59): as frases entre aspas, ou, sem aspas, o texto escrito
+ * "escreve (nela) X, ... o texto Y fique", ou o objeto colocado e tirado na mesma mensagem.
+ */
+function contradictionOptions(message: string): string[] {
+  const quoted = quotedLines(message);
+  if (quoted.length >= 2) return quoted.slice(0, 2);
+  const written = /\bescreve\w*(?: nela| nele)?\s+(.+?)\s*,.*?\btexto\s+(.+?)\s+fique\b/i.exec(
+    message,
+  );
+  if (written) return [written[1], written[2]];
+  const removed =
+    /\b(?:coloca|poe|bota)\s+(?:um|uma)\s+(\w+).*\b(?:tira|remove)\s+(?:o|a)\s+\1\b/i.exec(
+      fold(message),
+    );
+  return removed ? [`colocar ${removed[1]}`, `tirar ${removed[1]}`] : [];
+}
+
+/** Mensagem que se contradiz: pergunta curta com as opções, sem imagem, sem pedido e sem camada (D-59). */
+export function contradictionPlan(message: string): DirectorPlan {
+  const options = contradictionOptions(message);
+  const reply =
+    options.length === 2
+      ? `Qual você quer: “${options[0]}” ou “${options[1]}”?`
+      : 'Esses pedidos não podem valer juntos. Qual deles você quer?';
+  return { ...EMPTY, turn_kind: 'outro', will_change_image: false, reply };
 }

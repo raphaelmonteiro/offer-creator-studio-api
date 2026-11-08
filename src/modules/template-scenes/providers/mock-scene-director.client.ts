@@ -3,6 +3,7 @@ import type { DirectorImage, DirectorPlan } from '../domain/scene-director-schem
 import { fold } from '../../../shared/text/fold';
 import {
   clean,
+  contradictionPlan,
   EMPTY,
   has,
   imageOf,
@@ -31,6 +32,8 @@ export const MOCK_DIRECTOR_MARKERS = {
   frame: '#plano-moldura',
   /** O plano leva o ano ao pedido de imagem: o código refaz e, persistindo, corta só o trecho. */
   year: '#plano-ano',
+  /** A mensagem se contradiz: pergunta curta com as opções, sem imagem e sem item (D-59). */
+  contradiction: '#plano-contradicao',
 } as const;
 
 const LOGO_ASK = /\b(?:integra\w*|pinta\w*|desenha\w*) a logo\b/;
@@ -57,7 +60,8 @@ function planFor(script: DirectorScript, message: string): DirectorPlan {
  * para exercitar contexto, janela, camadas, desfazer, recusa e falha. Marcadores: `#diretor-falha` (erro),
  * `#diretor-invalido` (resposta fora do schema), `#plano-logo` (recusa pintar a logo), `#plano-texto` (placa com
  * a frase entre aspas), `#plano-texto-inventado`, `#plano-aspas-fora`, `#plano-moldura` (moldura que ninguém
- * pediu) e `#plano-ano` (leva o ano ao pedido de imagem).
+ * pediu), `#plano-ano` (leva o ano ao pedido de imagem) e `#plano-contradicao` (mensagem que se contradiz: pergunta
+ * curta, sem imagem e sem item).
  */
 export class MockSceneDirectorClient {
   async plan(input: SceneDirectorCall): Promise<DirectorCompletionResult> {
@@ -87,6 +91,7 @@ export class MockSceneDirectorClient {
       image,
       requests: [openRequest(message)],
     });
+    if (hasMarker(markers.contradiction)) return contradictionPlan(message);
     if (hasMarker(markers.logo)) return logoRefusal();
     if (hasMarker(markers.inventedText)) {
       return asEdit(imageOf('Add a sign with a promotional text', script, ['Oferta R$ 9,90']));
