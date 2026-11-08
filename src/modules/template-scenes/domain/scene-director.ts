@@ -20,6 +20,8 @@ export interface DirectorValidationContext {
   clientMessages: string[];
   /** A lista do que o cliente pediu (`brief`), para `drop` e reabertura. */
   briefItems: Array<{ id: string; text: string }>;
+  /** A mensagem trouxe marcação: `image.region.zone = marked` sem ela é saída inválida (D-51). */
+  marked: boolean;
 }
 
 export type DirectorParse = { ok: true; plan: DirectorPlan } | { ok: false; reason: string };
@@ -70,6 +72,12 @@ function layerOpProblem(plan: DirectorPlan): string | null {
   return null;
 }
 
+function regionProblem(plan: DirectorPlan, ctx: DirectorValidationContext): string | null {
+  return plan.image?.region.zone === 'marked' && !ctx.marked
+    ? 'region marked numa mensagem sem marcação'
+    : null;
+}
+
 function requestProblem(plan: DirectorPlan, ctx: DirectorValidationContext): string | null {
   for (const request of plan.requests) {
     // "Esquece isso" não nomeia o item: o `text` do `drop` genérico não precisa ter palavra do cliente.
@@ -115,6 +123,10 @@ export function parseDirector(raw: string, ctx: DirectorValidationContext): Dire
     return { ok: false, reason: `schema: ${issue.path.join('.') || 'raiz'} (${issue.message})` };
   }
   const plan = parsed.data;
-  const problem = layerOpProblem(plan) ?? textProblem(plan, ctx) ?? requestProblem(plan, ctx);
+  const problem =
+    layerOpProblem(plan) ??
+    textProblem(plan, ctx) ??
+    regionProblem(plan, ctx) ??
+    requestProblem(plan, ctx);
   return problem ? { ok: false, reason: problem } : { ok: true, plan };
 }

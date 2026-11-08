@@ -3,6 +3,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import * as sharp from 'sharp';
 import { DataSource, EntityManager, In, Not } from 'typeorm';
 import { BriefItem } from '../domain/scene-brief';
+import { findSceneFormat } from '../domain/scene-formats';
+import { zoneBands } from '../domain/scene-zone-bands';
 import { maskBounds } from '../domain/scene-mask-shape';
 import { MaskShape, Rect, SceneElement } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
@@ -29,6 +31,16 @@ export interface DirectorContext {
   clientMessages: string[];
   /** A lista do que o cliente pediu, com id e texto. */
   briefItems: Array<{ id: string; text: string }>;
+  /** Linhas pintadas a pedido e conferidas na versão atual (`metrics.paintedText`), fonte da validação 4. */
+  paintedText: string[];
+}
+
+/** As linhas pintadas e conferidas da versão (`metrics.paintedText`); vazio em versão sem texto pintado. */
+export function paintedTextOf(version: Pick<TemplateSceneVersion, 'metrics'> | null): string[] {
+  const value = version?.metrics?.paintedText;
+  return Array.isArray(value)
+    ? value.filter((line): line is string => typeof line === 'string')
+    : [];
 }
 
 const frac = (value: number): string => value.toFixed(2);
@@ -79,6 +91,29 @@ function versionsBlock(versions: DisplayedVersion[], currentId: string | null): 
       `- Versão ${v.displayNumber}: ${OPERATION_LABEL[v.operation] ?? v.operation} em ${v.createdAt.toISOString().slice(0, 16).replace('T', ' ')}${v.id === currentId ? ' (a atual)' : ''}`,
   );
   return `Versões da cena (número exibido):\n${lines.join('\n')}`;
+}
+
+/**
+ * Formato e zonas (D-51): nome, tamanho em cm e em px da master, e as faixas de `computeSceneZones` em cm, em
+ * fração e em px. O Diretor escolhe a região pelo nome; as medidas que vão ao modelo de imagem são do código.
+ */
+export function formatBlock(
+  scene: Pick<TemplateScene, 'formatId' | 'widthPx' | 'heightPx'>,
+): string {
+  const format = findSceneFormat(scene.formatId);
+  const size = `${scene.widthPx} x ${scene.heightPx} px`;
+  if (!format) return `Formato: ${scene.formatId}, ${size}.`;
+  const bands = zoneBands(format, scene.heightPx);
+  return [
+    `Formato: ${format.id}, ${format.artWidthCm} x ${format.artHeightCm} cm, master de ${size}.`,
+    `Zonas de image.region: header = ${format.headerCm} cm (${bands.headerPct}% da altura, y < ${bands.headerEnd} px); body = miolo de produtos (y de ${bands.headerEnd} a ${bands.footerStart} px); footer = ${format.footerCm} cm de ${format.printHeightCm} cm (${bands.footerPct}% da altura, y ≥ ${bands.footerStart} px).`,
+  ].join('\n');
+}
+
+function paintedBlock(lines: string[]): string {
+  return lines.length
+    ? `Textos já pintados e conferidos na imagem atual (cite sem inventar): ${lines.map((line) => `“${oneLine(line)}”`).join(' / ')}`
+    : 'Textos já pintados na imagem atual: nenhum.';
 }
 
 function briefBlock(brief: BriefItem[]): string {
@@ -156,6 +191,8 @@ export class SceneDirectorContextService {
       historyBlock(history),
       briefBlock(scene.brief ?? []),
       versionsBlock(versions, scene.currentVersionId),
+      formatBlock(scene),
+      paintedBlock(paintedTextOf(current)),
       marking
         ? `Marcação do cliente na imagem atual (frações 0..1): tipo=${marking.kind} ${boxText(marking.box)}`
         : 'Marcação do cliente: nenhuma.',
@@ -180,6 +217,7 @@ export class SceneDirectorContextService {
       image: await this.currentImage(manager, current),
       clientMessages: [...clientMessages, ...(clientMessages.includes(content) ? [] : [content])],
       briefItems: (scene.brief ?? []).map((item) => ({ id: item.id, text: item.text })),
+      paintedText: paintedTextOf(current),
       script: {
         message: content,
         hasImage: Boolean(current?.masterAssetId),

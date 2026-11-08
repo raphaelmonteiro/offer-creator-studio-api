@@ -1,3 +1,4 @@
+import { PlanOverrides } from '../testing/scene-director-fixtures';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { planRequest } from './scene-prompt';
@@ -24,14 +25,14 @@ describeIfSceneDb(
       const messages = await h.messagesOf(sceneId);
       return messages.filter((m) => m.role === 'assistant').pop()?.content;
     };
-    const imagem = (what_to_put: string, extra: Partial<DirectorPlan> = {}) => ({
+    const imagem = (what_to_put: string, extra: PlanOverrides = {}) => ({
       turn_kind: 'imagem_nova' as const,
       will_change_image: true,
       reply: 'Vou criar a imagem.',
       what_to_put,
       ...extra,
     });
-    const item = (what_to_change: string, extra: Partial<DirectorPlan> = {}) => ({
+    const item = (what_to_change: string, extra: PlanOverrides = {}) => ({
       turn_kind: 'pedido_item' as const,
       will_change_image: true,
       reply: 'Vou fazer a mudança.',
@@ -67,7 +68,7 @@ describeIfSceneDb(
         { problem: 'number', status: 'failed' },
         { status: 'done' },
       ]);
-      expect(planOf(version).what_to_put).toBe(WITHOUT_YEAR);
+      expect(planOf(version).image?.change).toBe(WITHOUT_YEAR);
       expect(version.metrics.planPatched).toBeUndefined();
       expect(imageJobs()).toHaveLength(1);
     });
@@ -75,27 +76,27 @@ describeIfSceneDb(
     it('Modelo insiste e o código corta só o trecho: o restante do plano fica intacto e o corte é gravado', async () => {
       const { version, plan } = await h.runTurn(YEAR_MESSAGE, imagem(WITH_YEAR), { noImage: true });
       expect(plan).toHaveBeenCalledTimes(2);
-      expect(planOf(version).what_to_put).toBe(WITHOUT_YEAR);
+      expect(planOf(version).image?.change).toBe(WITHOUT_YEAR);
       expect(planRequest(planOf(version))).not.toContain('2027');
       expect(version.metrics).toMatchObject({
         planPatched: true,
-        numberPatches: [{ field: 'what_to_put', before: WITH_YEAR, after: WITHOUT_YEAR }],
+        numberPatches: [{ field: 'change', before: WITH_YEAR, after: WITHOUT_YEAR }],
       });
       expect(imageJobs()).toHaveLength(1);
     });
 
-    it('Pedido de escrever o ano: o chat recusa pintar e oferece a camada, sem refazer e sem imagem', async () => {
-      const { scene, version, plan } = await h.runTurn('coloca 2027 em cima', {
+    it('Pedido de escrever o ano: o número vai literal em exact_text e é pintado, sem refazer', async () => {
+      const { version, plan } = await h.runTurn('coloca 2027 em cima', {
         turn_kind: 'pedido_item',
         will_change_image: true,
-        reply: 'Vou colocar o ano.',
-        what_to_put: '2027 em cima',
+        reply: 'Vou colocar o ano 2027 no alto.',
+        what_to_change: 'Add the number at the top',
+        exact_text: ['2027'],
       });
       expect(plan).toHaveBeenCalledTimes(1);
-      expect(version.status).toBe('rejected');
-      expect(await lastReply(scene.id)).toContain('Não pinto texto na imagem');
-      expect(await lastReply(scene.id)).toContain('como camada');
-      expect(imageJobs()).toHaveLength(0);
+      expect(version.status).toBe('queued');
+      expect(planOf(version).image?.exact_text).toEqual(['2027']);
+      expect(imageJobs()).toHaveLength(1);
     });
 
     it('Data: "ovos e a data 12/04" nas duas chamadas vira só "ovos"', async () => {
@@ -105,7 +106,7 @@ describeIfSceneDb(
           what_to_put: 'ovos e a data 12/04',
         }),
       );
-      expect(planOf(version).what_to_put).toBe('ovos');
+      expect(planOf(version).image?.change).toBe('ovos');
       expect(planRequest(planOf(version))).not.toContain('12/04');
     });
 
@@ -126,7 +127,7 @@ describeIfSceneDb(
       );
       expect(plan).toHaveBeenCalledTimes(1);
       expect(version.status).toBe('queued');
-      expect(planOf(version).what_to_change).toBe('tirar o 2027 do ovo');
+      expect(planOf(version).image?.change).toBe('tirar o 2027 do ovo');
       expect((await h.sceneOf(scene.id)).brief.map((entry) => entry.text)).toEqual([
         'tirar o 2027 do ovo',
       ]);
@@ -138,7 +139,7 @@ describeIfSceneDb(
         item('mais flores', { inventory_keep: ['ovos com 2027', 'cesta de ovos'] }),
       );
       expect(plan).toHaveBeenCalledTimes(1);
-      expect(planOf(version).inventory_keep).toEqual(['cesta de ovos']);
+      expect(planOf(version).image?.preserve).toEqual(['cesta de ovos']);
     });
 
     it('Pedido com ano não fica em aberto: a lista não ganha o item e o plano segue', async () => {
@@ -158,18 +159,17 @@ describeIfSceneDb(
       );
       expect(plan).toHaveBeenCalledTimes(2);
       expect(version.status).toBe('rejected');
-      expect(await lastReply(scene.id)).toContain('Não pinto ano, data nem número');
+      expect(await lastReply(scene.id)).toBe('O que você quer mudar na imagem?');
       expect(imageJobs()).toHaveLength(0);
     });
 
-    it('Número solto: "99 no canto" em what_to_put vira recusa, e "3 coelhos" segue (R34)', async () => {
-      const refused = await h.runTurn(
+    it('Número solto: "99 no canto" em exact_text é pintado, e "3 coelhos" segue (R34)', async () => {
+      const painted = await h.runTurn(
         'coloca 99 no canto',
-        item('', { what_to_put: '99 no canto' }),
+        item('Add the number in the corner', { exact_text: ['99'] }),
       );
-      expect(refused.version.status).toBe('rejected');
-      expect(await lastReply(refused.scene.id)).toContain('Não pinto texto');
-      expect(imageJobs()).toHaveLength(0);
+      expect(painted.version.status).toBe('queued');
+      expect(imageJobs()).toHaveLength(1);
 
       const kept = await h.runTurn('coloca 3 coelhos', item('', { what_to_put: '3 coelhos' }));
       expect(kept.version.status).toBe('queued');

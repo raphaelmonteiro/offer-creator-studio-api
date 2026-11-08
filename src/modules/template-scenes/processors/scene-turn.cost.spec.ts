@@ -98,9 +98,9 @@ describeIfSceneDb('Custo registrado por etapa (banco chroma_x_e2e)', () => {
     const { version } = await fullTurn();
     expect(version.metrics.plan).toMatchObject({
       turn_kind: 'pedido_item',
-      what_to_change: 'tirar o coelho',
+      image: { change: 'tirar o coelho' },
     });
-    expect(version.metrics.prompt).toContain('Nesta imagem: tirar o coelho.');
+    expect(version.metrics.prompt).toContain('Make exactly one change: tirar o coelho.');
     expect(version.metrics.judge).toMatchObject({
       available: true,
       satisfied: 'sim',

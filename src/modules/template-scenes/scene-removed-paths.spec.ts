@@ -37,6 +37,19 @@ const REMOVED = [
   'TEMPLATE_SCENE_INSET_PX',
   'TEMPLATE_SCENE_NOOP_THRESHOLD',
   'TEMPLATE_SCENE_INTENT_',
+  // D-51: o detector de escrita saiu (a medida 1.45 mostrou que só causava falsa recusa).
+  'scene-painted-detector',
+  'scene-removal-mask',
+  'scene-director-painted',
+  'PAINTED_PROMISE',
+  '#plano-pintado',
+  'promptableTexts',
+  'enforcePaintedRefusal',
+  'Não pinto',
+  'PAINTED_QUESTION',
+  'painted_question',
+  'buildGlobalPrompt',
+  'buildRedrawPrompt',
 ];
 
 const REMOVED_FILES = [
@@ -54,6 +67,12 @@ const REMOVED_FILES = [
   'modules/template-scenes/providers/mock-scene-intent.client.ts',
   'modules/ai/openai-intent.service.ts',
   'modules/ai/openai-image-masked-edit.ts',
+  'modules/template-scenes/domain/scene-painted-detector.ts',
+  'modules/template-scenes/domain/scene-removal-mask.ts',
+  'modules/template-scenes/domain/scene-director-painted.ts',
+  'modules/template-scenes/processors/scene-director.painted.spec.ts',
+  'modules/template-scenes/processors/scene-director.regression.spec.ts',
+  'modules/template-scenes/domain/__fixtures__/director-plans-1.42-1.43.json',
 ];
 
 function sourcesUnder(dir: string): string[] {

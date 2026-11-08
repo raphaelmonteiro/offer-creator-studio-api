@@ -49,7 +49,7 @@ export function visionCostUsd(model: string, usage: VisionUsage | null): number 
 /** O que o juiz recebe além das imagens: a mensagem, o plano e o que o cliente pediu e ainda não apareceu. */
 export interface JudgePromptInput {
   message: string;
-  plan: { what_to_change?: string; what_to_put?: string };
+  plan: { image?: { change?: string } | null };
   openItems: Array<{ id: string; text: string }>;
   /** Itens dados como feitos antes: o juiz diz se ainda aparecem depois do redesenho. */
   doneItems?: Array<{ id: string; text: string }>;
@@ -64,10 +64,7 @@ const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
  * avisa que o plano pode estar errado (crítica S2): a conferência é contra a mensagem do cliente.
  */
 export function buildVisionPrompt(input: JudgePromptInput): string {
-  const plan = [input.plan.what_to_change, input.plan.what_to_put]
-    .map((part) => oneLine(part ?? ''))
-    .filter(Boolean)
-    .join('; ');
+  const plan = oneLine(input.plan.image?.change ?? '');
   const list = (items: Array<{ id: string; text: string }>): string =>
     items.map((item) => `- ${item.id}: ${oneLine(item.text)}`).join('\n');
   const items = input.openItems.length ? list(input.openItems) : 'nenhum';

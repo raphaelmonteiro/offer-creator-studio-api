@@ -6,6 +6,7 @@ const ctxFor = (
   extra: Partial<DirectorValidationContext> = {},
 ): DirectorValidationContext => ({
   message,
+  marked: false,
   clientMessages: [message],
   briefItems: [],
   ...extra,
@@ -19,7 +20,14 @@ describe('parseDirector', () => {
       ['classe fora da lista', JSON.stringify({ ...directorPlan(), turn_kind: 'conversa' })],
       ['campo a mais', JSON.stringify({ ...directorPlan(), box: [0, 0, 1, 1] })],
       ['reply acima de 260 caracteres', directorRaw({ reply: 'x'.repeat(261) })],
-      ['inventário com mais de 8 nomes', directorRaw({ inventory_keep: Array(9).fill('coelho') })],
+      [
+        'preservação com mais de 12 itens',
+        directorRaw({ what_to_change: 'x', inventory_keep: Array(13).fill('coelho') }),
+      ],
+      [
+        'recusa de texto, que não existe mais',
+        JSON.stringify({ ...directorPlan(), refusal: 'painted_text' }),
+      ],
       [
         'will_change_image como texto',
         JSON.stringify({ ...directorPlan(), will_change_image: 'sim' }),
@@ -220,6 +228,43 @@ describe('DIRECTOR_JSON_SCHEMA', () => {
   it('não tem o campo box do protótipo', () => {
     expect(Object.keys((DIRECTOR_JSON_SCHEMA.schema as Node).properties ?? {})).not.toContain(
       'box',
+    );
+  });
+});
+
+describe('Blocos de imagem (D-51)', () => {
+  const marked = (zone: string) =>
+    directorRaw({ what_to_change: 'x', turn_kind: 'pedido_item', will_change_image: true }).replace(
+      '"zone":"whole"',
+      `"zone":"${zone}"`,
+    );
+
+  it('Região marcada sem marcação é saída inválida; com marcação, vale', () => {
+    expect(parseDirector(marked('marked'), ctxFor('tira isso'))).toMatchObject({ ok: false });
+    expect(parseDirector(marked('marked'), ctxFor('tira isso', { marked: true })).ok).toBe(true);
+    expect(parseDirector(marked('footer'), ctxFor('tira isso')).ok).toBe(true);
+  });
+
+  it('Item longo: requests.text acima de 80 caracteres e exact_text com mais de 4 linhas ou 80 caracteres são inválidos', () => {
+    const request = { id: null, text: 'x'.repeat(81), action: 'open', quote: null };
+    expect(parseDirector(directorRaw({ requests: [request] as never }), ctxFor('x')).ok).toBe(
+      false,
+    );
+    for (const lines of [Array(5).fill('a'), ['x'.repeat(81)]]) {
+      expect(parseDirector(directorRaw({ exact_text: lines }), ctxFor('a')).ok).toBe(false);
+    }
+  });
+
+  it('o JSON schema traz image com os seis blocos e sem os campos antigos', () => {
+    type SchemaNode = { properties?: Record<string, SchemaNode>; anyOf?: SchemaNode[] };
+    const props = (DIRECTOR_JSON_SCHEMA.schema as SchemaNode).properties ?? {};
+    expect(Object.keys(props)).toEqual(expect.arrayContaining(['image', 'refusal']));
+    for (const gone of ['what_to_change', 'what_to_put', 'inventory_keep']) {
+      expect(Object.keys(props)).not.toContain(gone);
+    }
+    const image = (props.image as SchemaNode).anyOf?.find((node) => node.properties) as SchemaNode;
+    expect(Object.keys(image.properties ?? {}).sort()).toEqual(
+      ['change', 'composition', 'exact_text', 'preserve', 'region', 'style'].sort(),
     );
   });
 });

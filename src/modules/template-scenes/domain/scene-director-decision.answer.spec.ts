@@ -1,8 +1,7 @@
-import { directorPlan } from '../testing/scene-director-fixtures';
-import { DirectorPlan } from './scene-director-schema';
+import { directorPlan, PlanOverrides } from '../testing/scene-director-fixtures';
 import { decideTurn, DecisionInput, unusableAnswer } from './scene-director-decision';
 
-const decide = (plan: Partial<DirectorPlan>, extra: Partial<DecisionInput> = {}) =>
+const decide = (plan: PlanOverrides, extra: Partial<DecisionInput> = {}) =>
   decideTurn({
     plan: directorPlan({ what_to_change: 'tirar o coelho', will_change_image: true, ...plan }),
     marked: false,

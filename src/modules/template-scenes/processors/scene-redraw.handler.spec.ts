@@ -69,7 +69,11 @@ describeIfSceneDb('SceneRedrawHandler: o redesenho da imagem inteira (banco chro
       expect(input).not.toHaveProperty('markup');
       expect(input).not.toHaveProperty('mask');
       expect(Buffer.compare(input.image, await storedMaster(v1.id))).toBe(0);
-      expect(input.prompt.startsWith('Nesta imagem: tirar o coelho da direita do rodapé.')).toBe(
+      expect(input.prompt).toContain(
+        'Make exactly one change: tirar o coelho da direita do rodapé.',
+      );
+      expect(input.prompt.startsWith('Edit the provided image.\n')).toBe(true);
+      expect(input.prompt.endsWith('No text, no letters, no numbers, no logo, no watermark.')).toBe(
         true,
       );
       const done = await h.versionOf(queued.id);
@@ -99,8 +103,11 @@ describeIfSceneDb('SceneRedrawHandler: o redesenho da imagem inteira (banco chro
         true,
       ]);
       expect(input).not.toHaveProperty('mask');
-      expect(input.prompt.startsWith('Dentro do retângulo da camada de marcação:')).toBe(true);
-      expect(input.prompt).toContain('não deixe o retângulo no resultado');
+      expect(
+        input.prompt.startsWith('Edit the provided image. The red outline on the markup layer'),
+      ).toBe(true);
+      expect(input.prompt).toContain('do not draw it');
+      expect(input.prompt).toContain('Make the change only inside the outlined area.');
       const done = await h.versionOf(queued.id);
       expect(done.metrics.markup).toMatchObject({ kind: 'retângulo' });
       expect(done.requestedRegion).toMatchObject({ x: 0.3, y: 0.4 });
@@ -139,7 +146,7 @@ describeIfSceneDb('SceneRedrawHandler: o redesenho da imagem inteira (banco chro
 
   describe('Frase de continuidade no formato alto (D-43)', () => {
     const TALL = 'folheto-27x54';
-    const PHRASE = 'A cena é um único ambiente contínuo do topo à base';
+    const PHRASE = 'The scene is one continuous environment from top to bottom';
 
     it.each([
       ['pedido_composicao', true],

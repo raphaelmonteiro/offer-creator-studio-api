@@ -1,4 +1,7 @@
 import { clientAsksForSplit } from '../domain/scene-director-composition';
+import { DirectorImage } from '../domain/scene-director-schema';
+import { findSceneFormat } from '../domain/scene-formats';
+import { zoneBands } from '../domain/scene-zone-bands';
 
 export interface ScenePromptInput {
   /** Pedido literal do cliente, em português. */
@@ -15,9 +18,12 @@ export interface ScenePromptInput {
   /** Formato da cena e mensagens do cliente: decidem a frase de continuidade (D-43). */
   formatId?: string;
   clientMessages?: string[];
+  /** Linhas de `exact_text` (D-52): trocam só a linha `Regras:` pelo texto exato, copiado letra por letra. */
+  exactText?: string[];
 }
 
 const cm = (value: number): string => String(value).replace('.', ',');
+const cmEn = (value: number): string => String(value);
 
 const isControl = (char: string): boolean => {
   const code = char.charCodeAt(0);
@@ -56,12 +62,14 @@ export function continuityApplies(
   );
 }
 
-/** Regra de texto em TODOS os casos: texto pintado é recusado antes, então não há exceção (R32 saiu). */
-export const NO_TEXT_RULES =
-  'Regras: sem texto legível, sem letras ou números, sem logotipos e sem preços.';
-
 export const FIXED_RULES =
   'Regras: sem texto legível, sem letras ou números, sem logotipos, sem preços, sem produtos de marcas reais e sem pessoas identificáveis.';
+
+/** D-52: com texto pedido, só a linha `Regras:` muda; o resto do prompt testado fica como está. */
+export function exactTextRules(lines: string[]): string {
+  const quoted = lines.map((line) => `“${cleanRequest(line)}”`).join(' / ');
+  return `Regras: o único texto da imagem é este, copiado letra por letra, com os mesmos acentos, cedilha, maiúsculas, pontuação e formato de preço: ${quoted}; nenhum outro texto, sem logotipos, sem produtos de marcas reais e sem pessoas identificáveis.`;
+}
 
 /** Os itens em aberto, numa frase fixa do código (nunca texto livre do modelo). */
 export function openItemsSentence(items: string[]): string {
@@ -69,8 +77,9 @@ export function openItemsSentence(items: string[]): string {
 }
 
 /**
- * Prompt da geração (primeira, e imagem nova da D-18): o pedido literal, o formato em cm e a
- * proporção, a imagem única e contínua (D-16) e as regras fixas. Sem composição por faixas ou zonas.
+ * Prompt da geração (primeira imagem e imagem nova, D-52): o pedido literal, o formato em cm e a proporção, a
+ * imagem única e contínua (D-16) e as regras fixas, como o prompt que o dono julgou excelente (D-38). Com texto
+ * pedido, só a linha `Regras:` muda.
  */
 export function buildGeneratePrompt(input: ScenePromptInput): string {
   const ratio = (input.artWidthCm / input.artHeightCm).toFixed(2).replace('.', ',');
@@ -81,81 +90,118 @@ export function buildGeneratePrompt(input: ScenePromptInput): string {
     `Formato: ${cm(input.artWidthCm)} x ${cm(input.artHeightCm)} cm (proporção largura/altura ${ratio}), imagem de ${input.widthPx} x ${input.heightPx} px, ocupando toda a área.`,
     CONTINUOUS_IMAGE_RULE,
     ...(continuityApplies(input.formatId, input.clientMessages) ? [CONTINUITY_PHRASE] : []),
-    FIXED_RULES,
+    input.exactText?.length ? exactTextRules(input.exactText) : FIXED_RULES,
   ].join('\n');
 }
 
-/** Prompt do ajuste geral: a imagem atual entra como referência; sem composição por faixas (D-16). */
-export function buildGlobalPrompt(input: {
-  request: string;
-  /** Só a composição leva a frase de continuidade (D-43), e só no formato alto. */
-  continuity?: boolean;
-}): string {
+/** O pedido do plano para o gerador da imagem nova: a mudança em uma linha, com ponto final. */
+export function planRequest(plan: { image?: Pick<DirectorImage, 'change'> | null }): string {
+  return `${cleanRequest(plan.image?.change ?? '').replace(/[.!;]+$/, '')}.`;
+}
+
+/** D-43, em inglês, no fim da composição das edições (a tradução da frase de `CONTINUITY_PHRASE`). */
+export const CONTINUITY_PHRASE_EN =
+  'The scene is one continuous environment from top to bottom: a single horizon, a single ground, and no object or group resting on an island, strip or separate piece of terrain.';
+
+/** Uma linha do texto exato que o juiz leu diferente do pedido, para a refação (D-51). */
+export interface TextCorrection {
+  asked: string;
+  read: string;
+}
+
+export interface EditPromptInput {
+  image: DirectorImage;
+  /** `pedido_composicao` é o único turno que leva a frase de continuidade (D-43). */
+  composition: boolean;
+  /** A mensagem trouxe marcação: ação e região mudam. */
+  marked: boolean;
+  formatId: string;
+  clientMessages: string[];
+  /** Tamanho nativo da master enviada, em px. */
+  widthPx: number;
+  heightPx: number;
+  /** Linhas lidas diferente do pedido, na refação única. */
+  corrections?: TextCorrection[];
+}
+
+const sentence = (text: string): string => {
+  const clean = cleanRequest(text);
+  return /[.!?]$/.test(clean) ? clean : `${clean}.`;
+};
+
+/** Faixas de `computeSceneZones` em px sobre o tamanho nativo: o limite fica dentro da faixa pedida. */
+function regionText(input: EditPromptInput): string {
+  const { side } = input.image.region;
+  // A marcação vale (a mensagem pode citar outro lugar): com `markup` a região é sempre a área contornada.
+  const zone = input.marked ? 'marked' : input.image.region.zone;
+  const on = side ? ` on the ${side} side` : '';
+  const format = findSceneFormat(input.formatId);
+  const { heightPx: H } = input;
+  if (zone === 'marked') return `Make the change only inside the outlined area${on}.`;
+  if (zone === 'whole' || !format) return 'The change may affect the whole image.';
+  const bands = zoneBands(format, H);
+  const printCm = cmEn(format.printHeightCm);
+  if (zone === 'footer') {
+    return `Make the change only inside the footer band${on}: the lowest ${cmEn(format.footerCm)} cm of the ${printCm} cm page (the bottom ${bands.footerPct}% of the image height, y ≥ ${bands.footerStart} of ${H} px), entirely within it, without extending up into the central product area.`;
+  }
+  if (zone === 'header') {
+    return `Make the change only inside the header band${on}: the top ${cmEn(format.headerCm)} cm of the ${printCm} cm page (the top ${bands.headerPct}% of the image height, y < ${bands.headerEnd} of ${H} px), entirely within it, without extending down into the central product area.`;
+  }
+  return `Make the change only inside the central product area${on}, between y = ${bands.headerEnd} px and y = ${bands.footerStart} px of ${H} px.`;
+}
+
+/** Bloco 8 (validação 4d): texto exato, com a linha de correção da refação, ou a regra de "sem texto". */
+export function textBlock(lines: string[], corrections: TextCorrection[] = []): string {
+  if (lines.length === 0) return 'No text, no letters, no numbers, no logo, no watermark.';
+  const numbered = lines.map((line, index) => `Line ${index + 1}: “${cleanRequest(line)}”`);
+  const fixes = corrections.map((fix) =>
+    fix.read
+      ? `A previous attempt rendered the text as “${cleanRequest(fix.read)}”. It must read exactly “${cleanRequest(fix.asked)}”.`
+      : `A previous attempt did not show the text. It must read exactly “${cleanRequest(fix.asked)}”.`,
+  );
   return [
-    `Ajuste esta imagem de fundo de encarte conforme o pedido do cliente: "${cleanRequest(input.request)}".`,
-    CONTINUOUS_IMAGE_RULE,
-    ...(input.continuity ? [CONTINUITY_PHRASE] : []),
-    NO_TEXT_RULES,
+    ...fixes,
+    'Put this exact Portuguese text, copied character by character, with the same accents, cedilla, uppercase and lowercase letters, punctuation and currency format:',
+    ...numbered,
+    'Never invent or add text, prices or logos. No other text, no logo, no watermark.',
   ].join('\n');
 }
-
-/** Campos curtos do plano do Diretor que entram no prompt; o Diretor nunca escreve o prompt (G2). */
-export interface PromptPlanFields {
-  what_to_change?: string;
-  what_to_put?: string;
-  inventory_keep?: string[];
-}
-
-/** `instr`: o que muda e o que fica no lugar, sem pontuação final. */
-export function planInstruction(plan: PromptPlanFields): string {
-  const parts = [plan.what_to_change, plan.what_to_put]
-    .map((part) => cleanRequest(part ?? '').replace(/[.!;]+$/, ''))
-    .filter(Boolean);
-  return parts.join('; ');
-}
-
-/** `mant`: o que precisa continuar como está, ou vazio. */
-export function planKeepSentence(plan: PromptPlanFields): string {
-  const names = (plan.inventory_keep ?? []).map((name) => cleanRequest(name)).filter(Boolean);
-  return names.length ? ` Mantenha como estão: ${names.join(', ')}.` : '';
-}
-
-/** O pedido do plano para o gerador: `instr`, ponto e `mant`. */
-export function planRequest(plan: PromptPlanFields): string {
-  return `${planInstruction(plan)}.${planKeepSentence(plan)}`;
-}
-
-const KEEP_ALL =
-  'Preserve todo o resto da imagem exatamente como está, sem mudar estilo, cor ou composição';
-
-export type RedrawKind = 'global' | 'composition' | 'item' | 'marked';
 
 /**
- * Prompt do redesenho da imagem inteira, sempre montado pelo código a partir dos campos do plano:
- * - `global` (ajuste geral) e `composition` (reorganizar): `buildGlobalPrompt` com o plano e "Mantenha como estão";
- *   só a composição leva a frase de continuidade, e só no formato alto (D-43);
- * - `item` (por texto): "Nesta imagem: ... Altere somente isso. Preserve...";
- * - `marked` (com marcação): "Dentro do retângulo da camada de marcação: ... O retângulo é só uma marcação...".
- * Os itens em aberto entram logo depois de `mant`. "Preserve..." é instrução ao modelo, não promessa ao cliente.
+ * Prompt da edição em oito blocos, em ordem fixa (D-51): ação, formato e uso, composição, estilo, mudança desta
+ * rodada, região com as medidas do formato, preservação e texto. O Diretor escreve composição, estilo, mudança e
+ * preservação; o código escreve o resto. Sem a linha de pedidos em aberto (D-54).
+ * "Preserve..." é instrução ao modelo, não promessa ao cliente.
  */
-export function buildRedrawPrompt(input: {
-  kind: RedrawKind;
-  plan: PromptPlanFields;
-  openItems?: string[];
-  formatId?: string;
-  clientMessages?: string[];
-}): string {
-  const { kind, plan } = input;
-  const open = input.openItems?.length ? openItemsSentence(input.openItems) : '';
-  const body = `${planInstruction(plan)}.${planKeepSentence(plan)}${open}`;
-  if (kind === 'global' || kind === 'composition') {
-    return buildGlobalPrompt({
-      request: body,
-      continuity: kind === 'composition' && continuityApplies(input.formatId, input.clientMessages),
-    });
-  }
-  if (kind === 'marked') {
-    return `Dentro do retângulo da camada de marcação: ${body} Altere somente essa área. ${KEEP_ALL} fora dela. O retângulo é só uma marcação: não deixe o retângulo no resultado. ${NO_TEXT_RULES}`;
-  }
-  return `Nesta imagem: ${body} Altere somente isso. ${KEEP_ALL}. ${NO_TEXT_RULES}`;
+export function buildEditPrompt(input: EditPromptInput): string {
+  const { image } = input;
+  const action = input.marked
+    ? 'Edit the provided image. The red outline on the markup layer marks the area to change; it is only a guide, do not draw it.'
+    : 'Edit the provided image.';
+  const format = findSceneFormat(input.formatId);
+  const sizeCm = format ? `${cmEn(format.artWidthCm)} x ${cmEn(format.artHeightCm)} cm, ` : '';
+  const orientation = input.heightPx >= input.widthPx ? 'portrait' : 'landscape';
+  const composition = [
+    image.composition ? sentence(image.composition) : '',
+    input.composition && continuityApplies(input.formatId, input.clientMessages)
+      ? CONTINUITY_PHRASE_EN
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const keep = image.preserve
+    .map((item) => cleanRequest(item).replace(/[.;]+$/, ''))
+    .filter(Boolean);
+  return [
+    action,
+    `This is the background of a printed supermarket offer flyer, ${sizeCm}${input.widthPx} x ${input.heightPx} px, ${orientation}.`,
+    composition,
+    image.style ? sentence(image.style) : '',
+    `Make exactly one change: ${sentence(image.change)}`,
+    regionText(input),
+    `${keep.length ? `Preserve: ${keep.join('; ')}. ` : ''}Do not change or remove any other element.`,
+    textBlock(image.exact_text, input.corrections),
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

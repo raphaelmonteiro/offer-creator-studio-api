@@ -5,23 +5,22 @@ import { SceneFailureCode } from './domain/scene.types';
 
 export const CANCELLED_REPLY = 'Geração cancelada.';
 
-/** Recusa de texto, preço e logo pintados (G3): a camada é o caminho exato. */
+/** A logo é sempre camada (D-51, 4c): pedido de pintar ou integrar a logo não chama imagem. */
 export const PAINTED_REFUSAL_REPLIES = {
-  painted_text:
-    'Não pinto texto na imagem: o modelo de imagem erra letras. Texto fica exato como camada. Me diga o texto entre aspas e onde colocar, e eu o coloco como camada. Nada foi alterado.',
-  painted_price:
-    'Não pinto preço na imagem: o modelo de imagem erra números. Preço fica exato como texto em camada. Me diga o texto entre aspas e onde colocar, e eu o coloco como camada. Nada foi alterado.',
   painted_logo:
-    'Não pinto a logo na imagem: ela fica exata como camada. Envie a logo pelo clipe e diga onde colocar, ou mantenha a camada que já está na cena. Nada foi alterado.',
+    'A logo fica sempre como camada, para sair exata. Envie a logo pelo clipe, ou me diga onde quer a que já está na cena.',
 } as const;
 
 /** Composição que o plano pediu e o cliente não (G4): vira pergunta, sem imagem. */
 export const compositionQuestion = (labels: string[]): string =>
   `Você quer ${labels.join(', ')} na imagem? Não incluo isso sem você pedir. Se quiser, me diga como. Nada foi alterado.`;
 
-/** O corte do ano, data ou número (D-42) esvaziou o pedido: vira pergunta, sem imagem. */
-export const NUMBER_QUESTION =
-  'Não pinto ano, data nem número na imagem: o modelo de imagem erra números. Me diga o que mudar na imagem; se quiser o número, me diga o texto entre aspas e onde colocar, e eu o coloco como camada. Nada foi alterado.';
+/** O corte do ano, data ou número (D-42) esvaziou `image.change`: vira pergunta, sem imagem. */
+export const NUMBER_QUESTION = 'O que você quer mudar na imagem?';
+
+/** O texto a pintar não está nas mensagens do cliente (4a, G3): pergunta o texto exato, sem imagem. */
+export const EXACT_TEXT_QUESTION =
+  'Qual é o texto exato que vai na imagem? Escreva do jeito que deve aparecer.';
 
 /** "Esquece isso" sem item em aberto (validação 3). */
 export const NO_OPEN_REQUEST_REPLY = 'Não há pedido em aberto para esquecer. Nada foi alterado.';
@@ -32,10 +31,6 @@ export const whichToForgetReply = (items: string[]): string =>
 
 /** Aviso do que saiu da lista (G9): o pedido não some em silêncio, mesmo se o alvo for o errado. */
 export const droppedNote = (items: string[]): string => `Tirei da lista: ${items.join(', ')}.`;
-
-/** Dúvida de escrita que persistiu (D-46): pergunta, sem dizer "não pinto" e sem imagem. */
-export const PAINTED_QUESTION =
-  'Não entendi se você quer isso escrito na imagem. Se for texto, preço ou logo, coloco como camada exata. Pode me dizer o que prefere?';
 
 /** O plano chamaria a imagem sem dizer o que mudar (G2): vira pergunta, sem imagem. */
 export const NO_INSTRUCTION_REPLY =

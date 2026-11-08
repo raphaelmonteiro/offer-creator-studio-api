@@ -42,28 +42,24 @@ const REST_PROMISE = new RegExp(
 const COMPLETION =
   /\b(?:pronto|pronta|prontos|prontas|feito|feita|concluido|concluida|conclui|terminei|finalizei|removi|troquei|alterei|mudei|ajustei|coloquei|adicionei|tirei|apaguei|apliquei|substitui|atualizei|corrigi|resolvi|resolvido)\b/;
 
-/** Promessa de texto pintado: letras, frases e palavras na imagem são camadas. */
-const PAINTED_PROMISE =
-  /\b(?:escrev\w*|escrit[oa]s?|com letras|com o texto|com a frase|com a palavra)\b/;
-
 /** O texto traz promessa de preservação ("fora da área nada mudou", "preservado", "idêntico")? */
 export function promisesPreservation(text: string): boolean {
   const folded = fold(text);
   return PRESERVATION.some((phrase) => folded.includes(phrase)) || REST_PROMISE.test(folded);
 }
 
-/** O `reply` do Diretor é barrado: preservação, conclusão e, só em anúncio de imagem, promessa de texto pintado. */
-export function replyIsForbidden(reply: string, announcesChange = true): boolean {
-  const folded = fold(reply);
-  // A promessa de texto pintado só importa no anúncio de uma imagem: "está escrito Feliz Páscoa" é resposta (C-1).
-  const paintedPromise = announcesChange && PAINTED_PROMISE.test(folded);
-  return promisesPreservation(reply) || COMPLETION.test(folded) || paintedPromise;
+/**
+ * O `reply` do Diretor é barrado: preservação e conclusão. Anunciar texto pintado é permitido (D-51): "Vou colocar uma
+ * placa com a frase “Promoção de Páscoa”" é anúncio certo.
+ */
+export function replyIsForbidden(reply: string): boolean {
+  return promisesPreservation(reply) || COMPLETION.test(fold(reply));
 }
 
 /** `reply` seguro para o cliente: o do Diretor, ou o texto fixo (anúncio ou resposta) se ele for barrado. */
 export function safeReply(plan: Pick<DirectorPlan, 'reply' | 'will_change_image'>): string {
   const reply = plan.reply.trim();
-  if (reply && !replyIsForbidden(reply, plan.will_change_image)) return reply;
+  if (reply && !replyIsForbidden(reply)) return reply;
   return plan.will_change_image ? FIXED_ANNOUNCEMENT : FIXED_ANSWER;
 }
 

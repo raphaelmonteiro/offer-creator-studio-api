@@ -1,8 +1,8 @@
 import {
   compositionQuestion,
   NO_INSTRUCTION_REPLY,
+  EXACT_TEXT_QUESTION,
   NUMBER_QUESTION,
-  PAINTED_QUESTION,
   droppedNote,
 } from '../scene-texts';
 import { BriefChanges } from '../domain/scene-brief';
@@ -14,10 +14,10 @@ export function questionReply(outcome: DirectorOutcome): string | null {
   switch (outcome.kind) {
     case 'composition_question':
       return compositionQuestion(outcome.labels);
+    case 'exact_text_question':
+      return EXACT_TEXT_QUESTION;
     case 'number_question':
       return NUMBER_QUESTION;
-    case 'painted_question':
-      return PAINTED_QUESTION;
     case 'instruction_question':
       return NO_INSTRUCTION_REPLY;
     default:

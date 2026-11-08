@@ -122,9 +122,8 @@ describeIfSceneDb('O juiz e a memória do que o cliente pediu (banco chroma_x_e2
       });
       expect(reply).toContain('Ainda não vi na imagem: um rio no meio.');
       expect((await h.sceneOf(scene.id)).brief[0].status).toBe('open');
-      expect(edit.mock.calls[0][0].prompt).toContain(
-        'Pedidos do cliente ainda em aberto: um rio no meio.',
-      );
+      // D-54: a edição pede uma mudança só, então a linha de pedidos em aberto não entra no prompt.
+      expect(edit.mock.calls[0][0].prompt).not.toContain('em aberto');
     });
 
     it('Item feito some da imagem: o juiz não vê mais o rio, o item reabre, o chat relata e nenhuma imagem é refeita sozinha', async () => {

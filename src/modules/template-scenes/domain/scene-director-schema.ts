@@ -10,8 +10,8 @@ import {
 
 /**
  * Schema fechado do Diretor (`gpt-6-luna`): um plano curto por turno. O efeito vem de `turn_kind` e
- * `will_change_image` por tabela do código, nunca de texto livre. Campos de auditoria (`what_i_see`) e de
- * montagem do prompt (`what_to_change`, `what_to_put`, `inventory_keep`) nunca vão ao cliente.
+ * `will_change_image` por tabela do código, nunca de texto livre. Os blocos de `image` (D-51, em inglês) montam o
+ * prompt da imagem; eles e `what_i_see` (auditoria) nunca vão ao cliente.
  */
 
 export const TURN_KINDS = [
@@ -30,8 +30,13 @@ export const TURN_KINDS = [
 ] as const;
 export type TurnKind = (typeof TURN_KINDS)[number];
 
-export const REFUSALS = ['painted_text', 'painted_price', 'painted_logo'] as const;
+/** D-51: só a logo é recusada (sempre camada); texto e preço são pintados a pedido. */
+export const REFUSALS = ['painted_logo'] as const;
 export type PaintedRefusal = (typeof REFUSALS)[number];
+
+export const IMAGE_ZONES = ['header', 'body', 'footer', 'marked', 'whole'] as const;
+export type ImageZone = (typeof IMAGE_ZONES)[number];
+export const IMAGE_SIDES = ['left', 'center', 'right'] as const;
 
 export const LAYER_OPS = ['move', 'resize', 'remove', 'set_text', 'add_logo'] as const;
 const LOGO_SIDES = ['left', 'center', 'right'] as const;
@@ -40,13 +45,17 @@ const REQUEST_ACTIONS = ['open', 'drop'] as const;
 /** Limites do schema (caracteres, itens). */
 export const DIRECTOR_LIMITS = {
   reply: 260,
-  field: 400,
+  composition: 300,
+  style: 200,
+  change: 500,
+  preserveItems: 12,
+  preserveItem: 120,
+  exactLines: 4,
+  exactLine: 80,
   seen: 500,
-  keepItems: 8,
-  keepName: 60,
   layerOps: 6,
   requests: 8,
-  requestText: 200,
+  requestText: 80,
   quote: 200,
 } as const;
 
@@ -72,16 +81,25 @@ const requestSchema = z
   })
   .strict();
 
+const imageSchema = z
+  .object({
+    composition: z.string().max(DIRECTOR_LIMITS.composition),
+    style: z.string().max(DIRECTOR_LIMITS.style),
+    change: z.string().max(DIRECTOR_LIMITS.change),
+    region: z.object({ zone: z.enum(IMAGE_ZONES), side: z.enum(IMAGE_SIDES).nullable() }).strict(),
+    preserve: z
+      .array(z.string().max(DIRECTOR_LIMITS.preserveItem))
+      .max(DIRECTOR_LIMITS.preserveItems),
+    exact_text: z.array(z.string().max(DIRECTOR_LIMITS.exactLine)).max(DIRECTOR_LIMITS.exactLines),
+  })
+  .strict();
+
 export const directorSchema = z
   .object({
     turn_kind: z.enum(TURN_KINDS),
     will_change_image: z.boolean(),
     reply: z.string().max(DIRECTOR_LIMITS.reply),
-    what_to_change: z.string().max(DIRECTOR_LIMITS.field),
-    what_to_put: z.string().max(DIRECTOR_LIMITS.field),
-    inventory_keep: z
-      .array(z.string().max(DIRECTOR_LIMITS.keepName))
-      .max(DIRECTOR_LIMITS.keepItems),
+    image: imageSchema.nullable(),
     what_i_see: z.string().max(DIRECTOR_LIMITS.seen),
     undo_target: z.union([z.literal('previous'), z.number().int().min(1)]).nullable(),
     layer_ops: z.array(layerOpSchema).max(DIRECTOR_LIMITS.layerOps),
@@ -91,6 +109,7 @@ export const directorSchema = z
   .strict();
 
 export type DirectorPlan = z.infer<typeof directorSchema>;
+export type DirectorImage = z.infer<typeof imageSchema>;
 export type DirectorLayerOp = DirectorPlan['layer_ops'][number];
 export type DirectorRequest = DirectorPlan['requests'][number];
 
@@ -134,6 +153,36 @@ const requestJsonSchema = {
   },
 };
 
+const imageJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['composition', 'style', 'change', 'region', 'preserve', 'exact_text'],
+  properties: {
+    composition: str(DIRECTOR_LIMITS.composition),
+    style: str(DIRECTOR_LIMITS.style),
+    change: str(DIRECTOR_LIMITS.change),
+    region: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['zone', 'side'],
+      properties: {
+        zone: { type: 'string', enum: [...IMAGE_ZONES] },
+        side: { type: ['string', 'null'], enum: [...IMAGE_SIDES, null] },
+      },
+    },
+    preserve: {
+      type: 'array',
+      maxItems: DIRECTOR_LIMITS.preserveItems,
+      items: str(DIRECTOR_LIMITS.preserveItem),
+    },
+    exact_text: {
+      type: 'array',
+      maxItems: DIRECTOR_LIMITS.exactLines,
+      items: str(DIRECTOR_LIMITS.exactLine),
+    },
+  },
+};
+
 /** `text.format` do `/responses` (strict: todos os campos presentes, `null` quando não valem). */
 export const DIRECTOR_JSON_SCHEMA: { name: string; schema: Record<string, unknown> } = {
   name: 'scene_director',
@@ -144,9 +193,7 @@ export const DIRECTOR_JSON_SCHEMA: { name: string; schema: Record<string, unknow
       'turn_kind',
       'will_change_image',
       'reply',
-      'what_to_change',
-      'what_to_put',
-      'inventory_keep',
+      'image',
       'what_i_see',
       'undo_target',
       'layer_ops',
@@ -157,13 +204,7 @@ export const DIRECTOR_JSON_SCHEMA: { name: string; schema: Record<string, unknow
       turn_kind: { type: 'string', enum: [...TURN_KINDS] },
       will_change_image: { type: 'boolean' },
       reply: str(DIRECTOR_LIMITS.reply),
-      what_to_change: str(DIRECTOR_LIMITS.field),
-      what_to_put: str(DIRECTOR_LIMITS.field),
-      inventory_keep: {
-        type: 'array',
-        maxItems: DIRECTOR_LIMITS.keepItems,
-        items: str(DIRECTOR_LIMITS.keepName),
-      },
+      image: { anyOf: [{ type: 'null' }, imageJsonSchema] },
       what_i_see: str(DIRECTOR_LIMITS.seen),
       undo_target: {
         anyOf: [{ type: 'null' }, { type: 'string', enum: ['previous'] }, { type: 'integer' }],

@@ -13,7 +13,12 @@ import {
 } from '../testing/scene-fixtures';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 import { useProcessorHarness } from '../testing/scene-processor-harness';
-import { DIRECTOR_IMAGE_EDGE, SceneDirectorContextService } from './scene-director-context';
+import {
+  DIRECTOR_IMAGE_EDGE,
+  formatBlock,
+  paintedTextOf,
+  SceneDirectorContextService,
+} from './scene-director-context';
 import { displayNumbersOf, loadDisplayedVersions } from './scene-display-number';
 
 const LOGO: SceneElement = {
@@ -255,5 +260,29 @@ describeIfSceneDb('SceneDirectorContextService (banco chroma_x_e2e)', () => {
       const byId = await displayNumbersOf(h.dataSource.manager, scene.id);
       expect([byId.get(first.version.id), byId.get(second.version.id)]).toEqual([1, 2]);
     });
+  });
+});
+
+describe('Contexto do Diretor: formato, zonas e texto já pintado (D-51)', () => {
+  it('Contexto completo: folheto-20x27 a 2480x3328 traz o cabeçalho (y < 739) e o rodapé (y ≥ 2835) em cm, fração e px', () => {
+    const block = formatBlock({ formatId: 'folheto-20x27', widthPx: 2480, heightPx: 3328 });
+    expect(block).toContain('folheto-20x27, 20.5 x 27.5 cm, master de 2480 x 3328 px');
+    expect(block).toContain('header = 6 cm (22.2% da altura, y < 739 px)');
+    expect(block).toContain('footer = 4 cm de 27 cm (14.8% da altura, y ≥ 2835 px)');
+    expect(block).toContain('y de 739 a 2835 px');
+  });
+
+  it('formato desconhecido traz só o tamanho', () => {
+    expect(formatBlock({ formatId: 'social', widthPx: 1080, heightPx: 1080 })).toBe(
+      'Formato: social, 1080 x 1080 px.',
+    );
+  });
+
+  it('o texto pintado vem de metrics.paintedText da versão; sem ele, vazio', () => {
+    expect(paintedTextOf({ metrics: { paintedText: ['Promoção de Páscoa', 3] } })).toEqual([
+      'Promoção de Páscoa',
+    ]);
+    expect(paintedTextOf({ metrics: {} })).toEqual([]);
+    expect(paintedTextOf(null)).toEqual([]);
   });
 });

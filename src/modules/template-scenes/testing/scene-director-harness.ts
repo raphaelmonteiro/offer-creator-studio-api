@@ -1,7 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
-import { DirectorPlan } from '../domain/scene-director-schema';
 import { SceneDirectorProcessor } from '../processors/scene-director.processor';
 import { SceneDirectorState } from '../processors/scene-director-state';
 import { SceneDirectorClient, SceneDirectorCall } from '../providers/scene-director-client';
@@ -9,7 +8,7 @@ import { SceneDirectorContextService } from '../services/scene-director-context'
 import { SceneDirectorService } from '../services/scene-director.service';
 import { SceneLockService } from '../services/scene-lock.service';
 import { SceneTurnService } from '../services/scene-turn.service';
-import { directorPlan } from './scene-director-fixtures';
+import { directorPlan, PlanOverrides } from './scene-director-fixtures';
 import { insertScene } from './scene-fixtures';
 import { useProcessorHarness } from './scene-processor-harness';
 
@@ -19,7 +18,7 @@ export const DIRECTOR_CALL_COST = 0.000435;
 
 /** Resposta do cliente do Diretor com o plano em JSON, como o provedor devolve. */
 export const directorAnswer = (
-  plan: Partial<DirectorPlan> | string,
+  plan: PlanOverrides | string,
   usage: object | null = DIRECTOR_USAGE,
 ) => ({
   text: typeof plan === 'string' ? plan : JSON.stringify(directorPlan(plan)),

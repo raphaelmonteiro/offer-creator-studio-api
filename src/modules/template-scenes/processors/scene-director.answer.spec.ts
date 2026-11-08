@@ -1,10 +1,10 @@
+import { PlanOverrides } from '../testing/scene-director-fixtures';
 import { QUEUES } from '../../../shared/queue/animation-queue.service';
-import { DirectorPlan } from '../domain/scene-director-schema';
 import { directorAnswer, useDirectorHarness } from '../testing/scene-director-harness';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 
 const open = (text: string) => ({ id: null, text, action: 'open' as const, quote: null });
-const answer = (extra: Partial<DirectorPlan>): Partial<DirectorPlan> => ({
+const answer = (extra: PlanOverrides): PlanOverrides => ({
   turn_kind: 'pedido_item',
   will_change_image: false,
   ...extra,

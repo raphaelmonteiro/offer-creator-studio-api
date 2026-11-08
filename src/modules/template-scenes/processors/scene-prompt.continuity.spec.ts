@@ -1,20 +1,27 @@
 import { SCENE_FORMAT_IDS, findSceneFormat } from '../domain/scene-formats';
 import { nativeSizeOfFormat } from '../domain/scene-format-size';
+import { directorImage } from '../testing/scene-director-fixtures';
 import {
+  buildEditPrompt,
   buildGeneratePrompt,
-  buildGlobalPrompt,
-  buildRedrawPrompt,
   CONTINUITY_PHRASE,
+  CONTINUITY_PHRASE_EN,
   CONTINUOUS_IMAGE_RULE,
   FIXED_RULES,
 } from './scene-prompt';
 
 const TALL = 'folheto-27x54';
-const PLAN = {
-  what_to_change: 'Reorganizar os ovos',
-  what_to_put: 'os ovos no rodapé',
-  inventory_keep: ['coelho'],
-};
+const IMAGE = directorImage({ change: 'Reorganizar os ovos', preserve: ['coelho'] });
+const edit = (formatId: string, composition: boolean, clientMessages: string[] = []) =>
+  buildEditPrompt({
+    image: IMAGE,
+    composition,
+    marked: false,
+    formatId,
+    clientMessages,
+    widthPx: 1920,
+    heightPx: 3840,
+  });
 
 const generate = (formatId: string, clientMessages: string[] = ['quero um template de pascoa']) => {
   const format = findSceneFormat(formatId)!;
@@ -46,26 +53,19 @@ describe('Frase de continuidade no formato alto (D-43)', () => {
   });
 
   it('Composição e imagem nova no formato alto: o prompt traz a frase', () => {
-    expect(
-      buildRedrawPrompt({ kind: 'composition', plan: PLAN, formatId: TALL, clientMessages: [] }),
-    ).toContain(CONTINUITY_PHRASE);
+    expect(edit(TALL, true)).toContain(CONTINUITY_PHRASE_EN);
     expect(generate(TALL)).toContain(CONTINUITY_PHRASE);
   });
 
   it('Ajuste, item e marcação no formato alto: o prompt não traz a frase', () => {
-    for (const kind of ['global', 'item', 'marked'] as const) {
-      const prompt = buildRedrawPrompt({ kind, plan: PLAN, formatId: TALL, clientMessages: [] });
-      expect(prompt).not.toContain(CONTINUITY_PHRASE);
-    }
+    expect(edit(TALL, false)).not.toContain(CONTINUITY_PHRASE_EN);
   });
 
   it.each(SCENE_FORMAT_IDS.filter((id) => id !== TALL))(
     'Outros formatos: %s não traz a frase, na primeira imagem nem na composição',
     (formatId) => {
       expect(generate(formatId)).not.toContain(CONTINUITY_PHRASE);
-      expect(
-        buildRedrawPrompt({ kind: 'composition', plan: PLAN, formatId, clientMessages: [] }),
-      ).not.toContain(CONTINUITY_PHRASE);
+      expect(edit(formatId, true)).not.toContain(CONTINUITY_PHRASE_EN);
     },
   );
 
@@ -93,7 +93,7 @@ describe('Frase de continuidade no formato alto (D-43)', () => {
   });
 
   it('sem formato, nada muda (chamadores antigos e o literal do anexo)', () => {
-    expect(buildGlobalPrompt({ request: 'x' })).not.toContain(CONTINUITY_PHRASE);
+    expect(edit('inexistente', true)).not.toContain(CONTINUITY_PHRASE_EN);
     expect(
       buildGeneratePrompt({
         request: 'x',

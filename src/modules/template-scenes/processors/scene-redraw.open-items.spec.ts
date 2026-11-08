@@ -83,7 +83,7 @@ describeIfSceneDb('SceneRedrawHandler: itens em aberto no prompt (banco chroma_x
       expect(lines[2]).toBe('Pedidos do cliente ainda em aberto: um rio no meio.');
     });
 
-    it('Item em aberto com conteúdo pintado: o prompt leva o rio e não leva "escreve FELIZ PASCOA"', async () => {
+    it('Uma mudança por rodada (D-54): a edição não leva a linha de pedidos em aberto', async () => {
       const { scene } = await sceneOf(FORMAT);
       await h.dataSource.manager.update(
         TemplateScene,
@@ -116,8 +116,8 @@ describeIfSceneDb('SceneRedrawHandler: itens em aberto no prompt (banco chroma_x
       await h.processorWith(provider).process(h.job(scene.id, queued.id));
 
       const prompt = edit.mock.calls[0][0].prompt;
-      expect(prompt).toContain('Pedidos do cliente ainda em aberto: um rio no meio.');
-      expect(prompt).not.toContain('FELIZ');
+      expect(prompt).not.toContain('em aberto');
+      expect(prompt).not.toContain('um rio no meio');
       expect((await h.sceneOf(scene.id)).brief).toHaveLength(2);
     });
 

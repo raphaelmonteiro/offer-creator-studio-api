@@ -1,34 +1,22 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import * as sharp from 'sharp';
-import { DirectorPlan } from '../domain/scene-director-schema';
+import { DirectorImage, DirectorPlan } from '../domain/scene-director-schema';
+import { imageChange } from '../domain/scene-director-image';
 import {
   SCENE_IMAGE_PROVIDER,
   SceneGenerateResult,
   SceneImageProvider,
 } from '../providers/scene-image-provider';
-import { promptableTexts } from '../domain/scene-director-painted';
 import { safeChanged, safeSeamDescription } from '../domain/scene-director-phrases';
 import { JudgeBriefVerdict } from '../domain/scene-brief';
 import { afterImageReply, JudgeFacts } from '../scene-texts';
 import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneCallRunner } from './scene-call-runner';
 import { markupFor, MarkupInfo } from './scene-redraw-markup';
-import {
-  buildGeneratePrompt,
-  buildRedrawPrompt,
-  planInstruction,
-  planRequest,
-  RedrawKind,
-} from './scene-prompt';
+import { buildEditPrompt, buildGeneratePrompt, planRequest } from './scene-prompt';
 import { TurnHandler } from './scene-turn-handler';
 import { SceneTurnSupport } from './scene-turn-support';
 import { TurnContext } from './scene-turn-state';
-
-/** Ajuste geral e composição redesenham a imagem pelo prompt global; o resto é item por texto. */
-const GLOBAL_TURNS: ReadonlyMap<DirectorPlan['turn_kind'], RedrawKind> = new Map([
-  ['pedido_ajuste_geral', 'global'],
-  ['pedido_composicao', 'composition'],
-]);
 
 /**
  * O job de imagem (`generate` e `redraw`): a chamada paga que o código monta a partir do plano do Diretor.
@@ -55,7 +43,7 @@ export class SceneRedrawHandler implements TurnHandler {
       return;
     }
     // Plano no formato antigo (job `generate` publicado antes da conversa) ou sem instrução: nenhuma chamada paga.
-    if (typeof ctx.plan.turn_kind !== 'string' || !planInstruction(ctx.plan)) {
+    if (typeof ctx.plan.turn_kind !== 'string' || !ctx.plan.image || !imageChange(ctx.plan)) {
       this.logger.error(
         `Versão ${ctx.versionId} com plano sem formato ou sem instrução: nenhuma imagem é pedida`,
       );
@@ -71,9 +59,7 @@ export class SceneRedrawHandler implements TurnHandler {
     if (!(await state.advance(ctx, 'generating'))) return;
     const size = `${ctx.widthPx}x${ctx.heightPx}`;
     // A primeira imagem da cena não leva a linha de pedidos em aberto (D-38): o prompt julgado excelente não muda.
-    const openItems = ctx.parent
-      ? promptableTexts(ctx.openItems.map((item) => item.text))
-      : undefined;
+    const openItems = ctx.parent ? ctx.openItems.map((item) => item.text) : undefined;
     const prompt = buildGeneratePrompt({
       request: planRequest(plan),
       artWidthCm: ctx.artWidthCm,
@@ -83,6 +69,7 @@ export class SceneRedrawHandler implements TurnHandler {
       openItems,
       formatId: ctx.formatId,
       clientMessages: ctx.clientMessages,
+      exactText: plan.image?.exact_text,
     });
     const result = await this.calls.imageCall(ctx, {
       kind: 'generate',
@@ -115,13 +102,14 @@ export class SceneRedrawHandler implements TurnHandler {
     const { width, height } = await sharp(master).metadata();
     const size = `${width}x${height}`;
     const marking = await markupFor(ctx, { width: width as number, height: height as number });
-    const kind: RedrawKind = marking ? 'marked' : (GLOBAL_TURNS.get(plan.turn_kind) ?? 'item');
-    const prompt = buildRedrawPrompt({
-      kind,
-      plan,
-      openItems: promptableTexts(ctx.openItems.map((item) => item.text)),
+    const prompt = buildEditPrompt({
+      image: plan.image as DirectorImage,
+      composition: plan.turn_kind === 'pedido_composicao',
+      marked: Boolean(marking),
       formatId: ctx.formatId,
       clientMessages: ctx.clientMessages,
+      widthPx: width as number,
+      heightPx: height as number,
     });
     const result = await this.calls.imageCall(ctx, {
       kind: 'edit',

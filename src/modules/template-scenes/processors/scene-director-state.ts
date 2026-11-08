@@ -4,7 +4,6 @@ import { EntityManager } from 'typeorm';
 import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { resolveGenericDrops } from '../domain/scene-desist';
 import { applyDirectorRequests, BriefChanges, openItems } from '../domain/scene-brief';
-import { promptableTexts } from '../domain/scene-director-painted';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { decideTurn, TurnDecision } from '../domain/scene-director-decision';
 import { SceneFailureCode } from '../domain/scene.types';
@@ -166,7 +165,13 @@ export class SceneDirectorState {
     version.metrics = {
       ...version.metrics,
       plan,
-      ...(outcome.patches ? { planPatched: true, numberPatches: outcome.patches } : {}),
+      ...(outcome.patches
+        ? {
+            planPatched: true,
+            ...(outcome.patches.number ? { numberPatches: outcome.patches.number } : {}),
+            ...(outcome.patches.text ? { textPatches: outcome.patches.text } : {}),
+          }
+        : {}),
     };
     const decision = this.decide(scene, { plan, context });
     if (decision.kind === 'refuse') {
@@ -198,7 +203,7 @@ export class SceneDirectorState {
       plan,
       marked: context.script.marked,
       hasImage: context.script.hasImage,
-      openRequests: promptableTexts(openItems(opened).map((item) => item.text)),
+      openRequests: openItems(opened).map((item) => item.text),
     });
   }
 

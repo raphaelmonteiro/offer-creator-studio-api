@@ -12,7 +12,7 @@ const OPEN = [
 
 const input = (message = 'deixa o sol mais alaranjado', extra: object = {}) => ({
   message,
-  plan: { what_to_change: 'sol mais alaranjado', what_to_put: '' },
+  plan: { image: { change: 'sol mais alaranjado' } },
   openItems: OPEN,
   hasBefore: true,
   before: JPEG,
@@ -195,7 +195,7 @@ describe('visionCostUsd e buildVisionPrompt', () => {
   describe('Plano errado: o prompt manda conferir contra a mensagem do cliente', () => {
     const prompt = buildVisionPrompt({
       message: 'tira\n o  coelho',
-      plan: { what_to_change: 'remover o coelho', what_to_put: 'gramado' },
+      plan: { image: { change: 'remover o coelho; gramado' } },
       openItems: OPEN,
       hasBefore: true,
     });
@@ -210,7 +210,7 @@ describe('visionCostUsd e buildVisionPrompt', () => {
     it('Juiz não cobra o ano de contexto: o prompt avisa que ano citado é contexto, e pergunta de emenda', () => {
       const withYear = buildVisionPrompt({
         message: 'template de pascoa para 2027',
-        plan: { what_to_change: 'criar o template', what_to_put: 'ovos e um coelho' },
+        plan: { image: { change: 'criar o template; ovos e um coelho' } },
         openItems: [],
         hasBefore: false,
       });

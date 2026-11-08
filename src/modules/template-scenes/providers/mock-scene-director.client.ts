@@ -1,5 +1,5 @@
 import type { DirectorCompletionResult } from '../../ai/openai-director.service';
-import type { DirectorPlan } from '../domain/scene-director-schema';
+import type { DirectorImage, DirectorPlan } from '../domain/scene-director-schema';
 import { fold } from '../../../shared/text/fold';
 import type { DirectorScript, SceneDirectorCall } from './scene-director-client';
 
@@ -7,27 +7,48 @@ import type { DirectorScript, SceneDirectorCall } from './scene-director-client'
 export const MOCK_DIRECTOR_MARKERS = {
   fail: '#diretor-falha',
   invalid: '#diretor-invalido',
-  /** O modelo "erra" e aceita pintar um preço: o código tem de barrar. */
-  painted: '#plano-pintado',
+  /** O modelo recusa pintar a logo (D-51: a logo é sempre camada). */
+  logo: '#plano-logo',
+  /** Placa com a frase entre aspas da mensagem em `exact_text` (D-51). */
+  text: '#plano-texto',
+  /** O modelo inventa a linha de `exact_text`: o código refaz e, persistindo, pergunta. */
+  inventedText: '#plano-texto-inventado',
+  /** O modelo põe aspas fora do bloco exato: o código refaz e, persistindo, tira só o trecho. */
+  quotesOutside: '#plano-aspas-fora',
   /** O plano traz moldura que ninguém pediu: o código refaz e, persistindo, pergunta. */
   frame: '#plano-moldura',
   /** O plano leva o ano ao pedido de imagem: o código refaz e, persistindo, corta só o trecho. */
   year: '#plano-ano',
 } as const;
 
+const WHOLE: DirectorImage['region'] = { zone: 'whole', side: null };
+
 const EMPTY: DirectorPlan = {
   turn_kind: 'outro',
   will_change_image: false,
   reply: '',
-  what_to_change: '',
-  what_to_put: '',
-  inventory_keep: [],
+  image: null,
   what_i_see: 'Imagem de teste (mock).',
   undo_target: null,
   layer_ops: [],
   requests: [],
   refusal: null,
 };
+
+/** Blocos de imagem do mock: a mudança em texto do cliente, a região pela marcação e o texto entre aspas. */
+function imageOf(change: string, script: DirectorScript, exact: string[] = []): DirectorImage {
+  return {
+    composition: '',
+    style: '',
+    change,
+    region: { zone: script.marked ? 'marked' : 'whole', side: null },
+    preserve: [],
+    exact_text: exact,
+  };
+}
+
+const quotedLines = (message: string): string[] =>
+  [...message.matchAll(/["“«]([^"”»]+)["”»]/g)].map((match) => match[1].trim()).slice(0, 4);
 
 const has = (folded: string, pattern: RegExp): boolean => pattern.test(folded);
 /** Tira só os marcadores do Diretor e do juiz: os do provedor de imagem (`#lento`, `#falha-*`) seguem no pedido. */
@@ -46,7 +67,9 @@ const openRequest = (text: string): DirectorPlan['requests'][number] => ({
 });
 
 function layerPlan(script: DirectorScript, folded: string, message: string): DirectorPlan | null {
-  const quoted = message.match(/["“«]([^"”»]+)["”»]/)?.[1];
+  // D-51: texto entre aspas é pintado; só vira camada quando o cliente pede texto editável ou camada.
+  const asksLayer = has(folded, /\b(?:camada|editavel|editaveis)\b/);
+  const quoted = asksLayer ? message.match(/["“«]([^"”»]+)["”»]/)?.[1] : undefined;
   const ops: DirectorPlan['layer_ops'] = [];
   if (script.hasLogoAttachment) {
     const side = has(folded, /\bdireita\b/)
@@ -124,14 +147,17 @@ function undoPlan(folded: string): DirectorPlan | null {
 }
 
 function imagePlan(script: DirectorScript, folded: string, message: string): DirectorPlan {
-  const base = { ...EMPTY, will_change_image: true, what_to_change: message, what_to_put: '' };
+  const base = {
+    ...EMPTY,
+    will_change_image: true,
+    image: imageOf(message, script, quotedLines(message)),
+  };
   if (!script.hasImage || has(folded, /\b(outra imagem|gere outra|gera outra|refaz tudo)\b/)) {
     return {
       ...base,
       turn_kind: 'imagem_nova',
       reply: 'Vou criar a imagem.',
-      what_to_change: '',
-      what_to_put: message,
+      image: { ...imageOf(message, script, quotedLines(message)), region: WHOLE },
       requests: [openRequest(message)],
     };
   }
@@ -142,7 +168,7 @@ function imagePlan(script: DirectorScript, folded: string, message: string): Dir
           ...base,
           turn_kind: 'marcacao_sem_pedido',
           reply: 'Vou fazer o pedido na área marcada.',
-          what_to_change: open.text,
+          image: imageOf(open.text, script),
         }
       : {
           ...EMPTY,
@@ -177,26 +203,20 @@ function imagePlan(script: DirectorScript, folded: string, message: string): Dir
   };
 }
 
-const PAINTED_ASK =
-  /(ignore .*regras|\bpreco\b|\bpinta\w* o texto|\bintegra\w* a logo|\bescrev\w* .*\b(na imagem|em cima)\b)/;
+const LOGO_ASK = /\b(?:integra\w*|pinta\w*|desenha\w*) a logo\b/;
 
-function paintedRefusal(folded: string): DirectorPlan {
-  const refusal = has(folded, /logo/)
-    ? 'painted_logo'
-    : has(folded, /preco/)
-      ? 'painted_price'
-      : 'painted_text';
+function logoRefusal(): DirectorPlan {
   return {
     ...EMPTY,
     turn_kind: 'recusa_pintado',
-    reply: 'Não pinto texto, preço nem logo.',
-    refusal,
+    reply: 'A logo fica como camada.',
+    refusal: 'painted_logo',
   };
 }
 
 function planFor(script: DirectorScript, message: string): DirectorPlan {
   const folded = fold(message);
-  if (has(folded, PAINTED_ASK)) return paintedRefusal(folded);
+  if (has(folded, LOGO_ASK)) return logoRefusal();
   const direct = undoPlan(folded) ?? layerPlan(script, folded, message);
   if (direct) return direct;
   if (has(folded, /\b(obrigad[oa]|otimo|valeu)\b/) && script.hasImage) {
@@ -214,8 +234,9 @@ function planFor(script: DirectorScript, message: string): DirectorPlan {
 /**
  * Diretor de desenvolvimento: sem rede e sem custo. Escolhe o plano por roteiro (mensagem + estado da cena),
  * para exercitar contexto, janela, camadas, desfazer, recusa e falha. Marcadores: `#diretor-falha` (erro),
- * `#diretor-invalido` (resposta fora do schema), `#plano-pintado` (aceita pintar preço), `#plano-moldura`
- * (moldura que ninguém pediu) e `#plano-ano` (leva o ano ao pedido de imagem).
+ * `#diretor-invalido` (resposta fora do schema), `#plano-logo` (recusa pintar a logo), `#plano-texto` (placa com
+ * a frase entre aspas), `#plano-texto-inventado`, `#plano-aspas-fora`, `#plano-moldura` (moldura que ninguém
+ * pediu) e `#plano-ano` (leva o ano ao pedido de imagem).
  */
 export class MockSceneDirectorClient {
   async plan(input: SceneDirectorCall): Promise<DirectorCompletionResult> {
@@ -237,32 +258,44 @@ export class MockSceneDirectorClient {
   private answer(script: DirectorScript): DirectorPlan {
     const message = clean(script.message);
     const plan = planFor(script, message);
-    if (script.message.includes(MOCK_DIRECTOR_MARKERS.painted)) {
-      return {
-        ...imagePlan({ ...script, hasImage: true }, '', message),
-        turn_kind: 'pedido_item',
-        what_to_put: 'o preço R$ 9,90 escrito na imagem',
-        requests: [openRequest(message)],
-      };
+    const markers = MOCK_DIRECTOR_MARKERS;
+    const hasMarker = (marker: string): boolean => script.message.includes(marker);
+    const asEdit = (image: DirectorImage): DirectorPlan => ({
+      ...imagePlan({ ...script, hasImage: true }, '', message),
+      turn_kind: 'pedido_item',
+      image,
+      requests: [openRequest(message)],
+    });
+    if (hasMarker(markers.logo)) return logoRefusal();
+    if (hasMarker(markers.inventedText)) {
+      return asEdit(imageOf('Add a sign with a promotional text', script, ['Oferta R$ 9,90']));
     }
-    if (script.message.includes(MOCK_DIRECTOR_MARKERS.year)) {
+    if (hasMarker(markers.text)) {
+      const lines = quotedLines(message);
+      return asEdit({
+        ...imageOf('Add a modest wooden sign with the requested text', script, lines),
+        region: { zone: script.marked ? 'marked' : 'footer', side: null },
+        preserve: ['the existing artwork'],
+      });
+    }
+    if (hasMarker(markers.quotesOutside)) {
+      return asEdit(imageOf('Add a sign reading “SALE 50% OFF”', script));
+    }
+    if (hasMarker(markers.year)) {
       const first = !script.hasImage;
+      const change = 'Easter eggs and a bunny, with visual references to Easter and the year 2027';
       return {
         ...imagePlan(script, '', message),
         turn_kind: first ? 'imagem_nova' : 'pedido_item',
-        what_to_change: first ? '' : message,
-        what_to_put:
-          'ovos de Páscoa e um coelho, com referências visuais à Páscoa e indicação do ano 2027',
+        image: imageOf(change, script),
         requests: [openRequest(message)],
       };
     }
-    if (script.message.includes(MOCK_DIRECTOR_MARKERS.frame)) {
-      return {
-        ...imagePlan({ ...script, hasImage: true }, '', message),
-        turn_kind: 'pedido_item',
-        what_to_put: 'enquadrar como uma moldura',
-        requests: [openRequest(message)],
-      };
+    if (hasMarker(markers.frame)) {
+      return asEdit({
+        ...imageOf('Frame the scene', script),
+        composition: 'a frame around the page',
+      });
     }
     return plan;
   }

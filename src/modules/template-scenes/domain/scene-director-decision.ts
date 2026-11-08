@@ -1,4 +1,10 @@
-import { DirectorLayerOp, DirectorPlan, PaintedRefusal } from './scene-director-schema';
+import {
+  DirectorImage,
+  DirectorLayerOp,
+  DirectorPlan,
+  PaintedRefusal,
+} from './scene-director-schema';
+import { emptyImage, imageChange } from './scene-director-image';
 import { NO_IMAGE_REPLY, NO_INSTRUCTION_REPLY } from '../scene-texts';
 import { FIXED_ANSWER, replyIsForbidden, safeReply } from './scene-director-phrases';
 import { fold } from '../../../shared/text/fold';
@@ -38,7 +44,7 @@ export type TurnDecision =
        * "Marquei" com pedido em aberto, mas o plano do Diretor veio sem instrução (só uma pergunta): o código monta a
        * instrução a partir dos pedidos em aberto, e o plano gravado recebe estes campos por cima.
        */
-      planPatch?: { will_change_image: true; what_to_change: string };
+      planPatch?: { will_change_image: true; image: DirectorImage };
       /** Aviso do redesenho só vale em edição: a primeira imagem e a imagem nova não contam (D-35). */
       isEdit: boolean;
     };
@@ -53,14 +59,12 @@ const IMAGE_KINDS = new Set<DirectorPlan['turn_kind']>([
 ]);
 
 /**
- * O plano diz o que fazer na imagem? Sem `what_to_change` e `what_to_put` o prompt sairia vazio (G2). O "marquei"
- * monta a instrução dos pedidos em aberto (`markedPatch`) e por isso não conta aqui.
+ * O plano diz o que fazer na imagem? Sem `image.change` o prompt sairia vazio (G2). O "marquei" monta a instrução
+ * dos pedidos em aberto (`markedPatch`) e por isso não conta aqui.
  */
-export function hasInstruction(
-  plan: Pick<DirectorPlan, 'what_to_change' | 'what_to_put' | 'turn_kind'>,
-): boolean {
+export function hasInstruction(plan: Pick<DirectorPlan, 'image' | 'turn_kind'>): boolean {
   if (plan.turn_kind === 'marcacao_sem_pedido') return true;
-  return Boolean(plan.what_to_change?.trim() || plan.what_to_put?.trim());
+  return Boolean(imageChange(plan));
 }
 
 /** O plano pede imagem? `will_change_image` é respeitado (validação 8); "marquei" tem regra própria. */
@@ -132,7 +136,7 @@ export function windowApplies(kind: DirectorPlan['turn_kind'], marked: boolean):
   return !marked;
 }
 
-/** Cabe no campo `what_to_change` do schema (400 caracteres) e no anúncio (260). */
+/** Cabe no campo `image.change` do schema (500 caracteres) e no anúncio (260). */
 const joinRequests = (texts: string[], max: number): string =>
   texts
     .map((text) =>
@@ -150,10 +154,15 @@ function markedPatch(
 ): Pick<ImageDecision, 'announcement' | 'planPatch'> | null {
   const { plan, openRequests } = input;
   if (plan.turn_kind !== 'marcacao_sem_pedido') return null;
-  if (plan.will_change_image && plan.what_to_change?.trim()) return null;
+  if (plan.will_change_image && imageChange(plan)) return null;
+  const image = emptyImage({
+    ...plan.image,
+    change: joinRequests(openRequests, 400),
+    region: { zone: 'marked', side: null },
+  });
   return {
     announcement: `Vou fazer na área marcada o que você pediu antes: ${joinRequests(openRequests, 190)}.`,
-    planPatch: { will_change_image: true, what_to_change: joinRequests(openRequests, 400) },
+    planPatch: { will_change_image: true, image },
   };
 }
 
@@ -176,7 +185,7 @@ function imageDecision(input: DecisionInput): TurnDecision {
 export function decideTurn(input: DecisionInput): TurnDecision {
   const { plan, hasImage } = input;
   if (plan.turn_kind === 'recusa_pintado') {
-    return { kind: 'refuse', refusal: plan.refusal ?? 'painted_text' };
+    return { kind: 'refuse', refusal: 'painted_logo' };
   }
   if ((plan.turn_kind === 'camada' || plan.turn_kind === 'desfazer') && !hasImage) {
     return { kind: 'reply', reply: NO_IMAGE_REPLY, aboutImage: false };
@@ -200,7 +209,7 @@ export function decideTurn(input: DecisionInput): TurnDecision {
     // O Diretor respondeu em vez de pedir imagem (por exemplo, não viu o objeto): a resposta vai como leitura (G8). Sem
     // resposta que sirva, ou barrada, o texto fixo, sem o prefixo.
     const text = plan.reply.trim();
-    return unusableAnswer(text) || replyIsForbidden(text, false)
+    return unusableAnswer(text) || replyIsForbidden(text)
       ? { kind: 'reply', reply: NO_INSTRUCTION_REPLY, aboutImage: false }
       : { kind: 'reply', reply: text, aboutImage: hasImage && isReading(text) };
   }

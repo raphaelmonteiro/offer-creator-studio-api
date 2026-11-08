@@ -1,10 +1,11 @@
+import { PlanOverrides } from '../testing/scene-director-fixtures';
 import { QUEUES } from '../../../shared/queue/animation-queue.service';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { directorAnswer, useDirectorHarness } from '../testing/scene-director-harness';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 
 const open = (text: string) => ({ id: null, text, action: 'open' as const, quote: null });
-const item = (extra: Partial<DirectorPlan>): Partial<DirectorPlan> => ({
+const item = (extra: PlanOverrides): PlanOverrides => ({
   turn_kind: 'pedido_item',
   will_change_image: true,
   reply: 'Vou fazer a mudança.',
@@ -45,58 +46,37 @@ describeIfSceneDb(
       });
     });
 
-    describe('G3: escrita em todo campo que vai ao modelo (R2, R3, D-45)', () => {
-      it('Escrita em what_to_change: vira recusa na hora, sem refazer e sem imagem', async () => {
-        const { scene, version, plan } = await h.runTurn(
+    describe('G3: o pedido de escrita não é recusado (D-51)', () => {
+      it('Pedido normal não vira recusa nem pergunta: plano com escrita no pedido segue, sem refazer', async () => {
+        const { version, plan } = await h.runTurn(
           'deixa mais bonito',
-          item({
-            what_to_change:
-              'escrever FELIZ PASCOA em letras grandes no topo; colocar o preco R$ 9,90',
-          }),
+          item({ what_to_change: 'write FELIZ PASCOA in big letters at the top' }),
         );
         expect(plan).toHaveBeenCalledTimes(1);
-        expect(version.status).toBe('rejected');
-        expect(await lastReply(scene.id)).toContain('Não pinto');
-        expect(imageJobs()).toHaveLength(0);
-      });
-
-      it('Escrita em what_to_change corrigida ao refazer: o segundo plano segue e o custo das duas fica', async () => {
-        const { version } = await h.runTurn('deixa mais bonito', async (_c, attempt) =>
-          directorAnswer(
-            item({ what_to_change: attempt === 1 ? 'colocar o titulo' : 'colocar mais flores' }),
-          ),
-        );
         expect(version.status).toBe('queued');
-        const director = version.metrics.director as { calls: unknown[] };
-        expect(director.calls).toHaveLength(2);
-        expect((version.metrics.plan as DirectorPlan).what_to_change).toBe('colocar mais flores');
+        expect(imageJobs()).toHaveLength(1);
       });
 
-      it('Inventário com conteúdo pintado: só o coelho segue, sem refazer', async () => {
+      it('Preservação com texto pintado segue como veio: o código não filtra por conteúdo', async () => {
         const { version, plan } = await h.runTurn(
           'mais flores',
           item({
             what_to_change: 'mais flores',
-            inventory_keep: ['titulo Feliz Pascoa', 'logo da loja', 'preco R$ 9,90', 'coelho'],
+            inventory_keep: ['the title lettering', 'the store logo', 'the bunny'],
           }),
         );
         expect(plan).toHaveBeenCalledTimes(1);
-        expect((version.metrics.plan as DirectorPlan).inventory_keep).toEqual(['coelho']);
+        expect((version.metrics.plan as DirectorPlan).image?.preserve).toEqual([
+          'the title lettering',
+          'the store logo',
+          'the bunny',
+        ]);
       });
 
-      it('Diretor recusa a escrita: refusal painted_text numa placa sem termo conhecido vira recusa, sem imagem', async () => {
+      it('Pedido disfarçado de escrita: a placa sem exact_text segue, e o prompt termina em "No text"', async () => {
         const { version } = await h.runTurn(
           'coloca uma placa de boas-vindas',
-          item({ what_to_put: 'uma placa de boas-vindas', refusal: 'painted_text' }),
-        );
-        expect(version.status).toBe('rejected');
-        expect(imageJobs()).toHaveLength(0);
-      });
-
-      it('Pedido disfarçado que escapa: written_content vazio segue, e a regra de texto fica no prompt', async () => {
-        const { version } = await h.runTurn(
-          'coloca uma placa de boas-vindas',
-          item({ what_to_put: 'uma placa de boas-vindas' }),
+          item({ what_to_put: 'a welcome sign' }),
         );
         expect(version.status).toBe('queued');
         expect(imageJobs()).toHaveLength(1);
@@ -109,6 +89,21 @@ describeIfSceneDb(
         );
         expect(plan).toHaveBeenCalledTimes(1);
         expect(version.status).toBe('queued');
+      });
+    });
+
+    describe('Região marcada sem marcação (D-51)', () => {
+      it('nas duas chamadas a versão falha com DIRECTOR_UNAVAILABLE, sem imagem', async () => {
+        const { version, plan } = await h.runTurn('tira esse coelho', async () => {
+          const raw = JSON.stringify(item({ what_to_change: 'remove the bunny' })).replace(
+            '"zone":"whole"',
+            '"zone":"marked"',
+          );
+          return directorAnswer(raw);
+        });
+        expect(plan).toHaveBeenCalledTimes(2);
+        expect(version).toMatchObject({ status: 'failed', errorCode: 'DIRECTOR_UNAVAILABLE' });
+        expect(imageJobs()).toHaveLength(0);
       });
     });
 

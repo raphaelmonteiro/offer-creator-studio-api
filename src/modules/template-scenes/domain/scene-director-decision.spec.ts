@@ -1,8 +1,7 @@
-import { directorPlan } from '../testing/scene-director-fixtures';
-import { DirectorPlan } from './scene-director-schema';
+import { directorPlan, PlanOverrides } from '../testing/scene-director-fixtures';
 import { decideTurn, DecisionInput, windowApplies } from './scene-director-decision';
 
-const decide = (plan: Partial<DirectorPlan>, extra: Partial<DecisionInput> = {}) =>
+const decide = (plan: PlanOverrides, extra: Partial<DecisionInput> = {}) =>
   decideTurn({
     plan: directorPlan({ what_to_change: 'tirar o coelho', will_change_image: true, ...plan }),
     marked: false,
@@ -45,13 +44,13 @@ describe('decideTurn: o efeito vem do tipo e das regras do código', () => {
   });
 
   it('recusa vira recusa, com o tipo de conteúdo pintado', () => {
-    expect(decide({ turn_kind: 'recusa_pintado', refusal: 'painted_price' })).toEqual({
+    expect(decide({ turn_kind: 'recusa_pintado', refusal: 'painted_logo' })).toEqual({
       kind: 'refuse',
-      refusal: 'painted_price',
+      refusal: 'painted_logo',
     });
     expect(decide({ turn_kind: 'recusa_pintado' })).toEqual({
       kind: 'refuse',
-      refusal: 'painted_text',
+      refusal: 'painted_logo',
     });
   });
 
@@ -161,7 +160,10 @@ describe('decideTurn: o efeito vem do tipo e das regras do código', () => {
           'Vou fazer na área marcada o que você pediu antes: coloca ovos no rodapé; um rio no meio.',
         planPatch: {
           will_change_image: true,
-          what_to_change: 'coloca ovos no rodapé; um rio no meio',
+          image: expect.objectContaining({
+            change: 'coloca ovos no rodapé; um rio no meio',
+            region: { zone: 'marked', side: null },
+          }),
         },
       });
     });
@@ -173,7 +175,7 @@ describe('decideTurn: o efeito vem do tipo e das regras do código', () => {
         { marked: true, openRequests: long },
       );
       if (result.kind !== 'image') throw new Error('esperava imagem');
-      expect(result.planPatch?.what_to_change.length).toBeLessThanOrEqual(400);
+      expect(result.planPatch?.image.change.length).toBeLessThanOrEqual(400);
       expect(result.announcement.length).toBeLessThanOrEqual(260);
     });
   });

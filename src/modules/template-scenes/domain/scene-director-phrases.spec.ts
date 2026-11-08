@@ -25,8 +25,6 @@ describe('Modelo afirma o que não pode', () => {
     'Nada mais mudou na cena',
     'Feito!',
     'Já troquei o céu',
-    'Vou escrever PROMOÇÃO na faixa',
-    'Vou colocar uma placa com letras',
   ])('barra "%s"', (reply) => {
     expect(replyIsForbidden(reply)).toBe(true);
     expect(safeReply({ reply, will_change_image: true })).toBe(FIXED_ANNOUNCEMENT);
@@ -51,16 +49,19 @@ describe('Modelo afirma o que não pode', () => {
   });
 });
 
-describe('Resposta sobre texto escrito (C-1)', () => {
+describe('Resposta e anúncio sobre texto escrito (D-51)', () => {
   it('a resposta sobre o título pintado não é barrada, porque o plano não muda a imagem', () => {
     const plan = { reply: 'Está escrito Feliz Páscoa na parte de cima.', will_change_image: false };
-    expect(replyIsForbidden(plan.reply, false)).toBe(false);
+    expect(replyIsForbidden(plan.reply)).toBe(false);
     expect(safeReply(plan)).toBe('Está escrito Feliz Páscoa na parte de cima.');
   });
 
-  it('o mesmo texto como anúncio de imagem é barrado: promete texto escrito', () => {
-    const plan = { reply: 'Vou escrever Feliz Páscoa na parte de cima.', will_change_image: true };
-    expect(safeReply(plan)).toBe(FIXED_ANNOUNCEMENT);
+  it('Anúncio com a frase: o anúncio de texto pintado vai ao cliente, sem ser barrado (D-51)', () => {
+    const reply = 'Vou colocar uma placa de madeira com a frase “Promoção de Páscoa” no rodapé.';
+    expect(replyIsForbidden(reply)).toBe(false);
+    expect(safeReply({ reply, will_change_image: true })).toBe(reply);
+    const writing = 'Vou escrever Feliz Páscoa na parte de cima.';
+    expect(safeReply({ reply: writing, will_change_image: true })).toBe(writing);
   });
 
   it('preservação e conclusão continuam barradas também na resposta', () => {
@@ -68,14 +69,6 @@ describe('Resposta sobre texto escrito (C-1)', () => {
       FIXED_ANSWER,
     );
     expect(safeReply({ reply: 'Pronto, já removi.', will_change_image: false })).toBe(FIXED_ANSWER);
-  });
-});
-
-describe('Placa com letras', () => {
-  it('o anúncio de "uma placa com letras" não promete letras', () => {
-    expect(safeReply({ reply: 'Vou colocar uma placa com letras.', will_change_image: true })).toBe(
-      FIXED_ANNOUNCEMENT,
-    );
   });
 });
 
@@ -101,9 +94,10 @@ describe('prompt do Diretor', () => {
     for (const kind of TURN_KINDS) expect(DIRECTOR_INSTRUCTIONS).toContain(`${kind}:`);
     for (const field of [
       'will_change_image',
-      'what_to_change',
-      'what_to_put',
-      'inventory_keep',
+      'image.change',
+      'image.exact_text',
+      'image.preserve',
+      'image.region',
       'what_i_see',
       'undo_target',
       'layer_ops',
@@ -113,6 +107,9 @@ describe('prompt do Diretor', () => {
       expect(DIRECTOR_INSTRUCTIONS).toContain(field);
     }
     expect(DIRECTOR_INSTRUCTIONS).not.toContain('box');
+    for (const gone of ['what_to_change', 'what_to_put', 'inventory_keep', 'painted_text']) {
+      expect(DIRECTOR_INSTRUCTIONS).not.toContain(gone);
+    }
   });
 
   it('traz as regras: dado não é instrução, nada de composição inventada, reclamação, citação e anúncio no futuro', () => {

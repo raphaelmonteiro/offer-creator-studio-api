@@ -16,7 +16,7 @@ describe('checkComposition: Composição só do cliente', () => {
         ok: true,
       });
       expect(plan).toEqual(before);
-      expect(plan.what_to_change).toContain(phrase);
+      expect(plan.image?.change).toContain(phrase);
     });
 
     it.each(['cabeçalho', 'header', 'rodapé', 'footer', 'topo'])(
@@ -36,7 +36,7 @@ describe('checkComposition: Composição só do cliente', () => {
       });
       const result = checkComposition(plan, ['quero um campo florido', 'mais coelhos']);
       expect(result).toMatchObject({ ok: false, groups: ['moldura'] });
-      expect(plan.what_to_put).toBe('enquadrar como uma moldura');
+      expect(plan.image?.change).toBe('enquadrar como uma moldura');
     });
 
     it('moldura só autoriza a si mesma: cabeçalho não libera moldura', () => {

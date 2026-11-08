@@ -3,7 +3,7 @@ import { DirectorPlan } from './scene-director-schema';
 
 /**
  * Validação 5 (G4): o sistema não pede divisão, faixa ou moldura que o cliente não pediu. Os termos do
- * plano (`what_to_change`, `what_to_put`, `inventory_keep`) são conferidos contra TODAS as mensagens do
+ * plano (`image.composition`, `image.change`, `image.preserve`) são conferidos contra TODAS as mensagens do
  * cliente. A conferência nunca corta frase: o chamador refaz o Diretor uma vez, com o motivo, e, se
  * persistir, pergunta ao cliente.
  */
@@ -65,12 +65,15 @@ export type CompositionCheck =
   | { ok: true }
   | { ok: false; groups: CompositionGroup[]; reason: string };
 
-/** Campos do plano que vão ao prompt de imagem, inclusive `requests` abertos. */
+/**
+ * Campos do plano que vão ao prompt de imagem, inclusive `requests` abertos. `image.region` não é composição: a
+ * faixa autorizada diz onde a mudança acontece e não pede faixa nenhuma (D-51).
+ */
 const planText = (plan: DirectorPlan): string =>
   [
-    plan.what_to_change,
-    plan.what_to_put,
-    ...plan.inventory_keep,
+    plan.image?.composition ?? '',
+    plan.image?.change ?? '',
+    ...(plan.image?.preserve ?? []),
     // Pedido em aberto também chega ao prompt (linha de pedidos e instrução do "marquei"): R4.
     ...plan.requests.filter((request) => request.action === 'open').map((request) => request.text),
   ].join(' \n ');
