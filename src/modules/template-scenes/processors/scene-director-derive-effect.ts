@@ -3,7 +3,7 @@ import { EntityManager } from 'typeorm';
 import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { TurnDecision } from '../domain/scene-director-decision';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
-import { BACK_EXISTS_REPLY, FRONT_FIRST_REPLY } from '../scene-texts';
+import { DERIVE_TEXTS, DeriveTexts } from '../scene-texts';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { assertDerivable, FrontAndBack, loadFrontAndBack } from '../services/scene-derive-face';
 import { announceAndQueue } from './scene-director-image-effect';
@@ -13,14 +13,15 @@ import { DirectorTarget, rejectTarget } from './scene-director-target';
 async function frontOrReply(
   manager: EntityManager,
   faces: FrontAndBack,
+  texts: DeriveTexts,
 ): Promise<TemplateSceneVersion | string> {
   try {
     return await assertDerivable(manager, faces);
   } catch (error) {
     const code =
       error instanceof HttpException ? (error.getResponse() as { code?: string }).code : '';
-    if (code === 'FRONT_NOT_READY') return FRONT_FIRST_REPLY;
-    if (code === 'BACK_ALREADY_EXISTS') return BACK_EXISTS_REPLY;
+    if (code === 'FRONT_NOT_READY') return texts.first;
+    if (code === 'BACK_ALREADY_EXISTS') return texts.exists;
     throw error;
   }
 }
@@ -37,8 +38,13 @@ export async function applyDeriveEffect(
   deps: { queue: AnimationQueueService; windowSeconds: number },
 ): Promise<void> {
   const { manager, scene, version } = target;
-  const faces = await loadFrontAndBack(manager, scene.id);
-  const front = await frontOrReply(manager, faces);
+  const faces = await loadFrontAndBack(
+    manager,
+    scene.id,
+    scene.layout === 'tabloid' ? 'inner' : 'back',
+  );
+  const texts = DERIVE_TEXTS[scene.layout === 'tabloid' ? 'tabloid' : 'front_back'];
+  const front = await frontOrReply(manager, faces, texts);
   if (typeof front === 'string') return rejectTarget(target, front);
   const windowSeconds = decision.window ? deps.windowSeconds : 0;
   Object.assign(version, {

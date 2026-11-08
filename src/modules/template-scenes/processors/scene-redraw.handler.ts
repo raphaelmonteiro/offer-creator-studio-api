@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import * as sharp from 'sharp';
 import { DirectorImage, DirectorPlan } from '../domain/scene-director-schema';
+import { hasTwoFaces } from '../domain/scene-faces';
 import { imageChange } from '../domain/scene-director-image';
 import { SCENE_IMAGE_PROVIDER, SceneImageProvider } from '../providers/scene-image-provider';
 import { SceneVisionService } from '../services/scene-vision.service';
@@ -8,7 +9,8 @@ import { SceneCallRunner } from './scene-call-runner';
 import { Attempt, concludeImage, Concluding } from './scene-redraw-conclude';
 import { markupFor } from './scene-redraw-markup';
 import { buildRoundText } from './scene-redraw-text-plan';
-import { buildEditPrompt, buildGeneratePrompt, planRequest, TextCorrection } from './scene-prompt';
+import { generatePromptFor } from './scene-generate-prompt';
+import { buildEditPrompt, TextCorrection } from './scene-prompt';
 import { TurnHandler } from './scene-turn-handler';
 import { SceneTurnSupport } from './scene-turn-support';
 import { TurnContext } from './scene-turn-state';
@@ -66,18 +68,7 @@ export class SceneRedrawHandler implements TurnHandler {
     // A primeira imagem da cena não leva a linha de pedidos em aberto (D-38): o prompt julgado excelente não muda.
     const openItems = ctx.parent ? ctx.openItems.map((item) => item.text) : undefined;
     const build = (corrections: TextCorrection[] = []): Attempt => {
-      const prompt = buildGeneratePrompt({
-        request: planRequest(plan),
-        artWidthCm: ctx.artWidthCm,
-        artHeightCm: ctx.artHeightCm,
-        widthPx: ctx.widthPx,
-        heightPx: ctx.heightPx,
-        openItems,
-        formatId: ctx.formatId,
-        clientMessages: ctx.clientMessages,
-        exactText: plan.image?.exact_text,
-        corrections,
-      });
+      const prompt = generatePromptFor(ctx, { plan, openItems, corrections });
       const model = this.support.model();
       const run = () =>
         this.provider.generate({
@@ -147,7 +138,7 @@ export class SceneRedrawHandler implements TurnHandler {
       corrections,
       keepText: text.keep,
       zones: ctx.zones,
-      faceKey: ctx.layout === 'front_back' ? ctx.faceKey : undefined,
+      faceKey: hasTwoFaces(ctx.layout) ? ctx.faceKey : undefined,
     });
     const model = this.support.model();
     const size = `${width}x${height}`;

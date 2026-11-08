@@ -21,12 +21,10 @@ const sameSize = (a: SceneElement, b: SceneElement): boolean =>
 
 /** "no rodapé, à direita": a zona pelo centro da camada e o lado pelo `x`. */
 export function whereIs(element: SceneElement, zones: SceneZones): string {
-  const zone =
-    element.y < zones.header.y + zones.header.h
-      ? 'header'
-      : element.y >= zones.footer.y
-        ? 'footer'
-        : 'body';
+  // No jornal o cabeçalho e o rodapé ocupam só uma metade da folha: o `x` também conta.
+  const inHeader = element.y < zones.header.y + zones.header.h && element.x >= zones.header.x;
+  const inFooter = element.y >= zones.footer.y && element.x <= zones.footer.x + zones.footer.w;
+  const zone = inHeader ? 'header' : inFooter ? 'footer' : 'body';
   const side = element.x < 0.4 ? 'left' : element.x > 0.6 ? 'right' : 'center';
   return `${ZONE_LABEL[zone]}, ${SIDE_LABEL[side]}`;
 }

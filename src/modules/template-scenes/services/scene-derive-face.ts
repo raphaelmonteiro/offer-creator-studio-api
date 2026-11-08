@@ -1,24 +1,30 @@
 import { EntityManager } from 'typeorm';
+import { FaceKey } from '../domain/scene-faces';
 import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { backAlreadyExists, faceNotFound, frontNotReady } from '../scene.errors';
 import { currentVersionOf, faceHasImage, loadFaces } from './scene-faces';
 
-/** A frente e o verso de uma cena de frente e verso. */
+/** A face de origem e a derivada: frente e verso, ou Externa e Interna (as chaves de cada par). */
 export interface FrontAndBack {
   front: TemplateSceneFace;
   back: TemplateSceneFace;
 }
 
-/** As faces da cena `front_back`; cena de uma face (sem `back`) é 422 `FACE_NOT_FOUND`. */
+/** Cada face derivável e a face de que nasce (a cena `front_back` tem `back`; a `tabloid`, `inner`). */
+const DERIVED_FROM: Readonly<Partial<Record<FaceKey, FaceKey>>> = { back: 'front', inner: 'outer' };
+
+/** As faces do par; cena sem elas (outro layout) ou chave que não se deriva é 422 `FACE_NOT_FOUND`. */
 export async function loadFrontAndBack(
   manager: EntityManager,
   sceneId: string,
+  derivedKey: FaceKey = 'back',
 ): Promise<FrontAndBack> {
+  const sourceKey = DERIVED_FROM[derivedKey];
   const faces = await loadFaces(manager, sceneId);
-  const back = faces.find((face) => face.key === 'back');
-  const front = faces.find((face) => face.key === 'front');
-  if (!back || !front) throw faceNotFound('back');
+  const back = faces.find((face) => face.key === derivedKey);
+  const front = faces.find((face) => face.key === sourceKey);
+  if (!sourceKey || !back || !front) throw faceNotFound(derivedKey);
   return { front, back };
 }
 
@@ -33,10 +39,10 @@ export async function assertDerivable(
 ): Promise<TemplateSceneVersion> {
   const frontVersion = await currentVersionOf(manager, faces.front);
   if (!frontVersion || frontVersion.status !== 'ready' || !frontVersion.masterAssetId) {
-    throw frontNotReady();
+    throw frontNotReady(faces.back.key);
   }
   if (await faceHasImage(manager, faces.back.sceneId, faces.back.index)) {
-    throw backAlreadyExists();
+    throw backAlreadyExists(faces.back.key);
   }
   return frontVersion;
 }
