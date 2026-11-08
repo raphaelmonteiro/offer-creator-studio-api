@@ -11,7 +11,9 @@ const verdict = (extra: Record<string, unknown> = {}) => ({
   mudou: 'O coelho da direita saiu.',
   vistos: [],
   nao_vistos: [],
-  texto_na_imagem: false,
+  faltou: '',
+  texto_lido: [],
+  texto_extra: '',
   emenda: false,
   emenda_descricao: '',
   ...extra,
@@ -273,11 +275,11 @@ describeIfSceneDb('O juiz confere e o resultado é sempre aplicado (banco chroma
       expect(judgeOf(version)).toBe('sim');
     });
 
-    it('Texto na imagem: o chat relata que viu texto e que fica melhor como camada', async () => {
-      const { reply, version } = await run(judgeReturning(verdict({ texto_na_imagem: true })));
+    it('Texto que ninguém pediu: o chat relata o que viu e oferece tirar, sem afirmar que não há texto', async () => {
+      const { reply, version } = await run(judgeReturning(verdict({ texto_extra: 'PROMO' })));
       expect(version.status).toBe('ready');
       expect(reply).toBe(
-        'Conferi a imagem nova: O coelho da direita saiu. Vi texto na imagem nova; se quiser texto, ele fica melhor como camada.',
+        'Conferi a imagem nova: O coelho da direita saiu. Vi na imagem um texto que você não pediu: “PROMO”. Diga se quer que eu tire.',
       );
     });
   });

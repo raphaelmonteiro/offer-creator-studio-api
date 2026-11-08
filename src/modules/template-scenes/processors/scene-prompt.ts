@@ -20,6 +20,8 @@ export interface ScenePromptInput {
   clientMessages?: string[];
   /** Linhas de `exact_text` (D-52): trocam só a linha `Regras:` pelo texto exato, copiado letra por letra. */
   exactText?: string[];
+  /** Linhas que o juiz leu diferente do pedido: a refação acrescenta a correção à linha `Regras:`. */
+  corrections?: TextCorrection[];
 }
 
 const cm = (value: number): string => String(value).replace('.', ',');
@@ -66,9 +68,16 @@ export const FIXED_RULES =
   'Regras: sem texto legível, sem letras ou números, sem logotipos, sem preços, sem produtos de marcas reais e sem pessoas identificáveis.';
 
 /** D-52: com texto pedido, só a linha `Regras:` muda; o resto do prompt testado fica como está. */
-export function exactTextRules(lines: string[]): string {
+export function exactTextRules(lines: string[], corrections: TextCorrection[] = []): string {
   const quoted = lines.map((line) => `“${cleanRequest(line)}”`).join(' / ');
-  return `Regras: o único texto da imagem é este, copiado letra por letra, com os mesmos acentos, cedilha, maiúsculas, pontuação e formato de preço: ${quoted}; nenhum outro texto, sem logotipos, sem produtos de marcas reais e sem pessoas identificáveis.`;
+  const fixes = corrections
+    .map((fix) =>
+      fix.read
+        ? ` Uma tentativa anterior escreveu “${cleanRequest(fix.read)}”; o certo é exatamente “${cleanRequest(fix.asked)}”.`
+        : ` Uma tentativa anterior não mostrou o texto; ele deve ser exatamente “${cleanRequest(fix.asked)}”.`,
+    )
+    .join('');
+  return `Regras: o único texto da imagem é este, copiado letra por letra, com os mesmos acentos, cedilha, maiúsculas, pontuação e formato de preço: ${quoted}; nenhum outro texto, sem logotipos, sem produtos de marcas reais e sem pessoas identificáveis.${fixes}`;
 }
 
 /** Os itens em aberto, numa frase fixa do código (nunca texto livre do modelo). */
@@ -90,7 +99,7 @@ export function buildGeneratePrompt(input: ScenePromptInput): string {
     `Formato: ${cm(input.artWidthCm)} x ${cm(input.artHeightCm)} cm (proporção largura/altura ${ratio}), imagem de ${input.widthPx} x ${input.heightPx} px, ocupando toda a área.`,
     CONTINUOUS_IMAGE_RULE,
     ...(continuityApplies(input.formatId, input.clientMessages) ? [CONTINUITY_PHRASE] : []),
-    input.exactText?.length ? exactTextRules(input.exactText) : FIXED_RULES,
+    input.exactText?.length ? exactTextRules(input.exactText, input.corrections) : FIXED_RULES,
   ].join('\n');
 }
 
@@ -122,6 +131,8 @@ export interface EditPromptInput {
   heightPx: number;
   /** Linhas lidas diferente do pedido, na refação única. */
   corrections?: TextCorrection[];
+  /** Texto já pintado e conferido na versão atual: sem texto novo, é mantido como está (D-56). */
+  paintedText?: string[];
 }
 
 const sentence = (text: string): string => {
@@ -150,15 +161,37 @@ function regionText(input: EditPromptInput): string {
   return `Make the change only inside the central product area${on}, between y = ${bands.headerEnd} px and y = ${bands.footerStart} px of ${H} px.`;
 }
 
-/** Bloco 8 (validação 4d): texto exato, com a linha de correção da refação, ou a regra de "sem texto". */
-export function textBlock(lines: string[], corrections: TextCorrection[] = []): string {
-  if (lines.length === 0) return 'No text, no letters, no numbers, no logo, no watermark.';
-  const numbered = lines.map((line, index) => `Line ${index + 1}: “${cleanRequest(line)}”`);
-  const fixes = corrections.map((fix) =>
+const correctionLines = (corrections: TextCorrection[]): string[] =>
+  corrections.map((fix) =>
     fix.read
       ? `A previous attempt rendered the text as “${cleanRequest(fix.read)}”. It must read exactly “${cleanRequest(fix.asked)}”.`
       : `A previous attempt did not show the text. It must read exactly “${cleanRequest(fix.asked)}”.`,
   );
+
+/**
+ * Sem texto novo, mas com texto já pintado e conferido na versão atual (D-56): o bloco manda mantê-lo como está, e não
+ * "No text", que apagaria a placa (PV-82).
+ */
+function keepPaintedBlock(painted: string[], corrections: TextCorrection[]): string {
+  const numbered = painted.map((line, index) => `Line ${index + 1}: “${cleanRequest(line)}”`);
+  return [
+    ...correctionLines(corrections),
+    'Keep the text already painted on the image exactly as it is, copied character by character, with the same accents, cedilla, uppercase and lowercase letters, punctuation and currency format:',
+    ...numbered,
+    'Never invent or add text, prices or logos. No other text, no logo, no watermark.',
+  ].join('\n');
+}
+
+/** Bloco 8 (validação 4d): texto exato, com a linha de correção da refação, ou a regra de "sem texto". */
+export function textBlock(
+  lines: string[],
+  corrections: TextCorrection[] = [],
+  painted: string[] = [],
+): string {
+  if (lines.length === 0 && painted.length > 0) return keepPaintedBlock(painted, corrections);
+  if (lines.length === 0) return 'No text, no letters, no numbers, no logo, no watermark.';
+  const numbered = lines.map((line, index) => `Line ${index + 1}: “${cleanRequest(line)}”`);
+  const fixes = correctionLines(corrections);
   return [
     ...fixes,
     'Put this exact Portuguese text, copied character by character, with the same accents, cedilla, uppercase and lowercase letters, punctuation and currency format:',
@@ -200,7 +233,7 @@ export function buildEditPrompt(input: EditPromptInput): string {
     `Make exactly one change: ${sentence(image.change)}`,
     regionText(input),
     `${keep.length ? `Preserve: ${keep.join('; ')}. ` : ''}Do not change or remove any other element.`,
-    textBlock(image.exact_text, input.corrections),
+    textBlock(image.exact_text, input.corrections, input.paintedText),
   ]
     .filter(Boolean)
     .join('\n');

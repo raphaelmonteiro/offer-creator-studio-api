@@ -48,6 +48,8 @@ export const SCENE_STEPS = [
   'generating',
   'editing',
   'checking',
+  /** O texto pintado saiu diferente do pedido: segunda chamada de imagem, uma só por mensagem (D-51). */
+  'retrying_text',
   'saving',
   'done',
 ] as const;

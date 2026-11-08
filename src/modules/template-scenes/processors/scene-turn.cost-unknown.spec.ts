@@ -16,7 +16,9 @@ const verdict = JSON.stringify({
   mudou: 'O coelho saiu.',
   vistos: [],
   nao_vistos: [],
-  texto_na_imagem: false,
+  faltou: '',
+  texto_lido: [],
+  texto_extra: '',
   emenda: false,
   emenda_descricao: '',
 });

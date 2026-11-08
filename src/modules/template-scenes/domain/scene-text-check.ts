@@ -15,6 +15,8 @@ export interface TextLine {
   /** O que o juiz leu; vazio se não achou o texto. */
   read: string;
   ok: boolean;
+  /** Linha já pintada em versão anterior que sumiu da imagem (o cliente pode ter tirado a placa): não é erro, PV-83. */
+  gone?: boolean;
 }
 
 /** Espaços repetidos viram um, e aspas tipográficas viram retas; o resto fica como está. */

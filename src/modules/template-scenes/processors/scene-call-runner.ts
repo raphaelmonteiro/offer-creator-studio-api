@@ -59,8 +59,30 @@ export class SceneCallRunner {
 
   /** `null` = o turno acabou (cancelado, limite, falha do provedor); a versão já foi fechada. */
   async imageCall(ctx: TurnContext, spec: ImageCallSpec): Promise<SceneGenerateResult | null> {
+    const result = await this.runImageCall(ctx, spec, 'fail');
+    return result === 'limit' ? null : result;
+  }
+
+  /**
+   * A segunda chamada de imagem da refação do texto (D-51). No limite de chamadas pagas do pedido, devolve `'limit'`
+   * sem falhar a versão: a primeira imagem vale, e o chat diz que não refez. `null` = o turno acabou.
+   */
+  retryImageCall(
+    ctx: TurnContext,
+    spec: ImageCallSpec,
+  ): Promise<SceneGenerateResult | 'limit' | null> {
+    return this.runImageCall(ctx, spec, 'skip');
+  }
+
+  private async runImageCall(
+    ctx: TurnContext,
+    spec: ImageCallSpec,
+    onLimit: 'fail' | 'skip',
+  ): Promise<SceneGenerateResult | 'limit' | null> {
     const call = this.pending(spec);
-    if ((await this.state.reserveCall(ctx, call, this.maxPaidCalls())) !== 'ok') return null;
+    const reserved = await this.state.reserveCall(ctx, call, this.maxPaidCalls(), onLimit);
+    if (reserved === 'limit') return 'limit';
+    if (reserved !== 'ok') return null;
     let result: SceneGenerateResult;
     try {
       result = await spec.run();

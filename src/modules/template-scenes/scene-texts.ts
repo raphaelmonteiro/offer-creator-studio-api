@@ -1,5 +1,6 @@
 import { FIXED_CHANGED } from './domain/scene-director-phrases';
 import { SceneFailureCode } from './domain/scene.types';
+import { TextLine } from './domain/scene-text-check';
 
 /** Mensagens do assistente no chat da cena (pt-BR). */
 
@@ -62,17 +63,34 @@ export const versionPurgedReply = (available: number[]): string =>
 export const REDRAW_NOTICE =
   'Cada pedido redesenha a imagem inteira, então detalhes que você não pediu podem variar. Se não gostar, é só pedir para voltar.';
 
+/** O texto pintado a pedido, conferido letra por letra (D-51): o que o código comparou e o que foi feito. */
+export interface TextFacts {
+  /** Cada linha esperada com o que o juiz leu na leitura que valeu (a da imagem aplicada). */
+  lines: TextLine[];
+  /** Quantas imagens foram pedidas: 1, ou 2 depois da refação única. */
+  tried: 1 | 2;
+  /** Não refez porque o limite de chamadas pagas do pedido não deixou. */
+  limited: boolean;
+}
+
 /** O que o juiz conferiu, em fatos; o texto ao cliente sai disto, nunca do modelo de imagem nem do Diretor. */
 export interface JudgeFacts {
   satisfied: 'sim' | 'parcial' | 'nao';
   /** O que mudou, já sem promessa de preservação; vazio se o juiz não disse ou foi barrado. */
   changed: string;
-  /** Itens do que o cliente pediu que o juiz não viu na imagem nova. */
-  missing: string[];
-  textInImage: boolean;
+  /** O que falta, em frase nominal do juiz, já filtrada; vazia se nada falta ou se foi barrada (D-51). */
+  missing: string;
+  /** O juiz não viu algum item da lista: mesmo sem frase útil, o chat diz que falta parte do pedido. */
+  missingAny: boolean;
+  /** Texto que ninguém pediu e o juiz viu, já filtrado; vazio se não houver (D-51). */
+  extraText: string;
   /** O juiz viu emenda ou objeto flutuando (D-44); a descrição já passou pelo filtro de frases proibidas. */
   seam: boolean;
   seamDescription: string;
+  /** Há texto pedido (ou já pintado) e o juiz o leu; ausente quando não havia texto a conferir. */
+  text?: TextFacts;
+  /** Item aberto da mesma mensagem que esta rodada não fez (D-54): o chat pergunta se faz agora. */
+  pendingItem?: string;
 }
 
 const sentence = (text: string): string => {
@@ -80,22 +98,59 @@ const sentence = (text: string): string => {
   return /[.!?]$/.test(clean) ? clean : `${clean}.`;
 };
 
+const dropFinal = (text: string): string => text.trim().replace(/[.!]+$/, '');
+const quoted = (line: string): string => `“${line}”`;
+
 /**
  * Aviso de emenda (D-44). Sem emenda, o texto nunca diz que a imagem está sem emenda (G8): o silêncio do juiz não
  * prova nada. Descrição vazia ou barrada: a frase sai sem ela.
  */
 function seamNote(description: string): string {
-  const detail = description.trim().replace(/[.!]+$/, '');
+  const detail = dropFinal(description);
   return `Na conferência, vi o que parece uma emenda ou um objeto flutuando${detail ? `: ${detail}` : ''}. Diga o que ajustar ou peça para voltar.`;
+}
+
+/** Texto certo, ou o que saiu diferente do pedido, com o que foi tentado (D-51, G3b). */
+function textNote(text: TextFacts): string {
+  const wrong = text.lines.filter((line) => !line.ok);
+  if (wrong.length === 0) {
+    return `Conferi o texto letra por letra: ${text.lines.map((line) => quoted(line.asked)).join(' / ')}.`;
+  }
+  const seen = wrong.map((line) =>
+    line.read.trim()
+      ? `Pedi ${quoted(line.asked)} e li ${quoted(line.read)}.`
+      : `Não encontrei na imagem o texto ${quoted(line.asked)}.`,
+  );
+  const tried = text.limited
+    ? 'Tentei uma vez e não refiz porque atingi o limite de chamadas deste pedido.'
+    : 'Tentei duas vezes.';
+  return `O texto na imagem saiu diferente do pedido. ${seen.join(' ')} ${tried} Posso tentar de novo, ou colocar a frase como camada de texto exata.`;
+}
+
+/** O que falta: a frase do juiz, ou o texto fixo; o item aberto da mesma mensagem tem pergunta própria (D-54). */
+function missingNote(facts: JudgeFacts): string | null {
+  if (facts.pendingItem) {
+    return `Ainda falta: ${dropFinal(facts.pendingItem)}. Quer que eu faça agora?`;
+  }
+  if (facts.missing) return `Ainda falta: ${dropFinal(facts.missing)}.`;
+  return facts.missingAny ? 'Ainda falta parte do que você pediu.' : null;
 }
 
 /**
  * Resposta depois da imagem (G8): montada pelo código a partir do que o juiz conferiu. O resultado já foi aplicado
- * em todos os casos (D-26). Sem juiz (`null`), diz que não conseguiu conferir.
+ * em todos os casos (D-26). Sem juiz (`null`), diz que não conseguiu conferir; com texto pedido, diz também que não
+ * conseguiu conferir o texto.
  */
-export function afterImageReply(facts: JudgeFacts | null): string {
+export function afterImageReply(
+  facts: JudgeFacts | null,
+  options: { textAsked?: boolean } = {},
+): string {
   if (!facts) {
-    return 'Apliquei a imagem nova, mas não consegui conferir o resultado. Veja se ficou como pediu.';
+    const base =
+      'Apliquei a imagem nova, mas não consegui conferir o resultado. Veja se ficou como pediu.';
+    return options.textAsked
+      ? `${base} Não consegui conferir o texto; veja se ficou como pediu.`
+      : base;
   }
   // `changed` vazio (vazio ou barrado pelo filtro): o texto fixo acompanha o veredito e nunca o contradiz (R6).
   const changed = facts.changed.trim() ? ` ${sentence(facts.changed)}` : '';
@@ -105,16 +160,14 @@ export function afterImageReply(facts: JudgeFacts | null): string {
       : facts.satisfied === 'parcial'
         ? `Conferi a imagem nova e o pedido foi atendido em parte${changed ? `:${changed}` : '.'} Diga o que ajustar ou peça para voltar.`
         : `Apliquei a imagem nova, mas na conferência o pedido não aparece atendido${changed ? `:${changed}` : '.'} Diga o que ajustar ou use "Voltar para a anterior".`;
-  const notes: string[] = [];
-  if (facts.missing.length) {
-    notes.push(
-      `Ainda não vi na imagem: ${facts.missing.map((item) => item.replace(/[.!]+$/, '')).join('; ')}.`,
-    );
-  }
-  if (facts.textInImage) {
-    notes.push('Vi texto na imagem nova; se quiser texto, ele fica melhor como camada.');
-  }
-  if (facts.seam) notes.push(seamNote(facts.seamDescription));
+  const notes = [
+    facts.text ? textNote(facts.text) : null,
+    missingNote(facts),
+    facts.extraText
+      ? `Vi na imagem um texto que você não pediu: ${quoted(dropFinal(facts.extraText))}. Diga se quer que eu tire.`
+      : null,
+    facts.seam ? seamNote(facts.seamDescription) : null,
+  ].filter((note): note is string => note !== null);
   return [head, ...notes].join(' ');
 }
 

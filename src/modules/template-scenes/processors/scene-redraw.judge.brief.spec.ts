@@ -10,7 +10,9 @@ const verdict = (extra: Record<string, unknown> = {}) => ({
   mudou: 'O coelho da direita saiu.',
   vistos: [],
   nao_vistos: [],
-  texto_na_imagem: false,
+  faltou: '',
+  texto_lido: [],
+  texto_extra: '',
   emenda: false,
   emenda_descricao: '',
   ...extra,
@@ -116,11 +118,13 @@ describeIfSceneDb('O juiz e a memória do que o cliente pediu (banco chroma_x_e2
       expect(version.metrics.judgeBrief).toMatchObject({ closed: ['p1'] });
     });
 
-    it('Continua em aberto: o juiz não viu o rio, o chat diz "Ainda não vi na imagem: um rio no meio" e o próximo prompt ainda o leva', async () => {
-      const { scene, reply, edit } = await run(judgeReturning(verdict({ nao_vistos: ['p1'] })), {
-        brief: [rio('open')],
-      });
-      expect(reply).toContain('Ainda não vi na imagem: um rio no meio.');
+    it('O que falta não é pedaço da mensagem: o chat diz a frase "faltou" do juiz, e o item continua em aberto', async () => {
+      const { scene, reply, edit } = await run(
+        judgeReturning(verdict({ nao_vistos: ['p1'], faltou: 'um rio no meio do campo' })),
+        { brief: [rio('open')] },
+      );
+      expect(reply).toContain('Ainda falta: um rio no meio do campo.');
+      expect(reply).not.toContain('Ainda não vi na imagem');
       expect((await h.sceneOf(scene.id)).brief[0].status).toBe('open');
       // D-54: a edição pede uma mudança só, então a linha de pedidos em aberto não entra no prompt.
       expect(edit.mock.calls[0][0].prompt).not.toContain('em aberto');
@@ -131,7 +135,7 @@ describeIfSceneDb('O juiz e a memória do que o cliente pediu (banco chroma_x_e2
         brief: [rio('done')],
       });
       expect((await h.sceneOf(scene.id)).brief[0].status).toBe('open');
-      expect(reply).toContain('Ainda não vi na imagem: um rio no meio.');
+      expect(reply).toContain('Ainda falta parte do que você pediu.');
       // nenhuma chamada de imagem é refeita sozinha: a única é a do próprio turno
       expect(edit).toHaveBeenCalledTimes(1);
     });
