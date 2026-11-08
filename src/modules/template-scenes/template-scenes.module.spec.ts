@@ -2,7 +2,9 @@ import { ConfigService } from '@nestjs/config';
 import { QUEUES } from '../../shared/queue/animation-queue.service';
 import { SceneDirectorProcessor } from './processors/scene-director.processor';
 import { SceneTurnProcessor } from './processors/scene-turn.processor';
+import { SceneTemplateSyncProcessor } from './processors/scene-template-sync.processor';
 import { SceneReconcilerService } from './services/scene-reconciler.service';
+import { SceneTemplateSweepService } from './services/scene-template-sweep.service';
 import { TemplateScenesModule } from './template-scenes.module';
 
 describe('TemplateScenesModule: consumer da fila', () => {
@@ -11,25 +13,29 @@ describe('TemplateScenesModule: consumer da fila', () => {
     const processor = { process: jest.fn().mockResolvedValue(undefined) };
     const director = { process: jest.fn().mockResolvedValue(undefined) };
     const reconciler = { start: jest.fn() };
+    const templateSync = { process: jest.fn().mockResolvedValue(undefined) };
+    const sweep = { start: jest.fn() };
     const module = new TemplateScenesModule(
       new ConfigService(env),
       queue as never,
       processor as unknown as SceneTurnProcessor,
       director as unknown as SceneDirectorProcessor,
       reconciler as unknown as SceneReconcilerService,
+      templateSync as unknown as SceneTemplateSyncProcessor,
+      sweep as unknown as SceneTemplateSweepService,
     );
-    return { module, queue, processor, director, reconciler };
+    return { module, queue, processor, director, reconciler, templateSync, sweep };
   };
 
-  it('worker com a flag ligada: assina a imagem e o Diretor e liga o reconciliador', async () => {
-    const { module, queue, processor, director, reconciler } = build({
+  it('worker com a flag ligada: assina a imagem, o Diretor e a sincronização do template e liga o reconciliador e a varredura', async () => {
+    const { module, queue, processor, director, reconciler, templateSync, sweep } = build({
       TEMPLATE_SCENE_ENABLED: 'true',
       WORKER_ONLY: 'true',
     });
     await module.onModuleInit();
 
-    expect(queue.subscribe).toHaveBeenCalledTimes(2);
-    const [turn, directorSub] = queue.subscribe.mock.calls;
+    expect(queue.subscribe).toHaveBeenCalledTimes(3);
+    const [turn, directorSub, syncSub] = queue.subscribe.mock.calls;
     expect(turn[0]).toBe(QUEUES.TEMPLATE_SCENE_TURN);
     expect(turn[1]).toBe(1);
     await turn[2]({ sceneId: 's', versionId: 'v' }, 'job-1');
@@ -38,7 +44,12 @@ describe('TemplateScenesModule: consumer da fila', () => {
     expect(directorSub[1]).toBe(4);
     await directorSub[2]({ sceneId: 's', versionId: 'v' }, 'job-2');
     expect(director.process).toHaveBeenCalledWith({ sceneId: 's', versionId: 'v' }, 'job-2');
+    expect(syncSub[0]).toBe(QUEUES.TEMPLATE_SCENE_TEMPLATE_SYNC);
+    expect(syncSub[1]).toBe(1);
+    await syncSub[2]({ sceneId: 's' }, 'job-3');
+    expect(templateSync.process).toHaveBeenCalledWith({ sceneId: 's' }, 'job-3');
     expect(reconciler.start).toHaveBeenCalledTimes(1);
+    expect(sweep.start).toHaveBeenCalledTimes(1);
   });
 
   it('usa TEMPLATE_SCENE_CONCURRENCY e TEMPLATE_SCENE_DIRECTOR_CONCURRENCY, cada um o seu', async () => {
@@ -69,9 +80,10 @@ describe('TemplateScenesModule: consumer da fila', () => {
     ['flag ausente', { WORKER_ONLY: 'true' }],
     ['processo da API (sem WORKER_ONLY)', { TEMPLATE_SCENE_ENABLED: 'true' }],
   ])('%s: o consumer não sobe', async (_label, env) => {
-    const { module, queue, reconciler } = build(env);
+    const { module, queue, reconciler, sweep } = build(env);
     await module.onModuleInit();
     expect(queue.subscribe).not.toHaveBeenCalled();
     expect(reconciler.start).not.toHaveBeenCalled();
+    expect(sweep.start).not.toHaveBeenCalled();
   });
 });

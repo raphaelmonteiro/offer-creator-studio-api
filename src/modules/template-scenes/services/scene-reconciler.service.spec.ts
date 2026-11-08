@@ -10,6 +10,7 @@ import {
   insertScene,
   insertVersion,
 } from '../testing/scene-fixtures';
+import { fakeQueue } from '../testing/scene-test-helpers';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
 import { SceneLockService } from './scene-lock.service';
 import {
@@ -28,7 +29,11 @@ describeIfSceneDb('SceneReconcilerService (banco chroma_x_e2e)', () => {
     Logger.overrideLogger(false);
     dataSource = await openSceneTestDb();
     const locks = new SceneLockService(dataSource);
-    reconciler = new SceneReconcilerService(dataSource, locks, new SceneTurnState(locks));
+    reconciler = new SceneReconcilerService(
+      dataSource,
+      locks,
+      new SceneTurnState(locks, fakeQueue().service),
+    );
   });
 
   afterAll(async () => {

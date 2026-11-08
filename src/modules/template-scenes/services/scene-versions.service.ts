@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
+import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { paintedMetricsOf } from '../domain/scene-painted-text';
 import { PatchElementsDto } from '../dto/patch-elements.dto';
 import { SceneElement } from '../domain/scene.types';
@@ -14,7 +15,7 @@ import {
   versionNotFound,
   versionNotReady,
 } from '../scene.errors';
-import { publishSceneEvent } from './scene-events';
+import { publishVersionReady } from './scene-events';
 import { assertMasterOnDisk, restoreInto } from './scene-restore';
 import {
   assertExpectedRevision,
@@ -37,6 +38,7 @@ export class SceneVersionsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly locks: SceneLockService,
     private readonly reads: SceneReadService,
+    private readonly queue: AnimationQueueService,
   ) {}
 
   /**
@@ -137,10 +139,9 @@ export class SceneVersionsService {
     scene.currentVersionId = version.id;
     await pruneSceneAssets(manager, scene);
     const revision = await bumpRevision(manager, scene);
-    await publishSceneEvent(manager, {
+    await publishVersionReady(manager, this.queue, {
       sceneId: scene.id,
       versionId: version.id,
-      kind: 'version.ready',
       step: null,
       status: 'ready',
       cancelRequested: false,

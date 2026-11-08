@@ -8,7 +8,7 @@ import {
   insertVersion,
   insertMessage,
 } from '../testing/scene-fixtures';
-import { errorBodyOf, errorOf, textElement } from '../testing/scene-test-helpers';
+import { errorBodyOf, errorOf, textElement, fakeQueue } from '../testing/scene-test-helpers';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
 import { SceneLockService } from './scene-lock.service';
 import { SceneReadService } from './scene-read.service';
@@ -25,6 +25,7 @@ describeIfSceneDb('SceneVersionsService (banco chroma_x_e2e)', () => {
       dataSource,
       new SceneLockService(dataSource),
       new SceneReadService(dataSource),
+      fakeQueue().service,
     );
   });
 

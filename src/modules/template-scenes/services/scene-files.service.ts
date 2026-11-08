@@ -1,19 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
-import * as path from 'path';
 import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 import {
   resolveSceneUploadPath,
   SCENE_UPLOADS_URL_PREFIX,
 } from '../../../shared/gc/template-scenes-gc.runner';
+import { FILENAME_PATTERN, UUID_PATTERN, writeFileAtomic } from './scene-file-io';
 
 /** Prefixo público dos arquivos da cena; o GC só apaga sob ele. */
 export const SCENE_UPLOADS_PREFIX = SCENE_UPLOADS_URL_PREFIX;
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 export interface WrittenSceneFile {
   url: string;
@@ -35,7 +31,11 @@ export class SceneFilesService {
 
   /** URL relativa do arquivo (também usada para localizar o arquivo no disco). */
   urlFor(sceneId: string, versionId: string, filename: string): string {
-    if (!UUID.test(sceneId) || !UUID.test(versionId) || !FILENAME.test(filename)) {
+    if (
+      !UUID_PATTERN.test(sceneId) ||
+      !UUID_PATTERN.test(versionId) ||
+      !FILENAME_PATTERN.test(filename)
+    ) {
       throw new Error('Caminho de arquivo da cena inválido');
     }
     return `${SCENE_UPLOADS_PREFIX}${sceneId}/${versionId}/${filename}`;
@@ -50,15 +50,7 @@ export class SceneFilesService {
   ): Promise<WrittenSceneFile> {
     const url = this.urlFor(sceneId, versionId, filename);
     const absolute = this.absolutePath(url);
-    await fs.mkdir(path.dirname(absolute), { recursive: true });
-    const temp = `${absolute}.${randomUUID()}.tmp`;
-    try {
-      await fs.writeFile(temp, buffer);
-      await fs.rename(temp, absolute);
-    } catch (error) {
-      await fs.rm(temp, { force: true }).catch(() => undefined);
-      throw error;
-    }
+    await writeFileAtomic(absolute, (temp) => fs.writeFile(temp, buffer));
     return { url, bytes: buffer.length };
   }
 

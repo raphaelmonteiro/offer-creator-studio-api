@@ -14,6 +14,10 @@ import { TemplateSceneVersion } from './entities/template-scene-version.entity';
 import { SceneCallRunner } from './processors/scene-call-runner';
 import { SceneDirectorJob, SceneDirectorProcessor } from './processors/scene-director.processor';
 import { SceneDirectorState } from './processors/scene-director-state';
+import {
+  SceneTemplateSyncProcessor,
+  TemplateSyncJob,
+} from './processors/scene-template-sync.processor';
 import { SceneRedrawHandler } from './processors/scene-redraw.handler';
 import { SceneTurnJob, SceneTurnProcessor } from './processors/scene-turn.processor';
 import { SceneTurnSupport } from './processors/scene-turn-support';
@@ -32,6 +36,8 @@ import { SceneLockService } from './services/scene-lock.service';
 import { SceneLogoService } from './services/scene-logo.service';
 import { SceneReadService } from './services/scene-read.service';
 import { SceneReconcilerService } from './services/scene-reconciler.service';
+import { SceneTemplateFilesService } from './services/scene-template-files.service';
+import { SceneTemplateSweepService } from './services/scene-template-sweep.service';
 import { SceneTurnService } from './services/scene-turn.service';
 import { SceneVisionService } from './services/scene-vision.service';
 import { SceneVersionsService } from './services/scene-versions.service';
@@ -81,6 +87,9 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneRedrawHandler,
     SceneTurnProcessor,
     SceneReconcilerService,
+    SceneTemplateFilesService,
+    SceneTemplateSyncProcessor,
+    SceneTemplateSweepService,
     {
       provide: SCENE_IMAGE_PROVIDER,
       inject: [ConfigService, OpenAiImageService],
@@ -105,9 +114,11 @@ export class TemplateScenesModule implements OnModuleInit {
     private readonly processor: SceneTurnProcessor,
     private readonly directorProcessor: SceneDirectorProcessor,
     private readonly reconciler: SceneReconcilerService,
+    private readonly templateSync: SceneTemplateSyncProcessor,
+    private readonly templateSweep: SceneTemplateSweepService,
   ) {}
 
-  /** Consumers e reconciliador só no worker e com a flag da cena ligada. */
+  /** Consumers, reconciliador e varredura do template só no worker e com a flag da cena ligada. */
   async onModuleInit(): Promise<void> {
     if (this.config.get('TEMPLATE_SCENE_ENABLED') !== 'true') return;
     if (this.config.get('WORKER_ONLY') !== 'true') return;
@@ -122,7 +133,14 @@ export class TemplateScenesModule implements OnModuleInit {
       this.positiveInt('TEMPLATE_SCENE_DIRECTOR_CONCURRENCY', 4),
       (job: SceneDirectorJob, jobId: string) => this.directorProcessor.process(job, jobId),
     );
+    // O template da cena no encarte (D-9): um job por vez, mais a varredura do backfill e dos jobs perdidos.
+    await this.queue.subscribe(
+      QUEUES.TEMPLATE_SCENE_TEMPLATE_SYNC,
+      1,
+      (job: TemplateSyncJob, jobId: string) => this.templateSync.process(job, jobId),
+    );
     this.reconciler.start();
+    this.templateSweep.start();
   }
 
   private positiveInt(key: string, fallback: number): number {

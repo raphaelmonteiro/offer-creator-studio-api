@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
+import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { SceneCallRecord, SceneFailureCode, SceneStep } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
@@ -23,7 +24,10 @@ export type CompleteResult = 'ready' | 'cancelled' | 'stale';
  */
 @Injectable()
 export class SceneTurnState {
-  constructor(private readonly locks: SceneLockService) {}
+  constructor(
+    private readonly locks: SceneLockService,
+    private readonly queue: AnimationQueueService,
+  ) {}
 
   private run<T>(
     ctx: Pick<TurnContext, 'sceneId'>,
@@ -133,7 +137,7 @@ export class SceneTurnState {
         versionId: ctx.versionId,
         parentElements: structuredClone(ctx.parent?.elements ?? []),
       };
-      return readyVersion(manager, scene, version, { target, image, extra });
+      return readyVersion(manager, scene, version, { target, image, extra, queue: this.queue });
     });
   }
 

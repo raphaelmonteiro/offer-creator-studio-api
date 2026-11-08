@@ -33,6 +33,7 @@ import { directorPlan } from './scene-director-fixtures';
 import { insertAsset, insertMessage, insertScene, insertVersion } from './scene-fixtures';
 import { syntheticScenePng } from './synthetic-scene';
 import { deleteTestScenes, openSceneTestDb } from './scene-test-db';
+import { fakeQueue } from './scene-test-helpers';
 
 /**
  * Preparo comum dos specs do `SceneTurnProcessor` (banco `chroma_x_e2e`, arquivos em pasta
@@ -44,6 +45,8 @@ export function useProcessorHarness() {
     uploadsDir: string;
     files: SceneFilesService;
     state: SceneTurnState;
+    /** Fila falsa do `SceneTurnState`: recebe o job de sincronização do template quando a imagem fica pronta. */
+    syncQueue: ReturnType<typeof fakeQueue>;
   };
   const createdScenes: string[] = [];
 
@@ -52,8 +55,11 @@ export function useProcessorHarness() {
     h.dataSource = await openSceneTestDb();
     h.uploadsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'scene-turn-'));
     h.files = new SceneFilesService(new ConfigService({ UPLOAD_DEST: h.uploadsDir }));
-    h.state = new SceneTurnState(new SceneLockService(h.dataSource));
+    h.syncQueue = fakeQueue();
+    h.state = new SceneTurnState(new SceneLockService(h.dataSource), h.syncQueue.service);
   });
+
+  beforeEach(() => h.syncQueue.publish.mockClear());
 
   afterAll(async () => {
     await deleteTestScenes(h.dataSource, createdScenes);

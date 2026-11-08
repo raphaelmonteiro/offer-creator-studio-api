@@ -1,5 +1,6 @@
 import { EntityManager } from 'typeorm';
 import { TEMPLATE_SCENE_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
+import { QUEUES, QueuePort } from '../../../shared/queue/animation-queue.service';
 import { SceneStep, SceneVersionStatus } from '../domain/scene.types';
 
 export type SceneEventKind =
@@ -35,4 +36,44 @@ export async function publishSceneEvent(
     TEMPLATE_SCENE_EVENTS_CHANNEL,
     JSON.stringify(payload),
   ]);
+}
+
+/** Espera antes do job de sincronização: uma rajada de ajustes vira uma projeção só (PV-11). */
+export const TEMPLATE_SYNC_DELAY_SECONDS = 5;
+/** Retentativas do pg-boss: 3 tentativas ao todo, o mesmo teto de falhas da varredura (PV-15). */
+export const TEMPLATE_SYNC_RETRY_LIMIT = 2;
+
+/**
+ * Enfileira, na MESMA transação, o job que mantém o template da cena (`template_scene.template_sync`). O job só
+ * fica visível no COMMIT, e `singletonKey` = id da cena junta o que chegar enquanto ele espera. Quem já está
+ * rodando não é afetado: o job lê o estado na hora em que roda (PV-13).
+ */
+export async function enqueueTemplateSync(
+  queue: Pick<QueuePort, 'publish'>,
+  manager: EntityManager,
+  sceneId: string,
+): Promise<void> {
+  await queue.publish(
+    QUEUES.TEMPLATE_SCENE_TEMPLATE_SYNC,
+    { sceneId },
+    {
+      manager,
+      singletonKey: sceneId,
+      startAfterSeconds: TEMPLATE_SYNC_DELAY_SECONDS,
+      retryLimit: TEMPLATE_SYNC_RETRY_LIMIT,
+    },
+  );
+}
+
+/**
+ * Todo caminho que publica `version.ready` passa por aqui: o evento e o job do template saem juntos, na mesma
+ * transação, e um caminho novo não esquece o job (PV-11).
+ */
+export async function publishVersionReady(
+  manager: EntityManager,
+  queue: Pick<QueuePort, 'publish'>,
+  event: Omit<SceneEvent, 'at' | 'kind'>,
+): Promise<void> {
+  await publishSceneEvent(manager, { ...event, kind: 'version.ready' });
+  await enqueueTemplateSync(queue, manager, event.sceneId);
 }

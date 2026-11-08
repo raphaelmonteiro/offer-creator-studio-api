@@ -1,5 +1,6 @@
 import { DataSource } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
+import { Template } from '../../templates/entities/template.entity';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
@@ -20,6 +21,7 @@ export const SCENE_TEST_ENTITIES = [
   TemplateSceneVersion,
   TemplateSceneAsset,
   TemplateSceneMessage,
+  Template,
 ];
 
 const SYNC_LOCK_KEY = 7_770_001;
@@ -70,5 +72,10 @@ export async function createTestUser(dataSource: DataSource, name = 'Autora Test
 /** Apaga as cenas (e, em cascata, versões, assets e mensagens) criadas pelo teste. */
 export async function deleteTestScenes(dataSource: DataSource, sceneIds: string[]): Promise<void> {
   if (sceneIds.length === 0) return;
+  // O template de cena sai junto com a cena (o `remove` apaga o dele; aqui a limpeza do teste).
+  await dataSource.query(
+    `DELETE FROM templates WHERE configuration->'source'->>'sceneId' = ANY($1)`,
+    [sceneIds],
+  );
   await dataSource.query(`DELETE FROM template_scenes WHERE id = ANY($1::uuid[])`, [sceneIds]);
 }
