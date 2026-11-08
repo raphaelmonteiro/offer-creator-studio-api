@@ -218,14 +218,14 @@ describe('Prompt montado pelo código', () => {
   describe('Região com as medidas do formato', () => {
     it('rodapé de folheto-20x27 a 2480x3328: 4 cm de 27 cm, 14.8%, y ≥ 2835', () => {
       expect(edit()).toContain(
-        'Make the change only inside the footer band: the lowest 4 cm of the 27 cm page (the bottom 14.8% of the image height, y ≥ 2835 of 3328 px), entirely within it, without extending up into the central product area.',
+        'Make the change only inside the footer band: the lowest 4 cm of the 27 cm page (the bottom 14.8% of the image height, y ≥ 2835 of 3328 px; the band is about 493 px tall), sized to fit entirely within it, without extending up into the central product area.',
       );
     });
 
     it('cabeçalho de 6 cm: y < 739', () => {
       const prompt = edit({ image: { ...FOOTER_SIGN, region: { zone: 'header', side: 'left' } } });
       expect(prompt).toContain(
-        'Make the change only inside the header band on the left side: the top 6 cm of the 27 cm page (the top 22.2% of the image height, y < 739 of 3328 px)',
+        'Make the change only inside the header band on the left side: the top 6 cm of the 27 cm page (the top 22.2% of the image height, y < 739 of 3328 px; the band is about 739 px tall)',
       );
     });
 

@@ -64,6 +64,8 @@ export interface JudgePromptInput {
   expectedText?: string[];
   /** O recorte da região do texto vai como imagem a mais. */
   hasCrop?: boolean;
+  /** Texto que já estava pintado na imagem e a rodada não pede de novo: não é texto "extra" (D-51, D-56). */
+  knownText?: string[];
 }
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
@@ -71,8 +73,15 @@ const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 /** Pedido de leitura do texto (D-51): as linhas esperadas e, se houver, a imagem a mais com o recorte da região. */
 function textRequest(input: JudgePromptInput): string[] {
   const lines = (input.expectedText ?? []).map((line) => oneLine(line)).filter(Boolean);
-  if (lines.length === 0) return ['Texto esperado na imagem: nenhum.'];
+  const known = (input.knownText ?? []).map((line) => oneLine(line)).filter(Boolean);
+  const knownNote = known.length
+    ? [
+        `Texto que já estava pintado antes e pode continuar na imagem (não é texto extra): ${known.map((line) => `“${line}”`).join(' / ')}`,
+      ]
+    : [];
+  if (lines.length === 0) return ['Texto esperado na imagem: nenhum.', ...knownNote];
   return [
+    ...knownNote,
     `Texto esperado na imagem DEPOIS (transcreva cada linha, sem corrigir):\n${lines.map((line, i) => `Linha ${i + 1}: “${line}”`).join('\n')}`,
     ...(input.hasCrop
       ? ['A última imagem é o recorte da região do texto, na resolução da imagem original.']

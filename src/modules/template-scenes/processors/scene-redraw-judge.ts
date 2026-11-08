@@ -13,6 +13,8 @@ import { TurnContext } from './scene-turn-state';
 /** O texto a conferir nesta rodada: as linhas esperadas, as que vêm de versão anterior, e o recorte da região. */
 export interface TextPlan {
   expected: string[];
+  /** Texto já pintado em versão anterior que não está em `expected`: o juiz não o conta como extra. */
+  known: string[];
   /** Posições de `expected` que vêm do texto já pintado na versão atual (D-56), e não do pedido desta rodada. */
   inherited: boolean[];
   crop: CropBox | null;
@@ -61,6 +63,7 @@ export async function judgeResult(
         doneItems: ctx.doneItems,
         hasBefore: Boolean(input.before),
         expectedText: text.expected,
+        knownText: text.known,
         hasCrop: Boolean(text.crop && text.expected.length),
         before: input.before ? await support.judgeImage(input.before) : undefined,
         after: await support.judgeImage(input.after),

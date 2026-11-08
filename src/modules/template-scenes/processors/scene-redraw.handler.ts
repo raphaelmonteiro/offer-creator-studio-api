@@ -189,8 +189,10 @@ export class SceneRedrawHandler implements TurnHandler {
     const painted =
       ctx.operation === 'redraw' && !round.length ? (ctx.parent?.paintedText ?? []) : [];
     const expected = [...round, ...painted];
+    const known = ctx.operation === 'redraw' ? (ctx.parent?.paintedText ?? []) : [];
     return {
       expected,
+      known: known.filter((line) => !expected.includes(line)),
       inherited: expected.map((_line, index) => index >= round.length),
       crop: textCropBox({
         region: done.plan.image?.region ?? null,

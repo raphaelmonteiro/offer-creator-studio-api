@@ -333,4 +333,26 @@ describe('Juiz com leitura do texto (D-51)', () => {
       reason: 'error',
     });
   });
+
+  it('Texto que já estava pintado e a rodada não pede de novo vai ao juiz como "não é extra" (medida 1.60)', () => {
+    const prompt = buildVisionPrompt({
+      message: 'muda só o preço',
+      plan: { image: { change: 'x' } },
+      openItems: [],
+      hasBefore: true,
+      expectedText: ['De R$ 19,90 por R$ 12,49'],
+      knownText: ['Oferta de Páscoa'],
+    });
+    expect(prompt).toContain('pode continuar na imagem (não é texto extra): “Oferta de Páscoa”');
+    expect(prompt).toContain('Linha 1: “De R$ 19,90 por R$ 12,49”');
+    const none = buildVisionPrompt({
+      message: 'x',
+      plan: {},
+      openItems: [],
+      hasBefore: true,
+      knownText: ['Oferta de Páscoa'],
+    });
+    expect(none).toContain('Texto esperado na imagem: nenhum.');
+    expect(none).toContain('(não é texto extra): “Oferta de Páscoa”');
+  });
 });

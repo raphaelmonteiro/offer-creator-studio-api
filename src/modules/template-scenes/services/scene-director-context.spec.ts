@@ -111,6 +111,7 @@ describeIfSceneDb('SceneDirectorContextService (banco chroma_x_e2e)', () => {
     );
     expect(context.text).toContain('"id":"logo-1"');
     expect(context.text).toContain('"nome":"Logo 1"');
+    expect(context.text).not.toContain('"texto"');
     expect(context.text).toContain('Mensagem atual do cliente: tira isso');
     expect(context.script).toMatchObject({
       message: 'tira isso',
@@ -186,6 +187,23 @@ describeIfSceneDb('SceneDirectorContextService (banco chroma_x_e2e)', () => {
       .filter((line) => line.startsWith('Mensagem atual do cliente'));
     expect(lines).toHaveLength(1);
     expect(context.text.match(/^Camadas/gm)).toHaveLength(1);
+  });
+
+  it('a camada de texto leva o texto ao Diretor, para ele saber o que a placa diz; a logo não (medida 1.60)', async () => {
+    const text: SceneElement = {
+      ...LOGO,
+      id: 'txt-1',
+      kind: 'text',
+      name: 'Texto 1',
+      text: 'Promoção de Páscoa',
+    };
+    const { scene, reading } = await sceneReading({
+      elements: [LOGO, text],
+      content: 'quero o texto escrito na madeira',
+    });
+    const context = await service().build(await h.sceneOf(scene.id), reading);
+    expect(context.text).toContain('"nome":"Texto 1","tipo":"text","texto":"Promoção de Páscoa"');
+    expect(context.text).toContain('"nome":"Logo 1","tipo":"logo","caixa"');
   });
 
   it('Conversa longa: o Diretor recebe as últimas 30 mensagens e todas as do cliente ficam para as conferências', async () => {

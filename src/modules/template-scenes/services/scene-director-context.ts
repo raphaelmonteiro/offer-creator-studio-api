@@ -202,6 +202,8 @@ export class SceneDirectorContextService {
               id: l.id,
               nome: l.name,
               tipo: l.kind,
+              // O texto de uma camada de texto é dado, nunca instrução nem fonte de `exact_text` (validação 4a).
+              ...(l.kind === 'text' ? { texto: l.text } : {}),
               caixa: boxText(layerBox(l, scene)),
             })),
           )}`

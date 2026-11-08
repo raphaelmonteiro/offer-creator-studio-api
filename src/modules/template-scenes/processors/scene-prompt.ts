@@ -153,10 +153,10 @@ function regionText(input: EditPromptInput): string {
   const bands = zoneBands(format, H);
   const printCm = cmEn(format.printHeightCm);
   if (zone === 'footer') {
-    return `Make the change only inside the footer band${on}: the lowest ${cmEn(format.footerCm)} cm of the ${printCm} cm page (the bottom ${bands.footerPct}% of the image height, y ≥ ${bands.footerStart} of ${H} px), entirely within it, without extending up into the central product area.`;
+    return `Make the change only inside the footer band${on}: the lowest ${cmEn(format.footerCm)} cm of the ${printCm} cm page (the bottom ${bands.footerPct}% of the image height, y ≥ ${bands.footerStart} of ${H} px; the band is about ${H - bands.footerStart} px tall), sized to fit entirely within it, without extending up into the central product area.`;
   }
   if (zone === 'header') {
-    return `Make the change only inside the header band${on}: the top ${cmEn(format.headerCm)} cm of the ${printCm} cm page (the top ${bands.headerPct}% of the image height, y < ${bands.headerEnd} of ${H} px), entirely within it, without extending down into the central product area.`;
+    return `Make the change only inside the header band${on}: the top ${cmEn(format.headerCm)} cm of the ${printCm} cm page (the top ${bands.headerPct}% of the image height, y < ${bands.headerEnd} of ${H} px; the band is about ${bands.headerEnd} px tall), sized to fit entirely within it, without extending down into the central product area.`;
   }
   return `Make the change only inside the central product area${on}, between y = ${bands.headerEnd} px and y = ${bands.footerStart} px of ${H} px.`;
 }
