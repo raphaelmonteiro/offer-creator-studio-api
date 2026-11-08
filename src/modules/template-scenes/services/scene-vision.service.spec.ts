@@ -31,7 +31,9 @@ const verdict = (extra: object = {}) =>
     mudou: 'O sol ficou alaranjado.',
     vistos: ['p1'],
     nao_vistos: ['p2'],
-    texto_na_imagem: false,
+    faltou: '',
+    texto_lido: [],
+    texto_extra: '',
     emenda: false,
     emenda_descricao: '',
     ...extra,
@@ -51,7 +53,9 @@ describe('SceneVisionService (o juiz)', () => {
       satisfied: 'sim',
       seen: ['p1'],
       notSeen: ['p2'],
-      textInImage: false,
+      missing: '',
+      textLines: [],
+      extraText: '',
       seam: false,
       seamDescription: '',
       costUsd: 0.0004,
@@ -89,7 +93,8 @@ describe('SceneVisionService (o juiz)', () => {
     [JSON.stringify({ mudou: 'x' })],
     [verdict({ atendeu: 'talvez' })],
     [verdict({ mudou: '  ' })],
-    [verdict({ texto_na_imagem: 'sim' })],
+    [verdict({ texto_lido: 'Promoção' })],
+    [verdict({ texto_lido: [{ pedido: 'x' }] })],
     [verdict({ emenda: 'sim' })],
     [
       JSON.stringify({
@@ -97,7 +102,6 @@ describe('SceneVisionService (o juiz)', () => {
         mudou: 'x',
         vistos: [],
         nao_vistos: [],
-        texto_na_imagem: false,
       }),
     ],
   ])('JSON fora do esquema (%s) vira invalid_json e guarda o custo', async (text) => {
@@ -141,7 +145,7 @@ describe('SceneVisionService (o juiz)', () => {
       satisfied: 'sim',
       seen: ['p1', 'p2'],
       notSeen: [],
-      textInImage: false,
+      extraText: '',
       costUsd: 0,
     });
     expect(await service.assess(input(`x ${MOCK_VISION_MARKERS.notSatisfied}`))).toMatchObject({
@@ -152,9 +156,9 @@ describe('SceneVisionService (o juiz)', () => {
     expect(await service.assess(input(`x ${MOCK_VISION_MARKERS.partial}`))).toMatchObject({
       satisfied: 'parcial',
     });
-    expect(await service.assess(input(`x ${MOCK_VISION_MARKERS.text}`))).toMatchObject({
+    expect(await service.assess(input(`x ${MOCK_VISION_MARKERS.extraText}`))).toMatchObject({
       satisfied: 'sim',
-      textInImage: true,
+      extraText: 'PROMO',
     });
     expect(await service.assess(input(`x ${MOCK_VISION_MARKERS.seam}`))).toMatchObject({
       satisfied: 'sim',
@@ -226,7 +230,10 @@ describe('visionCostUsd e buildVisionPrompt', () => {
       expect(prompt).toContain('- p2: ovos no rodapé');
       expect(prompt).toContain('"vistos"');
       expect(prompt).toContain('"nao_vistos"');
-      expect(prompt).toContain('"texto_na_imagem"');
+      expect(prompt).toContain('"texto_lido"');
+      expect(prompt).toContain('"texto_extra"');
+      expect(prompt).toContain('"faltou"');
+      expect(prompt).not.toContain('texto_na_imagem');
       expect(prompt).toContain('cujo RESULTADO você VÊ');
       expect(prompt).toContain('num pedido de tirar algo, o item não aparece mais');
       expect(prompt).toContain('Não afirme nada sobre o resto da imagem');
@@ -244,6 +251,86 @@ describe('visionCostUsd e buildVisionPrompt', () => {
       expect(first).not.toContain('a primeira imagem é ANTES');
       expect(first).toContain('em aberto (id: texto):\nnenhum');
       expect(first).toContain('sem plano');
+    });
+  });
+});
+
+describe('Juiz com leitura do texto (D-51)', () => {
+  const lines = ['Promoção de Páscoa', 'De R$ 19,90 por R$ 9,90'];
+  const asked = { expectedText: lines, hasCrop: true, crop: JPEG };
+  const reading = (lido: string[], extra: object = {}) =>
+    ok(
+      verdict({
+        texto_lido: lines.map((pedido, i) => ({ pedido, lido: lido[i] })),
+        ...extra,
+      }),
+    );
+
+  it('Texto certo: o código compara e todas as linhas batem; o recorte vai como imagem a mais', async () => {
+    const compare = reading(lines);
+    const result = await build({ compare }).assess(input('x', asked));
+    expect(result).toMatchObject({
+      ok: true,
+      textLines: [
+        { asked: lines[0], read: lines[0], ok: true },
+        { asked: lines[1], read: lines[1], ok: true },
+      ],
+    });
+    expect(compare.mock.calls[0][0].crop).toBe(JPEG);
+    expect(compare.mock.calls[0][0].prompt).toContain('Linha 1: “Promoção de Páscoa”');
+    expect(compare.mock.calls[0][0].prompt).toContain('A última imagem é o recorte da região');
+  });
+
+  it('Maiúsculas contam: "PROMOÇÃO DE PÁSCOA" não é igual a "Promoção de Páscoa"', async () => {
+    const result = await build({ compare: reading(['PROMOÇÃO DE PÁSCOA', lines[1]]) }).assess(
+      input('x', asked),
+    );
+    expect(result).toMatchObject({ textLines: [{ ok: false }, { ok: true }] });
+  });
+
+  it('Acento, vírgula e R$ contam; espaço repetido e aspas tipográficas não', async () => {
+    const result = await build({
+      compare: reading(['Promocao de Pascoa', 'De  R$ 19.90 por R$ 9,90']),
+    }).assess(input('x', asked));
+    expect(result).toMatchObject({
+      textLines: [{ ok: false }, { ok: false, read: 'De  R$ 19.90 por R$ 9,90' }],
+    });
+    const spaced = await build({
+      compare: reading(['Promoção  de Páscoa', 'De R$ 19,90 por R$ 9,90']),
+    }).assess(input('x', asked));
+    expect(spaced).toMatchObject({ textLines: [{ ok: true }, { ok: true }] });
+  });
+
+  it('Texto não encontrado: lido vazio é erro', async () => {
+    const result = await build({ compare: reading(['', lines[1]]) }).assess(input('x', asked));
+    expect(result).toMatchObject({ textLines: [{ read: '', ok: false }, { ok: true }] });
+  });
+
+  it('Texto que ninguém pediu: texto_extra e faltou voltam, com os limites', async () => {
+    const result = await build({
+      compare: reading(lines, { texto_extra: 'PROMO'.repeat(40), faltou: 'a placa'.repeat(40) }),
+    }).assess(input('x', asked));
+    expect(result).toMatchObject({ ok: true });
+    expect(result.ok && result.extraText).toHaveLength(120);
+    expect(result.ok && result.missing).toHaveLength(160);
+  });
+
+  it('com texto esperado, a falta de texto_lido invalida a saída; sem texto esperado, não precisa', async () => {
+    const raw = JSON.parse(verdict());
+    delete raw.texto_lido;
+    const without = JSON.stringify(raw);
+    expect(await build({ compare: ok(without) }).assess(input('x', asked))).toMatchObject({
+      ok: false,
+      reason: 'invalid_json',
+    });
+    expect(await build({ compare: ok(without) }).assess(input('x'))).toMatchObject({ ok: true });
+  });
+
+  it('Juiz indisponível com texto pedido: falha de rede vira ok false, sem lançar', async () => {
+    const compare = jest.fn().mockRejectedValue(new Error('x'));
+    expect(await build({ compare }).assess(input('x', asked))).toMatchObject({
+      ok: false,
+      reason: 'error',
     });
   });
 });

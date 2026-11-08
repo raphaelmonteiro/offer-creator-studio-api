@@ -11,6 +11,8 @@ export interface VisionCompareInput {
   before?: Buffer;
   /** JPEG da imagem inteira depois da edição. */
   after: Buffer;
+  /** JPEG do recorte da região do texto, na resolução da master (leitura letra por letra, D-51). */
+  crop?: Buffer;
   timeoutMs: number;
   correlationId: string;
 }
@@ -57,7 +59,7 @@ export class OpenAiVisionService {
           role: 'user',
           content: [
             { type: 'text', text: input.prompt },
-            ...[input.before, input.after]
+            ...[input.before, input.after, input.crop]
               .filter((image): image is Buffer => Boolean(image))
               .map((image) => ({
                 type: 'image_url',

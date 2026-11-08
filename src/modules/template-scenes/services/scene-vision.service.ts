@@ -4,6 +4,7 @@ import { llmCostUsd, llmPricesFor } from '../../ai/openai-llm-pricing';
 import { VisionUsage } from '../../ai/openai-vision.service';
 import { SCENE_VISION_CLIENT, SceneVisionClient } from '../providers/scene-vision-client';
 import { sleepFor } from '../domain/scene-timing';
+import { compareReadText, ReadLine, TextLine } from '../domain/scene-text-check';
 
 export const DEFAULT_VISION_MODEL = 'gpt-6-luna';
 /** PV-2: tempo máximo do juiz; passou disso, a resposta diz que não conseguiu conferir. */
@@ -20,8 +21,12 @@ export type VisionAssessment =
       seen: string[];
       /** Ids que o juiz não viu. */
       notSeen: string[];
-      /** O juiz viu texto legível pintado na imagem nova. */
-      textInImage: boolean;
+      /** O que o cliente pediu e não aparece, em uma frase nominal em pt-BR (vazia se nada falta). */
+      missing: string;
+      /** A leitura do texto esperado, já comparada pelo código com a linha pedida; vazia sem texto esperado. */
+      textLines: TextLine[];
+      /** Texto visível que ninguém pediu (até 120 caracteres); vazio se não houver. */
+      extraText: string;
       /** O juiz viu emenda, corte brusco ou objeto flutuando sobre ilha ou faixa (D-44); não muda o veredito. */
       seam: boolean;
       seamDescription: string;
@@ -55,9 +60,25 @@ export interface JudgePromptInput {
   doneItems?: Array<{ id: string; text: string }>;
   /** A cena tinha imagem antes: o juiz recebe ANTES e DEPOIS. Na primeira imagem, só DEPOIS. */
   hasBefore: boolean;
+  /** Linhas de texto que devem estar na imagem: as da rodada e as já pintadas e conferidas (D-51, D-56). */
+  expectedText?: string[];
+  /** O recorte da região do texto vai como imagem a mais. */
+  hasCrop?: boolean;
 }
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+/** Pedido de leitura do texto (D-51): as linhas esperadas e, se houver, a imagem a mais com o recorte da região. */
+function textRequest(input: JudgePromptInput): string[] {
+  const lines = (input.expectedText ?? []).map((line) => oneLine(line)).filter(Boolean);
+  if (lines.length === 0) return ['Texto esperado na imagem: nenhum.'];
+  return [
+    `Texto esperado na imagem DEPOIS (transcreva cada linha, sem corrigir):\n${lines.map((line, i) => `Linha ${i + 1}: “${line}”`).join('\n')}`,
+    ...(input.hasCrop
+      ? ['A última imagem é o recorte da região do texto, na resolução da imagem original.']
+      : []),
+  ];
+}
 
 /**
  * Pedido ao juiz: a imagem inteira antes e depois, a mensagem do cliente, o plano e a lista em aberto. O prompt
@@ -79,8 +100,9 @@ export function buildVisionPrompt(input: JudgePromptInput): string {
     `Plano do sistema (pode estar errado: confira contra a MENSAGEM DO CLIENTE, não contra o plano): ${plan || 'sem plano'}.`,
     `Pedidos do cliente ainda em aberto (id: texto):\n${items}${done}`,
     'Ano, data ou número citado na mensagem do cliente é contexto, não pedido de imagem: não cobre como faltando e não diga em "mudou" que o ano ou o número não aparece.',
-    'Responda só com JSON no formato {"atendeu": "sim"|"parcial"|"nao", "mudou": string, "vistos": string[], "nao_vistos": string[], "texto_na_imagem": boolean, "emenda": boolean, "emenda_descricao": string}.',
-    '"atendeu" diz se a mensagem do cliente foi atendida. "mudou" descreve em uma frase curta, em português, o que mudou em relação ao pedido (e não qualquer diferença). "vistos" lista os ids dos pedidos em aberto cujo RESULTADO você VÊ na imagem DEPOIS (num pedido de tirar algo, o item não aparece mais; num pedido de colocar ou mudar, o resultado aparece), e "nao_vistos" os ids cujo resultado você NÃO vê (por exemplo, o item que devia sair continua lá). "texto_na_imagem" é true se há texto, letras ou números legíveis pintados na imagem DEPOIS (ano pintado também conta aqui, sem mudar "atendeu"). "emenda" é true se a imagem DEPOIS tem emenda, corte brusco ou transição abrupta entre uma parte e outra, ou objeto ou grupo de objetos flutuando, apoiado em ilha, faixa ou pedaço de terreno separado do resto da cena; "emenda_descricao" diz isso em uma frase curta (vazia se "emenda" for false). "emenda" não muda "atendeu". Não afirme nada sobre o resto da imagem.',
+    ...textRequest(input),
+    'Responda só com JSON no formato {"atendeu": "sim"|"parcial"|"nao", "mudou": string, "vistos": string[], "nao_vistos": string[], "faltou": string, "texto_lido": [{"pedido": string, "lido": string}], "texto_extra": string, "emenda": boolean, "emenda_descricao": string}.',
+    '"atendeu" diz se a mensagem do cliente foi atendida. "mudou" descreve em uma frase curta, em português, o que mudou em relação ao pedido (e não qualquer diferença). "vistos" lista os ids dos pedidos em aberto cujo RESULTADO você VÊ na imagem DEPOIS (num pedido de tirar algo, o item não aparece mais; num pedido de colocar ou mudar, o resultado aparece), e "nao_vistos" os ids cujo resultado você NÃO vê (por exemplo, o item que devia sair continua lá). "faltou" é uma frase nominal curta em português sobre o que o cliente pediu e não aparece (por exemplo: a frase “Promoção de Páscoa” na placa), até 160 caracteres, vazia se nada falta. "texto_lido" só vale quando há texto esperado (veja acima): para cada linha esperada, "pedido" é a linha como foi pedida e "lido" é o que está ESCRITO na imagem, transcrito caractere por caractere, sem corrigir nada (acentos, cedilha, maiúsculas, vírgulas, R$); se não achar a linha, "lido" fica vazio; sem texto esperado, lista vazia. "texto_extra" é o texto, letras ou números legíveis pintados na imagem DEPOIS que não estão nas linhas esperadas (até 120 caracteres; ano pintado também conta aqui, sem mudar "atendeu"), vazio se não houver. "emenda" é true se a imagem DEPOIS tem emenda, corte brusco ou transição abrupta entre uma parte e outra, ou objeto ou grupo de objetos flutuando, apoiado em ilha, faixa ou pedaço de terreno separado do resto da cena; "emenda_descricao" diz isso em uma frase curta (vazia se "emenda" for false). "emenda" não muda "atendeu". Não afirme nada sobre o resto da imagem.',
   ].join('\n');
 }
 
@@ -94,30 +116,51 @@ interface Parsed {
   satisfied: VisionSatisfied;
   seen: string[];
   notSeen: string[];
-  textInImage: boolean;
+  missing: string;
+  readText: ReadLine[];
+  extraText: string;
   seam: boolean;
   seamDescription: string;
 }
 
-function parseAssessment(text: string, openIds: string[]): Parsed | null {
+const text = (value: unknown, max: number): string =>
+  typeof value === 'string' ? value.trim().slice(0, max) : '';
+
+function readLines(value: unknown): ReadLine[] | null {
+  if (!Array.isArray(value)) return null;
+  const lines = value.map((entry: unknown) => {
+    const row = entry as Record<string, unknown> | null;
+    return typeof row?.pedido === 'string' && typeof row.lido === 'string'
+      ? { pedido: row.pedido, lido: row.lido }
+      : null;
+  });
+  return lines.every((line): line is ReadLine => line !== null) ? lines : null;
+}
+
+function parseAssessment(raw: string, input: JudgePromptInput): Parsed | null {
   try {
-    const json = JSON.parse(text) as Record<string, unknown>;
+    const json = JSON.parse(raw) as Record<string, unknown>;
     const satisfied = json.atendeu;
     if (typeof json.mudou !== 'string' || !json.mudou.trim()) return null;
     if (satisfied !== 'sim' && satisfied !== 'parcial' && satisfied !== 'nao') return null;
-    if (typeof json.texto_na_imagem !== 'boolean') return null;
     if (typeof json.emenda !== 'boolean') return null;
-    const known = new Set(openIds);
+    const readText = readLines(json.texto_lido ?? []);
+    // Com texto esperado, a leitura é obrigatória: sem ela o código não tem o que comparar.
+    if (!readText || ((input.expectedText?.length ?? 0) > 0 && !Array.isArray(json.texto_lido))) {
+      return null;
+    }
+    const known = new Set([...input.openItems, ...(input.doneItems ?? [])].map((item) => item.id));
     const seen = ids(json.vistos, known);
     return {
       changed: json.mudou.trim().slice(0, 300),
       satisfied,
       seen,
       notSeen: ids(json.nao_vistos, known).filter((id) => !seen.includes(id)),
-      textInImage: json.texto_na_imagem,
+      missing: text(json.faltou, 160),
+      readText,
+      extraText: text(json.texto_extra, 120),
       seam: json.emenda,
-      seamDescription:
-        typeof json.emenda_descricao === 'string' ? json.emenda_descricao.trim().slice(0, 300) : '',
+      seamDescription: text(json.emenda_descricao, 300),
     };
   } catch {
     return null;
@@ -159,6 +202,8 @@ export class SceneVisionService {
       before?: Buffer;
       /** JPEG da imagem inteira depois. */
       after: Buffer;
+      /** JPEG do recorte da região do texto na resolução da master, quando há texto esperado. */
+      crop?: Buffer;
       correlationId: string;
     },
   ): Promise<VisionAssessment> {
@@ -178,6 +223,7 @@ export class SceneVisionService {
           prompt: buildVisionPrompt(input),
           before: input.before,
           after: input.after,
+          crop: input.crop,
           timeoutMs,
           correlationId: input.correlationId,
         }),
@@ -186,16 +232,15 @@ export class SceneVisionService {
       if (outcome === 'timeout')
         return { ok: false, reason: 'timeout', costUsd: null, requestId: null };
       const costUsd = visionCostUsd(model, outcome.usage);
-      const parsed = parseAssessment(
-        outcome.text,
-        [...input.openItems, ...(input.doneItems ?? [])].map((item) => item.id),
-      );
+      const parsed = parseAssessment(outcome.text, input);
       if (!parsed) {
         return { ok: false, reason: 'invalid_json', costUsd, requestId: outcome.requestId };
       }
+      const { readText, ...rest } = parsed;
       return {
         ok: true,
-        ...parsed,
+        ...rest,
+        textLines: compareReadText(input.expectedText ?? [], readText),
         costUsd,
         requestId: outcome.requestId,
         latencyMs: outcome.latencyMs,
