@@ -207,6 +207,10 @@ export const currentVersionReply = (displayNumber: number): string =>
 /** Marcação que não vale para imagem nova (`/images/generations` não recebe `markup`). */
 export const MARKING_DISCARDED_NOTE = 'A área marcada não vale para uma imagem nova.';
 
+/** D-7: marcação enviada junto de um pedido de tamanho do cabeçalho é descartada. */
+export const HEADER_MARKING_NOTE =
+  'A área marcada não foi usada: o tamanho do cabeçalho vale para a capa inteira.';
+
 const FAILURE_REPLIES: Record<SceneFailureCode, string> = {
   PROVIDER_QUOTA: 'O serviço de imagem está sem saldo. Avise o administrador.',
   PROVIDER_CONTENT_POLICY:
@@ -318,9 +322,9 @@ export function headerAnnouncement(cm: number, limit: 'max' | 'min' | null): str
 export const headerReadyReply = (cm: number): string =>
   `Pronto, o cabeçalho da capa está com ${cmText(cm)} cm.`;
 
-/** Pedido de tamanho junto da imagem que passou do limite: o anúncio da imagem diz o limite aplicado. */
-export const headerLimitNote = (cm: number, limit: 'max' | 'min'): string =>
-  `O cabeçalho da capa vai ficar com ${cmText(cm)} cm (${limit === 'max' ? 'o máximo' : 'o mínimo'} é ${cmText(cm)} cm).`;
-
 /** PV-T11: a logo que saía do cabeçalho encolhido foi ajustada ao novo espaço da logo. */
 export const LOGO_FITTED_NOTE = 'Ajustei a logo ao novo espaço do cabeçalho.';
+
+/** D-6: a primeira Externa sai com o cabeçalho padrão; o tamanho muda depois, pela conversa. */
+export const HEADER_DEFAULT_ANNOUNCEMENT = (cm: number): string =>
+  `Vou criar a externa. O cabeçalho da capa sai no tamanho padrão (${cmText(cm)} cm); se quiser, peça depois um cabeçalho maior ou menor.`;

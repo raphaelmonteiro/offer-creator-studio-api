@@ -37,7 +37,7 @@ const HEADER_SIZE_KIND =
 
 /** Só no jornal (D-1). */
 const HEADER_SIZE_FIELD =
-  'header_size: {cm, direction}. Em tamanho_cabecalho, cm é o número dito pelo cliente (ou null) e direction é "maior" ou "menor" quando ele não diz o número. Na primeira imagem ou na imagem nova, preencha só se o cliente já disser o tamanho do cabeçalho ("com cabeçalho de 10 cm"). Senão, null.';
+  'header_size: {cm, direction}. Em tamanho_cabecalho, cm é o número dito pelo cliente (ou null) e direction é "maior" ou "menor" quando ele não diz o número. O tamanho só muda com a externa já feita; a primeira imagem sai sempre com o cabeçalho padrão. Senão, null.';
 
 const IMAGE_FIELDS = [
   `image.composition: até ${DIRECTOR_LIMITS.composition} caracteres, em inglês: a composição atual ou desejada da página, numa frase.`,

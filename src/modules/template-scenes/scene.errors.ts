@@ -89,7 +89,7 @@ export const faceNotFound = (face: string) =>
     face,
   });
 
-/** `faceKey` só vai em `details` na derivação da Interna (PV-T5); a do verso responde como sempre. */
+/** `details.faceKey` (`back` ou `inner`) diz qual face a derivação recusou (PV-T5); só a mensagem da Interna é própria. */
 export const frontNotReady = (faceKey?: FaceKey) =>
   sceneError(
     HttpStatus.UNPROCESSABLE_ENTITY,

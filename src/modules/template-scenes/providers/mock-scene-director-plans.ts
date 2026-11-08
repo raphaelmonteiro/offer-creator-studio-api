@@ -288,23 +288,18 @@ function headerSizeOf(folded: string): NonNullable<DirectorPlan['header_size']> 
 }
 
 /**
- * Pedido do cabeçalho da capa no jornal: com imagem é `tamanho_cabecalho` (o código muda a altura); sem imagem é a
- * primeira imagem com o tamanho junto (valem antes do prompt).
+ * Pedido do cabeçalho da capa no jornal: com imagem é `tamanho_cabecalho` (o código muda a altura); sem imagem não
+ * há plano próprio (D-6).
  */
-export function headerPlan(
-  script: DirectorScript,
-  folded: string,
-  message: string,
-): DirectorPlan | null {
+export function headerPlan(script: DirectorScript, folded: string): DirectorPlan | null {
   const size = has(folded, /\bcabecalho\b/) ? headerSizeOf(folded) : null;
   if (!size) return null;
-  if (script.hasImage) {
-    return {
-      ...EMPTY,
-      turn_kind: 'tamanho_cabecalho',
-      reply: 'Vou mudar o cabeçalho da capa.',
-      header_size: size,
-    };
-  }
-  return { ...imagePlan(script, folded, message), header_size: size };
+  // Sem imagem, a primeira Externa sai com o cabeçalho padrão (D-6): é o pedido de imagem de sempre.
+  if (!script.hasImage) return null;
+  return {
+    ...EMPTY,
+    turn_kind: 'tamanho_cabecalho',
+    reply: 'Vou mudar o cabeçalho da capa.',
+    header_size: size,
+  };
 }

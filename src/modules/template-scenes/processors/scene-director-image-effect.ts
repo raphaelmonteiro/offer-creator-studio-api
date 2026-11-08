@@ -72,7 +72,7 @@ export async function queueImageEffect(
   }
   await manager.save(scene);
   const notes: string[] = [];
-  if (decision.discardMarking) notes.push(MARKING_DISCARDED_NOTE);
+  if (decision.discardMarking) notes.push(decision.markingNote ?? MARKING_DISCARDED_NOTE);
   const face = await loadFace(manager, scene.id, version.faceIndex);
   if (
     await paintsExistingLayer(manager, face.currentVersionId, version.metrics.plan as DirectorPlan)

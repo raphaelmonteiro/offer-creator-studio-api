@@ -11,11 +11,11 @@ import {
 import { zoneBands } from './scene-zone-bands';
 import {
   headerAnnouncement,
-  headerLimitNote,
   headerSameReply,
   HEADER_ONLY_TABLOID_REPLY,
   NO_HEADER_ON_INNER_REPLY,
-  NO_IMAGE_REPLY,
+  HEADER_DEFAULT_ANNOUNCEMENT,
+  HEADER_MARKING_NOTE,
   NO_INSTRUCTION_REPLY,
 } from '../scene-texts';
 import { SceneZones } from './scene.types';
@@ -56,6 +56,7 @@ function resizeDecision(
     operation: 'redraw',
     window: true,
     discardMarking: input.marked,
+    markingNote: HEADER_MARKING_NOTE,
     announcement: headerAnnouncement(resize.toCm, resize.limit),
     isEdit: true,
     planPatch: {
@@ -71,38 +72,39 @@ function resizeDecision(
 }
 
 /**
- * `tamanho_cabecalho`: fora do jornal e na Interna, resposta fixa; na Externa sem imagem, o pedido de imagem de
- * sempre; já no limite (ou no tamanho pedido), resposta sem chamada; senão uma edição de imagem pela janela de 5 s.
+ * D-6: a primeira geração da Externa sempre usa o cabeçalho padrão. Se a primeira mensagem veio como
+ * `tamanho_cabecalho`, ela não se perde: vira o pedido de criação, e o anúncio diz que o cabeçalho sai no padrão.
+ */
+function firstImageDecision(input: DecisionInput): TurnDecision {
+  const face = input.face as NonNullable<DecisionInput['face']>;
+  const cm = headerCmOf(face.zones, tabloidFormat(face));
+  return {
+    kind: 'image',
+    operation: 'generate',
+    window: true,
+    discardMarking: false,
+    announcement: HEADER_DEFAULT_ANNOUNCEMENT(cm),
+    isEdit: false,
+    planPatch: {
+      will_change_image: true,
+      image: emptyImage({ change: input.message ?? '', region: { zone: 'whole', side: null } }),
+    },
+  };
+}
+
+/**
+ * `tamanho_cabecalho`: fora do jornal e na Interna, resposta fixa; na Externa sem imagem, a criação da Externa no
+ * tamanho padrão (D-6); já no limite (ou no tamanho pedido), resposta sem chamada; senão uma edição de imagem pela janela de 5 s.
  */
 export function decideHeaderSize(input: DecisionInput): TurnDecision {
   const { face, plan, hasImage } = input;
   const reply = (text: string): TurnDecision => ({ kind: 'reply', reply: text });
   if (face?.layout !== 'tabloid') return reply(HEADER_ONLY_TABLOID_REPLY);
   if (face.key === 'inner') return reply(NO_HEADER_ON_INNER_REPLY);
-  if (!hasImage) return reply(NO_IMAGE_REPLY);
+  if (!hasImage) return firstImageDecision(input);
   const format = tabloidFormat(face);
   const resize = resolveHeaderSize(headerCmOf(face.zones, format), plan.header_size, format);
   if (resize.kind === 'unclear') return reply(NO_INSTRUCTION_REPLY);
   if (resize.kind === 'same') return reply(headerSameReply(resize.cm, resize.limit));
   return resizeDecision(input, resize);
-}
-
-/**
- * Tamanho do cabeçalho dito junto do pedido de imagem (primeira imagem e imagem nova da Externa): as zonas mudam antes
- * do prompt, sem chamada a mais. Pedido fora do limite fica no limite, e o anúncio diz.
- */
-export function headerOfGeneration(
-  input: DecisionInput,
-): { zones: SceneZones; note: string } | null {
-  const { face, plan } = input;
-  if (face?.layout !== 'tabloid' || face.key !== 'outer' || !plan.header_size) return null;
-  const format = tabloidFormat(face);
-  const resize = resolveHeaderSize(headerCmOf(face.zones, format), plan.header_size, format);
-  if (resize.kind === 'unclear') return null;
-  const toCm = resize.kind === 'resize' ? resize.toCm : resize.cm;
-  if (resize.kind === 'same' && !resize.limit) return null;
-  return {
-    zones: zonesWithHeader(format, toCm),
-    note: resize.limit ? headerLimitNote(toCm, resize.limit) : '',
-  };
 }

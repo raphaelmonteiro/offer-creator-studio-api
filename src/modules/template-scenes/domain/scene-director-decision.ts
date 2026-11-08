@@ -12,7 +12,7 @@ import {
   SINGLE_FACE_REPLY,
 } from '../scene-texts';
 import { DirectorFace, isTwoFaces } from './scene-director-faces';
-import { decideHeaderSize, headerOfGeneration } from './scene-director-header';
+import { decideHeaderSize } from './scene-director-header';
 import { isDerivedFace } from './scene-faces';
 import { SceneZones } from './scene.types';
 import { replyIsForbidden, safeReply } from './scene-director-phrases';
@@ -33,6 +33,8 @@ export interface DecisionInput {
   openRequests: string[];
   /** A face do pedido e o estado das faces; ausente vale cena de uma face (o comportamento de sempre). */
   face?: DirectorFace;
+  /** A mensagem do cliente: vira o pedido da primeira imagem quando o plano veio como `tamanho_cabecalho` sem imagem (D-6). */
+  message?: string;
 }
 
 type ImageDecision = Extract<TurnDecision, { kind: 'image' }>;
@@ -60,6 +62,8 @@ export type TurnDecision =
       planPatch?: { will_change_image: true; image: DirectorImage };
       /** Aviso do redesenho só vale em edição: a primeira imagem e a imagem nova não contam (D-35). */
       isEdit: boolean;
+      /** Aviso no lugar do `MARKING_DISCARDED_NOTE` quando `discardMarking` (D-7: tamanho do cabeçalho). */
+      markingNote?: string;
       /** Jornal (D-1): as zonas com a nova altura do cabeçalho, gravadas na versão antes da chamada de imagem. */
       zones?: SceneZones;
       /** Jornal (D-1): a edição que só muda a altura do cabeçalho; o anúncio e a resposta citam os cm. */
@@ -178,19 +182,15 @@ function imageDecision(input: DecisionInput): TurnDecision {
   const { plan, marked, hasImage } = input;
   const isNewImage = !hasImage || plan.turn_kind === 'imagem_nova';
   const patch = markedPatch(input);
-  const header = isNewImage ? headerOfGeneration(input) : null;
   return {
     kind: 'image',
     operation: isNewImage ? 'generate' : 'redraw',
     // A primeira imagem tem janela: é pedido sem marcação, e marcação não existe sem imagem.
     window: !hasImage || windowApplies(plan.turn_kind, marked),
     discardMarking: isNewImage && hasImage && marked,
-    announcement: [safeReply({ reply: plan.reply, will_change_image: true }), header?.note]
-      .filter(Boolean)
-      .join(' '),
+    announcement: safeReply({ reply: plan.reply, will_change_image: true }),
     isEdit: hasImage && !isNewImage,
     ...patch,
-    ...(header ? { zones: header.zones } : {}),
   };
 }
 

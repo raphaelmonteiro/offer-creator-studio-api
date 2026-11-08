@@ -5,7 +5,8 @@ import { TemplateSceneMessage } from '../entities/template-scene-message.entity'
 import {
   DERIVE_INNER_ANNOUNCEMENT,
   DERIVE_INNER_REPLY,
-  headerLimitNote,
+  HEADER_DEFAULT_ANNOUNCEMENT,
+  HEADER_MARKING_NOTE,
   INNER_EXISTS_REPLY,
   INNER_MISSING_REPLY,
   NO_HEADER_ON_INNER_REPLY,
@@ -244,20 +245,52 @@ describeIfSceneDb('Diretor no jornal de 4 páginas (banco chroma_x_e2e)', () => 
       expect((await faceOf(scene.id, 0)).zones.header.h).toBeCloseTo(0.2, 10);
     });
 
-    it('Tamanho dito pelo cliente na primeira mensagem: uma só geração, com o cabeçalho de 0 a 620', async () => {
+    it('Primeira mensagem com tamanho: a Externa sai no cabeçalho padrão (D-6), sem perder o pedido', async () => {
       const { scene } = await h.tabloidScene();
-      const { sent, version } = await chat(
+      const { sent, version } = await chatWith(
         scene.id,
         'jornal de aniversário com cabeçalho de 10 cm',
-        {
-          face: 'outer',
-        },
+        directorPlan({
+          turn_kind: 'tamanho_cabecalho',
+          header_size: { cm: 10, direction: null },
+        }),
+        { face: 'outer' },
       );
-      expect(version.zones?.header.h).toBeCloseTo(0.25, 10);
+      expect(version).toMatchObject({ operation: 'generate', status: 'queued' });
+      expect(version.zones).toBeNull();
+      expect(await assistantOf(sent.versionId)).toBe(HEADER_DEFAULT_ANNOUNCEMENT(6));
       const { fake, prompt } = await runImage(scene.id, sent.versionId, 'generate');
       expect(fake.generate).toHaveBeenCalledTimes(1);
-      expect(prompt).toContain('y from 0 to 620 px');
-      expect((await faceOf(scene.id, 0)).zones.header.h).toBeCloseTo(0.25, 10);
+      expect(prompt).toContain('y from 0 to 372 px');
+      expect(prompt).toContain('jornal de aniversário com cabeçalho de 10 cm');
+      expect((await faceOf(scene.id, 0)).zones.header.h).toBeCloseTo(0.15, 10);
+    });
+
+    it('imagem nova com header_size no plano: o tamanho não vale antes da geração (D-6)', async () => {
+      const { scene } = await h.tabloidScene({ outer: true });
+      const { version } = await chatWith(
+        scene.id,
+        'gera outra imagem com cabeçalho de 10 cm',
+        directorPlan({
+          turn_kind: 'imagem_nova',
+          will_change_image: true,
+          what_to_put: 'a new picture',
+          header_size: { cm: 10, direction: null },
+        }),
+        { face: 'outer' },
+      );
+      expect(version).toMatchObject({ operation: 'generate' });
+      expect(version.zones).toBeNull();
+    });
+
+    it('marcação junto do pedido de tamanho é descartada, com o aviso da D-7', async () => {
+      const { scene } = await h.tabloidScene({ outer: true });
+      const { sent, version } = await chat(scene.id, 'deixa o cabeçalho maior', {
+        face: 'outer',
+        region: { x: 0.1, y: 0.1, w: 0.3, h: 0.3 },
+      });
+      expect(version.requestedRegion).toBeNull();
+      expect(await assistantOf(sent.versionId)).toContain(HEADER_MARKING_NOTE);
     });
 
     it('Acima do teto: vai a 12 cm e o anúncio diz o máximo', async () => {
@@ -294,12 +327,6 @@ describeIfSceneDb('Diretor no jornal de 4 páginas (banco chroma_x_e2e)', () => 
       );
       expect(await assistantOf(sent.versionId)).toBe(HEADER_ONLY_TABLOID_REPLY);
       expect(imageJobs()).toHaveLength(0);
-    });
-
-    it('o limite aplicado na imagem nova tem a nota do limite', () => {
-      expect(headerLimitNote(12, 'max')).toBe(
-        'O cabeçalho da capa vai ficar com 12 cm (o máximo é 12 cm).',
-      );
     });
   });
 

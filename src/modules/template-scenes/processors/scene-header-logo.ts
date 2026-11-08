@@ -1,6 +1,7 @@
 import { findSceneFormat } from '../domain/scene-formats';
-import { logoSpace } from '../domain/scene-tabloid';
 import { SceneElement } from '../domain/scene.types';
+import { coverLogoBox } from './scene-layer-cover';
+import { heightFraction } from './scene-layer-target';
 import { TurnContext } from './scene-turn-state';
 
 /**
@@ -16,17 +17,16 @@ export function fitLogosToHeader(
   const format = findSceneFormat(ctx.formatId);
   if (!headerResize || !format || headerResize.toCm >= headerResize.fromCm) return null;
   const oldHeight = headerResize.fromCm / format.printHeightCm;
-  const space = logoSpace(zones, ctx);
   let changed = false;
   const fitted = elements.map((element) => {
     if (element.kind !== 'logo') return element;
-    const heightFraction = (element.w * ctx.widthPx) / element.aspect / ctx.heightPx;
+    const height = heightFraction(element, ctx);
     const inOldHeader = element.y < oldHeight && element.x >= zones.header.x;
-    const leaves = element.y + heightFraction / 2 > zones.header.h;
+    const leaves = element.y + height / 2 > zones.header.h;
     if (!inOldHeader || !leaves) return element;
     changed = true;
-    const widthPx = element.aspect >= 1 ? space.sidePx : space.sidePx * element.aspect;
-    return { ...element, x: space.centerX, y: space.centerY, w: widthPx / ctx.widthPx };
+    const box = coverLogoBox({ ...ctx, zones }, 'header', element.aspect);
+    return box ? { ...element, ...box } : element;
   });
   return changed ? fitted : null;
 }

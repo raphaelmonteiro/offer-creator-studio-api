@@ -49,7 +49,7 @@ function planFor(script: DirectorScript, message: string): DirectorPlan {
   if (script.layout === 'front_back' && has(folded, BACK_ASK)) return backPlan(message);
   if (script.layout === 'tabloid') {
     if (has(folded, INNER_ASK)) return innerPlan(message);
-    const header = headerPlan(script, folded, message);
+    const header = headerPlan(script, folded);
     if (header) return header;
   }
   const direct = undoPlan(folded) ?? layerPlan(script, folded, message);

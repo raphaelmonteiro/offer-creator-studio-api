@@ -205,6 +205,7 @@ export class SceneDirectorState {
         (item) => item.text,
       ),
       face: context.face,
+      message: context.script.message,
     });
   }
 
