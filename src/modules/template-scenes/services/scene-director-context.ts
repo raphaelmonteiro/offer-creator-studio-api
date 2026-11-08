@@ -2,18 +2,29 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import * as sharp from 'sharp';
 import { DataSource, EntityManager, In, Not } from 'typeorm';
-import { BriefItem } from '../domain/scene-brief';
-import { findSceneFormat } from '../domain/scene-formats';
-import { zoneBands } from '../domain/scene-zone-bands';
-import { maskBounds } from '../domain/scene-mask-shape';
-import { MaskShape, Rect, SceneElement } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
-import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { DirectorScript } from '../providers/scene-director-client';
+import {
+  boxText,
+  formatBlock,
+  HistoryEntry,
+  historyBlock,
+  layerBox,
+  markingOf,
+  oneLine,
+  paintedBlock,
+  paintedLinesOf,
+  paintedTextOf,
+  briefBlock,
+  versionsBlock,
+} from './scene-director-blocks';
 import { DisplayedVersion, loadDisplayedVersions } from './scene-display-number';
 import { SceneFilesService } from './scene-files.service';
+import { readVersionMaster } from './scene-master';
+
+export { formatBlock, markingOf, paintedTextOf } from './scene-director-blocks';
 
 /** Mensagens anteriores que o Diretor recebe (a conversa inteira continua na tela, sob demanda). */
 export const DIRECTOR_RECENT_MESSAGES = 30;
@@ -35,125 +46,6 @@ export interface DirectorContext {
   paintedText: string[];
   /** Texto de cada camada de texto da versão atual: fonte só da linha igual a ele, inteira (D-55, validação 4a). */
   layerTexts: string[];
-}
-
-/** As linhas pintadas e conferidas da versão (`metrics.paintedText`); vazio em versão sem texto pintado. */
-export function paintedTextOf(version: Pick<TemplateSceneVersion, 'metrics'> | null): string[] {
-  const value = version?.metrics?.paintedText;
-  return Array.isArray(value)
-    ? value.filter((line): line is string => typeof line === 'string')
-    : [];
-}
-
-const frac = (value: number): string => value.toFixed(2);
-const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
-
-const boxText = (box: Rect): string =>
-  `x0=${frac(box.x)} y0=${frac(box.y)} x1=${frac(box.x + box.w)} y1=${frac(box.y + box.h)}`;
-
-interface Marking {
-  kind: 'retângulo' | 'pincel' | 'laço';
-  box: Rect;
-}
-
-/** A marcação gravada na versão: forma (pincel e laço) ou retângulo (retângulo e zona). */
-export function markingOf(
-  version: Pick<TemplateSceneVersion, 'requestedRegion' | 'requestedMask'>,
-  sceneAspect: number,
-): Marking | null {
-  const mask: MaskShape | null = version.requestedMask;
-  if (mask) {
-    return {
-      kind: mask.kind === 'brush' ? 'pincel' : 'laço',
-      box: version.requestedRegion ?? maskBounds(mask, sceneAspect),
-    };
-  }
-  return version.requestedRegion ? { kind: 'retângulo', box: version.requestedRegion } : null;
-}
-
-/** Caixa da camada em frações da cena (o `x`, `y` é o centro e `w` a largura). */
-function layerBox(layer: SceneElement, scene: Pick<TemplateScene, 'widthPx' | 'heightPx'>): Rect {
-  const h = (layer.w * scene.widthPx) / layer.aspect / scene.heightPx;
-  return { x: layer.x - layer.w / 2, y: layer.y - h / 2, w: layer.w, h };
-}
-
-const OPERATION_LABEL: Record<string, string> = {
-  generate: 'gerada',
-  redraw: 'redesenhada',
-  manual: 'ajuste manual',
-  set_layer: 'camada alterada',
-  restore: 'restaurada',
-};
-
-/** Resumo das versões: número exibido, operação e data, para "é a versão 7?" e "volta para a 3". */
-function versionsBlock(versions: DisplayedVersion[], currentId: string | null): string {
-  if (versions.length === 0) return 'Versões da cena: nenhuma imagem ainda.';
-  const lines = versions.map(
-    (v) =>
-      `- Versão ${v.displayNumber}: ${OPERATION_LABEL[v.operation] ?? v.operation} em ${v.createdAt.toISOString().slice(0, 16).replace('T', ' ')}${v.id === currentId ? ' (a atual)' : ''}`,
-  );
-  return `Versões da cena (número exibido):\n${lines.join('\n')}`;
-}
-
-/**
- * Formato e zonas (D-51): nome, tamanho em cm e em px da master, e as faixas de `computeSceneZones` em cm, em
- * fração e em px. O Diretor escolhe a região pelo nome; as medidas que vão ao modelo de imagem são do código.
- */
-export function formatBlock(
-  scene: Pick<TemplateScene, 'formatId' | 'widthPx' | 'heightPx'>,
-): string {
-  const format = findSceneFormat(scene.formatId);
-  const size = `${scene.widthPx} x ${scene.heightPx} px`;
-  if (!format) return `Formato: ${scene.formatId}, ${size}.`;
-  const bands = zoneBands(format, scene.heightPx);
-  return [
-    `Formato: ${format.id}, ${format.artWidthCm} x ${format.artHeightCm} cm, master de ${size}.`,
-    `Zonas de image.region: header = ${format.headerCm} cm (${bands.headerPct}% da altura, y < ${bands.headerEnd} px); body = miolo de produtos (y de ${bands.headerEnd} a ${bands.footerStart} px); footer = ${format.footerCm} cm de ${format.printHeightCm} cm (${bands.footerPct}% da altura, y ≥ ${bands.footerStart} px).`,
-  ].join('\n');
-}
-
-function paintedBlock(lines: string[]): string {
-  return lines.length
-    ? `Textos já pintados e conferidos na imagem atual (cite sem inventar): ${lines.map((line) => `“${oneLine(line)}”`).join(' / ')}`
-    : 'Textos já pintados na imagem atual: nenhum.';
-}
-
-function briefBlock(brief: BriefItem[]): string {
-  const open = brief.filter((item) => item.status === 'open');
-  const closed = brief.filter((item) => item.status !== 'open').slice(-10);
-  const lines = [
-    open.length
-      ? `Pedidos do cliente ainda em aberto:\n${open.map((i) => `- ${i.id}: ${oneLine(i.text)}`).join('\n')}`
-      : 'Pedidos do cliente ainda em aberto: nenhum.',
-  ];
-  if (closed.length) {
-    lines.push(
-      `Pedidos já resolvidos ou desistidos (só contexto):\n${closed
-        .map(
-          (i) => `- ${i.id} (${i.status === 'done' ? 'feito' : 'desistido'}): ${oneLine(i.text)}`,
-        )
-        .join('\n')}`,
-    );
-  }
-  return lines.join('\n');
-}
-
-interface HistoryEntry {
-  message: TemplateSceneMessage;
-  displayNumber: number | null;
-  marking: Marking | null;
-}
-
-function historyBlock(entries: HistoryEntry[]): string {
-  if (entries.length === 0) return 'Histórico da conversa: nenhuma mensagem anterior.';
-  const lines = entries.map(({ message, displayNumber, marking }) => {
-    const who = message.role === 'user' ? 'Cliente' : 'Assistente';
-    const notes: string[] = [];
-    if (displayNumber !== null) notes.push(`versão ${displayNumber}`);
-    if (marking) notes.push(`com marcação (${marking.kind}, ${boxText(marking.box)})`);
-    return `${who}${notes.length ? ` [${notes.join(', ')}]` : ''}: ${oneLine(message.content)}`;
-  });
-  return `Histórico da conversa:\n${lines.join('\n')}`;
 }
 
 /**
@@ -194,7 +86,7 @@ export class SceneDirectorContextService {
       briefBlock(scene.brief ?? []),
       versionsBlock(versions, scene.currentVersionId),
       formatBlock(scene),
-      paintedBlock(paintedTextOf(current)),
+      paintedBlock(paintedLinesOf(current)),
       marking
         ? `Marcação do cliente na imagem atual (frações 0..1): tipo=${marking.kind} ${boxText(marking.box)}`
         : 'Marcação do cliente: nenhuma.',
@@ -280,13 +172,10 @@ export class SceneDirectorContextService {
     manager: EntityManager,
     current: TemplateSceneVersion | null,
   ): Promise<Buffer | null> {
-    if (!current?.masterAssetId) return null;
-    const master = await manager.findOne(TemplateSceneAsset, {
-      where: { id: current.masterAssetId },
-    });
-    if (!master || master.purgedAt) return null;
+    const master = await readVersionMaster(manager, this.files, current);
+    if (!master) return null;
     try {
-      return await sharp(await this.files.read(master.url))
+      return await sharp(master)
         .resize({
           width: DIRECTOR_IMAGE_EDGE,
           height: DIRECTOR_IMAGE_EDGE,
