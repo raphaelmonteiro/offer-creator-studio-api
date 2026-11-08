@@ -1,3 +1,5 @@
+import * as sharp from 'sharp';
+import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { QUEUES } from '../../../shared/queue/animation-queue.service';
 import { MockSceneDirectorClient } from '../providers/mock-scene-director.client';
 import { TemplateSceneFace } from '../entities/template-scene-face.entity';
@@ -5,14 +7,16 @@ import { TemplateSceneMessage } from '../entities/template-scene-message.entity'
 import {
   DERIVE_INNER_ANNOUNCEMENT,
   DERIVE_INNER_REPLY,
-  HEADER_DEFAULT_ANNOUNCEMENT,
+  headerDefaultAnnouncement,
   HEADER_MARKING_NOTE,
   INNER_EXISTS_REPLY,
   INNER_MISSING_REPLY,
   NO_HEADER_ON_INNER_REPLY,
   OUTER_FIRST_REPLY,
   HEADER_ONLY_TABLOID_REPLY,
+  TABLOID_FOLD_NOTE,
 } from '../scene-texts';
+import { FIXED_ANNOUNCEMENT } from '../domain/scene-director-phrases';
 import { SceneDirectorContextService } from '../services/scene-director-context';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { directorImage, directorPlan, PlanOverrides } from '../testing/scene-director-fixtures';
@@ -141,7 +145,7 @@ describeIfSceneDb('Diretor no jornal de 4 páginas (banco chroma_x_e2e)', () => 
       expect(prompt).toContain('above y = 372 px');
     });
 
-    it('Rodapé pedido na capa: o prompt limita a mudança à faixa da contracapa', async () => {
+    it('Faixa embaixo na capa (D-10): a região é a capa e o prompt a limita à direita da faixa da dobra', async () => {
       const { scene } = await h.tabloidScene({ outer: true });
       const { sent } = await chatWith(
         scene.id,
@@ -150,11 +154,84 @@ describeIfSceneDb('Diretor no jornal de 4 páginas (banco chroma_x_e2e)', () => 
         { face: 'outer' },
       );
       const plan = (await h.versionOf(sent.versionId)).metrics.plan as DirectorPlan;
+      expect(plan.image?.region).toEqual({ zone: 'body', side: 'right' });
+      const { prompt } = await runImage(scene.id, sent.versionId, 'edit');
+      expect(prompt).toContain('front cover (right half, x > 1754 px), below the header');
+    });
+
+    it('Rodapé da loja (sem lado ou na contracapa): o prompt limita a mudança à faixa da contracapa', async () => {
+      const { scene } = await h.tabloidScene({ outer: true });
+      const { sent } = await chatWith(
+        scene.id,
+        'coloca uma faixa no rodapé',
+        editPlan({ zone: 'footer', side: null }, 'Add a plain ribbon'),
+        { face: 'outer' },
+      );
+      const plan = (await h.versionOf(sent.versionId)).metrics.plan as DirectorPlan;
       expect(plan.image?.region).toEqual({ zone: 'footer', side: 'left' });
       const { prompt } = await runImage(scene.id, sent.versionId, 'edit');
       expect(prompt).toContain(
         'only inside the footer band of the back cover: x from 0 to 1574 px, y ≥ 2232 px',
       );
+    });
+
+    it('Anúncio que afirma algo sobre a dobra é trocado pelo fixo, e a edição leva a nota do sistema (D-9)', async () => {
+      const { scene } = await h.tabloidScene({ outer: true });
+      const { sent } = await chatWith(
+        scene.id,
+        'coloca uma faixa verde embaixo da capa',
+        directorPlan({
+          turn_kind: 'pedido_item',
+          will_change_image: true,
+          reply: 'Vou colocar uma faixa verde embaixo da capa, sem avançar sobre a dobra.',
+          image: directorImage({
+            change: 'Add a green strip',
+            region: { zone: 'body', side: 'right' },
+          }),
+        }),
+        { face: 'outer' },
+      );
+      const text = await assistantOf(sent.versionId);
+      expect(text).not.toContain('sem avançar');
+      expect(text).toContain(FIXED_ANNOUNCEMENT);
+      expect(text).toContain(TABLOID_FOLD_NOTE);
+    });
+
+    it('A faixa da dobra volta da master anterior depois da edição da Externa (D-9)', async () => {
+      const { scene, outer } = await h.tabloidScene({ outer: true });
+      const { sent } = await chatWith(
+        scene.id,
+        'coloca uma faixa verde embaixo da capa',
+        editPlan({ zone: 'body', side: 'right' }, 'Add a green strip'),
+        { face: 'outer' },
+      );
+      const painted = await sharp({
+        create: { width: 3328, height: 2480, channels: 3, background: '#ff00ff' },
+      })
+        .png()
+        .toBuffer();
+      const fake = h.fakeProvider(async () => ({ ...(await h.okResult(0.13)), buffer: painted }));
+      await h.processorWith(fake.provider).process(h.job(scene.id, sent.versionId));
+      const before = await h.dataSource.manager.findOneByOrFail(TemplateSceneAsset, {
+        id: outer?.masterAssetId as string,
+      });
+      const done = await h.versionOf(sent.versionId);
+      const after = await h.dataSource.manager.findOneByOrFail(TemplateSceneAsset, {
+        id: done.masterAssetId as string,
+      });
+      const pixelAt = async (url: string, x: number) =>
+        Array.from(
+          (
+            await sharp(await h.files.read(url))
+              .extract({ left: x, top: 1200, width: 1, height: 1 })
+              .removeAlpha()
+              .raw()
+              .toBuffer()
+          ).subarray(0, 3),
+        );
+      expect(await pixelAt(after.url, 1664)).toEqual(await pixelAt(before.url, 1664));
+      expect(await pixelAt(after.url, 1600)).toEqual(await pixelAt(before.url, 1600));
+      expect(await pixelAt(after.url, 2500)).toEqual([255, 0, 255]);
     });
 
     it('Cabeçalho pedido na Interna: executa no miolo e a frase diz que não há cabeçalho', async () => {
@@ -258,7 +335,7 @@ describeIfSceneDb('Diretor no jornal de 4 páginas (banco chroma_x_e2e)', () => 
       );
       expect(version).toMatchObject({ operation: 'generate', status: 'queued' });
       expect(version.zones).toBeNull();
-      expect(await assistantOf(sent.versionId)).toBe(HEADER_DEFAULT_ANNOUNCEMENT(6));
+      expect(await assistantOf(sent.versionId)).toBe(headerDefaultAnnouncement(6));
       const { fake, prompt } = await runImage(scene.id, sent.versionId, 'generate');
       expect(fake.generate).toHaveBeenCalledTimes(1);
       expect(prompt).toContain('y from 0 to 372 px');
@@ -341,7 +418,7 @@ describeIfSceneDb('Diretor no jornal de 4 páginas (banco chroma_x_e2e)', () => 
       expect(context.text).toContain('Jornal de 4 páginas, folha deitada dobrada no meio.');
       expect(context.text).toContain('Face deste pedido: Externa (com imagem)');
       expect(context.text).toContain(
-        'A capa não tem rodapé; a faixa do rodapé fica na contracapa.',
+        'A capa não tem rodapé da loja; a faixa do rodapé da loja fica na contracapa (zone footer, side left).',
       );
       expect(context.text).toContain('Altura atual do cabeçalho da capa: 6 cm (de 3 a 12 cm).');
       expect(context.text).toContain(

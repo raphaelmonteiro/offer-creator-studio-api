@@ -1,3 +1,4 @@
+import { restoreFold } from './scene-fold-restore';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import * as sharp from 'sharp';
 import { DirectorImage, DirectorPlan } from '../domain/scene-director-schema';
@@ -142,16 +143,20 @@ export class SceneRedrawHandler implements TurnHandler {
     });
     const model = this.support.model();
     const size = `${width}x${height}`;
-    const run = () =>
-      this.provider.edit({
-        model,
-        prompt,
-        size,
-        quality: this.support.editQuality(),
-        correlationId: ctx.correlationId,
-        image: master,
-        ...(marking ? { markup: marking.png } : {}),
-      });
+    const run = async () =>
+      restoreFold(
+        ctx,
+        master,
+        await this.provider.edit({
+          model,
+          prompt,
+          size,
+          quality: this.support.editQuality(),
+          correlationId: ctx.correlationId,
+          image: master,
+          ...(marking ? { markup: marking.png } : {}),
+        }),
+      );
     return { prompt, spec: { kind: 'edit', model, size, run } };
   }
 

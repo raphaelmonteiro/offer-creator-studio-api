@@ -50,7 +50,7 @@ export function tabloidFacesBlock(
   const key: TabloidFaceKey = isTabloidFace(face.key) ? face.key : 'outer';
   const lines = [
     `Jornal de 4 páginas, folha deitada dobrada no meio. Face deste pedido: ${FACE_LABEL[key]} (${face.hasImage ? 'com imagem' : 'vazia'}). Externa: metade esquerda = página 4 (contracapa, com a faixa do rodapé da loja embaixo), metade direita = página 1 (capa, com o cabeçalho no alto). Interna: páginas 2 e 3, uma arte contínua sem cabeçalho, sem rodapé e sem texto. Nada na faixa da dobra. Lado left = contracapa ou página 2; right = capa ou página 3.`,
-    'A capa não tem rodapé; a faixa do rodapé fica na contracapa.',
+    'A capa não tem rodapé da loja; a faixa do rodapé da loja fica na contracapa (zone footer, side left). Se o cliente pede uma faixa ou objeto embaixo NA CAPA, a região é a capa: zone body e side right (a mudança fica na capa, longe da dobra).',
     'Use turn_kind fazer_verso só quando o cliente pedir para fazer ou criar a parte de dentro (interna, páginas 2 e 3).',
   ];
   if (key === 'outer') {

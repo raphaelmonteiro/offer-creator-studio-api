@@ -14,7 +14,7 @@ import {
   headerSameReply,
   HEADER_ONLY_TABLOID_REPLY,
   NO_HEADER_ON_INNER_REPLY,
-  HEADER_DEFAULT_ANNOUNCEMENT,
+  headerDefaultAnnouncement,
   HEADER_MARKING_NOTE,
   NO_INSTRUCTION_REPLY,
 } from '../scene-texts';
@@ -83,7 +83,7 @@ function firstImageDecision(input: DecisionInput): TurnDecision {
     operation: 'generate',
     window: true,
     discardMarking: false,
-    announcement: HEADER_DEFAULT_ANNOUNCEMENT(cm),
+    announcement: headerDefaultAnnouncement(cm),
     isEdit: false,
     planPatch: {
       will_change_image: true,

@@ -56,6 +56,14 @@ export function replyIsForbidden(reply: string): boolean {
   return promisesPreservation(reply) || COMPLETION.test(fold(reply));
 }
 
+/**
+ * Jornal (D-9): o anúncio não afirma nada sobre a dobra nem sobre a posição ("sem avançar sobre a dobra"). Quem garante
+ * a faixa da dobra é o código (recolagem da master anterior); o aviso é a nota fixa `TABLOID_FOLD_NOTE`.
+ */
+const FOLD_CLAIM = /\b(?:dobra|dobras|vinco|vincos|lombada|centro da folha|meio da folha)\b/;
+
+export const claimsFold = (reply: string): boolean => FOLD_CLAIM.test(fold(reply));
+
 /** `reply` seguro para o cliente: o do Diretor, ou o texto fixo (anúncio ou resposta) se ele for barrado. */
 export function safeReply(plan: Pick<DirectorPlan, 'reply' | 'will_change_image'>): string {
   const reply = plan.reply.trim();

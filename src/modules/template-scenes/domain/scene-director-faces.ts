@@ -40,6 +40,11 @@ export function applyFaceZones(
   const cover = face?.layout === 'tabloid' && face.key === 'outer';
   const sideOf = <S extends string | null>(zone: string, side: S): S | 'left' =>
     cover && effectiveZone(zone, zones) === 'footer' ? 'left' : side;
+  // D-10: faixa embaixo na capa (rodapé com lado `right`) é pintada na capa: a região vira o miolo da capa.
+  const zoneOf = (zone: string, side: string | null): string =>
+    cover && effectiveZone(zone, zones) === 'footer' && side === 'right'
+      ? 'body'
+      : effectiveZone(zone, zones);
   const region = plan.image?.region;
   const image =
     plan.image && region
@@ -47,8 +52,11 @@ export function applyFaceZones(
           ...plan.image,
           region: {
             ...region,
-            zone: effectiveZone(region.zone, zones),
-            side: sideOf(region.zone, region.side),
+            zone: zoneOf(region.zone, region.side) as typeof region.zone,
+            side:
+              zoneOf(region.zone, region.side) === 'body'
+                ? region.side
+                : sideOf(region.zone, region.side),
           },
         }
       : plan.image;

@@ -5,6 +5,7 @@ import { buildInnerPrompt } from '../domain/scene-tabloid-prompts';
 import { SCENE_IMAGE_PROVIDER, SceneImageProvider } from '../providers/scene-image-provider';
 import { DERIVE_TEXTS } from '../scene-texts';
 import { SceneCallRunner } from './scene-call-runner';
+import { restoreFold } from './scene-fold-restore';
 import { normalize } from './scene-redraw-conclude';
 import { TurnHandler } from './scene-turn-handler';
 import { SceneTurnSupport } from './scene-turn-support';
@@ -50,15 +51,19 @@ export class SceneDeriveFaceHandler implements TurnHandler {
       kind: 'edit',
       model,
       size,
-      run: () =>
-        this.provider.edit({
-          model,
-          prompt,
-          size,
-          quality: this.support.editQuality(),
-          correlationId: ctx.correlationId,
-          image: master,
-        }),
+      run: async () =>
+        restoreFold(
+          ctx,
+          master,
+          await this.provider.edit({
+            model,
+            prompt,
+            size,
+            quality: this.support.editQuality(),
+            correlationId: ctx.correlationId,
+            image: master,
+          }),
+        ),
     });
     if (!result) return;
     await this.support.finishWithImage(ctx, await normalize(ctx, result), {

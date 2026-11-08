@@ -15,7 +15,12 @@ import { DirectorFace, isTwoFaces } from './scene-director-faces';
 import { decideHeaderSize } from './scene-director-header';
 import { isDerivedFace } from './scene-faces';
 import { SceneZones } from './scene.types';
-import { replyIsForbidden, safeReply } from './scene-director-phrases';
+import {
+  claimsFold,
+  FIXED_ANNOUNCEMENT,
+  replyIsForbidden,
+  safeReply,
+} from './scene-director-phrases';
 import { fold } from '../../../shared/text/fold';
 
 /**
@@ -188,7 +193,10 @@ function imageDecision(input: DecisionInput): TurnDecision {
     // A primeira imagem tem janela: é pedido sem marcação, e marcação não existe sem imagem.
     window: !hasImage || windowApplies(plan.turn_kind, marked),
     discardMarking: isNewImage && hasImage && marked,
-    announcement: safeReply({ reply: plan.reply, will_change_image: true }),
+    announcement:
+      input.face?.layout === 'tabloid' && claimsFold(plan.reply)
+        ? FIXED_ANNOUNCEMENT
+        : safeReply({ reply: plan.reply, will_change_image: true }),
     isEdit: hasImage && !isNewImage,
     ...patch,
   };
