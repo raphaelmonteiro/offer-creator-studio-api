@@ -1,7 +1,7 @@
 import { DataSource } from 'typeorm';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { insertReadyVersion, insertScene } from '../testing/scene-fixtures';
-import { textElement } from '../testing/scene-test-helpers';
+import { textElement, fakeQueue } from '../testing/scene-test-helpers';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
 import { SceneLockService } from './scene-lock.service';
 import { SceneReadService } from './scene-read.service';
@@ -22,6 +22,7 @@ describeIfSceneDb('Texto pintado nas versões do REST (banco chroma_x_e2e)', () 
       dataSource,
       new SceneLockService(dataSource),
       new SceneReadService(dataSource),
+      fakeQueue().service,
     );
   });
 

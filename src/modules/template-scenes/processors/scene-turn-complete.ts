@@ -1,4 +1,5 @@
 import { EntityManager } from 'typeorm';
+import { QueuePort } from '../../../shared/queue/animation-queue.service';
 import { Rect, SceneElement } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
@@ -8,7 +9,7 @@ import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage, turnMessageOf } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
 import { closeTurnBrief } from '../services/scene-turn-brief';
-import { cancelVersion, emitVersionEvent } from './scene-turn-finish';
+import { cancelVersion, emitVersionReady } from './scene-turn-finish';
 import { applyJudgeVerdict, JudgeBriefVerdict } from '../domain/scene-brief';
 
 export interface StoredFile {
@@ -77,9 +78,14 @@ export async function readyVersion(
   manager: EntityManager,
   scene: TemplateScene,
   version: TemplateSceneVersion,
-  completion: { target: CompleteTarget; image: CompleteImage; extra: CompleteExtra },
+  completion: {
+    target: CompleteTarget;
+    image: CompleteImage;
+    extra: CompleteExtra;
+    queue: Pick<QueuePort, 'publish'>;
+  },
 ): Promise<'ready' | 'cancelled'> {
-  const { target, image, extra } = completion;
+  const { target, image, extra, queue } = completion;
   if (scene.deletedAt || version.cancelRequestedAt) {
     await cancelVersion(manager, scene, version);
     return 'cancelled';
@@ -114,7 +120,7 @@ export async function readyVersion(
     status: 'done',
   });
   await bumpRevision(manager, scene);
-  await emitVersionEvent(manager, scene, version, 'version.ready');
+  await emitVersionReady(manager, queue, scene, version);
   return 'ready';
 }
 

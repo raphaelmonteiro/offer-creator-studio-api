@@ -12,7 +12,7 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { insertAsset, insertScene, insertVersion } from '../testing/scene-fixtures';
-import { errorOf, textElement } from '../testing/scene-test-helpers';
+import { errorOf, textElement, fakeQueue } from '../testing/scene-test-helpers';
 import { deleteTestScenes, describeIfSceneDb, openSceneTestDb } from '../testing/scene-test-db';
 import { SceneFilesService } from './scene-files.service';
 import { SceneLockService } from './scene-lock.service';
@@ -41,6 +41,7 @@ describeIfSceneDb('Retenção de assets e GC das cenas (banco chroma_x_e2e)', ()
       dataSource,
       new SceneLockService(dataSource),
       new SceneReadService(dataSource),
+      fakeQueue().service,
     );
     gc = new TemplateScenesGcRunner(dataSource, config);
   });

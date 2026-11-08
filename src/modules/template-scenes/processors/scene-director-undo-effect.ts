@@ -1,3 +1,4 @@
+import { QueuePort } from '../../../shared/queue/animation-queue.service';
 import { versionRestoredReply } from '../scene-texts';
 import { displayNumbersOf } from '../services/scene-display-number';
 import { bumpRevision } from '../services/scene-lock.service';
@@ -7,7 +8,7 @@ import { pruneSceneAssets } from '../services/scene-retention';
 import { closeTurnBrief } from '../services/scene-turn-brief';
 import { resolveUndo } from '../services/scene-undo';
 import { DirectorTarget, rejectTarget } from './scene-director-target';
-import { emitVersionEvent } from './scene-turn-finish';
+import { emitVersionReady } from './scene-turn-finish';
 
 /**
  * Desfazer sem chamar o modelo de imagem: a versão de leitura vira a restauração (sem segunda versão), sob o
@@ -16,6 +17,7 @@ import { emitVersionEvent } from './scene-turn-finish';
 export async function applyUndoEffect(
   target: DirectorTarget,
   undoTarget: 'previous' | number,
+  deps: { queue: Pick<QueuePort, 'publish'> },
 ): Promise<void> {
   const { manager, scene, version } = target;
   const resolution = await resolveUndo(manager, scene, undoTarget);
@@ -36,5 +38,5 @@ export async function applyUndoEffect(
     status: 'done',
   });
   await bumpRevision(manager, scene);
-  await emitVersionEvent(manager, scene, version, 'version.ready');
+  await emitVersionReady(manager, deps.queue, scene, version);
 }

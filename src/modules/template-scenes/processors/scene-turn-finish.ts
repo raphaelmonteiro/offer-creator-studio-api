@@ -3,12 +3,25 @@ import { SceneFailureCode } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { CANCELLED_REPLY, failureReply, NO_LAYER_CHANGED } from '../scene-texts';
-import { publishSceneEvent, SceneEventKind } from '../services/scene-events';
+import { QueuePort } from '../../../shared/queue/animation-queue.service';
+import { publishSceneEvent, publishVersionReady, SceneEventKind } from '../services/scene-events';
 import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
 import { closeTurnBrief } from '../services/scene-turn-brief';
 
 /** Fechamentos da versão (cancelada ou falha) sob o lock da cena: estado, chat, `revision` e evento. */
+
+function versionEventOf(scene: TemplateScene, version: TemplateSceneVersion) {
+  return {
+    sceneId: scene.id,
+    versionId: version.id,
+    step: version.step,
+    status: version.status,
+    cancelRequested: version.cancelRequestedAt !== null,
+    costUsd: version.providerCostUsd,
+    revision: scene.revision,
+  };
+}
 
 export function emitVersionEvent(
   manager: EntityManager,
@@ -16,16 +29,17 @@ export function emitVersionEvent(
   version: TemplateSceneVersion,
   kind: SceneEventKind,
 ): Promise<void> {
-  return publishSceneEvent(manager, {
-    sceneId: scene.id,
-    versionId: version.id,
-    kind,
-    step: version.step,
-    status: version.status,
-    cancelRequested: version.cancelRequestedAt !== null,
-    costUsd: version.providerCostUsd,
-    revision: scene.revision,
-  });
+  return publishSceneEvent(manager, { ...versionEventOf(scene, version), kind });
+}
+
+/** `version.ready` mais o job de sincronização do template, na mesma transação (PV-11). */
+export function emitVersionReady(
+  manager: EntityManager,
+  queue: Pick<QueuePort, 'publish'>,
+  scene: TemplateScene,
+  version: TemplateSceneVersion,
+): Promise<void> {
+  return publishVersionReady(manager, queue, versionEventOf(scene, version));
 }
 
 /** O plano que chamava imagem trazia camadas: diz que nenhuma foi alterada, porque a imagem não saiu. */

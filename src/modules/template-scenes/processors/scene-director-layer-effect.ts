@@ -1,3 +1,4 @@
+import { QueuePort } from '../../../shared/queue/animation-queue.service';
 import { layerOpsToActions } from '../domain/scene-director-layers';
 import { DirectorLayerOp } from '../domain/scene-director-schema';
 import { sceneZonesFor } from '../domain/scene-formats';
@@ -17,7 +18,7 @@ import { DirectorTarget, rejectTarget } from './scene-director-target';
 import { applyLayerActions } from './scene-layer-actions';
 import { colorNewTexts } from './scene-layer-color';
 import { loadAttachments } from './scene-turn-context';
-import { emitVersionEvent } from './scene-turn-finish';
+import { emitVersionReady } from './scene-turn-finish';
 
 /** A camada que o primeiro pedido mirava, para dizer "já está lá" quando nada mudou. */
 function targetOfFirst(actions: LayerAction[], elements: SceneElement[]): SceneElement | null {
@@ -60,7 +61,11 @@ async function saveLayerVersion(
 }
 
 /** A versão de camada vira a atual, e o chat diz o que mudou (sob o lock da cena). */
-async function finishLayerTurn(target: DirectorTarget, content: string): Promise<void> {
+async function finishLayerTurn(
+  target: DirectorTarget,
+  content: string,
+  queue: Pick<QueuePort, 'publish'>,
+): Promise<void> {
   const { manager, scene, version } = target;
   scene.currentVersionId = version.id;
   await pruneSceneAssets(manager, scene);
@@ -72,7 +77,7 @@ async function finishLayerTurn(target: DirectorTarget, content: string): Promise
     status: 'done',
   });
   await bumpRevision(manager, scene);
-  await emitVersionEvent(manager, scene, version, 'version.ready');
+  await emitVersionReady(manager, queue, scene, version);
 }
 
 /**
@@ -84,7 +89,7 @@ async function finishLayerTurn(target: DirectorTarget, content: string): Promise
 export async function applyLayersEffect(
   target: DirectorTarget,
   ops: DirectorLayerOp[],
-  deps: { files: SceneFilesService },
+  deps: { files: SceneFilesService; queue: Pick<QueuePort, 'publish'> },
 ): Promise<void> {
   const { manager, scene, version } = target;
   const current = await manager.findOneByOrFail(TemplateSceneVersion, {
@@ -124,5 +129,5 @@ export async function applyLayersEffect(
     return rejectTarget(target, noLayerChangeText(where, zones));
   }
   await saveLayerVersion(target, current, { elements, changed: result.changed });
-  await finishLayerTurn(target, diff.text as string);
+  await finishLayerTurn(target, diff.text as string, deps.queue);
 }

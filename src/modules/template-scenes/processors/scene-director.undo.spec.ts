@@ -160,6 +160,7 @@ describeIfSceneDb('Desfazer sem chamar o modelo de imagem (banco chroma_x_e2e)',
       h.dataSource,
       new SceneLockService(h.dataSource),
       new SceneReadService(h.dataSource),
+      h.queue as never,
     );
     await expect(versions.restore(scene.id, v1.id, null)).rejects.toMatchObject({
       response: { code: 'SCENE_BUSY' },

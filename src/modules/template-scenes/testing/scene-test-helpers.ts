@@ -1,4 +1,5 @@
 import { HttpException } from '@nestjs/common';
+import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { SceneElementDto } from '../dto/patch-elements.dto';
 
 /** Status HTTP e `code` do erro lançado pela promessa (falha o teste se ela resolver). */
@@ -38,4 +39,13 @@ export function textElement(id: string, overrides: Partial<SceneElementDto> = {}
     text: 'Páscoa',
     ...overrides,
   });
+}
+
+/** Fila falsa: `publish` registra as chamadas (nome da fila, dados e opções) e devolve um id de job. */
+export function fakeQueue() {
+  const publish = jest.fn<
+    Promise<string | null>,
+    [string, Record<string, unknown>, Record<string, unknown>?]
+  >(async () => 'job-fake');
+  return { publish, service: { publish } as unknown as AnimationQueueService };
 }

@@ -249,10 +249,10 @@ export class SceneDirectorState {
         );
         return;
       case 'undo':
-        await applyUndoEffect(target, decision.target);
+        await applyUndoEffect(target, decision.target, { queue: this.queue });
         return;
       case 'layers':
-        await applyLayersEffect(target, decision.ops, { files: this.files });
+        await applyLayersEffect(target, decision.ops, { files: this.files, queue: this.queue });
         return;
       case 'refuse':
         // Já tratada antes da lista (a recusa não abre pedidos), mas o tipo exige o ramo.

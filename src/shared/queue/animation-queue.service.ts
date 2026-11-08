@@ -33,6 +33,8 @@ export const QUEUES = {
   TEMPLATE_SCENE_TURN: 'template_scene.turn',
   /** Cena de template (change add-template-scene-conversation): a leitura da mensagem pelo Diretor, com concorrência própria. */
   TEMPLATE_SCENE_DIRECTOR: 'template_scene.director',
+  /** Cena de template (change add-template-scene-approve): mantém o registro de `templates` da cena (a projeção). */
+  TEMPLATE_SCENE_TEMPLATE_SYNC: 'template_scene.template_sync',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
