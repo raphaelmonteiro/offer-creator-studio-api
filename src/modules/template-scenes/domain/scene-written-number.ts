@@ -1,105 +1,111 @@
 import { fold } from '../../../shared/text/fold';
-import { FUNCTION_WORDS } from './scene-words';
 
 /**
- * Detector único de ano, data e número escrito (D-42, validação 7). Nenhum prompt de imagem pede número: o ano
- * citado pelo cliente é contexto, e o número escrito só vale como camada de texto exata.
+ * Detector único de ano, data e número escrito (D-42, validação 7), sobre os blocos em inglês e os pedidos em pt-BR.
+ * Nenhum bloco de contexto pede número: o ano citado pelo cliente é contexto, e o número que ele quer ver escrito
+ * vai só em `image.exact_text` (que não passa por aqui).
  *
- * Conta: ano (`19xx`, `20xx`), data (`12/04`, `12 de abril`), "número" seguido de dígito e "indicação do ano" ou
- * "da data". Não conta: quantidade ("3 coelhos"), tema ("ano novo") e, quando `removal` vale, a cláusula que
- * pede para tirar ("tira o 2027"). Limite conhecido: "2000 ovos" é lido como ano.
+ * Conta: ano (`19xx`, `20xx`), data (`12/04`, `12 de abril`, `April 12`, `12th of April`), "número" ou `number`
+ * seguido de dígito e "indicação do ano", "da data", `the year`, `the date`. Não conta: quantidade ("3 coelhos"),
+ * tema ("ano novo"), porcentagem, decimal e medida; fração simples (`1/3` seguida de `da`, `de`, `of` ou precedida de
+ * `a`, `em`, `com`, `to`, `in`, `by`, R54); e, quando `removal` vale, o número que é objeto de remoção ou de troca
+ * (R54, R55): depois de verbo de tirar ou trocar, antes de `por`, `with` ou `by`, inclusive no trecho herdado depois
+ * de " e " ou " and ". Limite conhecido: "2000 ovos" é lido como ano.
  */
 
-const MONTHS =
+const MONTHS_PT =
   'janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro';
+const MONTHS_EN =
+  'january|february|march|april|may|june|july|august|september|october|november|december';
+const DAY = '(?:0?[1-9]|[12]\\d|3[01])';
+
 const NUMBER_PATTERNS: readonly RegExp[] = [
   /\b(?:19|20)\d{2}\b/,
-  /\b(?:0?[1-9]|[12]\d|3[01])\s*\/\s*(?:0?[1-9]|1[0-2])(?:\s*\/\s*\d{2,4})?\b/,
-  new RegExp(`\\b(?:0?[1-9]|[12]\\d|3[01])\\s+de\\s+(?:${MONTHS})\\b`),
+  new RegExp(`\\b${DAY}\\s*\\/\\s*(?:0?[1-9]|1[0-2])(?:\\s*\\/\\s*\\d{2,4})?\\b`),
+  new RegExp(`\\b${DAY}\\s+de\\s+(?:${MONTHS_PT})\\b`),
+  new RegExp(`\\b(?:${MONTHS_EN})\\s+${DAY}(?:st|nd|rd|th)?\\b`),
+  new RegExp(`\\b${DAY}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:${MONTHS_EN})\\b`),
   /\bnumeros?\s*(?:de\s+)?\d/,
+  /\bnumbers?\s*(?:of\s+)?\d/,
   /\bindicacao\s+(?:do\s+ano|da\s+data|de\s+ano|de\s+data)\b/,
+  /\bthe\s+(?:year|date)\b/,
 ];
-const REMOVAL =
-  /\b(?:tir(?:a|ar|e|em|ei)|retir(?:a|ar|e|em)|remov(?:a|e|er|em)|apag(?:a|ar|ue|uem)|elimin(?:a|ar|e|em))\b/;
 
-/** Palavras que, sozinhas com o número, mostram que o cliente pediu o número ("2027 em cima"). */
-const POSITION_AND_FILLER = new Set([
-  'ano',
-  'data',
-  'numero',
-  'numeros',
-  'indicacao',
-  'cima',
-  'baixo',
-  'embaixo',
-  'acima',
-  'abaixo',
-  'topo',
-  'canto',
-  'centro',
-  'meio',
-  'direita',
-  'esquerda',
-  'lado',
-  'parte',
-  'superior',
-  'inferior',
-  'rodape',
-  'cabecalho',
-  'coloca',
-  'colocar',
-  'poe',
-  'por',
-]);
+/** Fração simples (R54): "ocupar 1/3 da imagem", "reduzir a 1/2", "to 1/4": não é data. */
+const FRACTION =
+  /\b(?:a|em|com|to|in|by)\s+(?:1\/[2-4]|2\/3|3\/4)\b|\b(?:1\/[2-4]|2\/3|3\/4)\s+(?:da|do|de|of)\b/g;
+
+const REMOVAL =
+  /\b(?:tir(?:a|ar|e|em|ei)|retir(?:a|ar|e|em)|remov(?:a|e|er|em)|apag(?:a|ar|ue|uem)|elimin(?:a|ar|e|em)|remove|removing|erase|delete|take out)\b/;
+const TRADE = /\b(?:troc(?:a|ar|e|em)|substitu(?:i|a|ir|em)|replace|swap)\b/;
+/** Verbo de pôr: o " e coloca 2027" depois de uma remoção é escrita nova, não objeto de remoção. */
+const ADD_VERB =
+  /\b(?:coloc\w*|adicion\w*|escrev\w*|pint(?:a|ar|e)|insir\w*|inser\w*|poe|pon\w*|desenh\w*|add|put|write|paint|insert|place|draw)\b/;
+const TRADE_SPLIT = /\b(?:por|with|by)\b/;
 
 export interface WrittenNumberOptions {
-  /** A cláusula que pede para tirar o número não conta (`what_to_change`, `requests`, itens em aberto). */
+  /** O número que é objeto de remoção ou de troca não conta (`change`, `requests`, itens em aberto). */
   removal?: boolean;
 }
 
-/** Cláusulas separadas por vírgula, ponto e vírgula, " e " ou ponto seguido de espaço; a vírgula entre dígitos ("9,90") não separa. */
-export const CLAUSE_SEPARATOR = /(\s*(?:(?<!\d),|,(?!\d)|;)\s*|\s+e\s+|\.\s+)/;
+/**
+ * Cláusulas separadas por vírgula, ponto e vírgula, " e ", " and " ou ponto seguido de espaço; a vírgula entre
+ * dígitos ("9,90") não separa.
+ */
+export const CLAUSE_SEPARATOR = /(\s*(?:(?<!\d),|,(?!\d)|;)\s*|\s+(?:e|and)\s+|\.\s+)/;
 
-const hasNumber = (clause: string, options: WrittenNumberOptions): boolean => {
-  const folded = fold(clause);
-  if (options.removal && REMOVAL.test(folded)) return false;
-  return NUMBER_PATTERNS.some((pattern) => pattern.test(folded));
-};
+/** O separador que passa o contexto de remoção à cláusula seguinte (R55). */
+const INHERITS = /^\s+(?:e|and)\s+$/;
+
+const hasPattern = (folded: string): boolean => NUMBER_PATTERNS.some((p) => p.test(folded));
+
+interface Clause {
+  text: string;
+  /** A cláusula traz número que conta. */
+  counts: boolean;
+  /** A cláusula é remoção ou troca, ou herdou isso: a seguinte, depois de " e ", também é. */
+  removal: boolean;
+}
+
+function judge(clause: string, options: WrittenNumberOptions, inherited: boolean): Clause {
+  const folded = fold(clause).replace(FRACTION, ' ');
+  if (!options.removal) return { text: clause, counts: hasPattern(folded), removal: false };
+  if (REMOVAL.test(folded) || (inherited && !ADD_VERB.test(folded)))
+    return { text: clause, counts: false, removal: true };
+  const trade = TRADE.exec(folded);
+  if (trade) {
+    // Troca: o número antes de "por"/"with"/"by" sai, o que vem depois é escrito.
+    const after = folded.slice(trade.index).split(TRADE_SPLIT).slice(1).join(' ');
+    return { text: clause, counts: hasPattern(after), removal: true };
+  }
+  return { text: clause, counts: hasPattern(folded), removal: false };
+}
+
+/** Cláusulas com os separadores entre elas; cada uma sabe se conta e se carrega contexto de remoção. */
+function scan(text: string, options: WrittenNumberOptions) {
+  const parts = text.split(CLAUSE_SEPARATOR);
+  const clauses: Clause[] = [];
+  for (let index = 0; index < parts.length; index += 2) {
+    const inherited =
+      index > 0 && INHERITS.test(parts[index - 1]) && clauses[clauses.length - 1].removal;
+    clauses.push(judge(parts[index], options, inherited));
+  }
+  return { parts, clauses };
+}
 
 /** O texto traz ano, data ou número escrito? */
 export function hasWrittenNumber(text: string, options: WrittenNumberOptions = {}): boolean {
-  return text
-    .split(CLAUSE_SEPARATOR)
-    .some((part, index) => index % 2 === 0 && hasNumber(part, options));
+  return scan(text, options).clauses.some((clause) => clause.counts);
 }
 
-/** Tira só o trecho que traz o número, até a vírgula, o ponto e vírgula ou o " e " mais próximo. */
+/** Tira só o trecho que traz o número, até a vírgula, o ponto e vírgula, o " e " ou o " and " mais próximo. */
 export function stripNumberClauses(text: string, options: WrittenNumberOptions = {}): string {
-  const parts = text.split(CLAUSE_SEPARATOR);
+  const { parts, clauses } = scan(text, options);
   let out = '';
-  for (let index = 0; index < parts.length; index += 2) {
-    if (hasNumber(parts[index], options)) continue;
-    if (out) out += parts[index - 1] ?? ', ';
-    out += parts[index];
-  }
+  clauses.forEach((clause, i) => {
+    if (clause.counts) return;
+    if (out) out += parts[i * 2 - 1] ?? ', ';
+    out += clause.text;
+  });
   return out.trim();
-}
-
-/** Deslocamento: porcentagem, decimal ou dígito seguido de direção ("20% para a direita", "1,50 acima"; R42). */
-const DISPLACEMENT =
-  /%|\d[.,]\d|\d+\s+(?:para\s+|pra\s+)?(?:cima|baixo|acima|abaixo|(?:a\s+)?(?:direita|esquerda))\b/;
-
-/** Só sobra o número, posição e palavras de ligação ("2027 em cima"): o cliente pediu o número. */
-export function onlyNumberLeft(text: string): boolean {
-  const written = hasWrittenNumber(text);
-  // Dígitos soltos contam ('99 no canto'), mesmo sem ser ano nem data (R34); '3 coelhos' tem palavra sobrando.
-  if (!written && !/\d/.test(text)) return false;
-  // O número que desloca algo não é o número pedido (R42); ano e data valem em qualquer posição.
-  if (!written && DISPLACEMENT.test(fold(text))) return false;
-  const words = fold(text)
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-    .filter((word) => !/\d/.test(word) && !MONTHS.split('|').includes(word))
-    .filter((word) => !FUNCTION_WORDS.has(word) && !POSITION_AND_FILLER.has(word));
-  return words.length === 0;
 }

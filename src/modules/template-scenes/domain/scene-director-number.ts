@@ -1,3 +1,4 @@
+import { fold } from '../../../shared/text/fold';
 import { DirectorPlan } from './scene-director-schema';
 import { hasWrittenNumber, stripNumberClauses } from './scene-written-number';
 
@@ -43,9 +44,11 @@ const removalOf = (field: NumberField): { removal: boolean } => ({ removal: fiel
 /** Passo 1: item de `preserve` e de `requests` com número sai do plano, sem refazer. */
 function withoutNumberItems(plan: DirectorPlan, painted: string[]): DirectorPlan {
   if (!plan.image) return plan;
-  const known = painted.join(' \n ');
+  // O item que cita texto já pintado e conferido fica: o número dele é o que deve continuar na imagem.
+  const keepsPainted = (item: string): boolean =>
+    painted.some((line) => fold(item).includes(fold(line)));
   const preserve = plan.image.preserve.filter(
-    (item) => !hasWrittenNumber(item) || known.includes(item),
+    (item) => !hasWrittenNumber(item) || keepsPainted(item),
   );
   const requests = plan.requests.filter(
     (request) => request.action !== 'open' || !hasWrittenNumber(request.text, { removal: true }),
