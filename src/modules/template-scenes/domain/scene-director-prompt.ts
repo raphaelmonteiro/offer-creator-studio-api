@@ -27,6 +27,18 @@ const KINDS = [
 const BACK_KIND =
   'fazer_verso: pede para fazer ou criar o verso da folha ("faz o verso", "agora o verso"). Não é pedido de imagem: o código faz o verso a partir da frente atual';
 
+/** Só no jornal (PV-T8): `fazer_verso` vale como "fazer a interna". */
+const INNER_KIND =
+  'fazer_verso: pede para fazer ou criar a parte de dentro (interna, páginas 2 e 3). Não é pedido de imagem: o código faz a interna a partir da externa atual';
+
+/** Só no jornal (D-1): a altura do cabeçalho da capa. */
+const HEADER_SIZE_KIND =
+  'tamanho_cabecalho: pede o cabeçalho da capa maior, menor ou com um tamanho ("cabeçalho maior", "com 10 cm"). Não é pedido de imagem: o código muda a altura do cabeçalho; ponha os cm ditos em header_size.cm';
+
+/** Só no jornal (D-1). */
+const HEADER_SIZE_FIELD =
+  'header_size: {cm, direction}. Em tamanho_cabecalho, cm é o número dito pelo cliente (ou null) e direction é "maior" ou "menor" quando ele não diz o número. Na primeira imagem ou na imagem nova, preencha só se o cliente já disser o tamanho do cabeçalho ("com cabeçalho de 10 cm"). Senão, null.';
+
 const IMAGE_FIELDS = [
   `image.composition: até ${DIRECTOR_LIMITS.composition} caracteres, em inglês: a composição atual ou desejada da página, numa frase.`,
   `image.style: até ${DIRECTOR_LIMITS.style} caracteres, em inglês: estilo, paleta e acabamento, lidos da imagem atual ou pedidos.`,
@@ -71,16 +83,25 @@ const RULES = [
 
 const list = (items: readonly string[]): string => items.map((item) => `- ${item}`).join('\n');
 
+/** As classes de turn_kind que a cena lista: as de sempre, e as do layout (PV-14, PV-T8, D-1). */
+function kindsOf(layout: SceneLayout): readonly string[] {
+  if (layout === 'front_back') return [...KINDS, BACK_KIND];
+  if (layout === 'tabloid') return [...KINDS, INNER_KIND, HEADER_SIZE_KIND];
+  return KINDS;
+}
+
 /**
  * As instruções do Diretor. Na cena de uma face (`single`) o texto é o de sempre; na de frente e verso entra a classe
- * `fazer_verso` (PV-14). O bloco de faces do contexto (`scene-director-blocks`) diz qual é a face do pedido.
+ * `fazer_verso` (PV-14); no jornal entram `fazer_verso` como "fazer a interna" e `tamanho_cabecalho` com o campo
+ * `header_size`. O bloco de faces do contexto (`scene-director-blocks`) diz qual é a face do pedido.
  */
 export function directorInstructions(layout: SceneLayout = 'single'): string {
-  const kinds = layout === 'front_back' ? [...KINDS, BACK_KIND] : [...KINDS];
+  const kinds = kindsOf(layout);
+  const fields = layout === 'tabloid' ? [...FIELDS, HEADER_SIZE_FIELD] : [...FIELDS];
   return [
     'Você é o diretor de arte de um chat que edita imagens de fundo de encartes. A cada turno você recebe o histórico da conversa, a lista do que o cliente pediu, as versões, o formato e as zonas da página, os textos já pintados na versão atual, a imagem atual, a geometria da marcação do cliente (se houver) e a lista de camadas (se houver). Você não edita nada: devolve só um plano curto no schema, com os blocos do prompt da imagem.',
-    `Classes de turn_kind (${BASE_TURN_KINDS.length + (layout === 'front_back' ? 1 : 0)}):\n${list(kinds)}`,
-    `Campos:\n${list(FIELDS)}`,
+    `Classes de turn_kind (${BASE_TURN_KINDS.length + kinds.length - KINDS.length}):\n${list(kinds)}`,
+    `Campos:\n${list(fields)}`,
     `Regras:\n${list(RULES)}`,
   ].join('\n\n');
 }

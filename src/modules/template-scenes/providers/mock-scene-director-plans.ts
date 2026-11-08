@@ -263,3 +263,48 @@ export function backPlan(message: string): DirectorPlan {
     requests: extra ? [openRequest(extra)] : [],
   };
 }
+
+/** O pedido de fazer a interna do jornal ("faz a interna", "agora faz as páginas de dentro"). */
+export const INNER_ASK =
+  /\b(?:faz|fazer|faca|cria|criar|gera|gerar)\w* (?:a |as |uma )?(?:interna|parte de dentro|paginas de dentro)\b/;
+
+/** Plano de `fazer_verso` no jornal: sem imagem (o código deriva a interna da externa atual). */
+export function innerPlan(message: string): DirectorPlan {
+  const extra = /\binterna\s+com\s+(.+)$/i.exec(message)?.[1]?.trim();
+  return {
+    ...EMPTY,
+    turn_kind: 'fazer_verso',
+    reply: 'Vou fazer a interna a partir da externa.',
+    requests: extra ? [openRequest(extra)] : [],
+  };
+}
+
+/** O tamanho do cabeçalho dito na mensagem: os cm ("10 cm"), ou a direção ("maior", "menor"). */
+function headerSizeOf(folded: string): NonNullable<DirectorPlan['header_size']> | null {
+  const cm = /(\d+(?:[.,]\d+)?)\s*cm\b/.exec(folded)?.[1];
+  const direction = has(folded, /\bmaior\b/) ? 'maior' : has(folded, /\bmenor\b/) ? 'menor' : null;
+  if (!cm && !direction) return null;
+  return { cm: cm ? Number(cm.replace(',', '.')) : null, direction: cm ? null : direction };
+}
+
+/**
+ * Pedido do cabeçalho da capa no jornal: com imagem é `tamanho_cabecalho` (o código muda a altura); sem imagem é a
+ * primeira imagem com o tamanho junto (valem antes do prompt).
+ */
+export function headerPlan(
+  script: DirectorScript,
+  folded: string,
+  message: string,
+): DirectorPlan | null {
+  const size = has(folded, /\bcabecalho\b/) ? headerSizeOf(folded) : null;
+  if (!size) return null;
+  if (script.hasImage) {
+    return {
+      ...EMPTY,
+      turn_kind: 'tamanho_cabecalho',
+      reply: 'Vou mudar o cabeçalho da capa.',
+      header_size: size,
+    };
+  }
+  return { ...imagePlan(script, folded, message), header_size: size };
+}

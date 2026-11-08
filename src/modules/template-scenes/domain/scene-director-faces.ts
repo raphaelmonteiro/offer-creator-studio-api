@@ -1,5 +1,5 @@
 import { DirectorPlan } from './scene-director-schema';
-import { effectiveZone, FaceKey, SceneLayout } from './scene-faces';
+import { effectiveZone, FaceKey, hasTwoFaces, SceneLayout } from './scene-faces';
 import { SceneZones } from './scene.types';
 
 /**
@@ -14,42 +14,68 @@ export interface DirectorFace {
   zones: SceneZones;
   /** A face do pedido tem imagem (versão atual `ready` com master). */
   hasImage: boolean;
-  /** A frente tem imagem: sem ela não há de onde derivar o verso. */
+  /** A primeira face (frente, Externa) tem imagem: sem ela não há de onde derivar a segunda. */
   frontReady: boolean;
-  /** O verso tem versão `ready`. */
+  /** A segunda face (verso, Interna) tem versão `ready`. */
   backReady: boolean;
+  /** Formato e altura nativa da face: o jornal escreve o fim do cabeçalho em px (D-1). */
+  formatId?: string;
+  heightPx?: number;
 }
 
-/** A face única de uma cena de uma face: o comportamento de sempre. */
-export const isFrontBack = (face: Pick<DirectorFace, 'layout'> | undefined): boolean =>
-  face?.layout === 'front_back';
+/** A cena tem duas faces (frente e verso, ou Externa e Interna)? A face única é o comportamento de sempre. */
+export const isTwoFaces = (face: Pick<DirectorFace, 'layout'> | undefined): boolean =>
+  Boolean(face) && hasTwoFaces((face as Pick<DirectorFace, 'layout'>).layout);
 
 /**
  * PV-9: zona que a face não tem (rodapé na frente, cabeçalho no verso) vira miolo, mantendo o lado, na região da
- * imagem e na posição das camadas do plano. O plano gravado em `metrics.plan` já é o convertido.
+ * imagem e na posição das camadas do plano. O plano gravado em `metrics.plan` já é o convertido. PV-T3: na Externa do
+ * jornal, o rodapé é só da contracapa, então o rodapé pedido no lado da capa vai para o lado `left`.
  */
-export function applyFaceZones(plan: DirectorPlan, zones: SceneZones): DirectorPlan {
+export function applyFaceZones(
+  plan: DirectorPlan,
+  zones: SceneZones,
+  face?: Pick<DirectorFace, 'layout' | 'key'>,
+): DirectorPlan {
+  const cover = face?.layout === 'tabloid' && face.key === 'outer';
+  const sideOf = <S extends string | null>(zone: string, side: S): S | 'left' =>
+    cover && effectiveZone(zone, zones) === 'footer' ? 'left' : side;
   const region = plan.image?.region;
   const image =
     plan.image && region
-      ? { ...plan.image, region: { ...region, zone: effectiveZone(region.zone, zones) } }
+      ? {
+          ...plan.image,
+          region: {
+            ...region,
+            zone: effectiveZone(region.zone, zones),
+            side: sideOf(region.zone, region.side),
+          },
+        }
       : plan.image;
   const layer_ops = plan.layer_ops.map((op) =>
     op.position
-      ? { ...op, position: { ...op.position, zone: effectiveZone(op.position.zone, zones) } }
+      ? {
+          ...op,
+          position: {
+            ...op.position,
+            zone: effectiveZone(op.position.zone, zones),
+            side: sideOf(op.position.zone, op.position.side),
+          },
+        }
       : op,
   );
   return { ...plan, image, layer_ops };
 }
 
 /**
- * A face dos itens que o plano abre no brief (PV-8): só na cena de frente e verso. `fazer_verso` abre o pedido extra
+ * A face dos itens que o plano abre no brief (PV-8): só na cena de duas faces. `fazer_verso` abre o pedido extra
  * ("com bandeirinhas") no verso; os demais turnos, na face do pedido. Cena de uma face não grava `faceKey`.
  */
 export function briefFaceKey(
   plan: Pick<DirectorPlan, 'turn_kind'>,
   face: DirectorFace | undefined,
 ): FaceKey | undefined {
-  if (!face || !isFrontBack(face)) return undefined;
-  return plan.turn_kind === 'fazer_verso' ? 'back' : face.key;
+  if (!face || !isTwoFaces(face)) return undefined;
+  if (plan.turn_kind !== 'fazer_verso') return face.key;
+  return face.layout === 'tabloid' ? 'inner' : 'back';
 }

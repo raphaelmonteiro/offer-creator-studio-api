@@ -5,6 +5,7 @@ import { maskBounds } from '../domain/scene-mask-shape';
 import { PaintedLine, readPaintedLines } from '../domain/scene-painted-text';
 import { MaskShape, Rect, SceneElement, SceneZones } from '../domain/scene.types';
 import { zoneBands } from '../domain/scene-zone-bands';
+import { tabloidFormatBlock } from '../domain/scene-director-tabloid';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
@@ -68,7 +69,17 @@ const FACE_NAME: Record<FaceKey, string> = {
   single: 'da cena',
   front: 'da Frente',
   back: 'do Verso',
+  outer: 'da Externa',
+  inner: 'da Interna',
 };
+
+/** Rótulo da face na conversa e na lista de pedidos; item sem `faceKey` é da primeira face. */
+const FACE_LABEL: Partial<Record<FaceKey, string>> = {
+  back: 'Verso',
+  outer: 'Externa',
+  inner: 'Interna',
+};
+export const faceLabelOf = (key?: FaceKey): string => (key && FACE_LABEL[key]) || 'Frente';
 
 /** Resumo das versões: número exibido, operação e data, para "é a versão 7?" e "volta para a 3". */
 export function versionsBlock(
@@ -97,6 +108,7 @@ export function formatBlock(
   const size = `${scene.widthPx} x ${scene.heightPx} px`;
   if (!format) return `Formato: ${scene.formatId}, ${size}.`;
   const faceZones = zones ?? computeSceneZones(format);
+  if (faceZones.fold) return tabloidFormatBlock(scene, format, faceZones);
   const bands = zoneBands(faceZones, scene.heightPx);
   // A zona que a face não tem não é escrita: o Diretor não a escolhe (PV-9).
   const parts = [
@@ -131,8 +143,7 @@ export function paintedBlock(lines: PaintedLine[]): string {
 
 export function briefBlock(brief: BriefItem[], labelFaces = false): string {
   // Na cena de frente e verso cada item leva a face dele (PV-8); sem `faceKey`, a frente.
-  const tag = (item: BriefItem): string =>
-    labelFaces ? `[${item.faceKey === 'back' ? 'Verso' : 'Frente'}] ` : '';
+  const tag = (item: BriefItem): string => (labelFaces ? `[${faceLabelOf(item.faceKey)}] ` : '');
   const open = brief.filter((item) => item.status === 'open');
   // Item superado (D-59) já ficou para trás: não é contexto nem pendência.
   const closed = brief

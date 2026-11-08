@@ -3,8 +3,9 @@ import { DirectorPlan } from '../domain/scene-director-schema';
 import { nextPaintedLines } from '../domain/scene-painted-text';
 import { hasTextError, TextLine, wrongLines } from '../domain/scene-text-check';
 import { SceneGenerateResult } from '../providers/scene-image-provider';
-import { afterImageReply } from '../scene-texts';
+import { afterImageReply, headerReadyReply, LOGO_FITTED_NOTE } from '../scene-texts';
 import { FailedRetry, ImageCallSpec } from './scene-call-runner';
+import { fitLogosToHeader } from './scene-header-logo';
 import { planLayers } from './scene-plan-layers';
 import {
   effectiveSatisfied,
@@ -187,9 +188,15 @@ async function finishConcluded(
     textAsked: expected.length > 0,
     redo: unconferredRedo(applied),
   });
+  // Jornal (D-1, PV-T11): a edição do cabeçalho diz a altura nova, e a logo que sai do cabeçalho encolhe junto.
+  const fitted = fitLogosToHeader(layers?.elements ?? ctx.parent?.elements ?? [], ctx);
+  const elements = fitted ?? layers?.elements;
+  const notes = [ctx.headerResize ? headerReadyReply(ctx.headerResize.toCm) : '', reply]
+    .concat(layers ? [layers.note] : [], fitted ? [LOGO_FITTED_NOTE] : [])
+    .filter(Boolean);
   await deps.support.finishWithImage(ctx, applied.png, {
-    reply: layers ? `${reply} ${layers.note}` : reply,
-    ...(layers ? { elements: layers.elements } : {}),
+    reply: notes.join(' '),
+    ...(elements ? { elements } : {}),
     judge: judged.verdict,
     metrics: {
       prompt: applied.prompt,

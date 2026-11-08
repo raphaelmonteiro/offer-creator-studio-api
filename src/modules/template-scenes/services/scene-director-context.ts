@@ -10,6 +10,7 @@ import { DirectorScript } from '../providers/scene-director-client';
 import {
   boxText,
   facesBlock,
+  faceLabelOf,
   formatBlock,
   HistoryEntry,
   historyBlock,
@@ -23,6 +24,9 @@ import {
   versionsBlock,
 } from './scene-director-blocks';
 import { DisplayedVersion, loadDisplayedVersions } from './scene-display-number';
+import { faceKeyOf, hasTwoFaces, SceneLayout } from '../domain/scene-faces';
+import { tabloidFacesBlock } from '../domain/scene-director-tabloid';
+import { findSceneFormat } from '../domain/scene-formats';
 import { currentVersionOf, faceHasImage, loadFaces } from './scene-faces';
 import { SceneFilesService } from './scene-files.service';
 import { readVersionMaster } from './scene-master';
@@ -73,7 +77,7 @@ export class SceneDirectorContextService {
     const manager = this.dataSource.manager;
     const faces = await loadFaces(manager, scene.id);
     const face = faces.find((item) => item.index === version.faceIndex) ?? faces[0];
-    const frontBack = scene.layout === 'front_back';
+    const frontBack = hasTwoFaces(scene.layout);
     const [current, messages, allVersions, currentMessage, clientMessages] = await Promise.all([
       currentVersionOf(manager, face),
       this.recentMessages(manager, scene.id, version.id),
@@ -89,7 +93,7 @@ export class SceneDirectorContextService {
     const history = await this.history(
       manager,
       { messages, versions: allVersions, aspect },
-      frontBack,
+      scene.layout,
     );
     const faceState = await this.faceState(manager, scene, { face, current });
     const layers = current?.elements ?? [];
@@ -100,7 +104,9 @@ export class SceneDirectorContextService {
       historyBlock(history),
       briefBlock(scene.brief ?? [], frontBack),
       versionsBlock(versions, face.currentVersionId, frontBack ? face.key : 'single'),
-      ...(frontBack ? [facesBlock({ key: face.key, hasImage: faceState.hasImage })] : []),
+      ...(frontBack
+        ? [this.facesBlockOf(scene, { key: face.key, zones: face.zones }, faceState)]
+        : []),
       formatBlock(scene, face.zones),
       paintedBlock(paintedLinesOf(current)),
       marking
@@ -148,6 +154,19 @@ export class SceneDirectorContextService {
     };
   }
 
+  /** O bloco de faces do contexto: o de frente e verso, ou o do jornal (com as zonas e a altura do cabeçalho). */
+  private facesBlockOf(
+    scene: TemplateScene,
+    face: { key: DirectorFace['key']; zones: DirectorFace['zones'] },
+    state: DirectorFace,
+  ): string {
+    const format = findSceneFormat(scene.formatId);
+    if (scene.layout === 'tabloid' && format) {
+      return tabloidFacesBlock({ ...face, hasImage: state.hasImage }, format);
+    }
+    return facesBlock({ key: face.key, hasImage: state.hasImage });
+  }
+
   /** As últimas 30 mensagens antes desta (em ordem cronológica); `role` mantém o usuário antes do assistente (PV-21). */
   private async recentMessages(manager: EntityManager, sceneId: string, versionId: string) {
     const rows = await manager.find(TemplateSceneMessage, {
@@ -177,11 +196,13 @@ export class SceneDirectorContextService {
     },
   ): Promise<DirectorFace> {
     const { face, current } = input;
-    const frontBack = scene.layout === 'front_back';
+    const frontBack = hasTwoFaces(scene.layout);
     return {
       layout: scene.layout,
       key: face.key,
       zones: face.zones,
+      formatId: scene.formatId,
+      heightPx: scene.heightPx,
       hasImage: current?.status === 'ready' && Boolean(current.masterAssetId),
       frontReady: frontBack ? await faceHasImage(manager, scene.id, 0) : true,
       backReady: frontBack ? await faceHasImage(manager, scene.id, 1) : false,
@@ -191,7 +212,7 @@ export class SceneDirectorContextService {
   private async history(
     manager: EntityManager,
     input: { messages: TemplateSceneMessage[]; versions: DisplayedVersion[]; aspect: number },
-    frontBack: boolean,
+    layout: SceneLayout,
   ): Promise<HistoryEntry[]> {
     const { messages, versions, aspect } = input;
     const ids = [...new Set(messages.map((m) => m.versionId).filter(Boolean))] as string[];
@@ -204,7 +225,9 @@ export class SceneDirectorContextService {
         message,
         displayNumber: message.versionId ? (display.get(message.versionId) ?? null) : null,
         marking: message.role === 'user' && source ? markingOf(source, aspect) : null,
-        ...(frontBack ? { faceLabel: message.faceIndex === 1 ? 'Verso' : 'Frente' } : {}),
+        ...(hasTwoFaces(layout)
+          ? { faceLabel: faceLabelOf(faceKeyOf(layout, message.faceIndex ?? 0)) }
+          : {}),
       };
     });
   }

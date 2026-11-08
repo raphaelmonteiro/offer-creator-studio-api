@@ -34,9 +34,11 @@ export const BASE_TURN_KINDS = [
 
 /**
  * `fazer_verso` (PV-14): o cliente pede para fazer ou criar o verso. A linha só entra no prompt da cena de frente e
- * verso; o schema aceita sempre, e o código responde "uma face só" quando a cena não tem verso.
+ * verso; o schema aceita sempre, e o código responde "uma face só" quando a cena não tem verso. No jornal vale como
+ * "fazer a interna" (PV-T8). `tamanho_cabecalho` (D-1): o cliente pede o cabeçalho da capa maior, menor ou com um
+ * tamanho; só a linha do prompt do jornal o lista, e fora do jornal o código responde que ainda não muda.
  */
-export const TURN_KINDS = [...BASE_TURN_KINDS, 'fazer_verso'] as const;
+export const TURN_KINDS = [...BASE_TURN_KINDS, 'fazer_verso', 'tamanho_cabecalho'] as const;
 export type TurnKind = (typeof TURN_KINDS)[number];
 
 /** D-51: só a logo é recusada (sempre camada); texto e preço são pintados a pedido. */
@@ -50,6 +52,7 @@ export const IMAGE_SIDES = ['left', 'center', 'right'] as const;
 export const LAYER_OPS = ['move', 'resize', 'remove', 'set_text', 'add_logo'] as const;
 const LOGO_SIDES = ['left', 'center', 'right'] as const;
 const REQUEST_ACTIONS = ['open', 'drop'] as const;
+const HEADER_DIRECTIONS = ['maior', 'menor'] as const;
 
 /** Limites do schema (caracteres, itens). */
 export const DIRECTOR_LIMITS = {
@@ -108,6 +111,14 @@ const imageSchema = z
   })
   .strict();
 
+/** Tamanho do cabeçalho pedido (D-1): os cm ditos, ou só a direção ("maior", "menor"). */
+const headerSizeSchema = z
+  .object({
+    cm: z.number().positive().max(200).nullable(),
+    direction: z.enum(HEADER_DIRECTIONS).nullable(),
+  })
+  .strict();
+
 export const directorSchema = z
   .object({
     turn_kind: z.enum(TURN_KINDS),
@@ -119,6 +130,8 @@ export const directorSchema = z
     layer_ops: z.array(layerOpSchema).max(DIRECTOR_LIMITS.layerOps),
     requests: z.array(requestSchema).max(DIRECTOR_LIMITS.requests),
     refusal: z.enum(REFUSALS).nullable(),
+    // Ausente vale `null` (plano gravado antes do jornal).
+    header_size: headerSizeSchema.nullish(),
   })
   .strict();
 
@@ -168,6 +181,16 @@ const requestJsonSchema = {
   },
 };
 
+const headerSizeJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['cm', 'direction'],
+  properties: {
+    cm: { type: ['number', 'null'] },
+    direction: { type: ['string', 'null'], enum: [...HEADER_DIRECTIONS, null] },
+  },
+};
+
 const imageJsonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -214,6 +237,7 @@ export const DIRECTOR_JSON_SCHEMA: { name: string; schema: Record<string, unknow
       'layer_ops',
       'requests',
       'refusal',
+      'header_size',
     ],
     properties: {
       turn_kind: { type: 'string', enum: [...TURN_KINDS] },
@@ -227,6 +251,7 @@ export const DIRECTOR_JSON_SCHEMA: { name: string; schema: Record<string, unknow
       layer_ops: { type: 'array', maxItems: DIRECTOR_LIMITS.layerOps, items: layerOpJsonSchema },
       requests: { type: 'array', maxItems: DIRECTOR_LIMITS.requests, items: requestJsonSchema },
       refusal: { type: ['string', 'null'], enum: [...REFUSALS, null] },
+      header_size: { anyOf: [{ type: 'null' }, headerSizeJsonSchema] },
     },
   },
 };
