@@ -9,6 +9,10 @@ export const CANCELLED_REPLY = 'Geração cancelada.';
 /** Plano com imagem e camada: se a imagem falha ou é parada, nenhuma camada é alterada, e o chat diz (defeito b). */
 export const NO_LAYER_CHANGED = 'Nenhuma camada foi alterada.';
 
+/** A camada pedida "embaixo de X" não cabe na página abaixo de X (B3, D-59): nada é criado nem movido. */
+export const noRoomBelowReply = (name: string): string =>
+  `Não cabe embaixo de “${name}”. Diga onde quer, ou arraste no quadro.`;
+
 /** Aviso da frase que já é camada e agora vai pintada (D-55): a camada de texto sai na mesma versão. */
 export const PAINTED_LAYER_NOTE = 'A frase vai ser pintada na imagem, e a camada de texto sai.';
 

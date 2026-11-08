@@ -204,6 +204,9 @@ describeIfSceneDb('Conversa da cena de template (e2e, banco chroma_x_e2e)', () =
       (s) => s.currentVersion?.operation === 'set_layer' && idle(s),
     );
     expect(done.currentVersion.elements.map((e: Scene) => e.kind)).toEqual(['logo', 'text']);
+    // B3: o texto "embaixo dela" fica abaixo da logo, e não no mesmo y.
+    const [logoLayer, textLayer] = done.currentVersion.elements;
+    expect(textLayer.y).toBeGreaterThan(logoLayer.y);
     expect(done.currentVersion.master.id).toBe(ready.currentVersion.master.id);
     expect(done.currentVersion.providerCostUsd).toBe(0);
   });

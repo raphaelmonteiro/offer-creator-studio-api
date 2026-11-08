@@ -89,6 +89,59 @@ describe('parseDirector', () => {
     });
   });
 
+  describe('position.below (B3, D-59)', () => {
+    const textOp = (position: unknown) => ({
+      op: 'set_text' as const,
+      layer: null,
+      text: { value: 'Ofertas da semana', placement: 'below-logo' as const },
+      position,
+      replace: false,
+    });
+    const message = 'escreve "Ofertas da semana" embaixo da logo';
+
+    it('aceita a camada de referência, e o plano sem `below` segue válido', () => {
+      const withBelow = textOp({
+        side: 'left',
+        zone: 'header',
+        below: { kind: 'logo', name: null },
+      });
+      const raw = directorRaw({ turn_kind: 'camada', layer_ops: [withBelow] });
+      expect(parseDirector(raw, ctxFor(message)).ok).toBe(true);
+      const old = directorRaw({
+        turn_kind: 'camada',
+        layer_ops: [textOp({ side: 'left', zone: 'header' })],
+      });
+      expect(parseDirector(old, ctxFor(message)).ok).toBe(true);
+    });
+
+    it('recusa `below` com tipo fora da lista ou campo a mais', () => {
+      const bad = (below: unknown) =>
+        directorRaw({
+          turn_kind: 'camada',
+          layer_ops: [textOp({ side: 'left', zone: 'header', below })],
+        });
+      expect(parseDirector(bad({ kind: 'foto', name: null }), ctxFor(message)).ok).toBe(false);
+      expect(parseDirector(bad({ kind: 'logo', name: null, extra: 1 }), ctxFor(message)).ok).toBe(
+        false,
+      );
+    });
+
+    it('o JSON schema pede `below` em `position`, nulo ou com tipo e nome', () => {
+      type Node = {
+        properties?: Record<string, Node>;
+        anyOf?: Node[];
+        required?: string[];
+        items?: Node;
+      };
+      const ops = (DIRECTOR_JSON_SCHEMA.schema as Node).properties?.layer_ops as Node;
+      const position = ops.items?.properties?.position as Node;
+      const object = position.anyOf?.find((node) => node.properties) as Node;
+      expect(object.required).toEqual(['side', 'zone', 'below']);
+      const below = object.properties?.below as Node;
+      expect(below.anyOf?.some((node) => node.required?.join() === 'kind,name')).toBe(true);
+    });
+  });
+
   describe('Diretor inventa pedido', () => {
     const request = (text: string) => ({ id: null, text, action: 'open' as const, quote: null });
 

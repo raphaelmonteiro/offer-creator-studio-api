@@ -1,4 +1,4 @@
-import { LayerAction } from '../domain/scene-layer.types';
+import { BelowRef, LayerAction } from '../domain/scene-layer.types';
 import { computeSceneZones, findSceneFormat } from '../domain/scene-formats';
 import { SceneElement } from '../domain/scene.types';
 import { applyLayerActions, LayerContext } from './scene-layer-actions';
@@ -203,5 +203,102 @@ describe('applyLayerActions', () => {
     const els = [logo()];
     apply([{ type: 'move', target: { kind: 'logo' }, side: 'right' }], els);
     expect(els[0].x).toBe(0.2);
+  });
+});
+
+describe('applyLayerActions: "embaixo de X" (B3)', () => {
+  const below: BelowRef = { kind: 'logo', name: null };
+  const textBelow = (over: { side?: 'left' | 'center' | 'right'; below?: BelowRef } = {}) =>
+    ({
+      type: 'set_text',
+      text: 'Ofertas da semana',
+      placement: 'below-logo',
+      replace: false,
+      position: { side: over.side ?? 'left', zone: 'header', below: over.below ?? below },
+    }) as LayerAction;
+  const heightOf = (el: SceneElement) => (el.w * 1920) / el.aspect / 3840;
+  const disjoint = (a: SceneElement, b: SceneElement) =>
+    Math.abs(a.x - b.x) >= (a.w + b.w) / 2 ||
+    Math.abs(a.y - b.y) >= (heightOf(a) + heightOf(b)) / 2;
+
+  it('Texto embaixo da logo não a cobre: logo e texto criados na mesma lista, sem o mesmo y nem caixas sobrepostas', () => {
+    const result = apply([
+      { type: 'add_logo', assetId: 'asset-1', side: 'left', zone: 'header' },
+      textBelow(),
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const [logoEl, textEl] = result.elements;
+    expect(textEl.y).toBeGreaterThan(logoEl.y);
+    expect(textEl.y - heightOf(textEl) / 2).toBeGreaterThan(logoEl.y + heightOf(logoEl) / 2);
+    expect(textEl.x - textEl.w / 2).toBeCloseTo(logoEl.x - logoEl.w / 2, 5);
+    expect(disjoint(logoEl, textEl)).toBe(true);
+  });
+
+  it.each([
+    ['direita', { x: 0.8 }, (l: SceneElement, t: SceneElement) => t.x + t.w / 2 - (l.x + l.w / 2)],
+    ['centro', { x: 0.5 }, (l: SceneElement, t: SceneElement) => t.x - l.x],
+  ])('alinha pelo lado da camada citada (%s)', (_name, at, delta) => {
+    const ref = logo({ ...at, y: 0.2 });
+    const result = apply([textBelow()], [ref]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const created = result.elements[1];
+    expect(delta(ref, created)).toBeCloseTo(0, 5);
+    expect(disjoint(ref, created)).toBe(true);
+  });
+
+  it('a camada de referência pode ser uma que já existia, inclusive de texto', () => {
+    const ref = text({ y: 0.3 });
+    const result = apply([textBelow({ below: { kind: 'text', name: null } })], [ref]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(disjoint(ref, result.elements[1])).toBe(true);
+    expect(result.elements[1].y).toBeGreaterThan(ref.y);
+  });
+
+  it('Não cabe embaixo da camada: nada é criado nem movido, e a resposta cita o nome', () => {
+    const edge = logo({ y: 0.97 });
+    const result = apply([textBelow()], [edge]);
+    expect(result).toEqual({
+      ok: false,
+      reply: 'Não cabe embaixo de “Logo 1”. Diga onde quer, ou arraste no quadro.',
+    });
+  });
+
+  it('sem espaço no meio de uma lista: a lista toda é recusada, e a logo criada antes também não fica', () => {
+    const result = apply([
+      { type: 'add_logo', assetId: 'asset-1', side: 'left', zone: 'footer' },
+      textBelow(),
+    ]);
+    expect(result.ok).toBe(false);
+  });
+
+  it('referência ausente ou ambígua vira resposta, sem criar nada', () => {
+    expect(apply([textBelow()])).toEqual({
+      ok: false,
+      reply: 'Não encontrei a logo na cena. Nada foi alterado.',
+    });
+    const two = [logo({ id: 'a' }), logo({ id: 'b', name: 'Logo 2', x: 0.7 })];
+    expect(apply([textBelow()], two)).toMatchObject({ ok: false });
+  });
+
+  it('logo embaixo de outra camada também respeita o espaço', () => {
+    const ref = text({ y: 0.2, x: 0.5 });
+    const result = apply(
+      [
+        {
+          type: 'add_logo',
+          assetId: 'asset-1',
+          side: 'left',
+          zone: 'header',
+          below: { kind: 'text', name: null },
+        },
+      ],
+      [ref],
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(disjoint(ref, result.elements[1])).toBe(true);
   });
 });

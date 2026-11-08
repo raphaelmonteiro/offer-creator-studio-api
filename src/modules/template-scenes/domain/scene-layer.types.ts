@@ -16,9 +16,17 @@ export interface ParsedText {
   replace: boolean;
 }
 
+/** A camada citada em "embaixo de X" (B3): o tipo e, se o cliente deu, o nome. */
+export interface BelowRef {
+  kind: 'logo' | 'text' | 'generated';
+  name: string | null;
+}
+
 export interface LogoPosition {
   side: 'left' | 'center' | 'right';
   zone: SceneZoneName;
+  /** "Embaixo de X": a caixa fica abaixo da camada citada, sem sobrepor; `side` e `zone` não valem (B3). */
+  below?: BelowRef | null;
 }
 
 /** Elemento escolhido por seleção (`elementId`) ou pelo tipo citado (`kind`). */
@@ -55,6 +63,11 @@ export const layerIntentSchema = z
   })
   .strict();
 
+/** A camada de referência de `position.below` (B3). */
+export const belowSchema = z
+  .object({ kind: z.enum(LAYER_INTENT_KINDS), name: optionalText(80) })
+  .strict();
+
 /** Texto exato pedido pelo cliente e onde fica. */
 export const textIntentSchema = z
   .object({ value: z.string().min(1).max(200), placement: z.enum(TEXT_PLACEMENTS) })
@@ -79,6 +92,16 @@ export const LAYER_OBJECT_JSON_SCHEMA = {
     name: nullableString,
     side: nullableEnum(LAYER_SIDES),
     direction: nullableEnum(LAYER_DIRECTIONS),
+  },
+};
+
+export const BELOW_OBJECT_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['kind', 'name'],
+  properties: {
+    kind: { type: 'string', enum: [...LAYER_INTENT_KINDS] },
+    name: nullableString,
   },
 };
 

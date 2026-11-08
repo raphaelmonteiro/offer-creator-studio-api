@@ -103,12 +103,17 @@ export function layerPlan(
     ops.push({ op: 'add_logo', layer: null, text: null, position: { side, zone }, replace: false });
   }
   if (quoted) {
-    const placement = has(folded, /\b(embaixo|abaixo)\b/) ? 'below-logo' : 'bottom';
+    const below = has(folded, /\b(embaixo|abaixo)\b/);
+    const logoThere = script.hasLogoAttachment || script.layers.some((l) => l.kind === 'logo');
     ops.push({
       op: 'set_text',
       layer: null,
-      text: { value: quoted, placement },
-      position: null,
+      text: { value: quoted, placement: below ? 'below-logo' : 'bottom' },
+      // B3 (D-59): "embaixo dela" cita a logo, que o código resolve entre as camadas (as de antes ou a desta lista).
+      position:
+        below && logoThere
+          ? { side: 'left', zone: 'header', below: { kind: 'logo', name: null } }
+          : null,
       replace: false,
     });
   }

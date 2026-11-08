@@ -1,7 +1,7 @@
 import { fold } from '../../../shared/text/fold';
 import { DirectorLayerOp } from './scene-director-schema';
 import { layerNamedIn } from './scene-layer-name';
-import { LayerAction, LayerTarget, LogoPosition } from './scene-layer.types';
+import { BelowRef, LayerAction, LayerTarget, LogoPosition } from './scene-layer.types';
 import { SceneElement } from './scene.types';
 
 /**
@@ -49,6 +49,7 @@ function actionOf(op: DirectorLayerOp, input: LayerOpsInput): LayerAction | { re
       assetId: input.attachmentId,
       side: position.side,
       zone: position.zone,
+      ...(position.below ? { below: position.below as BelowRef } : {}),
     };
   }
   if (op.op === 'set_text') {

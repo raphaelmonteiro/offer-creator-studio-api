@@ -59,6 +59,29 @@ describe('layerOpsToActions', () => {
     });
   });
 
+  it('position.below segue para a ação, de texto e de logo', () => {
+    const below = { kind: 'logo' as const, name: null };
+    const text = layerOpsToActions(
+      [
+        op({
+          op: 'set_text',
+          text: { value: 'Ofertas', placement: 'below-logo' },
+          position: { side: 'left', zone: 'header', below },
+        }),
+      ],
+      input,
+    );
+    expect(text).toMatchObject({
+      ok: true,
+      actions: [{ type: 'set_text', position: { side: 'left', zone: 'header', below } }],
+    });
+    const logo = layerOpsToActions(
+      [op({ op: 'add_logo', position: { side: 'right', zone: 'footer', below } })],
+      input,
+    );
+    expect(logo).toMatchObject({ actions: [{ type: 'add_logo', below }] });
+  });
+
   it('o elemento selecionado do mesmo tipo é a dica: vira o alvo exato', () => {
     const result = layerOpsToActions(
       [op({ layer: { kind: 'logo', name: null, side: 'left', direction: null } })],
@@ -181,6 +204,63 @@ describeIfSceneDb('Camadas pelo chat, no consumer do Diretor (banco chroma_x_e2e
       role: 'master',
     });
     expect(assets).toBe(1);
+  });
+
+  it('Texto embaixo da logo não a cobre (repro de B3): topo do texto abaixo da base da logo, alinhado à esquerda, sem imagem', async () => {
+    const { scene, logoAsset } = await sceneWithLogoAsset();
+    const message =
+      'coloca a logo no cabeçalho à esquerda e escreve "Ofertas da semana" embaixo dela, como texto editável';
+    const sent = await h.post(scene.id, message, { attachments: [{ assetId: logoAsset.id }] });
+    // Como o modelo devolveu na validação: as duas no cabeçalho à esquerda, o texto com `below` apontando a logo.
+    const { client } = h.directorClient(async () =>
+      answer([
+        op({ op: 'add_logo', position: { side: 'left', zone: 'header' } }),
+        op({
+          op: 'set_text',
+          text: { value: 'Ofertas da semana', placement: 'below-logo' },
+          position: { side: 'left', zone: 'header', below: { kind: 'logo', name: null } },
+        }),
+      ]),
+    );
+
+    await h.directorProcessor(client).process({ sceneId: scene.id, versionId: sent.versionId });
+
+    const done = await h.versionOf(sent.versionId);
+    expect(done.status).toBe('ready');
+    const logo = done.elements.find((e) => e.kind === 'logo') as SceneElement;
+    const text = done.elements.find((e) => e.kind === 'text') as SceneElement;
+    const heightOf = (e: SceneElement) => (e.w * scene.widthPx) / e.aspect / scene.heightPx;
+    expect(text.y).not.toBeCloseTo(logo.y, 3);
+    expect(text.y - heightOf(text) / 2).toBeGreaterThan(logo.y + heightOf(logo) / 2);
+    expect(text.x - text.w / 2).toBeCloseTo(logo.x - logo.w / 2, 5);
+    expect(imageJobs()).toHaveLength(0);
+    expect(done.metrics.calls).toBeUndefined();
+  });
+
+  it('Não cabe embaixo da camada: nada é criado nem movido, a leitura termina rejected e o chat diz que não cabe', async () => {
+    const edge = { ...LOGO, y: 0.97 };
+    const { scene, version: v1 } = await h.readyScene({ elements: [edge] });
+    const sent = await h.post(scene.id, 'escreve "Ofertas da semana" embaixo da logo');
+    const { client } = h.directorClient(async () =>
+      answer([
+        op({
+          op: 'set_text',
+          text: { value: 'Ofertas da semana', placement: 'below-logo' },
+          position: { side: 'left', zone: 'footer', below: { kind: 'logo', name: null } },
+        }),
+      ]),
+    );
+
+    await h.directorProcessor(client).process({ sceneId: scene.id, versionId: sent.versionId });
+
+    expect((await h.versionOf(sent.versionId)).status).toBe('rejected');
+    expect(await lastReply(scene.id)).toBe(
+      'Não cabe embaixo de “Logo 1”. Diga onde quer, ou arraste no quadro.',
+    );
+    const stored = await h.sceneOf(scene.id);
+    expect(stored.currentVersionId).toBe(v1.id);
+    expect((await h.versionOf(v1.id)).elements).toEqual([edge]);
+    expect(imageJobs()).toHaveLength(0);
   });
 
   it('Camada não espera: passar a logo para a direita muda sem janela e sem chamada de imagem', async () => {

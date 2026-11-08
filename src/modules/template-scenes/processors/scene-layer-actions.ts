@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto';
-import { LayerAction, LayerTarget } from '../domain/scene-layer.types';
+import { fold } from '../../../shared/text/fold';
+import { layerNamedIn } from '../domain/scene-layer-name';
+import { BelowRef, LayerAction, LayerTarget } from '../domain/scene-layer.types';
 import { SceneElement, SceneElementKind, SceneZones } from '../domain/scene.types';
+import { noRoomBelowReply } from '../scene-texts';
 import { TurnAttachmentAsset } from './scene-turn-state';
 
 /** Camadas exatas (logo, texto, elemento adicionado): mudam por regra, sem chamar o modelo. */
@@ -65,10 +68,89 @@ function findTarget(
   return { element: same[0] };
 }
 
+/** Folga entre a base da camada citada e o topo da caixa de baixo, em fração da altura da página (B3). */
+const BELOW_GAP = 0.01;
+
+/** Estado de uma aplicação: as camadas criadas antes, na mesma lista, que "embaixo de X" pode citar. */
+interface RunState {
+  created: Set<string>;
+}
+
+type Box = { x: number; y: number; w: number; h: number };
+const boxOf = (el: SceneElement, ctx: LayerContext): Box => ({
+  x: el.x,
+  y: el.y,
+  w: el.w,
+  h: heightFraction(el, ctx),
+});
+const overlaps = (a: Box, b: Box): boolean =>
+  Math.abs(a.x - b.x) < (a.w + b.w) / 2 && Math.abs(a.y - b.y) < (a.h + b.h) / 2;
+
+/** A camada citada em "embaixo de X": a criada antes na lista, ou a única do tipo (ou do nome); 0 ou 2+ viram resposta. */
+function findBelowRef(
+  ref: BelowRef,
+  elements: SceneElement[],
+  state: RunState,
+): { element: SceneElement } | { reply: string } {
+  const ofKind = elements.filter((e) => e.kind === ref.kind);
+  const fresh = ofKind.filter((e) => state.created.has(e.id));
+  if (fresh.length) return { element: fresh[fresh.length - 1] };
+  if (ref.kind !== 'generated') return findTarget({ kind: ref.kind }, elements);
+  const named = ref.name ? ofKind.filter((e) => layerNamedIn(e, fold(ref.name as string))) : ofKind;
+  return named.length === 1
+    ? { element: named[0] }
+    : { reply: 'Selecione na prévia a camada de referência. Nada foi alterado.' };
+}
+
+/**
+ * Centro da caixa `w` x `aspect` logo abaixo da base da camada de referência, alinhada pelo lado dela (borda esquerda
+ * com a esquerda, centro com o centro, borda direita com a direita), dentro da página e sem sobrepor (B3). `null` quando
+ * não há espaço abaixo.
+ */
+function placeBelow(
+  ref: SceneElement,
+  size: { w: number; aspect: number },
+  ctx: LayerContext,
+): [number, number] | null {
+  const refBox = boxOf(ref, ctx);
+  const h = heightFraction(size as SceneElement, ctx);
+  const top = refBox.y + refBox.h / 2 + BELOW_GAP;
+  if (top + h > 1) return null;
+  const side = ref.x < 1 / 3 ? 'left' : ref.x > 2 / 3 ? 'right' : 'center';
+  const aligned =
+    side === 'left'
+      ? ref.x - ref.w / 2 + size.w / 2
+      : side === 'right'
+        ? ref.x + ref.w / 2 - size.w / 2
+        : ref.x;
+  const x = clamp(aligned, size.w / 2, 1 - size.w / 2);
+  const y = top + h / 2;
+  return overlaps(refBox, { x, y, w: size.w, h }) ? null : [x, y];
+}
+
+/** O lugar de uma camada "embaixo de X", ou a resposta ao cliente (referência ausente, ambígua ou sem espaço). */
+function belowSpot(
+  below: BelowRef,
+  size: { w: number; aspect: number },
+  input: { ctx: LayerContext; elements: SceneElement[]; state: RunState },
+): { at: [number, number] } | { reply: string } {
+  const found = findBelowRef(below, input.elements, input.state);
+  if ('reply' in found) return found;
+  const at = placeBelow(found.element, size, input.ctx);
+  return at ? { at } : { reply: noRoomBelowReply(found.element.name) };
+}
+
+/** Proporção da logo anexada; 0 quando o arquivo não foi lido (a logo recusa depois). */
+function logoAspect(action: Extract<LayerAction, { type: 'add_logo' }>, ctx: LayerContext): number {
+  const asset = ctx.attachments.find((a) => a.id === action.assetId);
+  return asset?.width && asset.height ? asset.width / asset.height : 0;
+}
+
 function logoElement(
   action: Extract<LayerAction, { type: 'add_logo' }>,
   ctx: LayerContext,
   elements: SceneElement[],
+  spot?: [number, number],
 ): SceneElement | null {
   const asset = ctx.attachments.find((a) => a.id === action.assetId);
   if (!asset?.width || !asset.height) return null;
@@ -86,8 +168,8 @@ function logoElement(
     id: randomUUID(),
     kind: 'logo',
     name: nextName(elements, 'logo', 'Logo'),
-    x,
-    y: clamp(zone.y + zone.h / 2, h / 2, 1 - h / 2),
+    x: spot ? spot[0] : x,
+    y: spot ? spot[1] : clamp(zone.y + zone.h / 2, h / 2, 1 - h / 2),
     w: LOGO_WIDTH,
     aspect,
     rotation: 0,
@@ -125,9 +207,9 @@ function textY(placement: string, ctx: LayerContext, elements: SceneElement[]): 
 
 function textElements(
   action: Extract<LayerAction, { type: 'set_text' }>,
-  ctx: LayerContext,
-  elements: SceneElement[],
-): { elements: SceneElement[]; changed: string } {
+  input: { ctx: LayerContext; elements: SceneElement[]; state: RunState },
+): { elements: SceneElement[]; changed: string } | { reply: string } {
+  const { ctx, elements } = input;
   const texts = elements.filter((e) => e.kind === 'text');
   const current = action.elementId
     ? texts.find((e) => e.id === action.elementId)
@@ -140,7 +222,10 @@ function textElements(
       changed: current.name,
     };
   }
-  const [x, y] = textPosition(action, ctx, elements);
+  const below = action.position?.below;
+  const spot = below ? belowSpot(below, { w: TEXT_WIDTH, aspect: 5 }, input) : null;
+  if (spot && 'reply' in spot) return spot;
+  const [x, y] = (spot && 'at' in spot ? spot.at : null) ?? textPosition(action, ctx, elements);
   const created: SceneElement = {
     id: randomUUID(),
     kind: 'text',
@@ -171,15 +256,23 @@ function resized(el: SceneElement, direction: 'bigger' | 'smaller'): SceneElemen
     : { ...el, w: clamp(el.w * factor, 0.04, 0.9) };
 }
 
-function applyOne(action: LayerAction, ctx: LayerContext, elements: SceneElement[]): LayerResult {
+function applyOne(
+  action: LayerAction,
+  input: { ctx: LayerContext; elements: SceneElement[]; state: RunState },
+): LayerResult {
+  const { ctx, elements } = input;
   if (action.type === 'add_logo') {
-    const logo = logoElement(action, ctx, elements);
+    const draft = { w: LOGO_WIDTH, aspect: logoAspect(action, ctx) };
+    const spot = action.below && draft.aspect ? belowSpot(action.below, draft, input) : undefined;
+    if (spot && 'reply' in spot) return { ok: false, reply: spot.reply };
+    const logo = logoElement(action, ctx, elements, spot && 'at' in spot ? spot.at : undefined);
     return logo
       ? { ok: true, elements: [...elements, logo], changed: [logo.name] }
       : { ok: false, reply: 'Não consegui ler o logo enviado. Envie o arquivo de novo.' };
   }
   if (action.type === 'set_text') {
-    const result = textElements(action, ctx, elements);
+    const result = textElements(action, input);
+    if ('reply' in result) return { ok: false, reply: result.reply };
     return { ok: true, elements: result.elements, changed: [result.changed] };
   }
   const found = findTarget(action.target, elements);
@@ -210,9 +303,12 @@ function applyOne(action: LayerAction, ctx: LayerContext, elements: SceneElement
 export function applyLayerActions(actions: LayerAction[], ctx: LayerContext): LayerResult {
   let elements = structuredClone(ctx.elements);
   const changed: string[] = [];
+  const state: RunState = { created: new Set() };
   for (const action of actions) {
-    const result = applyOne(action, ctx, elements);
+    const result = applyOne(action, { ctx, elements, state });
     if (result.ok === false) return result;
+    const known = new Set(elements.map((e) => e.id));
+    for (const e of result.elements) if (!known.has(e.id)) state.created.add(e.id);
     elements = result.elements;
     changed.push(...result.changed);
   }

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import {
+  BELOW_OBJECT_JSON_SCHEMA,
+  belowSchema,
   LAYER_OBJECT_JSON_SCHEMA,
   LAYER_ZONES,
   layerIntentSchema,
@@ -65,7 +67,12 @@ const layerOpSchema = z
     layer: layerIntentSchema.nullable(),
     text: textIntentSchema.nullable(),
     position: z
-      .object({ side: z.enum(LOGO_SIDES), zone: z.enum(LAYER_ZONES) })
+      .object({
+        side: z.enum(LOGO_SIDES),
+        zone: z.enum(LAYER_ZONES),
+        // B3 (D-59): "embaixo de X". Ausente vale como `null`, para o plano antigo seguir válido.
+        below: belowSchema.nullish(),
+      })
       .strict()
       .nullable(),
     replace: z.boolean(),
@@ -129,10 +136,11 @@ const layerOpJsonSchema = {
         {
           type: 'object',
           additionalProperties: false,
-          required: ['side', 'zone'],
+          required: ['side', 'zone', 'below'],
           properties: {
             side: { type: 'string', enum: [...LOGO_SIDES] },
             zone: { type: 'string', enum: [...LAYER_ZONES] },
+            below: { anyOf: [{ type: 'null' }, BELOW_OBJECT_JSON_SCHEMA] },
           },
         },
       ],
