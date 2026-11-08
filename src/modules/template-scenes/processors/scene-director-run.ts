@@ -52,6 +52,7 @@ function problemLabel(problem: Problem): string {
   if (problem.groups) return 'composition';
   if (problem.number) return 'number';
   if (problem.instruction) return 'instruction';
+  if (problem.announcement) return 'announcement';
   return 'invalid';
 }
 

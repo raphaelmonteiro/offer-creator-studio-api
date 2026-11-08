@@ -171,6 +171,9 @@ export class SceneDirectorState {
             planPatched: true,
             ...(outcome.patches.number ? { numberPatches: outcome.patches.number } : {}),
             ...(outcome.patches.text ? { textPatches: outcome.patches.text } : {}),
+            ...(outcome.patches.announcement
+              ? { announcementPatch: outcome.patches.announcement }
+              : {}),
           }
         : {}),
     };

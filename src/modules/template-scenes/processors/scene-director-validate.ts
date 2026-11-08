@@ -7,6 +7,7 @@ import {
   unusableAnswer,
   wantsImage,
 } from '../domain/scene-director-decision';
+import { checkAnnouncement } from '../domain/scene-director-announce';
 import { applyNumberRule, NumberPatch } from '../domain/scene-director-number';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import {
@@ -23,6 +24,8 @@ import { DirectorContext } from '../services/scene-director-context';
 export interface PlanPatches {
   number?: NumberPatch[];
   text?: TextPatch[];
+  /** O anúncio do Diretor que o código não enviou (validação 9): o texto fixo o substituiu. */
+  announcement?: { before: string; reason: string };
 }
 
 export interface Problem {
@@ -31,6 +34,7 @@ export interface Problem {
   number?: boolean;
   instruction?: boolean;
   text?: boolean;
+  announcement?: boolean;
 }
 
 export const QUESTION_OUTCOMES = {
@@ -77,8 +81,27 @@ function checkText(
 }
 
 /**
+ * Validação 9: o anúncio só promete o que o plano traz. Refaz uma vez; persistindo, o anúncio não vai ao cliente e
+ * a imagem segue com o texto fixo (`reply` vazio cai em `safeReply`), como o `reply` barrado na validação 6.
+ */
+function checkAnnouncedPlan(
+  plan: DirectorPlan,
+  context: DirectorContext,
+  final: boolean,
+): Problem | { plan: DirectorPlan; patch?: { before: string; reason: string } } {
+  if (!wantsImage(plan)) return { plan };
+  const checked = checkAnnouncement(plan, context);
+  if (checked.ok === true) return { plan };
+  if (!final) return { reason: checked.reason, announcement: true };
+  return {
+    plan: { ...plan, reply: '' },
+    patch: { before: plan.reply, reason: checked.reason },
+  };
+}
+
+/**
  * Valida o texto do Diretor: schema, texto e pedidos (1 a 3), texto exato e texto fora do bloco (4a, 4b),
- * composição (5), número (7) e instrução (8). Plano que não chama imagem não passa por 4, 5 e 7: elas protegem o
+ * composição (5), número (7), instrução (8) e anúncio (9). Plano que não chama imagem não passa por 4, 5 e 7: elas protegem o
  * prompt (R32). A logo é a única recusa (4c). Nenhuma regra recusa pedido de escrita (D-51).
  */
 export function validate(text: string, context: DirectorContext, final: boolean): Checked {
@@ -119,9 +142,12 @@ export function validate(text: string, context: DirectorContext, final: boolean)
       ? { question: 'instruction' }
       : { reason: emptyAnswer ? ANSWER_RETRY_REASON : INSTRUCTION_RETRY_REASON, instruction: true };
   }
+  const announced = checkAnnouncedPlan(written.plan, context, final);
+  if ('reason' in announced) return announced;
   const patches: PlanPatches = {
     ...(written.patches.length ? { number: written.patches } : {}),
     ...(texted.patches?.text?.length ? { text: texted.patches.text } : {}),
+    ...(announced.patch ? { announcement: announced.patch } : {}),
   };
-  return Object.keys(patches).length ? { plan: written.plan, patches } : { plan: written.plan };
+  return Object.keys(patches).length ? { plan: announced.plan, patches } : { plan: announced.plan };
 }

@@ -56,6 +56,7 @@ const RULES = [
   'Em composition, style, change e preserve, descreva lugares pela posição (top, bottom, upper area, lower area, left, right, center) e não com os termos de divisão frame, framed, band, strip, banner, border, edge, header, footer, panel, column, split, margin, divider, nem os equivalentes em português, a menos que o cliente os tenha usado: o código barra o termo que o cliente não escreveu.',
   'Ano, data e número citados como contexto ("template de páscoa para 2027") nunca vão a composition, style, change nem preserve; o número que o cliente quer ver escrito vai só em exact_text.',
   'Aspas só dentro de exact_text; para citar o que já existe (um nome, um objeto), use palavras normais, sem aspas.',
+  'O anúncio em reply só promete o que o plano traz: cite entre aspas só frase que está em image.exact_text, em layer_ops ou já pintada; só fale de escrita ou gravação com exact_text preenchido; só fale de placa se image.change a descreve (sign, board); só prometa camada com layer_ops.',
   'Não invente pedidos: cada item de requests precisa vir de palavras do cliente.',
   'A marcação do cliente (caixa em frações da imagem, de 0 a 1) diz onde ele quer a mudança, mesmo que a mensagem cite outro lugar. Elemento selecionado é só uma dica de qual camada o cliente quer.',
   'Os blocos de image são curtos, concretos e em inglês. O código monta o prompt, o formato, a região com as medidas e o texto final.',
