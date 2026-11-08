@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { Template } from '../../templates/entities/template.entity';
 import { CreateSceneDto } from '../dto/create-scene.dto';
 import { findSceneFormat } from '../domain/scene-formats';
 import { nativeSizeOfFormat, pixelsPerCm } from '../domain/scene-format-size';
@@ -66,7 +67,8 @@ export class TemplateScenesService {
 
   /**
    * Exclusão lógica (D-4). Com versão em curso, marca `cancelRequestedAt`; o worker para antes da
-   * próxima etapa. Repetir dá 404 (a cena excluída não é mais encontrada).
+   * próxima etapa. Repetir dá 404 (a cena excluída não é mais encontrada). O template da cena sai na
+   * mesma transação; os arquivos dele ficam, porque os encartes já criados apontam para eles (PV-14).
    */
   async remove(sceneId: string): Promise<void> {
     await this.locks.run(sceneId, async ({ manager, scene }) => {
@@ -74,6 +76,10 @@ export class TemplateScenesService {
       if (busy && !busy.cancelRequestedAt) {
         busy.cancelRequestedAt = new Date();
         await manager.save(busy);
+      }
+      if (scene.approvedTemplateId) {
+        await manager.delete(Template, { id: scene.approvedTemplateId });
+        scene.approvedTemplateId = null;
       }
       const revision = await bumpRevision(manager, scene);
       await manager.softDelete(TemplateScene, { id: sceneId });

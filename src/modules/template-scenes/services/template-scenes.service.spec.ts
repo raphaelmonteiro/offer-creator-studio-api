@@ -3,6 +3,7 @@ import { SceneLockService } from './scene-lock.service';
 import { SceneReadService } from './scene-read.service';
 import { TemplateScenesService } from './template-scenes.service';
 import { TemplateScene } from '../entities/template-scene.entity';
+import { Template } from '../../templates/entities/template.entity';
 import {
   insertMessage,
   insertReadyVersion,
@@ -201,6 +202,56 @@ describeIfSceneDb('TemplateScenesService (banco chroma_x_e2e)', () => {
       expect(await errorOf(service.remove(scene.id))).toEqual({
         status: 404,
         code: 'SCENE_NOT_FOUND',
+      });
+    });
+
+    describe('Cena excluída: o template dela sai junto', () => {
+      const sceneTemplate = (sceneId: string) =>
+        dataSource.manager.save(
+          dataSource.manager.create(Template, {
+            name: 'Template da cena',
+            type: 'full',
+            configuration: { format: 'folheto-27x54', source: { kind: 'template-scene', sceneId } },
+          }),
+        );
+
+      it('apaga o template na mesma transação e zera o ponteiro da cena', async () => {
+        const scene = await track(insertScene(dataSource, { name: 'Excluir com template' }));
+        const template = await sceneTemplate(scene.id);
+        await dataSource.manager.update(
+          TemplateScene,
+          { id: scene.id },
+          { approvedTemplateId: template.id },
+        );
+
+        await service.remove(scene.id);
+
+        expect(await dataSource.manager.findOneBy(Template, { id: template.id })).toBeNull();
+        const row = await dataSource.manager.findOne(TemplateScene, {
+          where: { id: scene.id },
+          withDeleted: true,
+        });
+        expect(row).toMatchObject({ approvedTemplateId: null });
+        expect(row?.deletedAt).not.toBeNull();
+      });
+
+      it('exclusão que falha (cena inexistente) não apaga template nenhum', async () => {
+        const other = await track(insertScene(dataSource, { name: 'Outra cena' }));
+        const template = await sceneTemplate(other.id);
+        await dataSource.manager.update(
+          TemplateScene,
+          { id: other.id },
+          { approvedTemplateId: template.id },
+        );
+
+        await errorOf(service.remove('00000000-0000-4000-8000-000000000000'));
+
+        expect(await dataSource.manager.findOneBy(Template, { id: template.id })).not.toBeNull();
+      });
+
+      it('cena sem template exclui normalmente', async () => {
+        const scene = await track(insertScene(dataSource, { name: 'Excluir sem template' }));
+        await expect(service.remove(scene.id)).resolves.toBeUndefined();
       });
     });
 
