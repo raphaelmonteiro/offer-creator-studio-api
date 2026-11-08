@@ -91,6 +91,31 @@ export interface DirectorBriefContext {
 }
 
 /**
+ * Item que o Diretor devolve em `requests`: o aberto do turno anterior passa a ser da mensagem atual (D-59); o feito,
+ * desistido ou superado só reabre se o cliente pediu de novo na mensagem atual (R10, D-59).
+ */
+function adoptOrReopen(
+  found: BriefItem,
+  request: DirectorRequest,
+  ctx: DirectorBriefContext & { updatedAt: string },
+  changes: BriefChanges,
+): void {
+  if (found.status === 'open') {
+    if (found.sourceMessageId !== ctx.messageId) {
+      Object.assign(found, { updatedAt: ctx.updatedAt, sourceMessageId: ctx.messageId });
+    }
+    return;
+  }
+  if (!mentionsWords(request.text, ctx.message)) return;
+  Object.assign(found, {
+    status: 'open',
+    updatedAt: ctx.updatedAt,
+    sourceMessageId: ctx.messageId,
+  });
+  changes.reopened.push(found.id);
+}
+
+/**
  * Aplica os `requests` do Diretor. `open` sem item igual cria um item novo; `open` de item feito ou
  * desistido o reabre (o cliente pediu de novo); `drop` desiste do item (a citação já foi conferida).
  * Pedido repetido não duplica item. `open` com ano, data ou número escrito é ignorado (D-42).
@@ -123,16 +148,8 @@ export function applyDirectorRequests(
         updatedAt,
       });
       changes.opened.push(id);
-    } else if (found.status === 'open') {
-      // Item aberto do turno anterior que o Diretor executa agora: passa a ser da mensagem atual (D-59).
-      if (found.sourceMessageId !== ctx.messageId) {
-        Object.assign(found, { updatedAt, sourceMessageId: ctx.messageId });
-      }
     } else {
-      // Item feito, desistido ou superado só reabre se o cliente pediu de novo na mensagem atual (R10, D-59).
-      if (!mentionsWords(request.text, ctx.message)) continue;
-      Object.assign(found, { status: 'open', updatedAt, sourceMessageId: ctx.messageId });
-      changes.reopened.push(found.id);
+      adoptOrReopen(found, request, { ...ctx, updatedAt }, changes);
     }
   }
   return { brief: next, changes };

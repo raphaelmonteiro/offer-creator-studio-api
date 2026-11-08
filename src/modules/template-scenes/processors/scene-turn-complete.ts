@@ -2,11 +2,10 @@ import { EntityManager } from 'typeorm';
 import { Rect, SceneElement } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
-import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { publishSceneEvent } from '../services/scene-events';
 import { bumpRevision } from '../services/scene-lock.service';
-import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
+import { addAssistantMessage, settleUserMessage, turnMessageOf } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
 import { closeTurnBrief } from '../services/scene-turn-brief';
 import { cancelVersion, emitVersionEvent } from './scene-turn-finish';
@@ -92,19 +91,16 @@ export async function readyVersion(
   version.previewAssetId = ids.previewAssetId;
   version.elements = extra.elements ?? target.parentElements;
   version.metrics = { ...version.metrics, ...extra.metrics };
+  const messageId = (await turnMessageOf(manager, version))?.id ?? '';
   if (extra.judge) {
-    const message = await manager.findOne(TemplateSceneMessage, {
-      where: { versionId: version.id, role: 'user' },
-      order: { createdAt: 'ASC' },
-    });
     const judged = applyJudgeVerdict(scene.brief ?? [], extra.judge, {
-      messageId: message?.id ?? '',
+      messageId,
       now: new Date(),
     });
     scene.brief = judged.brief;
     version.metrics = { ...version.metrics, judgeBrief: judged.changes };
   }
-  await closeTurnBrief(manager, scene, version);
+  await closeTurnBrief(manager, scene, version, { messageId });
   if (extra.requestedRegion !== undefined) version.requestedRegion = extra.requestedRegion;
   await manager.save(version);
   // O resultado é sempre a versão atual, inclusive com o juiz reprovando (D-26): "Voltar para a anterior" é do cliente.

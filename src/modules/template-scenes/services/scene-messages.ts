@@ -1,6 +1,7 @@
 import { EntityManager } from 'typeorm';
 import { SceneMessageStatus } from '../domain/scene.types';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
+import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 
 /** Resposta do assistente no chat (uma por versão que terminou). */
 export async function addAssistantMessage(
@@ -25,4 +26,15 @@ export async function settleUserMessage(
   status: SceneMessageStatus,
 ): Promise<void> {
   await manager.update(TemplateSceneMessage, { versionId, role: 'user' }, { status });
+}
+
+/** A mensagem do cliente que originou a versão (a primeira `user` dela), ou `null`. */
+export async function turnMessageOf(
+  manager: EntityManager,
+  version: Pick<TemplateSceneVersion, 'id'>,
+): Promise<TemplateSceneMessage | null> {
+  return manager.findOne(TemplateSceneMessage, {
+    where: { versionId: version.id, role: 'user' },
+    order: { createdAt: 'ASC' },
+  });
 }

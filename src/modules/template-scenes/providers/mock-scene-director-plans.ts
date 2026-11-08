@@ -80,6 +80,26 @@ function existingLayerOp(folded: string): DirectorPlan['layer_ops'][number] {
   };
 }
 
+/** Texto entre aspas como camada. B3 (D-59): "embaixo dela" cita a logo, que o código resolve entre as camadas. */
+function textOp(
+  quoted: string,
+  folded: string,
+  script: DirectorScript,
+): NonNullable<DirectorPlan['layer_ops']>[number] {
+  const below = has(folded, /\b(embaixo|abaixo)\b/);
+  const logoThere = script.hasLogoAttachment || script.layers.some((l) => l.kind === 'logo');
+  return {
+    op: 'set_text',
+    layer: null,
+    text: { value: quoted, placement: below ? 'below-logo' : 'bottom' },
+    position:
+      below && logoThere
+        ? { side: 'left', zone: 'header', below: { kind: 'logo', name: null } }
+        : null,
+    replace: false,
+  };
+}
+
 export function layerPlan(
   script: DirectorScript,
   folded: string,
@@ -103,19 +123,7 @@ export function layerPlan(
     ops.push({ op: 'add_logo', layer: null, text: null, position: { side, zone }, replace: false });
   }
   if (quoted) {
-    const below = has(folded, /\b(embaixo|abaixo)\b/);
-    const logoThere = script.hasLogoAttachment || script.layers.some((l) => l.kind === 'logo');
-    ops.push({
-      op: 'set_text',
-      layer: null,
-      text: { value: quoted, placement: below ? 'below-logo' : 'bottom' },
-      // B3 (D-59): "embaixo dela" cita a logo, que o código resolve entre as camadas (as de antes ou a desta lista).
-      position:
-        below && logoThere
-          ? { side: 'left', zone: 'header', below: { kind: 'logo', name: null } }
-          : null,
-      replace: false,
-    });
+    ops.push(textOp(quoted, folded, script));
   }
   if (!ops.length && script.layers.length && has(folded, /\b(logo|texto)\b/)) {
     ops.push(existingLayerOp(folded));
