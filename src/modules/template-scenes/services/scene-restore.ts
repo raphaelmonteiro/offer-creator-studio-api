@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { EntityManager } from 'typeorm';
+import { paintedMetricsOf } from '../domain/scene-painted-text';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
@@ -33,6 +34,7 @@ export async function assertMasterOnDisk(
  * - Com `reading`, converte a versão de leitura do consumer do Diretor (`queued` para `ready`,
  *   `operation: 'restore'`, `parentVersionId` da origem), sem segunda versão. No consumer a versão de leitura
  *   está `queued`, e `restore` abriria outro lock e daria `SCENE_BUSY`: por isso este trecho é separado.
+ * - Nos dois, `metrics.paintedText` é copiado da origem, porque a master volta a ser a dela (R66).
  */
 export async function restoreInto(
   manager: EntityManager,
@@ -48,9 +50,12 @@ export async function restoreInto(
     previewAssetId: source.previewAssetId,
     elements: structuredClone(source.elements),
   };
+  // A master volta a ser a da origem, e o texto pintado nela também (R66).
+  const painted = paintedMetricsOf(source);
   if (reading) {
     reading.status = 'ready';
     reading.step = 'done';
+    reading.metrics = { ...reading.metrics, ...painted };
     return manager.save(Object.assign(reading, image));
   }
   return manager.save(
@@ -60,6 +65,7 @@ export async function restoreInto(
       status: 'ready',
       correlationId: randomUUID(),
       createdByUserId: userId,
+      metrics: painted,
       ...image,
     }),
   );

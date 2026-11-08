@@ -3,12 +3,13 @@ import { DirectorLayerOp } from '../domain/scene-director-schema';
 import { sceneZonesFor } from '../domain/scene-formats';
 import { describeLayerDiff, noLayerChangeText } from '../domain/scene-layer-diff';
 import { LayerAction } from '../domain/scene-layer.types';
+import { paintedMetricsOf } from '../domain/scene-painted-text';
 import { SceneElement } from '../domain/scene.types';
-import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { bumpRevision } from '../services/scene-lock.service';
 import { SceneFilesService } from '../services/scene-files.service';
+import { readVersionMaster } from '../services/scene-master';
 import { addAssistantMessage, settleUserMessage } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
 import { DirectorTarget, rejectTarget } from './scene-director-target';
@@ -16,24 +17,6 @@ import { applyLayerActions } from './scene-layer-actions';
 import { colorNewTexts } from './scene-layer-color';
 import { loadAttachments } from './scene-turn-context';
 import { emitVersionEvent } from './scene-turn-finish';
-
-/** A master da versão atual em disco, ou `null` se foi apagada (a cor do texto cai no branco). */
-async function readMaster(
-  target: DirectorTarget,
-  current: TemplateSceneVersion,
-  files: SceneFilesService,
-): Promise<Buffer | null> {
-  if (!current.masterAssetId) return null;
-  const asset = await target.manager.findOne(TemplateSceneAsset, {
-    where: { id: current.masterAssetId },
-  });
-  if (!asset || asset.purgedAt) return null;
-  try {
-    return await files.read(asset.url);
-  } catch {
-    return null;
-  }
-}
 
 /** A camada que o primeiro pedido mirava, para dizer "já está lá" quando nada mudou. */
 function targetOfFirst(actions: LayerAction[], elements: SceneElement[]): SceneElement | null {
@@ -45,6 +28,49 @@ function targetOfFirst(actions: LayerAction[], elements: SceneElement[]): SceneE
       ? elements.find((element) => element.id === target.elementId)
       : elements.find((element) => element.kind === target.kind)) ?? null
   );
+}
+
+/**
+ * A versão de leitura vira a de camada: master e prévia da atual, as camadas novas e o texto pintado da atual, porque
+ * a master não muda (R66).
+ */
+async function saveLayerVersion(
+  target: DirectorTarget,
+  current: TemplateSceneVersion,
+  input: { elements: SceneElement[]; changed: string[] },
+): Promise<void> {
+  const { manager, version } = target;
+  Object.assign(version, {
+    operation: 'set_layer' as const,
+    status: 'ready' as const,
+    step: 'done' as const,
+    parentVersionId: current.id,
+    masterAssetId: current.masterAssetId,
+    previewAssetId: current.previewAssetId,
+    elements: input.elements,
+    metrics: {
+      ...version.metrics,
+      layer: { changed: input.changed },
+      ...paintedMetricsOf(current),
+    },
+  });
+  await manager.save(version);
+}
+
+/** A versão de camada vira a atual, e o chat diz o que mudou (sob o lock da cena). */
+async function finishLayerTurn(target: DirectorTarget, content: string): Promise<void> {
+  const { manager, scene, version } = target;
+  scene.currentVersionId = version.id;
+  await pruneSceneAssets(manager, scene);
+  await settleUserMessage(manager, version.id, 'done');
+  await addAssistantMessage(manager, {
+    sceneId: scene.id,
+    versionId: version.id,
+    content,
+    status: 'done',
+  });
+  await bumpRevision(manager, scene);
+  await emitVersionEvent(manager, scene, version, 'version.ready');
 }
 
 /**
@@ -82,7 +108,7 @@ export async function applyLayersEffect(
     attachments,
   });
   if (result.ok === false) return rejectTarget(target, result.reply);
-  const master = await readMaster(target, current, deps.files);
+  const master = await readVersionMaster(manager, deps.files, current);
   const elements = master
     ? await colorNewTexts(current.elements, result.elements, {
         master,
@@ -95,26 +121,6 @@ export async function applyLayersEffect(
     const where = targetOfFirst(converted.actions, current.elements);
     return rejectTarget(target, noLayerChangeText(where, zones));
   }
-  Object.assign(version, {
-    operation: 'set_layer' as const,
-    status: 'ready' as const,
-    step: 'done' as const,
-    parentVersionId: current.id,
-    masterAssetId: current.masterAssetId,
-    previewAssetId: current.previewAssetId,
-    elements,
-    metrics: { ...version.metrics, layer: { changed: result.changed } },
-  });
-  await manager.save(version);
-  scene.currentVersionId = version.id;
-  await pruneSceneAssets(manager, scene);
-  await settleUserMessage(manager, version.id, 'done');
-  await addAssistantMessage(manager, {
-    sceneId: scene.id,
-    versionId: version.id,
-    content: diff.text as string,
-    status: 'done',
-  });
-  await bumpRevision(manager, scene);
-  await emitVersionEvent(manager, scene, version, 'version.ready');
+  await saveLayerVersion(target, current, { elements, changed: result.changed });
+  await finishLayerTurn(target, diff.text as string);
 }

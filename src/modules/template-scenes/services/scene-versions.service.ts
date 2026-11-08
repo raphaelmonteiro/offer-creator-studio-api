@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
+import { paintedMetricsOf } from '../domain/scene-painted-text';
 import { PatchElementsDto } from '../dto/patch-elements.dto';
 import { SceneElement } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
@@ -98,6 +99,8 @@ export class SceneVersionsService {
               masterAssetId: current.masterAssetId,
               previewAssetId: current.previewAssetId,
               elements,
+              // A master não muda: o texto pintado da atual segue valendo (R66).
+              metrics: paintedMetricsOf(current),
               isOpenManual: true,
               correlationId: randomUUID(),
               createdByUserId: userId,
