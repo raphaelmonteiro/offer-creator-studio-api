@@ -28,15 +28,18 @@ import {
 } from './dto/list-scenes-query.dto';
 import { PatchElementsDto } from './dto/patch-elements.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { GenerateReferenceDto, ReviseReferenceDto } from './dto/reference.dto';
 import { RestoreVersionDto } from './dto/restore-version.dto';
 import { FaceKey } from './domain/scene-faces';
 import { sceneNotFound, versionNotFound } from './scene.errors';
 import { SceneFacesService } from './services/scene-faces.service';
 import { SceneLogoService } from './services/scene-logo.service';
+import { SceneReferenceService } from './services/scene-reference.service';
 import { SceneTurnService } from './services/scene-turn.service';
 import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
+import { TemplateSceneReferenceEnabledGuard } from './template-scene-reference-enabled.guard';
 
 /** Id que não é UUID também é "cena não encontrada" (sem revelar nada além disso). */
 export const SceneIdPipe = new ParseUUIDPipe({ exceptionFactory: () => sceneNotFound() });
@@ -53,6 +56,7 @@ export class TemplateScenesController {
     private readonly logos: SceneLogoService,
     private readonly turns: SceneTurnService,
     private readonly faces: SceneFacesService,
+    private readonly references: SceneReferenceService,
   ) {}
 
   @Post()
@@ -135,6 +139,62 @@ export class TemplateScenesController {
     @CurrentUser() user: { id: string },
   ) {
     return this.faces.deriveFace(id, faceKey as FaceKey, {
+      expectedRevision: dto.expectedRevision,
+      userId: user?.id ?? null,
+    });
+  }
+
+  @Post(':id/reference')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(TemplateSceneReferenceEnabledGuard)
+  @SkipValidation()
+  @UseInterceptors(createFileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary:
+      'Envia o encarte de referência (JPG ou PNG até 20 MB; campos `file` e `expectedRevision`) e abre a leitura da ficha-conceito (assíncrono)',
+  })
+  uploadReference(
+    @Param('id', SceneIdPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('expectedRevision') expectedRevision: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.references.upload(id, file, { expectedRevision, userId: user?.id ?? null });
+  }
+
+  @Post(':id/reference/revise')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(TemplateSceneReferenceEnabledGuard)
+  @ApiOperation({
+    summary:
+      'Corrige a ficha proposta (até 5 vezes por encarte) e lê o encarte de novo (assíncrono)',
+  })
+  reviseReference(
+    @Param('id', SceneIdPipe) id: string,
+    @Body() dto: ReviseReferenceDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.references.revise(id, {
+      expectedRevision: dto.expectedRevision,
+      note: dto.note,
+      userId: user?.id ?? null,
+    });
+  }
+
+  @Post(':id/reference/generate')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(TemplateSceneReferenceEnabledGuard)
+  @ApiOperation({
+    summary:
+      'Gera a imagem da face 0 a partir da ficha proposta ("Gerar assim") ou repete a geração antes de qualquer edição (assíncrono, uma chamada de imagem)',
+  })
+  generateFromReference(
+    @Param('id', SceneIdPipe) id: string,
+    @Body() dto: GenerateReferenceDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.references.generate(id, {
       expectedRevision: dto.expectedRevision,
       userId: user?.id ?? null,
     });

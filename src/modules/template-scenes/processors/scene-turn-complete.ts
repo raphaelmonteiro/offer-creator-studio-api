@@ -16,6 +16,7 @@ import { pruneSceneAssets } from '../services/scene-retention';
 import { closeTurnBrief } from '../services/scene-turn-brief';
 import { cancelVersion, emitVersionReady } from './scene-turn-finish';
 import { applyJudgeVerdict, JudgeBriefVerdict } from '../domain/scene-brief';
+import { conceptDoneItem } from '../domain/scene-reference-plan';
 
 export interface StoredFile {
   url: string;
@@ -38,6 +39,8 @@ export interface CompleteExtra {
   judge?: JudgeBriefVerdict;
   /** Derivação do verso: o fim do turno não supera os pedidos em aberto (o do verso fica para o cliente pedir). */
   keepBrief?: boolean;
+  /** Geração por referência: o item "Conceito do encarte: ..." entra no brief como pedido atendido. */
+  briefDone?: string;
 }
 
 /** Imagem da versão: arquivos novos (master e prévia). Camadas e desfazer não passam por aqui: reaproveitam a master sob o lock do Diretor. */
@@ -114,6 +117,13 @@ export async function readyVersion(
     version.metrics = { ...version.metrics, judgeBrief: judged.changes };
   }
   if (!extra.keepBrief) await closeTurnBrief(manager, scene, version, { messageId });
+  if (extra.briefDone) {
+    scene.brief = conceptDoneItem(scene.brief ?? [], {
+      text: extra.briefDone,
+      messageId,
+      now: new Date(),
+    });
+  }
   if (extra.requestedRegion !== undefined) version.requestedRegion = extra.requestedRegion;
   await stampVersionZones(manager, scene, version);
   await manager.save(version);

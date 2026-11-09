@@ -99,6 +99,8 @@ export interface JudgeFacts {
   /** O juiz viu emenda ou objeto flutuando (D-44); a descrição já passou pelo filtro de frases proibidas. */
   seam: boolean;
   seamDescription: string;
+  /** Só nas versões nascidas do encarte: o que o juiz viu e não devia estar no fundo (logo, selo, medalhão, produto, pessoa). */
+  leak?: string;
   /** Há texto pedido (ou já pintado) e o juiz o leu; ausente quando não havia texto a conferir. */
   text?: TextFacts;
   /** Item aberto da mesma mensagem que esta rodada não fez (D-54): o chat pergunta se faz agora. */
@@ -120,6 +122,11 @@ const quoted = (line: string): string => `“${line}”`;
 function seamNote(description: string): string {
   const detail = dropFinal(description);
   return `Na conferência, vi o que parece uma emenda ou um objeto flutuando${detail ? `: ${detail}` : ''}. Diga o que ajustar ou peça para voltar.`;
+}
+
+/** Conteúdo que não devia estar no fundo do encarte (D-1): o chat conta e oferece voltar; nada é refeito sozinho. */
+function leakNote(description: string): string {
+  return `Na conferência, vi algo que não devia estar no fundo: ${dropFinal(description)}. Diga o que ajustar ou use "Voltar para a anterior".`;
 }
 
 /** Quantas vezes o código tentou, e por que parou antes da segunda. */
@@ -196,6 +203,7 @@ export function afterImageReply(
       ? `Vi na imagem um texto que você não pediu: ${quoted(dropFinal(facts.extraText))}. Diga se quer que eu tire.`
       : null,
     facts.seam ? seamNote(facts.seamDescription) : null,
+    facts.leak ? leakNote(facts.leak) : null,
   ].filter((note): note is string => note !== null);
   return [head, ...notes].join(' ');
 }
@@ -221,6 +229,7 @@ const FAILURE_REPLIES: Record<SceneFailureCode, string> = {
   PAID_CALL_LIMIT:
     'Atingi o limite de chamadas ao serviço de imagem para este pedido. Tente de novo com um pedido mais simples.',
   DIRECTOR_UNAVAILABLE: 'Não consegui ler seu pedido agora. Nada foi alterado.',
+  REFERENCE_READ_FAILED: 'Não consegui ler o encarte. Tente enviar de novo.',
 };
 
 export function failureReply(code: SceneFailureCode): string {
@@ -328,3 +337,17 @@ export const LOGO_FITTED_NOTE = 'Ajustei a logo ao novo espaço do cabeçalho.';
 /** D-6: a primeira Externa sai com o cabeçalho padrão; o tamanho muda depois, pela conversa. */
 export const headerDefaultAnnouncement = (cm: number): string =>
   `Vou criar a externa. O cabeçalho da capa sai no tamanho padrão (${cmText(cm)} cm); se quiser, peça depois um cabeçalho maior ou menor.`;
+
+/** Referência de encarte (change add-template-scene-from-reference): textos fixos do código, nunca do modelo. */
+export const REFERENCE_TEXTS = {
+  uploaded: (fileName: string): string => `Encarte enviado como referência: ${fileName}.`,
+  confirm: 'Gerar assim.',
+  retry: 'Tentar de novo com o encarte.',
+  notFlyer: 'Não reconheci um encarte nessa imagem. Envie outra.',
+  /** PV-R2: recusas do arquivo, na ordem em que são conferidas. */
+  notImage: 'Envie o encarte em JPG ou PNG (PDF ainda não: exporte a página como imagem).',
+  tooBig: 'O arquivo passa de 20 MB.',
+  tooSmall: 'A imagem é pequena demais: envie com pelo menos 800 px no lado maior.',
+  unreadable: 'Não foi possível ler a imagem.',
+  missingFile: 'Envie o arquivo do encarte.',
+} as const;

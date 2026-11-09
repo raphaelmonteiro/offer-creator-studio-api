@@ -9,10 +9,19 @@ import { cancelVersion, emitVersionEvent, failVersion } from './scene-turn-finis
 import { SceneLockService } from '../services/scene-lock.service';
 import { CallOutcome, closeCallIn, recordCallIn } from './scene-turn-calls';
 import { loadTurnContext, TurnContext } from './scene-turn-context';
-import { CompleteExtra, CompleteImage, readyVersion, StoredFile } from './scene-turn-complete';
+import { ReferenceRead } from '../domain/scene-reference.types';
+import { patchReference } from '../services/scene-reference-state';
+import {
+  CompleteExtra,
+  CompleteImage,
+  readyVersion,
+  rejectVersion,
+  StoredFile,
+} from './scene-turn-complete';
 
 export type { CompleteExtra, StoredFile } from './scene-turn-complete';
 export type { TurnAttachmentAsset, TurnContext, TurnParent } from './scene-turn-context';
+export type { TurnReference } from './scene-turn-reference';
 
 export type { CallOutcome } from './scene-turn-calls';
 export type CompleteResult = 'ready' | 'cancelled' | 'stale';
@@ -138,6 +147,27 @@ export class SceneTurnState {
         parentElements: structuredClone(ctx.parent?.elements ?? []),
       };
       return readyVersion(manager, scene, version, { target, image, extra, queue: this.queue });
+    });
+  }
+
+  /**
+   * `running` → `rejected` sem imagem, com a resposta fixa e a ficha do encarte gravada (a leitura da referência).
+   * `cancelled` quando houve pedido de parada durante a chamada (o custo já está gravado).
+   */
+  reject(
+    ctx: TurnContext,
+    outcome: { reply: string; reference: Partial<ReferenceRead> },
+  ): Promise<'rejected' | 'cancelled' | 'stale'> {
+    return this.run(ctx, async (manager, scene) => {
+      const version = await this.runningVersion(manager, ctx);
+      if (!version) return 'stale';
+      if (scene.deletedAt || version.cancelRequestedAt) {
+        await this.cancelIn(manager, scene, version);
+        return 'cancelled';
+      }
+      patchReference(version, outcome.reference);
+      await rejectVersion(manager, scene, version, outcome.reply);
+      return 'rejected';
     });
   }
 

@@ -1,4 +1,6 @@
 import { cleanRequest } from './scene-clean-text';
+import { ReferenceConcept } from './scene-reference.types';
+import { outerConceptBlock, REFERENCE_PARAGRAPH, tintLabel } from './scene-reference-prompts';
 import { SceneFormatSpec } from './scene-formats';
 import { TabloidFaceKey, tabloidMeasures, TabloidMeasures } from './scene-tabloid';
 import { SceneZones } from './scene.types';
@@ -26,6 +28,8 @@ export interface OuterPromptInput extends TabloidPromptInput {
   exactText?: string[];
   /** Linhas de correção da refação do texto (o juiz leu diferente do pedido), antes do bloco de texto. */
   correctionLines?: string[];
+  /** Ficha limpa do encarte de referência (D-2): no lugar do pedido, sem texto e sem selo. */
+  concept?: ReferenceConcept;
 }
 
 const measuresOf = (input: TabloidPromptInput): TabloidMeasures =>
@@ -41,6 +45,9 @@ const foldStrip = (m: TabloidMeasures): string => `x from ${m.foldFrom} to ${m.f
 
 const NO_TEXT = 'no text, no letters, no numbers, no logo, no watermark';
 const NO_BRANDS = 'No real brands or real product packaging.';
+/** Com a referência (D-1): o espaço da logo fica liso, sem selo nem medalhão no lugar dela. */
+const NO_BADGES =
+  'No badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes; the logo space stays plain soft background.';
 
 /** Bloco de texto da Externa: o texto pedido, copiado, só no cabeçalho; sem pedido, nenhum texto. */
 function outerTextBlock(lines: string[] | undefined): string {
@@ -77,12 +84,20 @@ export function buildOuterPrompt(input: OuterPromptInput): string {
   const lowest = Math.round(m.headerEnd * HEADER_SAFE);
   return [
     'Create a new image: the OUTER side of a 4-page supermarket newspaper flyer, as print-ready background artwork. Only the painted background, the cover header and the back-cover footer band are drawn; the products, the logo and the store text are added later by another tool.',
-    `Client request (Portuguese, follow its theme, mood, colors and header decoration): "${cleanRequest(input.request)}".${openItemsText(input.openItems)}`,
+    input.concept
+      ? outerConceptBlock(input.concept)
+      : `Client request (Portuguese, follow its theme, mood, colors and header decoration): "${cleanRequest(input.request)}".${openItemsText(input.openItems)}`,
     `Format and use: ${sheetText(format, m)}. The sheet is printed on both sides and folded vertically at the exact center (x = ${m.foldX} px) into two pages of ${side} x ${format.printHeightCm} cm: the LEFT half is the back cover and the RIGHT half is the front cover. The background is ONE continuous picture that crosses the fold with no seam, no border and no visible dividing line.`,
     RICH_STYLE,
+    ...(input.concept
+      ? [
+          `The open product areas keep a soft tint of ${tintLabel(input.concept)}, never pure white.`,
+        ]
+      : []),
     `Composition: (a) RIGHT half: a cover header strictly confined to y from 0 to ${m.headerEnd} px and strictly to the right of x = ${m.headerX} px, spreading up to the right edge. The lowest point of any header element must be at y = ${lowest} px or higher, and never lower than ${m.headerEnd} px: the header is a shallow strip at the top, and the open area starts right below it. Its lower edge is never a straight cut: it ends in a ribbon, a wave or a soft curve. Keep a clean empty space of ${m.logoSize} x ${m.logoSize} px at the top-left of the header (x from ${m.logoX} to ${logoEnd}, y from ${m.logoY} to ${m.logoY + m.logoSize}) with only soft background, for the client logo placed later: no title, letters or decoration may enter it, and the header artwork starts at x = ${logoEnd + LOGO_GAP}. (b) Below the header the right half (y from ${m.headerEnd + 20} to ${m.height} px) keeps the same rich background, with decorative elements only near the right and bottom edges; the central product area stays open, with no large objects and no strong contrast. (c) LEFT half: the same rich background with decorative elements along its top, left and bottom edges; no header, and the central product area stays open. (d) A finished footer band at the bottom of the left half: a solid, opaque band in a deep tone of the theme, x from 0 to ${m.footerEndX} px and y from ${m.footerStart} to ${m.height} px, with a ribbon-like curved top edge (a gentle wave with a thin lighter accent line), a clean straight end at x = ${m.footerEndX} px, nothing drawn on it. It never fades, blurs or dissolves. (e) Keep a vertical safe strip ${m.foldTo - m.foldFrom} px wide centered on the fold (${foldStrip(m)}) with no object and no light source: only the continuous background texture may cross it.`,
     ...(input.correctionLines ?? []),
-    outerTextBlock(input.exactText),
+    ...(input.concept ? [REFERENCE_PARAGRAPH, NO_BADGES] : []),
+    outerTextBlock(input.concept ? undefined : input.exactText),
   ].join('\n');
 }
 

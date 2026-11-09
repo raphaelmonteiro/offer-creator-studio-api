@@ -30,6 +30,8 @@ export type VisionAssessment =
       /** O juiz viu emenda, corte brusco ou objeto flutuando sobre ilha ou faixa (D-44); não muda o veredito. */
       seam: boolean;
       seamDescription: string;
+      /** Só nas versões nascidas do encarte: logo, selo, medalhão, círculo vazio, produto ou pessoa que o juiz viu (até 120 caracteres). */
+      leak?: string;
       costUsd: number | null;
       requestId: string | null;
       latencyMs: number;
@@ -62,11 +64,17 @@ export interface JudgePromptInput {
   expectedText?: string[];
   /** O recorte da região do texto vai como imagem a mais. */
   hasCrop?: boolean;
+  /** A imagem nasceu do encarte de referência: o juiz também relata logo, selo, medalhão, produto e pessoa. */
+  reference?: boolean;
   /** Texto que já estava pintado na imagem e a rodada não pede de novo: não é texto "extra" (D-51, D-56). */
   knownText?: string[];
 }
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+/** Versões nascidas do encarte (D-1): o juiz relata o que não devia estar no fundo, em `conteudo_indevido`. */
+const LEAK_REQUEST =
+  'Esta imagem deve ser só um fundo decorativo. Acrescente ao JSON da resposta a chave "conteudo_indevido" (string de até 120 caracteres): descreva, em português, qualquer logo, selo, medalhão, emblema, círculo ou moldura vazia, produto, pessoa ou QR code visível na imagem DEPOIS; vazia se não houver nada disso.';
 
 /** Pedido de leitura do texto (D-51): as linhas esperadas e, se houver, a imagem a mais com o recorte da região. */
 function textRequest(input: JudgePromptInput): string[] {
@@ -107,6 +115,7 @@ export function buildVisionPrompt(input: JudgePromptInput): string {
     ...textRequest(input),
     'Responda só com JSON no formato {"atendeu": "sim"|"parcial"|"nao", "mudou": string, "vistos": string[], "nao_vistos": string[], "faltou": string, "texto_lido": [{"pedido": string, "lido": string}], "texto_extra": string, "emenda": boolean, "emenda_descricao": string}.',
     '"atendeu" diz se a mensagem do cliente foi atendida. "mudou" descreve em uma frase curta, em português, o que mudou em relação ao pedido (e não qualquer diferença). "vistos" lista os ids dos pedidos em aberto cujo RESULTADO você VÊ na imagem DEPOIS (num pedido de tirar algo, o item não aparece mais; num pedido de colocar ou mudar, o resultado aparece), e "nao_vistos" os ids cujo resultado você NÃO vê (por exemplo, o item que devia sair continua lá). "faltou" é uma frase nominal curta em português sobre o que o cliente pediu e não aparece (por exemplo: a frase “Promoção de Páscoa” na placa), até 160 caracteres, vazia se nada falta. "texto_lido" só vale quando há texto esperado (veja acima): para cada linha esperada, "pedido" é a linha como foi pedida e "lido" é o que está ESCRITO na imagem, transcrito caractere por caractere, sem corrigir nada (acentos, cedilha, maiúsculas, vírgulas, R$); se não achar a linha, "lido" fica vazio; sem texto esperado, lista vazia. "texto_extra" é o texto, letras ou números legíveis pintados na imagem DEPOIS que não estão nas linhas esperadas (até 120 caracteres; ano pintado também conta aqui, sem mudar "atendeu"), vazio se não houver. "emenda" é true se a imagem DEPOIS tem emenda, corte brusco ou transição abrupta entre uma parte e outra, ou objeto ou grupo de objetos flutuando, apoiado em ilha, faixa ou pedaço de terreno separado do resto da cena; "emenda_descricao" diz isso em uma frase curta (vazia se "emenda" for false). "emenda" não muda "atendeu". Não afirme nada sobre o resto da imagem.',
+    ...(input.reference ? [LEAK_REQUEST] : []),
   ].join('\n');
 }
 
@@ -125,6 +134,7 @@ interface Parsed {
   extraText: string;
   seam: boolean;
   seamDescription: string;
+  leak: string;
 }
 
 const text = (value: unknown, max: number): string =>
@@ -165,6 +175,7 @@ function parseAssessment(raw: string, input: JudgePromptInput): Parsed | null {
       extraText: text(json.texto_extra, 120),
       seam: json.emenda,
       seamDescription: text(json.emenda_descricao, 300),
+      leak: text(json.conteudo_indevido, 120),
     };
   } catch {
     return null;
@@ -240,10 +251,11 @@ export class SceneVisionService {
       if (!parsed) {
         return { ok: false, reason: 'invalid_json', costUsd, requestId: outcome.requestId };
       }
-      const { readText, ...rest } = parsed;
+      const { readText, leak, ...rest } = parsed;
       return {
         ok: true,
         ...rest,
+        ...(leak ? { leak } : {}),
         textLines: compareReadText(input.expectedText ?? [], readText),
         costUsd,
         requestId: outcome.requestId,

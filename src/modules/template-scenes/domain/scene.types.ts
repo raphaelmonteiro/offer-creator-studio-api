@@ -16,6 +16,8 @@ export const SCENE_VERSION_OPERATIONS = [
   'restore',
   /** Verso derivado da frente por edição (change add-template-scene-faces). */
   'derive_face',
+  /** Leitura do encarte de referência em ficha-conceito: versão sem imagem (change add-template-scene-from-reference). */
+  'read_reference',
 ] as const;
 export type SceneVersionOperation = (typeof SCENE_VERSION_OPERATIONS)[number];
 
@@ -65,6 +67,8 @@ export const SCENE_ASSET_ROLES = [
   'crop',
   'logo',
   'element',
+  /** O encarte de referência reduzido; não expira (change add-template-scene-from-reference). */
+  'reference',
 ] as const;
 export type SceneAssetRole = (typeof SCENE_ASSET_ROLES)[number];
 
@@ -81,6 +85,8 @@ export const SCENE_FAILURE_CODES = [
   'PAID_CALL_LIMIT',
   /** O Diretor não respondeu, estourou o tempo ou devolveu saída inválida duas vezes. */
   'DIRECTOR_UNAVAILABLE',
+  /** A visão não leu o encarte (fora do ar ou saída inválida). */
+  'REFERENCE_READ_FAILED',
 ] as const;
 export type SceneFailureCode = (typeof SCENE_FAILURE_CODES)[number];
 

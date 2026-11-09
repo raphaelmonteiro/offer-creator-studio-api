@@ -1,3 +1,4 @@
+import type { SceneReferenceView } from './scene-reference-view';
 import {
   MaskShape,
   Rect,
@@ -138,6 +139,8 @@ export interface SceneDetailView extends SceneSummaryView {
   /** Versão `queued`/`running`, para a tela mostrar leitura, janela, etapa e "Parar" depois de recarregar. */
   activeVersion: SceneVersionView | null;
   messages: SceneMessageView[];
+  /** O encarte de referência e a ficha dele (change add-template-scene-from-reference); `null` sem encarte. */
+  reference: SceneReferenceView | null;
   /** Só as versões `ready` com imagem da face pedida (padrão: face 0), com `displayNumber`; o filtro vale também na paginação. */
   versions: {
     items: SceneVersionView[];

@@ -42,6 +42,16 @@ export class SceneTurnSupport {
     }
   }
 
+  /** Arquivo da cena pela URL (o encarte reduzido da referência), ou `null` se não está em disco. */
+  async readFile(url: string | null | undefined): Promise<Buffer | null> {
+    if (!url) return null;
+    try {
+      return await this.files.read(url);
+    } catch {
+      return null;
+    }
+  }
+
   /** Reduz uma imagem inteira para o juiz: JPEG até 1.536 px. */
   judgeImage(png: Buffer): Promise<Buffer> {
     return sharp(png)

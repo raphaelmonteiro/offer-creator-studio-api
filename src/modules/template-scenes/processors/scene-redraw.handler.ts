@@ -26,7 +26,8 @@ interface EditInput {
 
 /**
  * O job de imagem (`generate` e `redraw`): a chamada paga que o código monta a partir do plano do Diretor.
- * - `generate`: primeira imagem da cena e imagem nova, sem imagem de referência (`/images/generations`);
+ * - `generate`: primeira imagem da cena e imagem nova, sem imagem de referência (`/images/generations`); a nascida da
+ *   ficha do encarte é a única exceção: `edit` com o encarte reduzido (change add-template-scene-from-reference);
  * - `redraw`: sempre a master da versão atual inteira, no tamanho nativo (D-31, D-32), a `gpt-image-2.6-sunburst`
  *   (`/images/edits`), com `markup` quando o cliente marcou. Sem recorte, máscara nem recomposição (D-22). Logo é
  *   camada e nunca vai ao modelo (G1).
@@ -64,21 +65,27 @@ export class SceneRedrawHandler implements TurnHandler {
   private async generate(ctx: TurnContext, plan: DirectorPlan): Promise<void> {
     const { state } = this.support;
     if (!(await state.advance(ctx, 'generating'))) return;
+    // Geração nascida da ficha do encarte: a única imagem nova com referência (`edit` com o encarte reduzido).
+    const concept = ctx.reference?.concept ?? undefined;
+    const referenceImage = concept ? await this.support.readFile(ctx.reference?.assetUrl) : null;
+    if (concept && !referenceImage) {
+      this.logger.error(`Encarte ausente para gerar (versão ${ctx.versionId})`);
+      await state.fail(ctx, 'PROVIDER_ERROR');
+      return;
+    }
     const size = `${ctx.widthPx}x${ctx.heightPx}`;
     // A primeira imagem da cena não leva a linha de pedidos em aberto (D-38): o prompt julgado excelente não muda.
-    const openItems = ctx.parent ? ctx.openItems.map((item) => item.text) : undefined;
+    const openItems = ctx.parent && !concept ? ctx.openItems.map((item) => item.text) : undefined;
     const build = (corrections: TextCorrection[] = []): Attempt => {
-      const prompt = generatePromptFor(ctx, { plan, openItems, corrections });
+      const prompt = generatePromptFor(ctx, { plan, openItems, corrections, concept });
       const model = this.support.model();
+      const quality = this.support.generateQuality();
+      const base = { model, prompt, size, quality, correlationId: ctx.correlationId };
       const run = () =>
-        this.provider.generate({
-          model,
-          prompt,
-          size,
-          quality: this.support.generateQuality(),
-          correlationId: ctx.correlationId,
-        });
-      return { prompt, spec: { kind: 'generate', model, size, run } };
+        referenceImage
+          ? this.provider.edit({ ...base, image: referenceImage })
+          : this.provider.generate(base);
+      return { prompt, spec: { kind: referenceImage ? 'edit' : 'generate', model, size, run } };
     };
     const attempt = build();
     const result = await this.calls.imageCall(ctx, attempt.spec);

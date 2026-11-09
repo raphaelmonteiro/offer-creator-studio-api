@@ -1,3 +1,5 @@
+import { buildConceptPrompt } from '../domain/scene-reference-prompts';
+import { MOCK_REFERENCE_MARKERS } from './mock-scene-reference-concept';
 import { MockSceneVisionClient, MOCK_VISION_MARKERS } from './mock-scene-vision.client';
 
 const client = new MockSceneVisionClient();
@@ -57,5 +59,38 @@ describe('MockSceneVisionClient (o juiz simulado)', () => {
   it('#juiz-invalido devolve texto que não é JSON, e #juiz-falha lança', async () => {
     expect((await compare('x #juiz-invalido')).text).toBe('não é json');
     await expect(compare('x #juiz-falha')).rejects.toThrow('juiz indisponível');
+  });
+});
+
+describe('MockSceneVisionClient: leitura do encarte', () => {
+  const read = async (prompt: string) => JSON.parse((await compare(prompt)).text);
+
+  it('devolve a ficha fixa do R1, com is_retail_flyer e um medalhão de carrinho a mais', async () => {
+    const ficha = await read(buildConceptPrompt());
+    expect(ficha.is_retail_flyer).toBe(true);
+    expect(ficha.theme_pt).toBe('festa junina');
+    expect(ficha.signature_elements.map((e: { element: string }) => e.element)).toContain(
+      'Circular shopping-cart medallion',
+    );
+  });
+
+  it('a correção que tira as bandeirinhas as tira; outra correção não', async () => {
+    const previous = (await read(buildConceptPrompt())) as never;
+    const names = async (note: string) =>
+      (await read(buildConceptPrompt({ note, previous }))).signature_elements.map(
+        (e: { element: string }) => e.element,
+      );
+    expect(await names('não tem bandeirinha, tira')).not.toContain('Triangular paper bunting');
+    expect(await names('mais vermelho')).toContain('Triangular paper bunting');
+  });
+
+  it('os marcadores simulam a imagem que não é encarte, a saída inválida e a visão fora do ar', async () => {
+    const previous = (await read(buildConceptPrompt())) as never;
+    const withMarker = (marker: string) => buildConceptPrompt({ note: marker, previous });
+    expect(await read(withMarker(MOCK_REFERENCE_MARKERS.notFlyer))).toEqual({
+      is_retail_flyer: false,
+    });
+    expect((await compare(withMarker(MOCK_REFERENCE_MARKERS.invalid))).text).toBe('não é json');
+    await expect(compare(withMarker(MOCK_REFERENCE_MARKERS.fail))).rejects.toThrow('Mock');
   });
 });

@@ -25,6 +25,7 @@ import { SceneCallRunner } from '../processors/scene-call-runner';
 import { SceneDirectorProcessor } from '../processors/scene-director.processor';
 import { SceneDirectorState } from '../processors/scene-director-state';
 import { SceneDeriveFaceHandler } from '../processors/scene-derive-face.handler';
+import { SceneReferenceReadHandler } from '../processors/scene-reference-read.handler';
 import { SceneRedrawHandler } from '../processors/scene-redraw.handler';
 import { SceneTemplateSyncProcessor } from '../processors/scene-template-sync.processor';
 import { SceneTurnProcessor } from '../processors/scene-turn.processor';
@@ -44,6 +45,8 @@ import { SceneFilesService } from '../services/scene-files.service';
 import { SceneLockService } from '../services/scene-lock.service';
 import { SceneLogoService } from '../services/scene-logo.service';
 import { SceneReadService } from '../services/scene-read.service';
+import { SceneReferenceService } from '../services/scene-reference.service';
+import { SceneReferenceVisionService } from '../services/scene-reference-vision.service';
 import { SceneReconcilerService } from '../services/scene-reconciler.service';
 import { SceneTemplateFilesService } from '../services/scene-template-files.service';
 import { SceneTemplateSweepService } from '../services/scene-template-sweep.service';
@@ -52,6 +55,7 @@ import { SceneVersionsService } from '../services/scene-versions.service';
 import { TemplateScenesService } from '../services/template-scenes.service';
 import { TemplateSceneEventsController } from '../template-scene-events.controller';
 import { TemplateSceneEnabledGuard } from '../template-scene-enabled.guard';
+import { TemplateSceneReferenceEnabledGuard } from '../template-scene-reference-enabled.guard';
 import { TemplateScenesAdminController } from '../template-scenes-admin.controller';
 import { TemplateScenesController } from '../template-scenes.controller';
 
@@ -121,6 +125,7 @@ export async function createSceneE2eApp(
       AuthService,
       JwtStrategy,
       TemplateSceneEnabledGuard,
+      TemplateSceneReferenceEnabledGuard,
       SceneLockService,
       SceneReadService,
       SceneFilesService,
@@ -128,6 +133,7 @@ export async function createSceneE2eApp(
       SceneVersionsService,
       SceneTurnService,
       SceneFacesService,
+      SceneReferenceService,
       TemplateScenesService,
       SceneTurnState,
       SceneTurnSupport,
@@ -135,6 +141,8 @@ export async function createSceneE2eApp(
       SceneVisionService,
       SceneRedrawHandler,
       SceneDeriveFaceHandler,
+      SceneReferenceVisionService,
+      SceneReferenceReadHandler,
       SceneDirectorService,
       SceneDirectorContextService,
       SceneDirectorState,

@@ -26,6 +26,7 @@ import {
   requestedTargetOf,
 } from './scene-message-target';
 import { addAssistantMessage, settleUserMessage } from './scene-messages';
+import { discardProposed, settleReferenceOnStop } from './scene-reference-state';
 import { closeTurnBrief } from './scene-turn-brief';
 import {
   assertExpectedRevision,
@@ -95,6 +96,8 @@ export class SceneTurnService {
           await assertTargetElementExists(manager, face, dto);
         }
         await closeOpenManual(manager, sceneId, face.index);
+        // Mensagem comum com a ficha do encarte proposta: a ficha é descartada e a mensagem segue o fluxo de hoje (PV-R9).
+        await discardProposed(manager, sceneId);
         return this.enqueueReading(manager, scene, { dto, userId }, { hasImage, face });
       });
     } catch (error) {
@@ -205,6 +208,7 @@ export class SceneTurnService {
     version.status = 'cancelled';
     // Parar na janela fecha o pedido do turno e o que sobrou do anterior (D-59).
     await closeTurnBrief(manager, scene, version, { stopped: true });
+    await settleReferenceOnStop(manager, version);
     await manager.save(version);
     await settleUserMessage(manager, version.id, 'failed');
     await addAssistantMessage(manager, {

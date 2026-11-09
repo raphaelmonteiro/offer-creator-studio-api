@@ -141,3 +141,32 @@ export const invalidBody = (message: string) =>
 
 export const adminTokenInvalid = () =>
   sceneError(HttpStatus.UNAUTHORIZED, 'UNAUTHORIZED', 'Token administrativo inválido.');
+
+/** Referência de encarte (change add-template-scene-from-reference). */
+export const referenceDisabled = () =>
+  sceneError(HttpStatus.NOT_FOUND, 'REFERENCE_DISABLED', 'Recurso não disponível');
+
+export const referenceInvalid = (message: string) =>
+  sceneError(HttpStatus.UNPROCESSABLE_ENTITY, 'REFERENCE_INVALID', message);
+
+export const referenceOnlyAtStart = () =>
+  sceneError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'REFERENCE_ONLY_AT_START',
+    'A referência vale só para começar o template.',
+  );
+
+export const referenceNotProposed = () =>
+  sceneError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'REFERENCE_NOT_PROPOSED',
+    'Não há uma ficha do encarte esperando a sua confirmação.',
+  );
+
+export const referenceReviseLimit = (limit: number) =>
+  sceneError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'REFERENCE_REVISE_LIMIT',
+    `Você já corrigiu ${limit} vezes. Gere assim ou envie outro encarte.`,
+    { limit },
+  );

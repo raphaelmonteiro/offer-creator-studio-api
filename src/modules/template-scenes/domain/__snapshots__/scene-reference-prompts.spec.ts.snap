@@ -1,0 +1,121 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Externa do jornal com referência (D-2) snapshot com a ficha do R2: conceito no lugar do pedido, tinta, parágrafo e sem texto 1`] = `
+"Create a new image: the OUTER side of a 4-page supermarket newspaper flyer, as print-ready background artwork. Only the painted background, the cover header and the back-cover footer band are drawn; the products, the logo and the store text are added later by another tool.
+Art concept from the reference flyer (follow its theme, signature elements, texture and palette): Theme: A lively Brazilian supermarket savings campaign with a bold, high-energy promotional mood. Header: Abstract cobalt and cyan rays, subtle halftone dots. Edges: Deep blue geometric rays with halftone dots (Vivid cobalt and cyan, angled and energetic, with a subtle darker blue vignette.); Small triangular paper bunting (Bright cyan and blue accents, sparse and playful.). Background texture: Cobalt-to-cyan geometric rays with scattered halftone dots and a subtle soft glow. Palette: #073CB8, #0879ED, #21D8E8, #F6D923, #C93624, #F5F2E9.
+Format and use: sheet art of 55 x 41 cm (54 x 40 cm trim plus 0.5 cm bleed), landscape, 3328x2480 px, filling the whole canvas edge to edge. The sheet is printed on both sides and folded vertically at the exact center (x = 1664 px) into two pages of 27 x 40 cm: the LEFT half is the back cover and the RIGHT half is the front cover. The background is ONE continuous picture that crosses the fold with no seam, no border and no visible dividing line.
+Style: a rich, finished, professional retail-flyer artwork, as good as a top graphic designer's work. The whole sheet has a lush continuous background: subtle paper or fabric texture, soft gradients, gentle light, soft bokeh and decorative elements of the theme (the same family of elements everywhere) spread along ALL the outer edges and corners of BOTH halves, always fading toward the center. Colors are saturated and harmonious. Never a flat blank wash.
+The open product areas keep a soft tint of light tint #E6ECF8, never pure white.
+Composition: (a) RIGHT half: a cover header strictly confined to y from 0 to 372 px and strictly to the right of x = 1780 px, spreading up to the right edge. The lowest point of any header element must be at y = 298 px or higher, and never lower than 372 px: the header is a shallow strip at the top, and the open area starts right below it. Its lower edge is never a straight cut: it ends in a ribbon, a wave or a soft curve. Keep a clean empty space of 312 x 312 px at the top-left of the header (x from 1800 to 2112, y from 30 to 342) with only soft background, for the client logo placed later: no title, letters or decoration may enter it, and the header artwork starts at x = 2160. (b) Below the header the right half (y from 392 to 2480 px) keeps the same rich background, with decorative elements only near the right and bottom edges; the central product area stays open, with no large objects and no strong contrast. (c) LEFT half: the same rich background with decorative elements along its top, left and bottom edges; no header, and the central product area stays open. (d) A finished footer band at the bottom of the left half: a solid, opaque band in a deep tone of the theme, x from 0 to 1574 px and y from 2232 to 2480 px, with a ribbon-like curved top edge (a gentle wave with a thin lighter accent line), a clean straight end at x = 1574 px, nothing drawn on it. It never fades, blurs or dissolves. (e) Keep a vertical safe strip 180 px wide centered on the fold (x from 1574 to 1754 px) with no object and no light source: only the continuous background texture may cross it.
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details.
+No badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes; the logo space stays plain soft background.
+Text: no text, no letters, no numbers, no logo, no watermark. No real brands or real product packaging."
+`;
+
+exports[`buildReferencePrompt: snapshots das 3 fichas do estudo Navarro em folheto-20x27 1`] = `
+"Original background template for a printed retail flyer, portrait 20.5 x 27.5 cm, 2480x3328 px, filling the whole canvas edge to edge. Theme: An October retail-sale concept with energetic, warm, celebratory styling. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
+
+Concept:
+- Header: the decorated header is strictly confined to the top 740 px (y from 0 to 740); keep its lowest decoration above y = 629 px. Lower edge: straight. Fill: Warm blurred color field with golden bokeh. Warm blurred color forms and soft bokeh (Vivid but softly defocused, with golden highlights and hints of green.)
+- Edges: No decorations on the edges.
+- Background texture: Softly blurred warm retail-inspired color field with gentle bokeh, strongest in the header and along the edges.
+- Body (from y = 740 to the bottom): one calm, continuous surface with a soft tint of light tint #F2E9EA, never pure white, keeping the palette (#7A2028, #D94335, #F2A12A, #FFE45A, #F7F1E6, #66834A) visible as a very gentle gradient or very subtle texture. Along the bottom 493 px, a thin Narrow warm-toned horizontal accent (Bright orange and yellow glow, kept subtle and continuous.) strip.
+
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details."
+`;
+
+exports[`buildReferencePrompt: snapshots das 3 fichas do estudo Navarro em folheto-27x40 1`] = `
+"Original background template for a printed retail flyer, portrait 27.5 x 41 cm, 2352x3504 px, filling the whole canvas edge to edge. Theme: An October retail-sale concept with energetic, warm, celebratory styling. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
+
+Concept:
+- Header: the decorated header is strictly confined to the top 526 px (y from 0 to 526); keep its lowest decoration above y = 447 px. Lower edge: straight. Fill: Warm blurred color field with golden bokeh. Warm blurred color forms and soft bokeh (Vivid but softly defocused, with golden highlights and hints of green.)
+- Edges: No decorations on the edges.
+- Background texture: Softly blurred warm retail-inspired color field with gentle bokeh, strongest in the header and along the edges.
+- Body (from y = 526 to the bottom): one calm, continuous surface with a soft tint of light tint #F2E9EA, never pure white, keeping the palette (#7A2028, #D94335, #F2A12A, #FFE45A, #F7F1E6, #66834A) visible as a very gentle gradient or very subtle texture. Along the bottom 350 px, a thin Narrow warm-toned horizontal accent (Bright orange and yellow glow, kept subtle and continuous.) strip.
+
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details."
+`;
+
+exports[`buildReferencePrompt: snapshots das 3 fichas do estudo Navarro em folheto-54x40 1`] = `
+"Original background template for a printed retail flyer, landscape 55 x 41 cm, 3328x2480 px, filling the whole canvas edge to edge. Theme: An October retail-sale concept with energetic, warm, celebratory styling. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
+
+Concept:
+- Header: the decorated header is strictly confined to the top 372 px (y from 0 to 372); keep its lowest decoration above y = 316 px. Lower edge: straight. Fill: Warm blurred color field with golden bokeh. Warm blurred color forms and soft bokeh (Vivid but softly defocused, with golden highlights and hints of green.)
+- Edges: No decorations on the edges.
+- Background texture: Softly blurred warm retail-inspired color field with gentle bokeh, strongest in the header and along the edges.
+- Body (from y = 372 to the bottom): one calm, continuous surface with a soft tint of light tint #F2E9EA, never pure white, keeping the palette (#7A2028, #D94335, #F2A12A, #FFE45A, #F7F1E6, #66834A) visible as a very gentle gradient or very subtle texture. Along the bottom 248 px, a thin Narrow warm-toned horizontal accent (Bright orange and yellow glow, kept subtle and continuous.) strip.
+
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details."
+`;
+
+exports[`buildReferencePrompt: snapshots das 3 fichas do estudo R1 em folheto-20x27 1`] = `
+"Original background template for a printed retail flyer, portrait 20.5 x 27.5 cm, 2480x3328 px, filling the whole canvas edge to edge. Theme: Brazilian June festival with a lively, colorful, celebratory mood. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
+
+Concept:
+- Header: the decorated header is strictly confined to the top 740 px (y from 0 to 740); keep its lowest decoration above y = 629 px. Lower edge: straight. Fill: Blue checker texture with colorful triangular bunting, braided hanging cords, and restrained geometric accents. Triangular paper bunting (Small vivid pennants in red, yellow, green, and blue, strung along the upper area.); Hanging braided cords (Short orange and gold strands with a playful handmade feel.)
+- Edges: Blue checker fabric pattern (Saturated cobalt and royal blue checks with a crisp, festive look.); Geometric color rays (Angular red, yellow, and green accents radiating inward from the upper corners.)
+- Background texture: Blue checker fabric across the upper area, transitioning to a soft, light neutral field below, strongest in the header and along the edges.
+- Body (from y = 740 to the bottom): one calm, continuous surface with a soft tint of light tint #E8EBFB, never pure white, keeping the palette (#1739D2, #F2C943, #E94036, #32A84A, #FFF4D6) visible as a very gentle gradient or very subtle texture.
+
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details."
+`;
+
+exports[`buildReferencePrompt: snapshots das 3 fichas do estudo R1 em folheto-27x40 1`] = `
+"Original background template for a printed retail flyer, portrait 27.5 x 41 cm, 2352x3504 px, filling the whole canvas edge to edge. Theme: Brazilian June festival with a lively, colorful, celebratory mood. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
+
+Concept:
+- Header: the decorated header is strictly confined to the top 526 px (y from 0 to 526); keep its lowest decoration above y = 447 px. Lower edge: straight. Fill: Blue checker texture with colorful triangular bunting, braided hanging cords, and restrained geometric accents. Triangular paper bunting (Small vivid pennants in red, yellow, green, and blue, strung along the upper area.); Hanging braided cords (Short orange and gold strands with a playful handmade feel.)
+- Edges: Blue checker fabric pattern (Saturated cobalt and royal blue checks with a crisp, festive look.); Geometric color rays (Angular red, yellow, and green accents radiating inward from the upper corners.)
+- Background texture: Blue checker fabric across the upper area, transitioning to a soft, light neutral field below, strongest in the header and along the edges.
+- Body (from y = 526 to the bottom): one calm, continuous surface with a soft tint of light tint #E8EBFB, never pure white, keeping the palette (#1739D2, #F2C943, #E94036, #32A84A, #FFF4D6) visible as a very gentle gradient or very subtle texture.
+
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details."
+`;
+
+exports[`buildReferencePrompt: snapshots das 3 fichas do estudo R1 em folheto-54x40 1`] = `
+"Original background template for a printed retail flyer, landscape 55 x 41 cm, 3328x2480 px, filling the whole canvas edge to edge. Theme: Brazilian June festival with a lively, colorful, celebratory mood. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
+
+Concept:
+- Header: the decorated header is strictly confined to the top 372 px (y from 0 to 372); keep its lowest decoration above y = 316 px. Lower edge: straight. Fill: Blue checker texture with colorful triangular bunting, braided hanging cords, and restrained geometric accents. Triangular paper bunting (Small vivid pennants in red, yellow, green, and blue, strung along the upper area.); Hanging braided cords (Short orange and gold strands with a playful handmade feel.)
+- Edges: Blue checker fabric pattern (Saturated cobalt and royal blue checks with a crisp, festive look.); Geometric color rays (Angular red, yellow, and green accents radiating inward from the upper corners.)
+- Background texture: Blue checker fabric across the upper area, transitioning to a soft, light neutral field below, strongest in the header and along the edges.
+- Body (from y = 372 to the bottom): one calm, continuous surface with a soft tint of light tint #E8EBFB, never pure white, keeping the palette (#1739D2, #F2C943, #E94036, #32A84A, #FFF4D6) visible as a very gentle gradient or very subtle texture.
+
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details."
+`;
+
+exports[`buildReferencePrompt: snapshots das 3 fichas do estudo R2 em folheto-20x27 1`] = `
+"Original background template for a printed retail flyer, portrait 20.5 x 27.5 cm, 2480x3328 px, filling the whole canvas edge to edge. Theme: A lively Brazilian supermarket savings campaign with a bold, high-energy promotional mood. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
+
+Concept:
+- Header: the decorated header is strictly confined to the top 740 px (y from 0 to 740); keep its lowest decoration above y = 629 px. Lower edge: straight. Fill: Abstract cobalt and cyan rays, subtle halftone dots. Keep the header simple.
+- Edges: Deep blue geometric rays with halftone dots (Vivid cobalt and cyan, angled and energetic, with a subtle darker blue vignette.); Small triangular paper bunting (Bright cyan and blue accents, sparse and playful.)
+- Background texture: Cobalt-to-cyan geometric rays with scattered halftone dots and a subtle soft glow, strongest in the header and along the edges.
+- Body (from y = 740 to the bottom): one calm, continuous surface with a soft tint of light tint #E6ECF8, never pure white, keeping the palette (#073CB8, #0879ED, #21D8E8, #F6D923, #C93624, #F5F2E9) visible as a very gentle gradient or very subtle texture.
+
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details."
+`;
+
+exports[`buildReferencePrompt: snapshots das 3 fichas do estudo R2 em folheto-27x40 1`] = `
+"Original background template for a printed retail flyer, portrait 27.5 x 41 cm, 2352x3504 px, filling the whole canvas edge to edge. Theme: A lively Brazilian supermarket savings campaign with a bold, high-energy promotional mood. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
+
+Concept:
+- Header: the decorated header is strictly confined to the top 526 px (y from 0 to 526); keep its lowest decoration above y = 447 px. Lower edge: straight. Fill: Abstract cobalt and cyan rays, subtle halftone dots. Keep the header simple.
+- Edges: Deep blue geometric rays with halftone dots (Vivid cobalt and cyan, angled and energetic, with a subtle darker blue vignette.); Small triangular paper bunting (Bright cyan and blue accents, sparse and playful.)
+- Background texture: Cobalt-to-cyan geometric rays with scattered halftone dots and a subtle soft glow, strongest in the header and along the edges.
+- Body (from y = 526 to the bottom): one calm, continuous surface with a soft tint of light tint #E6ECF8, never pure white, keeping the palette (#073CB8, #0879ED, #21D8E8, #F6D923, #C93624, #F5F2E9) visible as a very gentle gradient or very subtle texture.
+
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details."
+`;
+
+exports[`buildReferencePrompt: snapshots das 3 fichas do estudo R2 em folheto-54x40 1`] = `
+"Original background template for a printed retail flyer, landscape 55 x 41 cm, 3328x2480 px, filling the whole canvas edge to edge. Theme: A lively Brazilian supermarket savings campaign with a bold, high-energy promotional mood. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
+
+Concept:
+- Header: the decorated header is strictly confined to the top 372 px (y from 0 to 372); keep its lowest decoration above y = 316 px. Lower edge: straight. Fill: Abstract cobalt and cyan rays, subtle halftone dots. Keep the header simple.
+- Edges: Deep blue geometric rays with halftone dots (Vivid cobalt and cyan, angled and energetic, with a subtle darker blue vignette.); Small triangular paper bunting (Bright cyan and blue accents, sparse and playful.)
+- Background texture: Cobalt-to-cyan geometric rays with scattered halftone dots and a subtle soft glow, strongest in the header and along the edges.
+- Body (from y = 372 to the bottom): one calm, continuous surface with a soft tint of light tint #E6ECF8, never pure white, keeping the palette (#073CB8, #0879ED, #21D8E8, #F6D923, #C93624, #F5F2E9) visible as a very gentle gradient or very subtle texture.
+
+The attached reference image is ONLY a style reference for the theme, the signature decorative elements, the texture and the palette. Do NOT copy its layout. Do NOT create any panels, boxes, cards, colored section blocks, columns, title bars, divider bands, grids or frames in the body. Do NOT reproduce anything from the reference that is content or identity: products, food, logos, logo badges or medallions, store or brand names, any text or numbers, prices, people, QR codes, payment logos. The body must stay calm so a flyer editor can lay out product sections on top later. High print quality, crisp decorative details."
+`;
