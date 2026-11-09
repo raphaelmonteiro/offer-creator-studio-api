@@ -1,5 +1,5 @@
 import { SCENE_FAILURE_CODES } from './domain/scene.types';
-import { afterImageReply, failureReply } from './scene-texts';
+import { afterImageReply, failureReply, REFERENCE_TEXTS } from './scene-texts';
 
 describe('scene-texts', () => {
   it.each(SCENE_FAILURE_CODES)('há mensagem em pt-BR para %s', (code) => {
@@ -182,5 +182,38 @@ describe('afterImageReply: texto pintado e o que falta (D-51)', () => {
     expect(afterImageReply({ ...base, extraText: 'PROMO' })).toContain(
       'Vi na imagem um texto que você não pediu: “PROMO”. Diga se quer que eu tire.',
     );
+  });
+});
+
+describe('referência de encarte: textos fixos', () => {
+  it('a falha da leitura e as recusas do arquivo', () => {
+    expect(failureReply('REFERENCE_READ_FAILED')).toBe(
+      'Não consegui ler o encarte. Tente enviar de novo.',
+    );
+    expect(REFERENCE_TEXTS.notImage).toBe(
+      'Envie o encarte em JPG ou PNG (PDF ainda não: exporte a página como imagem).',
+    );
+    expect(REFERENCE_TEXTS.tooBig).toBe('O arquivo passa de 20 MB.');
+    expect(REFERENCE_TEXTS.tooSmall).toBe(
+      'A imagem é pequena demais: envie com pelo menos 800 px no lado maior.',
+    );
+    expect(REFERENCE_TEXTS.uploaded('junina.jpg')).toBe(
+      'Encarte enviado como referência: junina.jpg.',
+    );
+  });
+
+  it('conteúdo vazado: o chat relata o que o juiz viu e oferece voltar', () => {
+    const reply = afterImageReply({
+      satisfied: 'sim',
+      changed: 'O fundo ficou como o conceito.',
+      missing: '',
+      missingAny: false,
+      extraText: '',
+      seam: false,
+      seamDescription: '',
+      leak: 'selo redondo vazio.',
+    });
+    expect(reply).toContain('vi algo que não devia estar no fundo: selo redondo vazio.');
+    expect(reply).toContain('Voltar para a anterior');
   });
 });

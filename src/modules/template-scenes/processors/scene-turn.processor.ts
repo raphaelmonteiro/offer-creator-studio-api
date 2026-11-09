@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SceneFailureCode } from '../domain/scene.types';
 import { SceneDeriveFaceHandler } from './scene-derive-face.handler';
+import { SceneReferenceReadHandler } from './scene-reference-read.handler';
 import { SceneRedrawHandler } from './scene-redraw.handler';
 import { TurnHandler } from './scene-turn-handler';
 import { SceneTurnState, TurnContext } from './scene-turn-state';
@@ -12,7 +13,8 @@ export interface SceneTurnJob {
 
 /**
  * Consumer de `template_scene.turn`. Escolhe o tratador pela operação gravada na versão:
- * `generate` e `redraw` (a imagem pedida pelo Diretor) e `derive_face` (o verso a partir da frente). Qualquer outra operação publicada antes da
+ * `generate` e `redraw` (a imagem pedida pelo Diretor, ou pela ficha do encarte), `derive_face` (o verso a partir da frente) e
+ * `read_reference` (a leitura do encarte de referência, sem imagem). Qualquer outra operação publicada antes da
  * conversa (`local_edit`, `add_element`) falha sem chamada paga. Regras comuns:
  * - a tentativa é gravada ANTES da chamada paga (R10) e fechada depois com o custo do `usage`;
  * - nunca lança depois de uma chamada paga: qualquer erro vira `failed` com o código e o custo, e o
@@ -29,6 +31,7 @@ export class SceneTurnProcessor {
     private readonly state: SceneTurnState,
     private readonly redraw: SceneRedrawHandler,
     private readonly derive: SceneDeriveFaceHandler,
+    private readonly readReference: SceneReferenceReadHandler,
   ) {}
 
   async process(job: SceneTurnJob, jobId?: string): Promise<void> {
@@ -56,6 +59,8 @@ export class SceneTurnProcessor {
         return this.redraw;
       case 'derive_face':
         return this.derive;
+      case 'read_reference':
+        return this.readReference;
       default:
         // Job antigo na fila: hoje o `default` geraria imagem para uma operação que não existe mais.
         return { run: (turn) => this.failWithoutCall(turn) };

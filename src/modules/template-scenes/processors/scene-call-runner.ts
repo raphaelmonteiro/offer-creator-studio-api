@@ -30,6 +30,14 @@ export type OptionalCall<T> =
   | { status: 'skipped' }
   | { status: 'over' };
 
+/** O que toda chamada de visão devolve ao runner: o custo conhecido e, se falhou, o motivo (`VisionAssessment` e a leitura da referência). */
+export interface VisionOutcome {
+  ok: boolean;
+  reason?: string;
+  costUsd: number | null;
+  requestId: string | null;
+}
+
 /**
  * Executa as chamadas pagas do turno com as garantias do estágio 3 (R10) e do disjuntor:
  * - a tentativa é gravada ANTES da chamada e fechada depois com o custo (`usage`), por etapa;
@@ -115,10 +123,10 @@ export class SceneCallRunner {
   }
 
   /** Chamada de visão: nunca falha a versão; o custo fica gravado mesmo com resposta inválida. */
-  async visionCall(
+  async visionCall<T extends VisionOutcome = VisionAssessment>(
     ctx: TurnContext,
-    spec: { model: string; run: () => Promise<VisionAssessment> },
-  ): Promise<OptionalCall<VisionAssessment>> {
+    spec: { model: string; run: () => Promise<T> },
+  ): Promise<OptionalCall<T>> {
     const call = this.pending({ kind: 'vision', model: spec.model, size: 'high' });
     const reserved = await this.state.reserveCall(ctx, call, this.maxPaidCalls(), 'skip');
     if (reserved === 'cancelled') return { status: 'over' };
@@ -131,7 +139,7 @@ export class SceneCallRunner {
   private async closeVision(
     ctx: TurnContext,
     callId: string,
-    assessment: VisionAssessment,
+    assessment: VisionOutcome,
   ): Promise<void> {
     const outcome: CallOutcome = {
       status: 'done',
@@ -140,7 +148,7 @@ export class SceneCallRunner {
     };
     if (assessment.ok === false) {
       outcome.status = 'failed';
-      outcome.errorCode = `VISION_${assessment.reason.toUpperCase()}`;
+      outcome.errorCode = `VISION_${(assessment.reason ?? 'error').toUpperCase()}`;
     }
     try {
       await this.state.closeCall(ctx, callId, outcome);

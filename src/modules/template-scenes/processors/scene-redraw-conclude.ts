@@ -1,5 +1,6 @@
 import * as sharp from 'sharp';
 import { DirectorPlan } from '../domain/scene-director-schema';
+import { conceptBriefText } from '../domain/scene-reference-summary';
 import { nextPaintedLines } from '../domain/scene-painted-text';
 import { hasTextError, TextLine, wrongLines } from '../domain/scene-text-check';
 import { SceneGenerateResult } from '../providers/scene-image-provider';
@@ -198,6 +199,7 @@ async function finishConcluded(
     reply: notes.join(' '),
     ...(elements ? { elements } : {}),
     judge: judged.verdict,
+    ...(ctx.reference?.summary ? { briefDone: conceptBriefText(ctx.reference.summary) } : {}),
     metrics: {
       prompt: applied.prompt,
       ...(done.marking ? { markup: { kind: done.marking.kind, box: done.marking.box } } : {}),

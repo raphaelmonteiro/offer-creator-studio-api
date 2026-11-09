@@ -58,6 +58,7 @@ function factsOf(assessment: VisionOk, ctx: TurnContext): NonNullable<JudgedResu
     extraText: safeChanged(assessment.extraText),
     seam: assessment.seam,
     seamDescription: safeSeamDescription(assessment.seamDescription),
+    ...(assessment.leak ? { leak: safeChanged(assessment.leak) } : {}),
   };
 }
 
@@ -82,6 +83,7 @@ function recordOf(assessment: VisionOk, textLines: TextLine[]): Record<string, u
     textLines,
     seam: assessment.seam,
     seamDescription: assessment.seamDescription,
+    ...(assessment.leak ? { leak: assessment.leak } : {}),
   };
 }
 
@@ -107,6 +109,7 @@ export async function judgeResult(
         expectedText: text.expected,
         knownText: text.known,
         hasCrop: Boolean(text.crop && text.expected.length),
+        reference: Boolean(ctx.reference?.concept),
         before: input.before ? await support.judgeImage(input.before) : undefined,
         after: await support.judgeImage(input.after),
         crop:

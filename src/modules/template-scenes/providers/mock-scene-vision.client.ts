@@ -1,4 +1,9 @@
 import type { VisionCompareInput, VisionCompareResult } from '../../ai/openai-vision.service';
+import {
+  CONCEPT_PROMPT_START,
+  MOCK_REFERENCE_MARKERS,
+  mockReferenceConcept,
+} from './mock-scene-reference-concept';
 
 /** Marcadores na mensagem que simulam o juiz (D-26: o resultado é aplicado em todos os casos). */
 export const MOCK_VISION_MARKERS = {
@@ -45,11 +50,26 @@ export class MockSceneVisionClient {
   private readonly readings = new Map<string, number>();
 
   async compare(input: VisionCompareInput): Promise<VisionCompareResult> {
+    if (input.prompt.startsWith(CONCEPT_PROMPT_START)) return this.concept(input.prompt);
     if (input.prompt.includes(MOCK_VISION_MARKERS.fail)) {
       throw new Error('Mock: juiz indisponível');
     }
     return {
       text: this.answer(input.prompt, this.nextReading(input.correlationId)),
+      usage: { prompt_tokens: 0, completion_tokens: 0 },
+      requestId: 'mock-vision',
+      latencyMs: 0,
+    };
+  }
+
+  /** A leitura do encarte (change add-template-scene-from-reference): a ficha fixa, com os marcadores de falha. */
+  private concept(prompt: string): VisionCompareResult {
+    if (prompt.includes(MOCK_REFERENCE_MARKERS.fail)) throw new Error('Mock: visão indisponível');
+    const text = prompt.includes(MOCK_REFERENCE_MARKERS.invalid)
+      ? 'não é json'
+      : JSON.stringify(mockReferenceConcept(prompt));
+    return {
+      text,
       usage: { prompt_tokens: 0, completion_tokens: 0 },
       requestId: 'mock-vision',
       latencyMs: 0,

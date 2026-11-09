@@ -20,6 +20,7 @@ import {
   TemplateSyncJob,
 } from './processors/scene-template-sync.processor';
 import { SceneDeriveFaceHandler } from './processors/scene-derive-face.handler';
+import { SceneReferenceReadHandler } from './processors/scene-reference-read.handler';
 import { SceneRedrawHandler } from './processors/scene-redraw.handler';
 import { SceneTurnJob, SceneTurnProcessor } from './processors/scene-turn.processor';
 import { SceneTurnSupport } from './processors/scene-turn-support';
@@ -37,7 +38,9 @@ import { SceneFacesService } from './services/scene-faces.service';
 import { SceneFilesService } from './services/scene-files.service';
 import { SceneLockService } from './services/scene-lock.service';
 import { SceneLogoService } from './services/scene-logo.service';
+import { SceneReferenceService } from './services/scene-reference.service';
 import { SceneReadService } from './services/scene-read.service';
+import { SceneReferenceVisionService } from './services/scene-reference-vision.service';
 import { SceneReconcilerService } from './services/scene-reconciler.service';
 import { SceneTemplateFilesService } from './services/scene-template-files.service';
 import { SceneTemplateSweepService } from './services/scene-template-sweep.service';
@@ -46,6 +49,7 @@ import { SceneVisionService } from './services/scene-vision.service';
 import { SceneVersionsService } from './services/scene-versions.service';
 import { TemplateScenesService } from './services/template-scenes.service';
 import { TemplateSceneEnabledGuard } from './template-scene-enabled.guard';
+import { TemplateSceneReferenceEnabledGuard } from './template-scene-reference-enabled.guard';
 import { TemplateSceneEventsController } from './template-scene-events.controller';
 import { TemplateScenesAdminController } from './template-scenes-admin.controller';
 import { TemplateScenesController } from './template-scenes.controller';
@@ -73,6 +77,7 @@ import { TemplateScenesController } from './template-scenes.controller';
   ],
   providers: [
     TemplateSceneEnabledGuard,
+    TemplateSceneReferenceEnabledGuard,
     SceneLockService,
     SceneReadService,
     TemplateScenesService,
@@ -81,6 +86,7 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneLogoService,
     SceneTurnService,
     SceneFacesService,
+    SceneReferenceService,
     SceneTurnState,
     SceneTurnSupport,
     SceneCallRunner,
@@ -91,6 +97,8 @@ import { TemplateScenesController } from './template-scenes.controller';
     SceneDirectorProcessor,
     SceneRedrawHandler,
     SceneDeriveFaceHandler,
+    SceneReferenceVisionService,
+    SceneReferenceReadHandler,
     SceneTurnProcessor,
     SceneReconcilerService,
     SceneTemplateFilesService,

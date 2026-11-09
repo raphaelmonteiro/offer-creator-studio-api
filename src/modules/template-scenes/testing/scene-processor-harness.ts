@@ -10,9 +10,11 @@ import { TemplateSceneMessage } from '../entities/template-scene-message.entity'
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { SceneCallRunner } from '../processors/scene-call-runner';
 import { SceneDeriveFaceHandler } from '../processors/scene-derive-face.handler';
+import { SceneReferenceReadHandler } from '../processors/scene-reference-read.handler';
 import { SceneRedrawHandler } from '../processors/scene-redraw.handler';
 import { MockSceneVisionClient } from '../providers/mock-scene-vision.client';
 import { SceneVisionClient } from '../providers/scene-vision-client';
+import { SceneReferenceVisionService } from '../services/scene-reference-vision.service';
 import { SceneVisionService } from '../services/scene-vision.service';
 import { SceneTurnProcessor } from '../processors/scene-turn.processor';
 import { SceneTurnSupport } from '../processors/scene-turn-support';
@@ -131,6 +133,11 @@ export function useProcessorHarness() {
         h.state,
         new SceneRedrawHandler(support, calls, vision, provider),
         new SceneDeriveFaceHandler(support, calls, provider),
+        new SceneReferenceReadHandler(
+          support,
+          calls,
+          new SceneReferenceVisionService(cfg, visionClient),
+        ),
       );
     },
     /** Cena folheto 1920x3840 com uma versão `queued` e a mensagem do pedido. */

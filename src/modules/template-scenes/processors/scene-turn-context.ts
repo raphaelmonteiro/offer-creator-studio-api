@@ -17,6 +17,7 @@ import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { currentVersionOf, loadFace } from '../services/scene-faces';
+import { loadTurnReference, TurnReference } from './scene-turn-reference';
 
 /** A versão de onde o turno parte: imagem em disco e camadas. */
 export interface TurnParent {
@@ -77,6 +78,8 @@ export interface TurnContext {
   openItems: Array<{ id: string; text: string; sourceMessageId?: string }>;
   /** Só os itens do turno (D-59): o juiz recebe e cobra estes, nunca o item de turno anterior nem o feito. */
   turnItems: Array<{ id: string; text: string }>;
+  /** O encarte de referência: na leitura (`read_reference`) e na geração nascida da ficha; `null` nas outras (change add-template-scene-from-reference). */
+  reference?: TurnReference | null;
 }
 
 const headerResizeOf = (version: TemplateSceneVersion): TurnContext['headerResize'] =>
@@ -136,6 +139,7 @@ export async function loadTurnContext(
       id: item.id,
       text: item.text,
     })),
+    reference: await loadTurnReference(manager, version),
   };
 }
 

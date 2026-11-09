@@ -9,6 +9,7 @@ import { TemplateSceneMessage } from '../entities/template-scene-message.entity'
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { invalidBody, sceneNotFound } from '../scene.errors';
 import { loadFaces, pickFace } from './scene-faces';
+import { loadReferenceView } from './scene-reference-view';
 import { displayNumbersOf } from './scene-display-number';
 import {
   SceneDetailView,
@@ -81,6 +82,7 @@ export class SceneReadService {
       activeVersion: active ? toVersionView(active, assets, displayNumbers, layout) : null,
       faces: faces.map((face) => toFaceView(face, currentView(currents.get(face.index)))),
       messages: messages.reverse().map((message) => toMessageView(message, layout)),
+      reference: await loadReferenceView(manager, sceneId),
       versions: {
         items: pageVersions.map((version) =>
           toVersionView(version, assets, displayNumbers, layout),
