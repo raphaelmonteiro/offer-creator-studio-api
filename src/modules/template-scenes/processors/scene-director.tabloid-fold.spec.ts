@@ -54,7 +54,7 @@ describeIfSceneDb(
         );
       });
 
-      it('Anúncio que afirma algo sobre a dobra é trocado pelo fixo, ', async () => {
+      it('Anúncio que afirma algo sobre a dobra é trocado pelo fixo, sem nota da dobra (D-11)', async () => {
         const { scene } = await h.tabloidScene({ outer: true });
         const { sent } = await chatWith(
           scene.id,
