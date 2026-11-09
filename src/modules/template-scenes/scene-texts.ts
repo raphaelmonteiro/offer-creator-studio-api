@@ -325,9 +325,6 @@ export const headerReadyReply = (cm: number): string =>
 /** PV-T11: a logo que saía do cabeçalho encolhido foi ajustada ao novo espaço da logo. */
 export const LOGO_FITTED_NOTE = 'Ajustei a logo ao novo espaço do cabeçalho.';
 
-/** D-9: nota fixa do sistema nas edições do jornal; a recolagem da faixa da dobra é feita pelo código. */
-export const TABLOID_FOLD_NOTE = 'A faixa da dobra, no centro da folha, volta como estava.';
-
 /** D-6: a primeira Externa sai com o cabeçalho padrão; o tamanho muda depois, pela conversa. */
 export const headerDefaultAnnouncement = (cm: number): string =>
   `Vou criar a externa. O cabeçalho da capa sai no tamanho padrão (${cmText(cm)} cm); se quiser, peça depois um cabeçalho maior ou menor.`;

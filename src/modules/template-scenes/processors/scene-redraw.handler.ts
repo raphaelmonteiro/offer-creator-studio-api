@@ -117,7 +117,6 @@ export class SceneRedrawHandler implements TurnHandler {
         first: { result, attempt },
         redo: build,
         before: master,
-        foldReference: master,
         marking,
         text,
       });

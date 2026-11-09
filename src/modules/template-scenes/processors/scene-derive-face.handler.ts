@@ -61,7 +61,7 @@ export class SceneDeriveFaceHandler implements TurnHandler {
         }),
     });
     if (!result) return;
-    await this.support.finishWithImage(ctx, await normalize(ctx, result, master), {
+    await this.support.finishWithImage(ctx, await normalize(ctx, result), {
       reply: DERIVE_TEXTS[ctx.layout === 'tabloid' ? 'tabloid' : 'front_back'].reply,
       elements: [],
       keepBrief: true,

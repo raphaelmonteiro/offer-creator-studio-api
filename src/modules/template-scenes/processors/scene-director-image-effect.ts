@@ -2,12 +2,7 @@ import { EntityManager } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TurnDecision } from '../domain/scene-director-decision';
 import { DirectorPlan } from '../domain/scene-director-schema';
-import {
-  MARKING_DISCARDED_NOTE,
-  PAINTED_LAYER_NOTE,
-  REDRAW_NOTICE,
-  TABLOID_FOLD_NOTE,
-} from '../scene-texts';
+import { MARKING_DISCARDED_NOTE, PAINTED_LAYER_NOTE, REDRAW_NOTICE } from '../scene-texts';
 import { fold } from '../../../shared/text/fold';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { faceKeyOfVersion, loadFace } from '../services/scene-faces';
@@ -84,7 +79,6 @@ export async function queueImageEffect(
   ) {
     notes.push(PAINTED_LAYER_NOTE);
   }
-  if (decision.isEdit && scene.layout === 'tabloid') notes.push(TABLOID_FOLD_NOTE);
   if (decision.isEdit && !(await alreadyNotified(manager, scene.id))) {
     // D-35: o aviso fica gravado com a versão do anúncio, antes da janela, então "Parar" não o repete.
     notes.push(REDRAW_NOTICE);

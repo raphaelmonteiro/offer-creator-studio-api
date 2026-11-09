@@ -57,8 +57,8 @@ export function replyIsForbidden(reply: string): boolean {
 }
 
 /**
- * Jornal (D-9): o anúncio não afirma nada sobre a dobra nem sobre a posição ("sem avançar sobre a dobra"). Quem garante
- * a faixa da dobra é o código (recolagem da master anterior); o aviso é a nota fixa `TABLOID_FOLD_NOTE`.
+ * Jornal (D-9): o anúncio não afirma nada sobre a dobra nem sobre a posição ("sem avançar sobre a dobra"). Não há
+ * proteção por código da faixa da dobra (D-11): o Diretor também não pode prometê-la.
  */
 const FOLD_CLAIM = /\b(?:dobra|dobras|vinco|vincos|lombada|centro da folha|meio da folha)\b/;
 
