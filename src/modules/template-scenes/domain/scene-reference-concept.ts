@@ -2,6 +2,10 @@ import { z } from 'zod';
 import {
   ConceptColor,
   ConceptElement,
+  ELEMENT_KINDS,
+  ElementKind,
+  HEADER_SHAPES,
+  HeaderShape,
   REFERENCE_LIMITS,
   REFERENCE_PLACES,
   ReferenceConcept,
@@ -66,6 +70,15 @@ export function normalizePlace(value: string): ReferencePlace | null {
   return known ?? PLACE_ALIASES[key] ?? null;
 }
 
+/** O formato do cabeçalho no conjunto fechado: a primeira palavra do conjunto que o texto cita, ou `''`. */
+export function normalizeShape(value: string): HeaderShape | '' {
+  const lower = value.toLowerCase();
+  return HEADER_SHAPES.find((shape) => new RegExp(`(?<![\\p{L}])${shape}`, 'u').test(lower)) ?? '';
+}
+
+const kindOf = (value: unknown): ElementKind | null =>
+  ELEMENT_KINDS.find((kind) => kind === value) ?? null;
+
 type Removals = Removal[];
 
 function cleanElements(raw: unknown, removed: Removals): ConceptElement[] {
@@ -75,10 +88,22 @@ function cleanElements(raw: unknown, removed: Removals): ConceptElement[] {
     const element = text(row.element);
     const labelPt = text(row.label_pt);
     const notes = text(row.notes);
+    const kind = kindOf(row.kind);
     const reason = termGroupOf(`${element} ${labelPt} ${notes}`);
     const where = normalizePlace(text(row.where));
     if (!element) continue;
-    if (reason) {
+    // A regra principal é o campo fechado `kind`; a tabela de termos é a segunda linha de defesa.
+    if (kind === 'logo_or_badge') {
+      removed.push({ field: 'signature_elements', text: element, reason: 'logo_badge' });
+    } else if (kind === 'section_decoration') {
+      removed.push({
+        field: 'signature_elements',
+        text: element,
+        reason: 'section_or_unknown_place',
+      });
+    } else if (!kind) {
+      removed.push({ field: 'signature_elements', text: element, reason: 'invalid' });
+    } else if (reason) {
       removed.push({ field: 'signature_elements', text: element, reason });
     } else if (!where) {
       removed.push({
@@ -105,7 +130,11 @@ function cleanPalette(raw: unknown, removed: Removals): ConceptColor[] {
     } else if (SECTION_COLOR_ROLE.test(role)) {
       removed.push({ field: 'palette', text: `${hex} (${role})`, reason: 'section_color' });
     } else {
-      kept.push({ hex: hex.toUpperCase(), namePt: text(row.name_pt) || hex.toUpperCase(), role });
+      const upper = hex.toUpperCase();
+      const name = text(row.name_pt);
+      const nameReason = name ? termGroupOf(name) : null;
+      if (nameReason) removed.push({ field: 'palette.name_pt', text: name, reason: nameReason });
+      kept.push({ hex: upper, namePt: name && !nameReason ? name : upper, role });
     }
   }
   return kept.slice(0, REFERENCE_LIMITS.maxPalette);
@@ -135,7 +164,10 @@ export function sanitizeConcept(raw: unknown): { concept: ReferenceConcept; remo
     backgroundTexture: cleanFree('background_texture', row.background_texture, removed),
     backgroundTexturePt: cleanFree('background_texture_pt', row.background_texture_pt, removed),
     palette: cleanPalette(row.palette, removed),
-    header: { shape: text(header.shape), fill: cleanFree('header.fill', header.fill, removed) },
+    header: {
+      shape: normalizeShape(text(header.shape)),
+      fill: cleanFree('header.fill', header.fill, removed),
+    },
     bodySuggestion: cleanFree('body_suggestion', row.body_suggestion, removed),
     ignoredSections: strings(row.ignored_sections),
     ignoredContent: strings(row.ignored_content),

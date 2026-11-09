@@ -16,7 +16,7 @@ exports[`buildReferencePrompt: snapshots das 3 fichas do estudo Navarro em folhe
 "Original background template for a printed retail flyer, portrait 20.5 x 27.5 cm, 2480x3328 px, filling the whole canvas edge to edge. Theme: An October retail-sale concept with energetic, warm, celebratory styling. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
 
 Concept:
-- Header: the decorated header is strictly confined to the top 740 px (y from 0 to 740); keep its lowest decoration above y = 629 px. Lower edge: straight horizontal edge. Fill: Warm blurred color field with golden bokeh. Warm blurred color forms and soft bokeh (Vivid but softly defocused, with golden highlights and hints of green.)
+- Header: the decorated header is strictly confined to the top 740 px (y from 0 to 740); keep its lowest decoration above y = 629 px. Lower edge: straight. Fill: Warm blurred color field with golden bokeh. Warm blurred color forms and soft bokeh (Vivid but softly defocused, with golden highlights and hints of green.)
 - Edges: No decorations on the edges.
 - Background texture: Softly blurred warm retail-inspired color field with gentle bokeh, strongest in the header and along the edges.
 - Body (from y = 740 to the bottom): one calm, continuous surface with a soft tint of light tint #F2E9EA, never pure white, keeping the palette (#7A2028, #D94335, #F2A12A, #FFE45A, #F7F1E6, #66834A) visible as a very gentle gradient or very subtle texture. Along the bottom 493 px, a thin Narrow warm-toned horizontal accent (Bright orange and yellow glow, kept subtle and continuous.) strip.
@@ -28,7 +28,7 @@ exports[`buildReferencePrompt: snapshots das 3 fichas do estudo Navarro em folhe
 "Original background template for a printed retail flyer, portrait 27.5 x 41 cm, 2352x3504 px, filling the whole canvas edge to edge. Theme: An October retail-sale concept with energetic, warm, celebratory styling. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
 
 Concept:
-- Header: the decorated header is strictly confined to the top 526 px (y from 0 to 526); keep its lowest decoration above y = 447 px. Lower edge: straight horizontal edge. Fill: Warm blurred color field with golden bokeh. Warm blurred color forms and soft bokeh (Vivid but softly defocused, with golden highlights and hints of green.)
+- Header: the decorated header is strictly confined to the top 526 px (y from 0 to 526); keep its lowest decoration above y = 447 px. Lower edge: straight. Fill: Warm blurred color field with golden bokeh. Warm blurred color forms and soft bokeh (Vivid but softly defocused, with golden highlights and hints of green.)
 - Edges: No decorations on the edges.
 - Background texture: Softly blurred warm retail-inspired color field with gentle bokeh, strongest in the header and along the edges.
 - Body (from y = 526 to the bottom): one calm, continuous surface with a soft tint of light tint #F2E9EA, never pure white, keeping the palette (#7A2028, #D94335, #F2A12A, #FFE45A, #F7F1E6, #66834A) visible as a very gentle gradient or very subtle texture. Along the bottom 350 px, a thin Narrow warm-toned horizontal accent (Bright orange and yellow glow, kept subtle and continuous.) strip.
@@ -40,7 +40,7 @@ exports[`buildReferencePrompt: snapshots das 3 fichas do estudo Navarro em folhe
 "Original background template for a printed retail flyer, landscape 55 x 41 cm, 3328x2480 px, filling the whole canvas edge to edge. Theme: An October retail-sale concept with energetic, warm, celebratory styling. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
 
 Concept:
-- Header: the decorated header is strictly confined to the top 372 px (y from 0 to 372); keep its lowest decoration above y = 316 px. Lower edge: straight horizontal edge. Fill: Warm blurred color field with golden bokeh. Warm blurred color forms and soft bokeh (Vivid but softly defocused, with golden highlights and hints of green.)
+- Header: the decorated header is strictly confined to the top 372 px (y from 0 to 372); keep its lowest decoration above y = 316 px. Lower edge: straight. Fill: Warm blurred color field with golden bokeh. Warm blurred color forms and soft bokeh (Vivid but softly defocused, with golden highlights and hints of green.)
 - Edges: No decorations on the edges.
 - Background texture: Softly blurred warm retail-inspired color field with gentle bokeh, strongest in the header and along the edges.
 - Body (from y = 372 to the bottom): one calm, continuous surface with a soft tint of light tint #F2E9EA, never pure white, keeping the palette (#7A2028, #D94335, #F2A12A, #FFE45A, #F7F1E6, #66834A) visible as a very gentle gradient or very subtle texture. Along the bottom 248 px, a thin Narrow warm-toned horizontal accent (Bright orange and yellow glow, kept subtle and continuous.) strip.
@@ -88,7 +88,7 @@ exports[`buildReferencePrompt: snapshots das 3 fichas do estudo R2 em folheto-20
 "Original background template for a printed retail flyer, portrait 20.5 x 27.5 cm, 2480x3328 px, filling the whole canvas edge to edge. Theme: A lively Brazilian supermarket savings campaign with a bold, high-energy promotional mood. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
 
 Concept:
-- Header: the decorated header is strictly confined to the top 740 px (y from 0 to 740); keep its lowest decoration above y = 629 px. Lower edge: Straight lower edge with layered diagonal ray accents. Fill: Abstract cobalt and cyan rays, subtle halftone dots. Keep the header simple.
+- Header: the decorated header is strictly confined to the top 740 px (y from 0 to 740); keep its lowest decoration above y = 629 px. Lower edge: straight. Fill: Abstract cobalt and cyan rays, subtle halftone dots. Keep the header simple.
 - Edges: Deep blue geometric rays with halftone dots (Vivid cobalt and cyan, angled and energetic, with a subtle darker blue vignette.); Small triangular paper bunting (Bright cyan and blue accents, sparse and playful.)
 - Background texture: Cobalt-to-cyan geometric rays with scattered halftone dots and a subtle soft glow, strongest in the header and along the edges.
 - Body (from y = 740 to the bottom): one calm, continuous surface with a soft tint of light tint #E6ECF8, never pure white, keeping the palette (#073CB8, #0879ED, #21D8E8, #F6D923, #C93624, #F5F2E9) visible as a very gentle gradient or very subtle texture.
@@ -100,7 +100,7 @@ exports[`buildReferencePrompt: snapshots das 3 fichas do estudo R2 em folheto-27
 "Original background template for a printed retail flyer, portrait 27.5 x 41 cm, 2352x3504 px, filling the whole canvas edge to edge. Theme: A lively Brazilian supermarket savings campaign with a bold, high-energy promotional mood. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
 
 Concept:
-- Header: the decorated header is strictly confined to the top 526 px (y from 0 to 526); keep its lowest decoration above y = 447 px. Lower edge: Straight lower edge with layered diagonal ray accents. Fill: Abstract cobalt and cyan rays, subtle halftone dots. Keep the header simple.
+- Header: the decorated header is strictly confined to the top 526 px (y from 0 to 526); keep its lowest decoration above y = 447 px. Lower edge: straight. Fill: Abstract cobalt and cyan rays, subtle halftone dots. Keep the header simple.
 - Edges: Deep blue geometric rays with halftone dots (Vivid cobalt and cyan, angled and energetic, with a subtle darker blue vignette.); Small triangular paper bunting (Bright cyan and blue accents, sparse and playful.)
 - Background texture: Cobalt-to-cyan geometric rays with scattered halftone dots and a subtle soft glow, strongest in the header and along the edges.
 - Body (from y = 526 to the bottom): one calm, continuous surface with a soft tint of light tint #E6ECF8, never pure white, keeping the palette (#073CB8, #0879ED, #21D8E8, #F6D923, #C93624, #F5F2E9) visible as a very gentle gradient or very subtle texture.
@@ -112,7 +112,7 @@ exports[`buildReferencePrompt: snapshots das 3 fichas do estudo R2 em folheto-54
 "Original background template for a printed retail flyer, landscape 55 x 41 cm, 3328x2480 px, filling the whole canvas edge to edge. Theme: A lively Brazilian supermarket savings campaign with a bold, high-energy promotional mood. Absolutely no text, no letters, no numbers, no logos, no brand names, no badges, no medallions, no seals, no emblems, no empty round frames or placeholder shapes, no products, no food, no packaging, no prices, no price tags, no people, no QR codes, no icons.
 
 Concept:
-- Header: the decorated header is strictly confined to the top 372 px (y from 0 to 372); keep its lowest decoration above y = 316 px. Lower edge: Straight lower edge with layered diagonal ray accents. Fill: Abstract cobalt and cyan rays, subtle halftone dots. Keep the header simple.
+- Header: the decorated header is strictly confined to the top 372 px (y from 0 to 372); keep its lowest decoration above y = 316 px. Lower edge: straight. Fill: Abstract cobalt and cyan rays, subtle halftone dots. Keep the header simple.
 - Edges: Deep blue geometric rays with halftone dots (Vivid cobalt and cyan, angled and energetic, with a subtle darker blue vignette.); Small triangular paper bunting (Bright cyan and blue accents, sparse and playful.)
 - Background texture: Cobalt-to-cyan geometric rays with scattered halftone dots and a subtle soft glow, strongest in the header and along the edges.
 - Body (from y = 372 to the bottom): one calm, continuous surface with a soft tint of light tint #E6ECF8, never pure white, keeping the palette (#073CB8, #0879ED, #21D8E8, #F6D923, #C93624, #F5F2E9) visible as a very gentle gradient or very subtle texture.

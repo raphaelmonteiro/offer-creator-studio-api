@@ -15,6 +15,17 @@ export const REFERENCE_PLACES = [
 ] as const;
 export type ReferencePlace = (typeof REFERENCE_PLACES)[number];
 
+/**
+ * O campo fechado de cada elemento-assinatura (R1): a visão classifica, o sanitizador derruba pelo campo. Só
+ * `decoration` chega ao prompt; ausente ou fora do conjunto, o elemento cai (falha fechada).
+ */
+export const ELEMENT_KINDS = ['decoration', 'logo_or_badge', 'section_decoration'] as const;
+export type ElementKind = (typeof ELEMENT_KINDS)[number];
+
+/** O formato da borda de baixo do cabeçalho: conjunto fechado (R2); fora dele, o prompt usa "a soft curve". */
+export const HEADER_SHAPES = ['straight', 'curved', 'wave', 'diagonal', 'arch'] as const;
+export type HeaderShape = (typeof HEADER_SHAPES)[number];
+
 /** Por que o sanitizador tirou algo da ficha (gravado em `removed`, para auditar e ajustar a lista de termos). */
 export type RemovalReason =
   | 'brand'
@@ -56,7 +67,7 @@ export interface ReferenceConcept {
   backgroundTexture: string;
   backgroundTexturePt: string;
   palette: ConceptColor[];
-  header: { shape: string; fill: string };
+  header: { shape: HeaderShape | ''; fill: string };
   bodySuggestion: string;
   ignoredSections: string[];
   ignoredContent: string[];

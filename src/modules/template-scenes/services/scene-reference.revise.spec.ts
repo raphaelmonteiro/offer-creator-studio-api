@@ -120,7 +120,12 @@ describeIfSceneDb('Correção da ficha pelo cliente (banco chroma_x_e2e)', () =>
       ...FICHA_R2,
       signature_elements: [
         ...(FICHA_R2.signature_elements as unknown[]),
-        { element: 'Round seal with a shopping cart', where: 'top edge', notes: 'gold' },
+        {
+          element: 'Round seal with a shopping cart',
+          kind: 'decoration',
+          where: 'top edge',
+          notes: 'gold',
+        },
       ],
     }));
     const sent = await reviseAndRead(scene.id, 'coloca o selo com o carrinho de volta', vision);

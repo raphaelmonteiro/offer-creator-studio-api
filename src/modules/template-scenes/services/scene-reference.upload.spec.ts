@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as sharp from 'sharp';
@@ -113,6 +114,24 @@ describeIfSceneDb('Envio do encarte de referência (banco chroma_x_e2e)', () => 
       .api()
       .upload(scene.id, await uploadedFile(), { expectedRevision: 'abc', userId: null });
     expect(await errorOf(result)).toEqual({ status: 400, code: 'BAD_REQUEST' });
+  });
+
+  it('ordem dos erros (R3): arquivo inválido 422 e cena inexistente 404 vêm antes do 400 da revisão', async () => {
+    const scene = await h.newScene();
+    const badFile = {
+      buffer: Buffer.from('x'),
+      mimetype: 'image/jpeg',
+      size: 1,
+      originalname: 'x.jpg',
+    };
+    const badRevision = { expectedRevision: 'abc', userId: null };
+    expect(await errorOf(h.api().upload(scene.id, badFile, badRevision))).toEqual({
+      status: 422,
+      code: 'REFERENCE_INVALID',
+    });
+    const missing = h.api().upload(randomUUID(), await uploadedFile(), badRevision);
+    expect(await errorOf(missing)).toEqual({ status: 404, code: 'SCENE_NOT_FOUND' });
+    await nothingWritten(scene.id);
   });
 
   it('depois da primeira imagem: 422 REFERENCE_ONLY_AT_START, nada gravado e o arquivo some do disco', async () => {

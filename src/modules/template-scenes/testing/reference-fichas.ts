@@ -5,21 +5,25 @@ export const FICHA_R1: Record<string, unknown> = {
   signature_elements: [
     {
       element: 'Blue checker fabric pattern',
+      kind: 'decoration',
       where: 'top edge',
       notes: 'Saturated cobalt and royal blue checks with a crisp, festive look.',
     },
     {
       element: 'Triangular paper bunting',
+      kind: 'decoration',
       where: 'header',
       notes: 'Small vivid pennants in red, yellow, green, and blue, strung along the upper area.',
     },
     {
       element: 'Hanging braided cords',
+      kind: 'decoration',
       where: 'header',
       notes: 'Short orange and gold strands with a playful handmade feel.',
     },
     {
       element: 'Geometric color rays',
+      kind: 'decoration',
       where: 'corners',
       notes: 'Angular red, yellow, and green accents radiating inward from the upper corners.',
     },
@@ -89,21 +93,25 @@ export const FICHA_R2: Record<string, unknown> = {
   signature_elements: [
     {
       element: 'Deep blue geometric rays with halftone dots',
+      kind: 'decoration',
       where: 'whole background',
       notes: 'Vivid cobalt and cyan, angled and energetic, with a subtle darker blue vignette.',
     },
     {
       element: 'Glossy gold coin medallions',
+      kind: 'logo_or_badge',
       where: 'top edge',
       notes: 'Oversized, embossed, dimensional accents with warm highlights.',
     },
     {
       element: 'Circular shopping-cart medallion',
+      kind: 'logo_or_badge',
       where: 'top edge',
       notes: 'Deep red and bronze, raised metallic rim, used as an abstract retail motif.',
     },
     {
       element: 'Small triangular paper bunting',
+      kind: 'decoration',
       where: 'corners',
       notes: 'Bright cyan and blue accents, sparse and playful.',
     },
@@ -172,16 +180,19 @@ export const FICHA_NAVARRO: Record<string, unknown> = {
   signature_elements: [
     {
       element: 'Large circular medallion with an abstract shopping-cart symbol',
+      kind: 'logo_or_badge',
       where: 'top right',
       notes: 'Layered burgundy, red, and golden-orange rings with glossy dimensional shading.',
     },
     {
       element: 'Warm blurred color forms and soft bokeh',
+      kind: 'decoration',
       where: 'header',
       notes: 'Vivid but softly defocused, with golden highlights and hints of green.',
     },
     {
       element: 'Narrow warm-toned horizontal accent',
+      kind: 'decoration',
       where: 'bottom edge',
       notes: 'Bright orange and yellow glow, kept subtle and continuous.',
     },

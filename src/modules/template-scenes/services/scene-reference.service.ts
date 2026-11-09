@@ -69,7 +69,6 @@ export class SceneReferenceService {
     file: UploadedFile,
     input: { expectedRevision: unknown; userId: string | null },
   ): Promise<ReferenceTurnResult> {
-    const expectedRevision = parseRevision(input.expectedRevision);
     const inspected = await inspectReference(file);
     const versionId = randomUUID();
     const assetId = randomUUID();
@@ -84,7 +83,7 @@ export class SceneReferenceService {
     try {
       return await this.guarded(sceneId, async ({ manager, scene }) => {
         const face = await resolveFace(manager, scene);
-        assertExpectedRevision(scene, expectedRevision);
+        assertExpectedRevision(scene, parseRevision(input.expectedRevision));
         await assertSceneIdle(manager, sceneId);
         if (await faceHasImage(manager, sceneId, face.index)) throw referenceOnlyAtStart();
         await discardProposed(manager, sceneId);

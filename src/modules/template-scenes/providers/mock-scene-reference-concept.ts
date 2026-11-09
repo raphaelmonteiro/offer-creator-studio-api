@@ -19,6 +19,7 @@ export const CONCEPT_PROMPT_START = 'You are an art director analysing a retail 
 const BUNTING = {
   element: 'Triangular paper bunting',
   label_pt: 'bandeirinhas de São João',
+  kind: 'decoration',
   where: 'header',
   notes: 'Small vivid pennants in red, yellow, green, and blue, strung along the upper area.',
 };
@@ -27,6 +28,7 @@ const ELEMENTS = [
   {
     element: 'Blue checker fabric pattern',
     label_pt: 'tecido xadrez azul',
+    kind: 'decoration',
     where: 'top edge',
     notes: 'Saturated cobalt and royal blue checks with a crisp, festive look.',
   },
@@ -34,18 +36,21 @@ const ELEMENTS = [
   {
     element: 'Hanging braided cords',
     label_pt: 'cordões trançados',
+    kind: 'decoration',
     where: 'header',
     notes: 'Short orange and gold strands with a playful handmade feel.',
   },
   {
     element: 'Geometric color rays',
     label_pt: 'raios de cor',
+    kind: 'decoration',
     where: 'corners',
     notes: 'Angular red, yellow, and green accents radiating inward from the upper corners.',
   },
   {
     element: 'Circular shopping-cart medallion',
     label_pt: 'medalhão com carrinho',
+    kind: 'logo_or_badge',
     where: 'top right',
     notes: 'Deep red and bronze, raised metallic rim.',
   },

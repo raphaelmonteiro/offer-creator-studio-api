@@ -2,7 +2,11 @@ import { TemplateSceneVersion } from '../entities/template-scene-version.entity'
 import { SceneProviderError } from '../providers/scene-image-provider';
 import { loadReferenceView } from '../services/scene-reference-view';
 import { insertVersion } from '../testing/scene-fixtures';
-import { conceptVision, useReferenceHarness } from '../testing/scene-reference-harness';
+import {
+  conceptVision,
+  SCENE_27X40,
+  useReferenceHarness,
+} from '../testing/scene-reference-harness';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 import { errorOf } from '../testing/scene-test-helpers';
 
@@ -53,6 +57,28 @@ describeIfSceneDb(
         code: 'REFERENCE_NOT_PROPOSED',
       });
       expect(h.publish).not.toHaveBeenCalled();
+    });
+
+    it('PV-R20: fazer o verso não é editar a Frente: "Tentar de novo com o encarte" continua e gera na Frente', async () => {
+      const { scene, revision } = await proposedScene({ ...SCENE_27X40, layout: 'front_back' });
+      const first = await h.generate(scene.id, revision);
+      await h.run(scene.id, first.versionId);
+      const { SceneFacesService } = await import('../services/scene-faces.service');
+      const { SceneLockService } = await import('../services/scene-lock.service');
+      const faces = new SceneFacesService(h.dataSource, new SceneLockService(h.dataSource), {
+        publish: h.publish,
+      } as never);
+      const back = await faces.deriveBack(scene.id, await h.revisionOf(scene.id), null);
+      await h.run(scene.id, back.versionId);
+      expect((await view(scene.id))?.canRetry).toBe(true);
+
+      const again = await h.generate(scene.id, await h.revisionOf(scene.id));
+
+      expect(await h.versionOf(again.versionId)).toMatchObject({
+        operation: 'generate',
+        faceIndex: 0,
+        status: 'queued',
+      });
     });
 
     it('repetição que falha: a versão 2 fica failed, a 1 continua a atual e o botão continua', async () => {

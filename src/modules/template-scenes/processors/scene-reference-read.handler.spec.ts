@@ -26,6 +26,7 @@ describeIfSceneDb('Leitura do encarte em ficha-conceito (banco chroma_x_e2e)', (
         {
           element: 'Triangular paper bunting',
           label_pt: 'bandeirinhas de São João',
+          kind: 'decoration',
           where: 'header',
           notes: 'pennants',
         },
@@ -122,8 +123,8 @@ describeIfSceneDb('Leitura do encarte em ficha-conceito (banco chroma_x_e2e)', (
         theme: 'October sale',
         theme_pt: 'ofertas de outubro',
         signature_elements: [
-          { element: 'seal', where: 'header', notes: '' },
-          { element: 'shopping cart', where: 'corners', notes: '' },
+          { element: 'seal', kind: 'decoration', where: 'header', notes: '' },
+          { element: 'shopping cart', kind: 'decoration', where: 'corners', notes: '' },
         ],
         palette: [{ hex: '#112233', name_pt: 'azul', role: 'header' }],
       })).client,

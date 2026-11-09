@@ -13,9 +13,15 @@ const flyer = (overrides: Record<string, unknown>): Record<string, unknown> => (
   ...overrides,
 });
 
-const element = (name: string, where = 'header', notes = 'soft'): Record<string, unknown> => ({
+const element = (
+  name: string,
+  where = 'header',
+  notes = 'soft',
+  kind: string | null = 'decoration',
+): Record<string, unknown> => ({
   element: name,
   label_pt: '',
+  ...(kind ? { kind } : {}),
   where,
   notes,
 });
@@ -42,6 +48,65 @@ describe('sanitizeConcept: fichas reais do estudo', () => {
     const byText = Object.fromEntries(removed.map((r) => [r.text, r.reason]));
     expect(byText['Circular shopping-cart medallion']).toBe('logo_badge');
     expect(byText['Glossy gold coin medallions']).toBe('logo_badge');
+  });
+
+  it('R1 (estrutural): o selo vem pelo campo kind, mesmo parafraseado sem nenhum termo da tabela', () => {
+    const raw = flyer({
+      signature_elements: [
+        element('large circular gold ornament with a ring', 'top right', 'glossy', 'logo_or_badge'),
+        element('striped canvas over one produce area', 'top edge', 'red', 'section_decoration'),
+        element('flame shapes', 'bottom edge', 'orange', 'section_decoration'),
+        element('grass strip', 'bottom edge', 'green', 'section_decoration'),
+        element('sparkles', 'corners', 'tiny', 'decoration'),
+      ],
+    });
+    expect(names(raw)).toEqual(['sparkles']);
+    expect(clean(raw).removed).toEqual([
+      {
+        field: 'signature_elements',
+        text: 'large circular gold ornament with a ring',
+        reason: 'logo_badge',
+      },
+      {
+        field: 'signature_elements',
+        text: 'striped canvas over one produce area',
+        reason: 'section_or_unknown_place',
+      },
+      { field: 'signature_elements', text: 'flame shapes', reason: 'section_or_unknown_place' },
+      { field: 'signature_elements', text: 'grass strip', reason: 'section_or_unknown_place' },
+    ]);
+  });
+
+  it('kind ausente ou fora do conjunto: o elemento cai (falha fechada, motivo invalid)', () => {
+    const raw = flyer({
+      signature_elements: [
+        element('rays', 'header', 'soft', null),
+        element('bunting', 'header', 'soft', 'banner'),
+      ],
+    });
+    expect(names(raw)).toEqual([]);
+    expect(reasonsOf(raw)).toEqual(['invalid', 'invalid']);
+  });
+
+  it('R2: header.shape vira o conjunto fechado e name_pt passa pela tabela de termos', () => {
+    const shaped = (shape: string) => clean(flyer({ header: { shape } })).concept.header.shape;
+    expect(shaped('Straight lower edge with layered rays')).toBe('straight');
+    expect(shaped('Soft wave pattern')).toBe('wave');
+    expect(shaped('round gold medallion edge')).toBe('');
+    const { concept, removed } = clean(
+      flyer({
+        palette: [
+          { hex: '#112233', name_pt: 'dourado do selo', role: 'header' },
+          { hex: '#445566', name_pt: 'azul', role: 'header' },
+        ],
+      }),
+    );
+    expect(concept.palette.map((c) => c.namePt)).toEqual(['#112233', 'azul']);
+    expect(removed).toContainEqual({
+      field: 'palette.name_pt',
+      text: 'dourado do selo',
+      reason: 'logo_badge',
+    });
   });
 
   it('Navarro (D-1): o medalhão do topo à direita sai com logo_badge; ficam o bokeh e a faixa de baixo', () => {
@@ -164,7 +229,9 @@ describe('sanitizeConcept: casos', () => {
   it('rótulos: label_pt vazio cai no element e name_pt vazio cai no hex', () => {
     const { concept } = clean(
       flyer({
-        signature_elements: [{ element: 'rays', label_pt: 'raios', where: 'header', notes: '' }],
+        signature_elements: [
+          { element: 'rays', label_pt: 'raios', kind: 'decoration', where: 'header', notes: '' },
+        ],
         palette: [{ hex: '#1739d2', role: 'header' }],
       }),
     );

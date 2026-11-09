@@ -91,7 +91,7 @@ describe('summarize e a resposta do chat', () => {
     const raw = {
       theme: 'x',
       theme_pt: 'outubro',
-      signature_elements: [{ element: 'seal', where: 'header', notes: '' }],
+      signature_elements: [{ element: 'seal', kind: 'decoration', where: 'header', notes: '' }],
       palette: [{ hex: '#112233', name_pt: 'azul', role: 'header' }],
     };
     const { concept, removed } = sanitizeConcept(raw);

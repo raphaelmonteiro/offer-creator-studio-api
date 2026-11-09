@@ -15,6 +15,8 @@ DISCARD as section structure (list them in "ignored_sections", never describe th
 
 DISCARD as brand identity (list them in "ignored_content", never describe them elsewhere): the store logo and anything around it, and any badge, medallion, seal, emblem, rosette, crest, stamp or round frame that holds a logo, a store name, a campaign title, a price or a symbol (shopping cart, coin, currency sign). These belong to the logo and must not become decorations.
 
+Classify EVERY item of "signature_elements" with "kind", whatever words you use to name it: "logo_or_badge" for any medallion, badge, seal, emblem, rosette, crest, stamp, round frame, coin or cart ornament, or anything that sits around, holds or stands for the logo, the store name, a campaign title, a price or a symbol; "section_decoration" for any decoration tied to one product section (awning, flames, grass, wood planks, section ribbons); "decoration" ONLY for free artwork of the theme itself (bunting, checker fabric, sparkles, light rays, bokeh, ribbons of the header). When in doubt between "decoration" and another kind, choose the other kind.
+
 Only describe what you can actually see in the image. Do not add elements that are not there.
 
 Return ONLY a JSON object with exactly these keys:
@@ -22,17 +24,17 @@ Return ONLY a JSON object with exactly these keys:
   "is_retail_flyer": true|false,
   "theme": "season/holiday/occasion and mood in one sentence (e.g. Brazilian June festival, October sale, anniversary)",
   "theme_pt": "the same theme in Brazilian Portuguese, short (e.g. festa junina, ofertas de outubro)",
-  "signature_elements": [{"element": "generic artwork element, e.g. triangular paper bunting, blue checker fabric texture, sparkles, geometric light rays", "label_pt": "short Brazilian Portuguese name, e.g. bandeirinhas de São João", "where": "header|top edge|bottom edge|left edge|right edge|corners|whole background", "notes": "color, size, style"}],
+  "signature_elements": [{"element": "generic artwork element, e.g. triangular paper bunting, blue checker fabric texture, sparkles, geometric light rays", "label_pt": "short Brazilian Portuguese name, e.g. bandeirinhas de São João", "kind": "decoration|logo_or_badge|section_decoration", "where": "header|top edge|bottom edge|left edge|right edge|corners|whole background", "notes": "color, size, style"}],
   "background_texture": "the texture/field behind everything (e.g. blue rays with halftone dots, checker fabric, soft gradient)",
   "background_texture_pt": "the same in Brazilian Portuguese, short",
   "palette": [{"hex": "#RRGGBB", "name_pt": "color name in Brazilian Portuguese", "role": "header, accent, body background, edge decoration..."}] (4 to 7 colors, theme colors only, no section block colors),
-  "header": {"shape": "straight, curved, wave, diagonal, arch...", "height_pct": number, "fill": "texture/colors/decorations, abstract terms only"},
+  "header": {"shape": "straight|curved|wave|diagonal|arch", "height_pct": number, "fill": "texture/colors/decorations, abstract terms only"},
   "body_suggestion": "how a calm, empty body should look to match the concept (light tint of the theme colors, soft gradient, subtle texture)",
   "ignored_sections": ["each discarded section structure or section-tied decoration, described generically"],
   "ignored_content": ["categories present that must never be reproduced: logos, badges or medallions of the logo, store names, brands, product imagery, prices, texts, dates, people, mascots, QR codes, payment logos, social icons"]
 }
 
-Vocabulary rules: never use the words photography, photo, shelf, shelves, lettering, letters, text, title, price, collage, product, food, packaging, logo, brand, cart, coin, badge, medallion, seal, emblem in "theme", "signature_elements", "background_texture", "palette", "header" or "body_suggestion". Replace them with abstract art terms (e.g. "warm blurred bokeh" instead of shelf photography). Never write any word that is printed on the flyer.`;
+Vocabulary rules: never use the words photography, photo, shelf, shelves, lettering, letters, text, title, price, collage, product, food, packaging in "theme", "signature_elements", "background_texture", "palette", "header" or "body_suggestion". Replace them with abstract art terms (e.g. "warm blurred bokeh" instead of shelf photography). Never write any word that is printed on the flyer.`;
 
 /** O prompt da ficha; na correção do cliente (D-3), leva o pedido e a ficha limpa anterior. */
 export function buildConceptPrompt(correction?: {
