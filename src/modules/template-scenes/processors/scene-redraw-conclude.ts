@@ -1,4 +1,5 @@
 import * as sharp from 'sharp';
+import { restoreFold } from './scene-fold-restore';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { nextPaintedLines } from '../domain/scene-painted-text';
 import { hasTextError, TextLine, wrongLines } from '../domain/scene-text-check';
@@ -50,8 +51,15 @@ interface Applied {
 }
 
 /** O PNG no tamanho nativo do formato (D-32), de qualquer resposta do provedor. */
-export const normalize = (ctx: TurnContext, result: SceneGenerateResult): Promise<Buffer> =>
-  sharp(result.buffer).resize(ctx.widthPx, ctx.heightPx, { fit: 'fill' }).png().toBuffer();
+export const normalize = async (
+  ctx: TurnContext,
+  result: SceneGenerateResult,
+  reference?: Buffer,
+): Promise<Buffer> => {
+  // D-9, R7: a recolagem da faixa da dobra é processamento local, depois da chamada paga e do custo gravado.
+  const restored = reference ? await restoreFold(ctx, reference, result) : result;
+  return sharp(restored.buffer).resize(ctx.widthPx, ctx.heightPx, { fit: 'fill' }).png().toBuffer();
+};
 
 /** O que a primeira ou a segunda tentativa deixam em `metrics.textCheck.attempts`: prompt, custo e leitura. */
 function attemptRecord(
@@ -102,7 +110,7 @@ async function redoText(
     attempts.push(failedRecord(next, result.failed));
     return { ...applied, secondFailed: true };
   }
-  const png = await normalize(ctx, result);
+  const png = await normalize(ctx, result, done.before);
   if (!(await state.advance(ctx, 'checking'))) return 'over';
   const judged = await judge(png);
   if (judged === 'over') return 'over';
@@ -120,7 +128,7 @@ export async function concludeImage(
   ctx: TurnContext,
   done: Concluding,
 ): Promise<void> {
-  const png = await normalize(ctx, done.first.result);
+  const png = await normalize(ctx, done.first.result, done.before);
   if (!(await deps.support.state.advance(ctx, 'checking'))) return;
   const judge: Judge = (after) =>
     judgeResult(deps, ctx, { plan: done.plan, before: done.before, after, text: done.text });

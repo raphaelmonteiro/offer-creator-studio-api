@@ -1,9 +1,3 @@
-import * as sharp from 'sharp';
-import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
-import { QUEUES } from '../../../shared/queue/animation-queue.service';
-import { MockSceneDirectorClient } from '../providers/mock-scene-director.client';
-import { TemplateSceneFace } from '../entities/template-scene-face.entity';
-import { TemplateSceneMessage } from '../entities/template-scene-message.entity';
 import {
   DERIVE_INNER_ANNOUNCEMENT,
   DERIVE_INNER_REPLY,
@@ -14,58 +8,17 @@ import {
   NO_HEADER_ON_INNER_REPLY,
   OUTER_FIRST_REPLY,
   HEADER_ONLY_TABLOID_REPLY,
-  TABLOID_FOLD_NOTE,
 } from '../scene-texts';
-import { FIXED_ANNOUNCEMENT } from '../domain/scene-director-phrases';
 import { SceneDirectorContextService } from '../services/scene-director-context';
-import { DirectorPlan } from '../domain/scene-director-schema';
 import { directorImage, directorPlan, PlanOverrides } from '../testing/scene-director-fixtures';
-import { directorAnswer } from '../testing/scene-director-harness';
+import { tabloidChat } from '../testing/scene-tabloid-chat';
 import { useFacesHarness } from '../testing/scene-faces-harness';
 import { describeIfSceneDb } from '../testing/scene-test-db';
 
 describeIfSceneDb('Diretor no jornal de 4 páginas (banco chroma_x_e2e)', () => {
   const h = useFacesHarness();
 
-  async function chat(sceneId: string, content: string, extra: Record<string, unknown> = {}) {
-    const sent = await h.post(sceneId, content, extra);
-    await h
-      .directorProcessor(new MockSceneDirectorClient() as never)
-      .process({ sceneId, versionId: sent.versionId });
-    return { sent, version: await h.versionOf(sent.versionId) };
-  }
-
-  async function chatWith(
-    sceneId: string,
-    content: string,
-    plan: PlanOverrides,
-    extra: Record<string, unknown> = {},
-  ) {
-    const sent = await h.post(sceneId, content, extra);
-    const { client } = h.directorClient(async () => directorAnswer(plan));
-    await h.directorProcessor(client).process({ sceneId, versionId: sent.versionId });
-    return { sent, version: await h.versionOf(sent.versionId) };
-  }
-
-  const imageJobs = () =>
-    h.queue.publish.mock.calls.filter(([queue]) => queue === QUEUES.TEMPLATE_SCENE_TURN);
-  /** A resposta mais recente do assistente na versão (o anúncio antes da imagem, a resposta depois). */
-  const assistantOf = async (versionId: string) =>
-    (
-      await h.dataSource.manager.findOneOrFail(TemplateSceneMessage, {
-        where: { versionId, role: 'assistant' },
-        order: { createdAt: 'DESC' },
-      })
-    ).content;
-  const faceOf = (sceneId: string, index: number) =>
-    h.dataSource.manager.findOneByOrFail(TemplateSceneFace, { sceneId, index });
-
-  /** Roda o job de imagem da versão com o provedor falso e devolve o prompt enviado. */
-  async function runImage(sceneId: string, versionId: string, call: 'generate' | 'edit') {
-    const fake = h.fakeProvider(async () => h.okResult(0.13));
-    await h.processorWith(fake.provider).process(h.job(sceneId, versionId));
-    return { fake, prompt: fake[call].mock.calls[0]?.[0]?.prompt as string };
-  }
+  const { chat, chatWith, imageJobs, assistantOf, faceOf, runImage } = tabloidChat(h);
 
   describe('Fazer a interna', () => {
     it('pelo chat: o mesmo do botão, com uma chamada de edição e a janela de 5 s', async () => {
@@ -143,95 +96,6 @@ describeIfSceneDb('Diretor no jornal de 4 páginas (banco chroma_x_e2e)', () => 
       expect(prompt).toContain('front cover (right half, x > 1754 px), below the header');
       expect(prompt).toContain('This is the OUTER side of a 4-page folded flyer');
       expect(prompt).toContain('above y = 372 px');
-    });
-
-    it('Faixa embaixo na capa (D-10): a região é a capa e o prompt a limita à direita da faixa da dobra', async () => {
-      const { scene } = await h.tabloidScene({ outer: true });
-      const { sent } = await chatWith(
-        scene.id,
-        'coloca uma faixa no rodapé da direita',
-        editPlan({ zone: 'footer', side: 'right' }, 'Add a plain ribbon'),
-        { face: 'outer' },
-      );
-      const plan = (await h.versionOf(sent.versionId)).metrics.plan as DirectorPlan;
-      expect(plan.image?.region).toEqual({ zone: 'body', side: 'right' });
-      const { prompt } = await runImage(scene.id, sent.versionId, 'edit');
-      expect(prompt).toContain('front cover (right half, x > 1754 px), below the header');
-    });
-
-    it('Rodapé da loja (sem lado ou na contracapa): o prompt limita a mudança à faixa da contracapa', async () => {
-      const { scene } = await h.tabloidScene({ outer: true });
-      const { sent } = await chatWith(
-        scene.id,
-        'coloca uma faixa no rodapé',
-        editPlan({ zone: 'footer', side: null }, 'Add a plain ribbon'),
-        { face: 'outer' },
-      );
-      const plan = (await h.versionOf(sent.versionId)).metrics.plan as DirectorPlan;
-      expect(plan.image?.region).toEqual({ zone: 'footer', side: 'left' });
-      const { prompt } = await runImage(scene.id, sent.versionId, 'edit');
-      expect(prompt).toContain(
-        'only inside the footer band of the back cover: x from 0 to 1574 px, y ≥ 2232 px',
-      );
-    });
-
-    it('Anúncio que afirma algo sobre a dobra é trocado pelo fixo, e a edição leva a nota do sistema (D-9)', async () => {
-      const { scene } = await h.tabloidScene({ outer: true });
-      const { sent } = await chatWith(
-        scene.id,
-        'coloca uma faixa verde embaixo da capa',
-        directorPlan({
-          turn_kind: 'pedido_item',
-          will_change_image: true,
-          reply: 'Vou colocar uma faixa verde embaixo da capa, sem avançar sobre a dobra.',
-          image: directorImage({
-            change: 'Add a green strip',
-            region: { zone: 'body', side: 'right' },
-          }),
-        }),
-        { face: 'outer' },
-      );
-      const text = await assistantOf(sent.versionId);
-      expect(text).not.toContain('sem avançar');
-      expect(text).toContain(FIXED_ANNOUNCEMENT);
-      expect(text).toContain(TABLOID_FOLD_NOTE);
-    });
-
-    it('A faixa da dobra volta da master anterior depois da edição da Externa (D-9)', async () => {
-      const { scene, outer } = await h.tabloidScene({ outer: true });
-      const { sent } = await chatWith(
-        scene.id,
-        'coloca uma faixa verde embaixo da capa',
-        editPlan({ zone: 'body', side: 'right' }, 'Add a green strip'),
-        { face: 'outer' },
-      );
-      const painted = await sharp({
-        create: { width: 3328, height: 2480, channels: 3, background: '#ff00ff' },
-      })
-        .png()
-        .toBuffer();
-      const fake = h.fakeProvider(async () => ({ ...(await h.okResult(0.13)), buffer: painted }));
-      await h.processorWith(fake.provider).process(h.job(scene.id, sent.versionId));
-      const before = await h.dataSource.manager.findOneByOrFail(TemplateSceneAsset, {
-        id: outer?.masterAssetId as string,
-      });
-      const done = await h.versionOf(sent.versionId);
-      const after = await h.dataSource.manager.findOneByOrFail(TemplateSceneAsset, {
-        id: done.masterAssetId as string,
-      });
-      const pixelAt = async (url: string, x: number) =>
-        Array.from(
-          (
-            await sharp(await h.files.read(url))
-              .extract({ left: x, top: 1200, width: 1, height: 1 })
-              .removeAlpha()
-              .raw()
-              .toBuffer()
-          ).subarray(0, 3),
-        );
-      expect(await pixelAt(after.url, 1664)).toEqual(await pixelAt(before.url, 1664));
-      expect(await pixelAt(after.url, 1600)).toEqual(await pixelAt(before.url, 1600));
-      expect(await pixelAt(after.url, 2500)).toEqual([255, 0, 255]);
     });
 
     it('Cabeçalho pedido na Interna: executa no miolo e a frase diz que não há cabeçalho', async () => {
