@@ -32,6 +32,8 @@ export interface Concluding {
   /** Monta a segunda chamada da refação do texto, com as linhas lidas diferente do pedido. */
   redo: (corrections: TextCorrection[]) => Attempt;
   before: Buffer | null;
+  /** D-9, R11: a master de que a faixa da dobra volta; só no edit. A imagem nova (`generate`) não tem. */
+  foldReference?: Buffer;
   marking: MarkupInfo | null;
   text: RoundText;
 }
@@ -110,7 +112,7 @@ async function redoText(
     attempts.push(failedRecord(next, result.failed));
     return { ...applied, secondFailed: true };
   }
-  const png = await normalize(ctx, result, done.before);
+  const png = await normalize(ctx, result, done.foldReference);
   if (!(await state.advance(ctx, 'checking'))) return 'over';
   const judged = await judge(png);
   if (judged === 'over') return 'over';
@@ -128,7 +130,7 @@ export async function concludeImage(
   ctx: TurnContext,
   done: Concluding,
 ): Promise<void> {
-  const png = await normalize(ctx, done.first.result, done.before);
+  const png = await normalize(ctx, done.first.result, done.foldReference);
   if (!(await deps.support.state.advance(ctx, 'checking'))) return;
   const judge: Judge = (after) =>
     judgeResult(deps, ctx, { plan: done.plan, before: done.before, after, text: done.text });

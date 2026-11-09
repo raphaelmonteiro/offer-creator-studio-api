@@ -119,6 +119,34 @@ describeIfSceneDb('Jornal: faixa da dobra e faixa na capa (D-9, D-10; banco chro
       expect(await pixelAt(after, 2500)).toEqual(MAGENTA);
     });
 
+    it('imagem nova da Externa (generate): nada é recolado, a faixa da dobra é a da imagem nova (R11)', async () => {
+      const { scene } = await h.tabloidScene({ outer: true });
+      const { sent } = await chatWith(
+        scene.id,
+        'gera outra imagem, tudo diferente',
+        directorPlan({
+          turn_kind: 'imagem_nova',
+          will_change_image: true,
+          image: directorImage({
+            change: 'A new festive background',
+            region: { zone: 'whole', side: null },
+          }),
+        }),
+        { face: 'outer' },
+      );
+      const fake = h.fakeProvider(async () => ({
+        ...(await h.okResult(0.13)),
+        buffer: await paintedMagenta(),
+      }));
+      await h.processorWith(fake.provider).process(h.job(scene.id, sent.versionId));
+      expect(fake.generate).toHaveBeenCalledTimes(1);
+      const done = await h.versionOf(sent.versionId);
+      expect(done.status).toBe('ready');
+      const after = await masterUrl(done.masterAssetId);
+      expect(await pixelAt(after, 1664)).toEqual(MAGENTA);
+      expect(await pixelAt(after, 1600)).toEqual(MAGENTA);
+    });
+
     it('derivação da Interna: a faixa da Interna é a da Externa (a referência da derivação)', async () => {
       const { scene, outer } = await h.tabloidScene({ outer: true });
       const { sent } = await chat(scene.id, 'agora faz as páginas de dentro');
