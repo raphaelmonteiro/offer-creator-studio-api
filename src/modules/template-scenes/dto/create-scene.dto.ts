@@ -25,7 +25,7 @@ export class CreateSceneDto {
     enum: SCENE_LAYOUTS,
     default: 'single',
     description:
-      '`single` (uma face, como sempre) ou `front_back` (frente e verso, só nos formatos em retrato)',
+      '`single` (uma face, como sempre), `front_back` (frente e verso, só nos formatos em retrato) ou `tabloid` (jornal de 4 páginas: Externa e Interna, só no `folheto-54x40`)',
   })
   @IsOptional()
   @IsIn(SCENE_LAYOUTS)

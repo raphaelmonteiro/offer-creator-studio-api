@@ -3,6 +3,7 @@ import { zoneRect } from '../domain/scene-faces';
 import { LayerAction } from '../domain/scene-layer.types';
 import { SceneElement, SceneElementKind } from '../domain/scene.types';
 import { belowSpot, RunState } from './scene-layer-below';
+import { coverLogoBox, sideX } from './scene-layer-cover';
 import { clamp, findTarget, heightFraction, LayerContext } from './scene-layer-target';
 
 /** Camadas exatas (logo, texto, elemento adicionado): mudam por regra, sem chamar o modelo. */
@@ -13,7 +14,6 @@ export type LayerResult =
   | { ok: true; elements: SceneElement[]; changed: string[] }
   | { ok: false; reply: string };
 
-const SIDE_MARGIN = 0.04;
 const LOGO_WIDTH = 0.3;
 const TEXT_WIDTH = 0.6;
 const nextZ = (elements: SceneElement[]): number => Math.max(0, ...elements.map((e) => e.z)) + 1;
@@ -41,21 +41,16 @@ function logoElement(
   if (!asset?.width || !asset.height) return null;
   const aspect = asset.width / asset.height;
   const zone = zoneRect(ctx.zones, action.zone);
-  const x =
-    action.side === 'left'
-      ? SIDE_MARGIN + LOGO_WIDTH / 2
-      : action.side === 'right'
-        ? 1 - SIDE_MARGIN - LOGO_WIDTH / 2
-        : 0.5;
-  const draft = { w: LOGO_WIDTH, aspect } as SceneElement;
-  const h = heightFraction(draft, ctx);
+  const cover = spot ? null : coverLogoBox(ctx, action.zone, aspect);
+  const w = cover?.w ?? LOGO_WIDTH;
+  const h = heightFraction({ w, aspect } as SceneElement, ctx);
   return {
     id: randomUUID(),
     kind: 'logo',
     name: nextName(elements, 'logo', 'Logo'),
-    x: spot ? spot[0] : x,
-    y: spot ? spot[1] : clamp(zone.y + zone.h / 2, h / 2, 1 - h / 2),
-    w: LOGO_WIDTH,
+    x: spot ? spot[0] : (cover?.x ?? sideX(action.side, zone, w)),
+    y: spot ? spot[1] : (cover?.y ?? clamp(zone.y + zone.h / 2, h / 2, 1 - h / 2)),
+    w,
     aspect,
     rotation: 0,
     z: nextZ(elements),
@@ -72,13 +67,7 @@ function textPosition(
   const { position } = action;
   if (!position) return textY(action.placement, ctx, elements);
   const zone = zoneRect(ctx.zones, position.zone);
-  const x =
-    position.side === 'left'
-      ? SIDE_MARGIN + TEXT_WIDTH / 2
-      : position.side === 'right'
-        ? 1 - SIDE_MARGIN - TEXT_WIDTH / 2
-        : 0.5;
-  return [x, zone.y + zone.h / 2];
+  return [sideX(position.side, zone, TEXT_WIDTH), zone.y + zone.h / 2];
 }
 
 function textY(placement: string, ctx: LayerContext, elements: SceneElement[]): [number, number] {
@@ -87,7 +76,7 @@ function textY(placement: string, ctx: LayerContext, elements: SceneElement[]): 
     return [logo.x, Math.min(0.95, logo.y + heightFraction(logo, ctx) / 2 + 0.06)];
   }
   const zone = zoneRect(ctx.zones, placement === 'top' ? 'header' : 'footer');
-  return [0.5, zone.y + zone.h / 2];
+  return [zone.x + zone.w / 2, zone.y + zone.h / 2];
 }
 
 function textElements(

@@ -3,7 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { Template } from '../../templates/entities/template.entity';
 import { CreateSceneDto } from '../dto/create-scene.dto';
-import { acceptsFrontBack, FaceKey } from '../domain/scene-faces';
+import { acceptsFrontBack, acceptsTabloid, FaceKey } from '../domain/scene-faces';
 import { findSceneFormat } from '../domain/scene-formats';
 import { nativeSizeOfFormat, pixelsPerCm } from '../domain/scene-format-size';
 import { TemplateScene } from '../entities/template-scene.entity';
@@ -25,17 +25,18 @@ export class TemplateScenesService {
   ) {}
 
   /**
-   * Valida o formato (lista de impressão, 1:3 a 3:1) e o layout (frente e verso só nos formatos em retrato, D-9) e
-   * grava a cena com o tamanho nativo e as faces, na mesma transação.
+   * Valida o formato (lista de impressão, 1:3 a 3:1) e o layout (frente e verso só nos formatos em retrato, D-9; jornal
+   * só no 54x40, T-1) e grava a cena com o tamanho nativo e as faces, na mesma transação.
    */
   async create(dto: CreateSceneDto, userId: string | null): Promise<SceneDetailView> {
     const format = findSceneFormat(dto.formatId);
     const size = format ? nativeSizeOfFormat(format) : null;
     if (!format || !size) throw sceneFormatUnsupported(dto.formatId);
     const layout = dto.layout ?? 'single';
-    if (layout === 'front_back' && !acceptsFrontBack(format.id)) {
-      throw sceneLayoutUnsupported(format.id, layout);
-    }
+    const unsupported =
+      (layout === 'front_back' && !acceptsFrontBack(format.id)) ||
+      (layout === 'tabloid' && !acceptsTabloid(format.id));
+    if (unsupported) throw sceneLayoutUnsupported(format.id, layout);
 
     const sceneId = await this.dataSource.transaction(async (manager) => {
       const scene = await manager.save(TemplateScene, {

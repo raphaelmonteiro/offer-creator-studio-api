@@ -6,16 +6,21 @@ import {
 } from './scene-director-schema';
 import { emptyImage, imageChange } from './scene-director-image';
 import {
-  BACK_EXISTS_REPLY,
-  BACK_MISSING_REPLY,
-  DERIVE_BACK_ANNOUNCEMENT,
-  FRONT_FIRST_REPLY,
+  DERIVE_TEXTS,
   NO_IMAGE_REPLY,
   NO_INSTRUCTION_REPLY,
   SINGLE_FACE_REPLY,
 } from '../scene-texts';
-import { DirectorFace, isFrontBack } from './scene-director-faces';
-import { replyIsForbidden, safeReply } from './scene-director-phrases';
+import { DirectorFace, isTwoFaces } from './scene-director-faces';
+import { decideHeaderSize } from './scene-director-header';
+import { isDerivedFace } from './scene-faces';
+import { SceneZones } from './scene.types';
+import {
+  claimsFold,
+  FIXED_ANNOUNCEMENT,
+  replyIsForbidden,
+  safeReply,
+} from './scene-director-phrases';
 import { fold } from '../../../shared/text/fold';
 
 /**
@@ -33,6 +38,8 @@ export interface DecisionInput {
   openRequests: string[];
   /** A face do pedido e o estado das faces; ausente vale cena de uma face (o comportamento de sempre). */
   face?: DirectorFace;
+  /** A mensagem do cliente: vira o pedido da primeira imagem quando o plano veio como `tamanho_cabecalho` sem imagem (D-6). */
+  message?: string;
 }
 
 type ImageDecision = Extract<TurnDecision, { kind: 'image' }>;
@@ -60,6 +67,12 @@ export type TurnDecision =
       planPatch?: { will_change_image: true; image: DirectorImage };
       /** Aviso do redesenho só vale em edição: a primeira imagem e a imagem nova não contam (D-35). */
       isEdit: boolean;
+      /** Aviso no lugar do `MARKING_DISCARDED_NOTE` quando `discardMarking` (D-7: tamanho do cabeçalho). */
+      markingNote?: string;
+      /** Jornal (D-1): as zonas com a nova altura do cabeçalho, gravadas na versão antes da chamada de imagem. */
+      zones?: SceneZones;
+      /** Jornal (D-1): a edição que só muda a altura do cabeçalho; o anúncio e a resposta citam os cm. */
+      headerResize?: { fromCm: number; toCm: number };
     };
 
 /** Tipos que podem pedir imagem: quem decide é `will_change_image`, e o `reply` é a resposta quando ele é falso. */
@@ -180,34 +193,41 @@ function imageDecision(input: DecisionInput): TurnDecision {
     // A primeira imagem tem janela: é pedido sem marcação, e marcação não existe sem imagem.
     window: !hasImage || windowApplies(plan.turn_kind, marked),
     discardMarking: isNewImage && hasImage && marked,
-    announcement: safeReply({ reply: plan.reply, will_change_image: true }),
+    announcement:
+      input.face?.layout === 'tabloid' && claimsFold(plan.reply)
+        ? FIXED_ANNOUNCEMENT
+        : safeReply({ reply: plan.reply, will_change_image: true }),
     isEdit: hasImage && !isNewImage,
     ...patch,
   };
 }
 
 /**
- * Efeito dos turnos que dependem da face (PV-14, D-13): `fazer_verso` e o pedido de imagem no verso vazio ou o de
- * imagem nova no verso pronto. `null` deixa o turno seguir a tabela de sempre.
+ * Efeito dos turnos que dependem da face (PV-14, D-13, PV-T8): `fazer_verso` (no jornal, "fazer a interna"), o pedido
+ * de imagem na segunda face vazia ou o de imagem nova na segunda face pronta, e o tamanho do cabeçalho (D-1). `null`
+ * deixa o turno seguir a tabela de sempre.
  */
 function decideFaceTurn(input: DecisionInput): TurnDecision | null {
   const { plan, face } = input;
   const reply = (text: string): TurnDecision => ({ kind: 'reply', reply: text });
+  if (plan.turn_kind === 'tamanho_cabecalho') return decideHeaderSize(input);
   if (plan.turn_kind === 'fazer_verso') {
-    if (!isFrontBack(face)) return reply(SINGLE_FACE_REPLY);
-    if (!face?.frontReady) return reply(FRONT_FIRST_REPLY);
-    if (face.backReady) return reply(BACK_EXISTS_REPLY);
-    return { kind: 'derive', announcement: DERIVE_BACK_ANNOUNCEMENT, window: true };
+    if (!face || !isTwoFaces(face)) return reply(SINGLE_FACE_REPLY);
+    const texts = DERIVE_TEXTS[face.layout as 'front_back' | 'tabloid'];
+    if (!face.frontReady) return reply(texts.first);
+    if (face.backReady) return reply(texts.exists);
+    return { kind: 'derive', announcement: texts.announcement, window: true };
   }
-  if (!isFrontBack(face) || face?.key !== 'back') return null;
+  if (!face || !isTwoFaces(face) || !isDerivedFace(face.key)) return null;
+  const texts = DERIVE_TEXTS[face.layout as 'front_back' | 'tabloid'];
   const wantsNewImage = plan.turn_kind === 'imagem_nova';
-  if (face.hasImage) return wantsNewImage ? reply(BACK_EXISTS_REPLY) : null;
+  if (face.hasImage) return wantsNewImage ? reply(texts.exists) : null;
   const touchesImage =
     wantsNewImage ||
     plan.turn_kind === 'camada' ||
     plan.turn_kind === 'desfazer' ||
     changesImage(input);
-  return touchesImage ? reply(BACK_MISSING_REPLY) : null;
+  return touchesImage ? reply(texts.missing) : null;
 }
 
 export function decideTurn(input: DecisionInput): TurnDecision {

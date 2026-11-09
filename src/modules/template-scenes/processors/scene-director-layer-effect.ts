@@ -51,6 +51,8 @@ async function saveLayerVersion(
     masterAssetId: current.masterAssetId,
     previewAssetId: current.previewAssetId,
     elements: input.elements,
+    // A master não muda: a altura do cabeçalho da atual segue valendo (PV-T10).
+    zones: current.zones,
     metrics: {
       ...version.metrics,
       layer: { changed: input.changed },

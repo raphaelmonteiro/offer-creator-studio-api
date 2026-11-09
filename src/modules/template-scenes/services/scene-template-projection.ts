@@ -1,6 +1,7 @@
 import { buildTemplateConfiguration, zoneSectionBands } from '../domain/scene-template-config';
 import { mapLayersToSections } from '../domain/scene-template-layers';
 import { PROJECTION_VERSION, ProjectionKeys } from '../domain/scene-template-keys';
+import { foldSourceOf } from '../domain/scene-tabloid';
 import { FaceKey } from '../domain/scene-faces';
 import { computeSceneZones, SceneFormatSpec } from '../domain/scene-formats';
 import { SceneTemplateConfiguration, TemplateImageUrls } from '../domain/scene-template.types';
@@ -70,6 +71,7 @@ export function configurationFor(
     ...bands,
     logoUrlOf: (assetId) => logos.get(assetId),
   });
+  const fold = foldSourceOf(zones, source.widthPx);
   return buildTemplateConfiguration({
     format: source.format,
     zones,
@@ -86,6 +88,7 @@ export function configurationFor(
       fingerprint: source.keys.fingerprint,
       projectionVersion: PROJECTION_VERSION,
       syncedAt: new Date().toISOString(),
+      ...(fold ? { fold } : {}),
     },
   });
 }

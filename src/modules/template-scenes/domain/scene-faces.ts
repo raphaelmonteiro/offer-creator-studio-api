@@ -1,17 +1,27 @@
 import { computeSceneZones, SceneFormatSpec } from './scene-formats';
+import { isTabloidFace, tabloidZones } from './scene-tabloid';
 import { zoneBands } from './scene-zone-bands';
 import { Rect, SceneZoneName, SceneZones } from './scene.types';
 
 /**
- * Faces da cena (change add-template-scene-faces): uma face (`single`, igual ao que sempre existiu) ou frente e
- * verso (`front_back`, só nos formatos em retrato, D-9). Tudo aqui é função pura sobre o formato e a chave da face.
+ * Faces da cena (change add-template-scene-faces): uma face (`single`, igual ao que sempre existiu), frente e
+ * verso (`front_back`, só nos formatos em retrato, D-9) ou o jornal de 4 páginas (`tabloid`, Externa e Interna, só
+ * no 54x40; change add-template-scene-tabloid). Tudo aqui é função pura sobre o formato e a chave da face.
  */
 
-export const SCENE_LAYOUTS = ['single', 'front_back'] as const;
+export const SCENE_LAYOUTS = ['single', 'front_back', 'tabloid'] as const;
 export type SceneLayout = (typeof SCENE_LAYOUTS)[number];
 
-export const FACE_KEYS = ['single', 'front', 'back'] as const;
+export const FACE_KEYS = ['single', 'front', 'back', 'outer', 'inner'] as const;
 export type FaceKey = (typeof FACE_KEYS)[number];
+
+export { acceptsTabloid, TABLOID_FORMAT_IDS } from './scene-tabloid';
+
+/** A cena tem duas faces (frente e verso, ou Externa e Interna)? */
+export const hasTwoFaces = (layout: SceneLayout): boolean => layout !== 'single';
+
+/** A segunda face da cena de duas faces: a que "Fazer o verso" e "Fazer a interna" derivam da primeira. */
+export const isDerivedFace = (key: FaceKey): boolean => key === 'back' || key === 'inner';
 
 /** Os 7 formatos em retrato que aceitam frente e verso (D-9). Espelhado no front em `constants/templateScene.ts`. */
 export const FRONT_BACK_FORMAT_IDS: readonly string[] = [
@@ -40,6 +50,10 @@ const LAYOUT_FACES: Readonly<Record<SceneLayout, readonly FaceSpec[]>> = {
     { index: 0, key: 'front', label: 'Frente' },
     { index: 1, key: 'back', label: 'Verso' },
   ],
+  tabloid: [
+    { index: 0, key: 'outer', label: 'Externa' },
+    { index: 1, key: 'inner', label: 'Interna' },
+  ],
 };
 
 export const facesOfLayout = (layout: SceneLayout): readonly FaceSpec[] => LAYOUT_FACES[layout];
@@ -53,9 +67,11 @@ const noZone = (y: number): Rect => ({ x: 0, y, w: 1, h: 0 });
 
 /**
  * Zonas da face (PV-3): `single` = as do formato; `front` = cabeçalho do formato e rodapé de altura 0; `back` =
- * cabeçalho de altura 0 e rodapé do formato. O miolo ocupa o que sobra.
+ * cabeçalho de altura 0 e rodapé do formato. O miolo ocupa o que sobra. No jornal (`outer`, `inner`): meia largura e
+ * faixa da dobra (`tabloidZones`).
  */
 export function faceZones(format: SceneFormatSpec, key: FaceKey): SceneZones {
+  if (isTabloidFace(key)) return tabloidZones(format, key);
   const zones = computeSceneZones(format);
   if (key === 'front') {
     const header = zones.header.h;

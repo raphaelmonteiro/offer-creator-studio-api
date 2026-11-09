@@ -7,7 +7,9 @@ import {
   faceZones,
   SceneLayout,
 } from '../domain/scene-faces';
-import { SceneFormatSpec } from '../domain/scene-formats';
+import { findSceneFormat, SceneFormatSpec } from '../domain/scene-formats';
+import { sameZones } from '../domain/scene-tabloid';
+import { SceneZones } from '../domain/scene.types';
 import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneFace } from '../entities/template-scene-face.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
@@ -97,9 +99,46 @@ export function faceHasImage(
     .getExists();
 }
 
+/** As zonas da face na criação (as que a versão sem `zones` própria tem). */
+function creationZones(scene: Pick<TemplateScene, 'formatId' | 'layout'>, faceIndex: number) {
+  const format = findSceneFormat(scene.formatId) as SceneFormatSpec;
+  return faceZones(format, faceKeyOf(scene.layout, faceIndex));
+}
+
+/**
+ * PV-T10: a versão do jornal sem zonas próprias herda as da face em vigor (nulo se iguais às da criação). Chamada
+ * antes de salvar a versão que passa a ser a atual sem mudar o cabeçalho (imagem, camada, manual). Versão que já traz
+ * `zones` (a que mudou a altura do cabeçalho) e cena que não é jornal ficam como estão.
+ */
+export async function stampVersionZones(
+  manager: EntityManager,
+  scene: Pick<TemplateScene, 'id' | 'formatId' | 'layout'>,
+  version: Pick<TemplateSceneVersion, 'faceIndex' | 'zones'>,
+): Promise<void> {
+  if (scene.layout !== 'tabloid' || version.zones) return;
+  const face = await loadFace(manager, scene.id, version.faceIndex);
+  version.zones = sameZones(face.zones, creationZones(scene, version.faceIndex))
+    ? null
+    : face.zones;
+}
+
+/** As zonas que passam a valer na face quando a versão vira a atual: as dela, ou as da criação (PV-T10). */
+async function zonesOfVersion(
+  manager: EntityManager,
+  scene: Pick<TemplateScene, 'formatId' | 'layout'>,
+  input: { faceIndex: number; versionId: string },
+): Promise<SceneZones> {
+  const version = await manager.findOne(TemplateSceneVersion, {
+    where: { id: input.versionId },
+    select: { id: true, zones: true },
+  });
+  return version?.zones ?? creationZones(scene, input.faceIndex);
+}
+
 /**
  * A versão passa a ser a atual da face; na face 0, a cena espelha. Atualiza também `scene` em memória, porque o
- * `bumpRevision` que fecha o turno salva a entidade inteira e não pode desfazer o espelho.
+ * `bumpRevision` que fecha o turno salva a entidade inteira e não pode desfazer o espelho. No jornal, as zonas da face
+ * passam a ser as da versão (PV-T10): a altura do cabeçalho acompanha a imagem em "voltar", restaurar e desfazer.
  */
 export async function setFaceCurrentVersion(
   manager: EntityManager,
@@ -107,10 +146,14 @@ export async function setFaceCurrentVersion(
   faceIndex: number,
   versionId: string,
 ): Promise<void> {
+  const zones =
+    scene.layout === 'tabloid'
+      ? { zones: await zonesOfVersion(manager, scene, { faceIndex, versionId }) }
+      : {};
   const result = await manager.update(
     TemplateSceneFace,
     { sceneId: scene.id, index: faceIndex },
-    { currentVersionId: versionId },
+    { currentVersionId: versionId, ...zones },
   );
   if (!result.affected) throw new Error(`Cena ${scene.id} sem a face ${faceIndex}`);
   if (faceIndex !== 0) return;
@@ -146,7 +189,7 @@ export function parseFaceKey(value: unknown): FaceKey | undefined {
   if (typeof value === 'string' && (FACE_KEYS as readonly string[]).includes(value)) {
     return value as FaceKey;
   }
-  throw invalidBody('O campo "face" precisa ser single, front ou back.');
+  throw invalidBody('O campo "face" precisa ser single, front, back, outer ou inner.');
 }
 
 /**

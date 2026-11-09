@@ -5,7 +5,11 @@ import { TemplateScene } from '../entities/template-scene.entity';
 import { TemplateSceneAsset } from '../entities/template-scene-asset.entity';
 import { TemplateSceneVersion } from '../entities/template-scene-version.entity';
 import { publishSceneEvent } from '../services/scene-events';
-import { faceKeyOfVersion, setFaceCurrentVersion } from '../services/scene-faces';
+import {
+  faceKeyOfVersion,
+  setFaceCurrentVersion,
+  stampVersionZones,
+} from '../services/scene-faces';
 import { bumpRevision } from '../services/scene-lock.service';
 import { addAssistantMessage, settleUserMessage, turnMessageOf } from '../services/scene-messages';
 import { pruneSceneAssets } from '../services/scene-retention';
@@ -111,6 +115,7 @@ export async function readyVersion(
   }
   if (!extra.keepBrief) await closeTurnBrief(manager, scene, version, { messageId });
   if (extra.requestedRegion !== undefined) version.requestedRegion = extra.requestedRegion;
+  await stampVersionZones(manager, scene, version);
   await manager.save(version);
   // O resultado é sempre a versão atual, inclusive com o juiz reprovando (D-26): "Voltar para a anterior" é do cliente.
   await setFaceCurrentVersion(manager, scene, version.faceIndex, version.id);

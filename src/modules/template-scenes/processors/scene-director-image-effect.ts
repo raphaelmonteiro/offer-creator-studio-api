@@ -45,6 +45,13 @@ export async function queueImageEffect(
   const windowSeconds = decision.window ? deps.windowSeconds : 0;
   version.operation = decision.operation;
   version.step = null;
+  if (decision.zones) {
+    // D-1, PV-T10: a altura nova vale para a imagem desta versão; a face só a adota quando a versão fica pronta.
+    version.zones = decision.zones;
+    if (decision.headerResize) {
+      version.metrics = { ...version.metrics, headerResize: decision.headerResize };
+    }
+  }
   if (decision.planPatch) {
     // O Diretor não deu a instrução do "marquei": o plano gravado (e o prompt) passam a ter a dos pedidos em aberto.
     version.metrics = {
@@ -65,7 +72,7 @@ export async function queueImageEffect(
   }
   await manager.save(scene);
   const notes: string[] = [];
-  if (decision.discardMarking) notes.push(MARKING_DISCARDED_NOTE);
+  if (decision.discardMarking) notes.push(decision.markingNote ?? MARKING_DISCARDED_NOTE);
   const face = await loadFace(manager, scene.id, version.faceIndex);
   if (
     await paintsExistingLayer(manager, face.currentVersionId, version.metrics.plan as DirectorPlan)

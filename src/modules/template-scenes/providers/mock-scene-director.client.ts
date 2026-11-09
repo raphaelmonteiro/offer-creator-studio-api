@@ -8,8 +8,11 @@ import {
   contradictionPlan,
   EMPTY,
   has,
+  headerPlan,
   imageOf,
   imagePlan,
+  INNER_ASK,
+  innerPlan,
   layerPlan,
   logoRefusal,
   openRequest,
@@ -44,6 +47,11 @@ function planFor(script: DirectorScript, message: string): DirectorPlan {
   const folded = fold(message);
   if (has(folded, LOGO_ASK)) return logoRefusal();
   if (script.layout === 'front_back' && has(folded, BACK_ASK)) return backPlan(message);
+  if (script.layout === 'tabloid') {
+    if (has(folded, INNER_ASK)) return innerPlan(message);
+    const header = headerPlan(script, folded);
+    if (header) return header;
+  }
   const direct = undoPlan(folded) ?? layerPlan(script, folded, message);
   if (direct) return direct;
   if (has(folded, /\b(obrigad[oa]|otimo|valeu)\b/) && script.hasImage) {

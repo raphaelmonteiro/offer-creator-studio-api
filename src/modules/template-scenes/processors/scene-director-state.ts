@@ -4,7 +4,7 @@ import { EntityManager } from 'typeorm';
 import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { resolveGenericDrops } from '../domain/scene-desist';
 import { applyDirectorRequests, BriefChanges, openItems } from '../domain/scene-brief';
-import { briefFaceKey } from '../domain/scene-director-faces';
+import { briefFaceKey, isTwoFaces } from '../domain/scene-director-faces';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { decideTurn, TurnDecision } from '../domain/scene-director-decision';
 import { SceneFailureCode } from '../domain/scene.types';
@@ -201,11 +201,11 @@ export class SceneDirectorState {
       plan,
       marked: context.script.marked,
       hasImage: context.script.hasImage,
-      openRequests: openItems(
-        opened,
-        context.face?.layout === 'front_back' ? context.face.key : undefined,
-      ).map((item) => item.text),
+      openRequests: openItems(opened, isTwoFaces(context.face) ? context.face?.key : undefined).map(
+        (item) => item.text,
+      ),
       face: context.face,
+      message: context.script.message,
     });
   }
 

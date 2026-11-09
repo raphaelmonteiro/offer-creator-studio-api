@@ -29,6 +29,7 @@ import {
 import { PatchElementsDto } from './dto/patch-elements.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { RestoreVersionDto } from './dto/restore-version.dto';
+import { FaceKey } from './domain/scene-faces';
 import { sceneNotFound, versionNotFound } from './scene.errors';
 import { SceneFacesService } from './services/scene-faces.service';
 import { SceneLogoService } from './services/scene-logo.service';
@@ -121,17 +122,22 @@ export class TemplateScenesController {
     return this.logos.upload(id, file, face);
   }
 
-  @Post(':id/faces/back/derive')
+  @Post(':id/faces/:faceKey/derive')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
-    summary: 'Faz o verso a partir da frente atual (assíncrono, uma chamada de imagem)',
+    summary:
+      'Faz o verso (`back`, cena de frente e verso) ou a interna (`inner`, jornal) a partir da primeira face atual (assíncrono, uma chamada de imagem)',
   })
-  deriveBack(
+  deriveFace(
     @Param('id', SceneIdPipe) id: string,
+    @Param('faceKey') faceKey: string,
     @Body() dto: DeriveFaceDto,
     @CurrentUser() user: { id: string },
   ) {
-    return this.faces.deriveBack(id, dto.expectedRevision, user?.id ?? null);
+    return this.faces.deriveFace(id, faceKey as FaceKey, {
+      expectedRevision: dto.expectedRevision,
+      userId: user?.id ?? null,
+    });
   }
 
   @Post(':id/messages')

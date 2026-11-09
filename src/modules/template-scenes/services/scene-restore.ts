@@ -50,6 +50,8 @@ export async function restoreInto(
     masterAssetId: source.masterAssetId,
     previewAssetId: source.previewAssetId,
     elements: structuredClone(source.elements),
+    // A altura do cabeçalho volta com a imagem (PV-T10); nulo = as zonas da criação.
+    zones: source.zones,
   };
   // A master volta a ser a da origem, e o texto pintado nela também (R66).
   const painted = paintedMetricsOf(source);

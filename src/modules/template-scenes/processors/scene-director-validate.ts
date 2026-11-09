@@ -116,7 +116,9 @@ export function validate(text: string, context: DirectorContext, final: boolean)
   // O par coerente é a única recusa (R62); `parseDirector` já recusou o par incoerente.
   if (parsed.plan.turn_kind === 'recusa_pintado') return { plan: parsed.plan };
   // PV-9: a zona que a face não tem (rodapé na frente, cabeçalho no verso) vira miolo antes de tudo o mais.
-  const zoned = context.face ? applyFaceZones(parsed.plan, context.face.zones) : parsed.plan;
+  const zoned = context.face
+    ? applyFaceZones(parsed.plan, context.face.zones, context.face)
+    : parsed.plan;
   const plan = withCleanExactText(zoned);
   const sources = {
     clientMessages: context.clientMessages,

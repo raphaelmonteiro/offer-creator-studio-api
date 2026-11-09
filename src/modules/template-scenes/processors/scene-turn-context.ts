@@ -6,7 +6,7 @@ import {
   SceneVersionOperation,
   SceneZones,
 } from '../domain/scene.types';
-import { FaceKey, SceneLayout } from '../domain/scene-faces';
+import { FaceKey, hasTwoFaces, SceneLayout } from '../domain/scene-faces';
 import { openItems, turnItems } from '../domain/scene-brief';
 import { DirectorPlan } from '../domain/scene-director-schema';
 import { PaintedLine } from '../domain/scene-painted-text';
@@ -49,6 +49,8 @@ export interface TurnContext {
   faceKey: FaceKey;
   /** Zonas da face (a frente não tem rodapé e o verso não tem cabeçalho; zona de altura 0 vale como miolo, PV-9). */
   zones: SceneZones;
+  /** Jornal: a edição que só muda a altura do cabeçalho (D-1) traz a altura de antes e a nova, em cm; senão `null`. */
+  headerResize: { fromCm: number; toCm: number } | null;
   artWidthCm: number;
   artHeightCm: number;
   widthPx: number;
@@ -77,6 +79,9 @@ export interface TurnContext {
   turnItems: Array<{ id: string; text: string }>;
 }
 
+const headerResizeOf = (version: TemplateSceneVersion): TurnContext['headerResize'] =>
+  (version.metrics.headerResize as TurnContext['headerResize'] | undefined) ?? null;
+
 /** Monta o contexto do turno a partir da versão `queued` (leitura sob o lock da cena). */
 export async function loadTurnContext(
   manager: EntityManager,
@@ -90,7 +95,7 @@ export async function loadTurnContext(
   const plan = (version.metrics.plan as DirectorPlan | undefined) ?? null;
   const face = await loadFace(manager, scene.id, version.faceIndex);
   // Só a cena de frente e verso separa os pedidos em aberto por face (PV-8).
-  const itemFace = scene.layout === 'front_back' ? face.key : undefined;
+  const itemFace = hasTwoFaces(scene.layout) ? face.key : undefined;
   return {
     sceneId: scene.id,
     versionId: version.id,
@@ -98,7 +103,9 @@ export async function loadTurnContext(
     layout: scene.layout,
     faceIndex: face.index,
     faceKey: face.key,
-    zones: face.zones,
+    // A versão do jornal que muda a altura do cabeçalho traz as zonas dela (PV-T10); senão valem as da face.
+    zones: version.zones ?? face.zones,
+    headerResize: headerResizeOf(version),
     artWidthCm: scene.artWidthCm,
     artHeightCm: scene.artHeightCm,
     widthPx: face.widthPx,

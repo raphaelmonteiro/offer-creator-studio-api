@@ -17,6 +17,7 @@ import {
   SceneVersionMetrics,
   SceneVersionOperation,
   SceneVersionStatus,
+  SceneZones,
 } from '../domain/scene.types';
 import { numericTransformer } from './numeric.transformer';
 import { TemplateScene } from './template-scene.entity';
@@ -56,6 +57,13 @@ export class TemplateSceneVersion {
   /** Verso derivado: a versão da frente cuja master serviu de referência (só auditoria; não protege a master). */
   @Column({ type: 'uuid', nullable: true })
   derivedFromVersionId: string | null;
+
+  /**
+   * Zonas da face com que a versão foi pintada (PV-T10): só o jornal grava, quando a altura do cabeçalho difere da
+   * criação. Nulo = as zonas da face na criação. `setFaceCurrentVersion` copia para `face.zones`.
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  zones: SceneZones | null;
 
   @Column({ type: 'int' })
   number: number;

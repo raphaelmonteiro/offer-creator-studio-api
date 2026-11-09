@@ -207,6 +207,10 @@ export const currentVersionReply = (displayNumber: number): string =>
 /** Marcação que não vale para imagem nova (`/images/generations` não recebe `markup`). */
 export const MARKING_DISCARDED_NOTE = 'A área marcada não vale para uma imagem nova.';
 
+/** D-7: marcação enviada junto de um pedido de tamanho do cabeçalho é descartada. */
+export const HEADER_MARKING_NOTE =
+  'A área marcada não foi usada: o tamanho do cabeçalho vale para a capa inteira.';
+
 const FAILURE_REPLIES: Record<SceneFailureCode, string> = {
   PROVIDER_QUOTA: 'O serviço de imagem está sem saldo. Avise o administrador.',
   PROVIDER_CONTENT_POLICY:
@@ -242,3 +246,85 @@ export const FRONT_FIRST_REPLY = 'Faça a frente primeiro; o verso nasce dela.';
 
 export const SINGLE_FACE_REPLY =
   'Esta cena tem uma face só. Para ter verso, crie uma cena de frente e verso.';
+
+/** Jornal de 4 páginas (change add-template-scene-tabloid): a Interna nasce da Externa como o verso nasce da frente. */
+export const DERIVE_INNER_MESSAGE = 'Fazer a interna';
+
+export const DERIVE_INNER_ANNOUNCEMENT =
+  'Vou fazer a interna a partir da externa atual: uma arte contínua, sem cabeçalho, sem rodapé e sem texto.';
+
+export const DERIVE_INNER_REPLY =
+  'Pronto, fiz a interna a partir da externa atual. Peça aqui os ajustes das páginas 2 e 3.';
+
+export const INNER_MISSING_REPLY =
+  'A interna ainda não existe. Use “Fazer a interna” e depois peça o ajuste.';
+
+export const INNER_EXISTS_REPLY =
+  'A interna já existe e nasce da externa. Peça aqui o ajuste que quer nela, ou volte a uma versão anterior.';
+
+export const OUTER_FIRST_REPLY = 'Faça a externa primeiro; a interna nasce dela.';
+
+/** Os textos fixos da derivação da segunda face, por layout de duas faces. */
+export interface DeriveTexts {
+  message: string;
+  announcement: string;
+  reply: string;
+  missing: string;
+  exists: string;
+  first: string;
+}
+
+export const DERIVE_TEXTS: Readonly<Record<'front_back' | 'tabloid', DeriveTexts>> = {
+  front_back: {
+    message: DERIVE_BACK_MESSAGE,
+    announcement: DERIVE_BACK_ANNOUNCEMENT,
+    reply: DERIVE_BACK_REPLY,
+    missing: BACK_MISSING_REPLY,
+    exists: BACK_EXISTS_REPLY,
+    first: FRONT_FIRST_REPLY,
+  },
+  tabloid: {
+    message: DERIVE_INNER_MESSAGE,
+    announcement: DERIVE_INNER_ANNOUNCEMENT,
+    reply: DERIVE_INNER_REPLY,
+    missing: INNER_MISSING_REPLY,
+    exists: INNER_EXISTS_REPLY,
+    first: OUTER_FIRST_REPLY,
+  },
+};
+
+/** Altura do cabeçalho da capa pela conversa (D-1, PV-T9). Textos fixos do código, nunca do modelo. */
+export const NO_HEADER_ON_INNER_REPLY =
+  'A interna não tem cabeçalho; ela é uma arte contínua das páginas 2 e 3.';
+
+export const HEADER_ONLY_TABLOID_REPLY =
+  'Por enquanto, a altura do cabeçalho só muda no jornal de 4 páginas.';
+
+const cmText = (cm: number): string => String(cm).replace('.', ',');
+
+export function headerSameReply(cm: number, limit: 'max' | 'min' | null): string {
+  if (limit === 'max') return `O cabeçalho já está no máximo, ${cmText(cm)} cm.`;
+  if (limit === 'min') return `O cabeçalho já está no mínimo, ${cmText(cm)} cm.`;
+  return `O cabeçalho já está com ${cmText(cm)} cm.`;
+}
+
+/** Anúncio antes da imagem; pedido fora do limite fica no limite e o anúncio diz o máximo ou o mínimo. */
+export function headerAnnouncement(cm: number, limit: 'max' | 'min' | null): string {
+  const note =
+    limit === 'max'
+      ? ` (o máximo é ${cmText(cm)} cm)`
+      : limit === 'min'
+        ? ` (o mínimo é ${cmText(cm)} cm)`
+        : '';
+  return `Vou deixar o cabeçalho da capa com ${cmText(cm)} cm${note}.`;
+}
+
+export const headerReadyReply = (cm: number): string =>
+  `Pronto, o cabeçalho da capa está com ${cmText(cm)} cm.`;
+
+/** PV-T11: a logo que saía do cabeçalho encolhido foi ajustada ao novo espaço da logo. */
+export const LOGO_FITTED_NOTE = 'Ajustei a logo ao novo espaço do cabeçalho.';
+
+/** D-6: a primeira Externa sai com o cabeçalho padrão; o tamanho muda depois, pela conversa. */
+export const headerDefaultAnnouncement = (cm: number): string =>
+  `Vou criar a externa. O cabeçalho da capa sai no tamanho padrão (${cmText(cm)} cm); se quiser, peça depois um cabeçalho maior ou menor.`;

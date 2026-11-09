@@ -34,8 +34,10 @@ export function textCropBox(input: {
     return box(x0 * width, y0 * height, x1 * width, y1 * height, { width, height });
   }
   if (!region || region.zone === 'whole' || region.zone === 'marked') return null;
-  const bands = zoneBands(zones, height);
   const zone = effectiveZone(region.zone, zones);
+  // Jornal: o miolo em L não é uma faixa de y; o juiz lê a folha inteira.
+  if (zones.fold && zone === 'body') return null;
+  const bands = zoneBands(zones, height);
   const [from, to] =
     zone === 'header'
       ? [0, bands.headerEnd]

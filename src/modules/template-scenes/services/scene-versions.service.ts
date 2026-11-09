@@ -108,6 +108,8 @@ export class SceneVersionsService {
               masterAssetId: current.masterAssetId,
               previewAssetId: current.previewAssetId,
               elements,
+              // A master não muda: a altura do cabeçalho da atual segue valendo (PV-T10).
+              zones: current.zones,
               // A master não muda: o texto pintado da atual segue valendo (R66).
               metrics: paintedMetricsOf(current),
               isOpenManual: true,

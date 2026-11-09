@@ -59,7 +59,7 @@ export function findSceneFormat(formatId: string): SceneFormatSpec | null {
 }
 
 /** Fração máxima da altura para cabeçalho e rodapé (igual ao protótipo). */
-const MAX_SECTION_FRACTION = 0.3;
+export const MAX_SECTION_FRACTION = 0.3;
 
 /** Zonas reservadas (cabeçalho, miolo e rodapé) como `Rect` normalizado, como `getZoneRect` do front. */
 export function computeSceneZones(format: SceneFormatSpec): SceneZones {

@@ -19,7 +19,10 @@ export const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
 /** Altura do elemento em fração da altura da cena. */
-export function heightFraction(el: SceneElement, ctx: LayerContext): number {
+export function heightFraction(
+  el: Pick<SceneElement, 'w' | 'aspect'>,
+  ctx: Pick<LayerContext, 'widthPx' | 'heightPx'>,
+): number {
   return (el.w * ctx.widthPx) / el.aspect / ctx.heightPx;
 }
 
