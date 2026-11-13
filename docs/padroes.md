@@ -24,7 +24,7 @@ Os comandos rodam dentro do container (`docker compose exec -T backend <cmd>`, a
 
 | Item | Versão | Observação |
 |---|---|---|
-| Node | 18 no container (`node:18-alpine` + ffmpeg); 22.11.0 x64 no host | não subir sem decisão registrada |
+| Node | 20 no container (`node:20-alpine` + ffmpeg); 22.11.0 x64 no host | decisão de 13/11/2026: Node 18 não tem o global `File` que o SDK openai v6 exige em uploads (derive_face); não subir além sem decisão registrada |
 | NestJS | 10 (Express) | `@nestjs/passport` + `passport-jwt`; `@nestjs/swagger` em `/api` |
 | TypeORM | 0.3 | `synchronize: true` só em `NODE_ENV=development`; migrations em `src/migrations/`, DataSource do CLI em `src/data-source.ts` |
 | PostgreSQL | 15 + `pgvector` (`pgvector/pgvector:pg15`) | coluna `vector` em `gallery_images` fora da entidade |
