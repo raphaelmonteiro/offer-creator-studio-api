@@ -52,6 +52,13 @@ export class Client {
   @Column({ type: 'jsonb', nullable: true })
   footers: Record<string, unknown>[] | null;
 
+  /**
+   * Biblioteca de cabeçalhos do cliente, irmã de `footers`: `{ id, name, format?, storeId?,
+   * section: TemplateSection }`. Opaca no servidor, sem espelho legado; nulo = lista vazia.
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  headers: Record<string, unknown>[] | null;
+
   @OneToMany(() => ClientContact, (contact) => contact.client, {
     cascade: true,
     eager: true,
