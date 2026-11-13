@@ -50,6 +50,13 @@ export class CreateClientDto {
   @IsArray()
   footers?: Record<string, unknown>[] | null;
 
+  // Biblioteca de cabeçalhos do cliente — array opaco de `{ id, name, format?, storeId?, section }`.
+  @ApiProperty({ required: false, nullable: true, type: 'array', items: { type: 'object' } })
+  @IsOptional()
+  @IsArray()
+  @IsObject({ each: true })
+  headers?: Record<string, unknown>[] | null;
+
   @ApiProperty({ type: [ClientContactDto], required: false })
   @IsOptional()
   @IsArray()

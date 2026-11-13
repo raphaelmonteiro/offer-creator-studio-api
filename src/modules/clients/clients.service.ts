@@ -42,6 +42,7 @@ export class ClientsService {
       phoneMobile: createClientDto.phoneMobile ?? null,
       footer: createClientDto.footer ?? null,
       footers: createClientDto.footers ?? null,
+      headers: createClientDto.headers ?? null,
     });
 
     const savedClient = await this.clientRepository.save(client);
@@ -164,6 +165,10 @@ export class ClientsService {
 
     if (updateClientDto.footers !== undefined) {
       client.footers = updateClientDto.footers;
+    }
+
+    if (updateClientDto.headers !== undefined) {
+      client.headers = updateClientDto.headers;
     }
 
     await this.clientRepository.save(client);
