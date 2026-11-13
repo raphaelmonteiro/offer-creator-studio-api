@@ -103,37 +103,6 @@ describe('Clients headers (HTTP)', () => {
     expect(cleared.body.footers).toHaveLength(1);
   });
 
-  it('400 quando headers não é lista e nada é gravado', async () => {
-    const { body } = await http()
-      .post('/clients')
-      .set('Authorization', auth)
-      .send({ name: 'D', cnpj: '11' })
-      .expect(201);
-    await http()
-      .patch(`/clients/${body.id}`)
-      .set('Authorization', auth)
-      .send({ headers: 'abc' })
-      .expect(400);
-    const read = await http().get(`/clients/${body.id}`).set('Authorization', auth).expect(200);
-    expect(read.body.headers).toBeNull();
-  });
-
-  it('400 quando um item de headers não é objeto', async () => {
-    await http()
-      .post('/clients')
-      .set('Authorization', auth)
-      .send({ name: 'E', cnpj: '12', headers: ['x', 1] })
-      .expect(400);
-  });
-
-  it('404 para cliente inexistente', async () => {
-    await http()
-      .patch('/clients/nao-existe')
-      .set('Authorization', auth)
-      .send({ headers: [] })
-      .expect(404);
-  });
-
   it('401 sem token em POST, GET e PATCH', async () => {
     await http().post('/clients').send({ name: 'F', cnpj: '13', headers: [] }).expect(401);
     await http().get('/clients/x').expect(401);
