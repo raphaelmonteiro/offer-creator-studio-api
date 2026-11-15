@@ -93,7 +93,7 @@ describe('SpellCheckService, teto de chamadas em paralelo', () => {
     expect(create).toHaveBeenCalledTimes(16);
   });
 
-  it('um lote que falha: a revisão rejeita e os lotes que faltavam não são enviados', async () => {
+  it('um lote falha no sexto início: a revisão rejeita com o erro do provedor', async () => {
     const { service, create } = build();
     let call = 0;
     create.mockImplementation(async () => {
@@ -104,7 +104,23 @@ describe('SpellCheckService, teto de chamadas em paralelo', () => {
     });
 
     await expect(service.spellCheck(products(78))).rejects.toThrow('falha do lote 6');
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(create.mock.calls.length).toBeLessThanOrEqual(8);
+  });
+
+  it('429 no lote 1 com os lotes 2 a 4 em andamento: 4 chamadas e os lotes 5 a 8 nunca são enviados', async () => {
+    const { service, create } = build();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    create
+      .mockRejectedValueOnce(openAiError(429, 'limite de uso', 'rate_limit_exceeded'))
+      .mockImplementation(async () => {
+        await held;
+        return answer();
+      });
+
+    await expect(service.spellCheck(products(78))).rejects.toThrow('limite de uso');
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(create).toHaveBeenCalledTimes(4);
   });
 });
