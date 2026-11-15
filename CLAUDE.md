@@ -43,6 +43,13 @@ BASE_URL         # Backend base URL used in email verification links
 OPENAI_API_KEY                # OpenAI (text/vision/image/embeddings)
 OPENAI_TEXT_MODEL             # default gpt-4o
 OPENAI_FAST_TEXT_MODEL        # default gpt-4o-mini
+OPENAI_SPELLCHECK_MODEL / OPENAI_CATEGORIZATION_MODEL / OPENAI_NAME_PARSER_MODEL / OPENAI_TRANSLATION_MODEL
+                              # as 4 features de texto do encarte: default gpt-6-luna; NÃO herdam OPENAI_TEXT_MODEL / OPENAI_FAST_TEXT_MODEL
+OPENAI_GALLERY_VISION_MODEL   # leitura da foto da Galeria: default gpt-6.1-terra
+OPENAI_<SPELLCHECK|CATEGORIZATION|NAME_PARSER|GALLERY_VISION|TRANSLATION>_TIMEOUT_MS
+                              # prazo por chamada das 5 (30/60/60/60/10 s por padrão); sem repetição do SDK; NÃO herdam OPENAI_TIMEOUT_MS
+AI_SPELLCHECK_CONCURRENCY / AI_SPELLCHECK_ENABLED
+                              # ortografia: chamadas em paralelo por revisão (padrão 4) e liga/desliga (ausente = ligada)
 OPENAI_IMAGE_MODEL            # default gpt-image-2.5-sunburst (+ OPENAI_IMAGE_PREVIEW_MODEL, default gpt-image-2.5-flare)
 OPENAI_IMAGE_*                # quality, format, concurrency, retry, cost knobs
 OPENAI_ENABLE_DALLE_FALLBACK  # opt-in DALL-E 3 fallback

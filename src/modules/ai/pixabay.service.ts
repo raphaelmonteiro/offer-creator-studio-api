@@ -3,12 +3,17 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { GalleryService } from '../gallery/gallery.service';
 import { UploadsService } from '../uploads/uploads.service';
-import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
+import { TRANSLATION_CEILING } from './config/openai-product-ceilings';
+import {
+  getProductAiConfig,
+  ProductAiFeatureConfig,
+} from './config/openai-product-features.config';
 import { PixabayCategory } from './dto/image-search-request.dto';
 import { ImageSearchResponseDto, PixabayImageDto } from './dto/image-search-response.dto';
 import { PIXABAY_SEARCH_TRANSLATION_SYSTEM_PROMPT } from './prompts/image-search.prompts';
 import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
-import { withAiLogging } from './utils/ai-telemetry.util';
+import { callProductChat } from './utils/ai-product-chat.util';
+import { AiUsageCollector, AiUsageOptions } from './utils/ai-usage';
 
 const UNITS = [
   'kg',
@@ -45,20 +50,25 @@ interface PixabayResponse {
 export class PixabayService {
   private readonly logger = new Logger(PixabayService.name);
   private readonly openai: OpenAI | null;
-  private readonly models: OpenAiModelConfig;
+  private readonly feature: ProductAiFeatureConfig;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly uploadsService: UploadsService,
     private readonly galleryService: GalleryService,
   ) {
-    this.models = getOpenAiModelConfig(configService);
+    this.feature = getProductAiConfig(configService).translation;
 
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     this.openai = apiKey ? new OpenAI({ apiKey }) : null;
   }
 
-  async searchImages(rawName: string, category?: PixabayCategory): Promise<ImageSearchResponseDto> {
+  async searchImages(
+    rawName: string,
+    category?: PixabayCategory,
+    options: AiUsageOptions = {},
+  ): Promise<ImageSearchResponseDto> {
+    options.usage?.declareModel(this.feature.model);
     const apiKey = this.configService.get<string>('PIXABAY_API_KEY');
     if (!apiKey) {
       this.logger.error('PIXABAY_API_KEY não configurada');
@@ -66,7 +76,7 @@ export class PixabayService {
     }
 
     const normalizedTerm = this.normalizeProductName(rawName);
-    const searchTerm = await this.translateToEnglish(normalizedTerm);
+    const searchTerm = await this.translateToEnglish(normalizedTerm, options.usage);
     const selectedCategory = category ?? 'food';
 
     const params = new URLSearchParams({
@@ -162,33 +172,29 @@ export class PixabayService {
     return result.url;
   }
 
-  private async translateToEnglish(term: string): Promise<string> {
+  private async translateToEnglish(term: string, usage?: AiUsageCollector): Promise<string> {
     if (!this.openai) {
       return term;
     }
 
     try {
-      const response = await withAiLogging(
-        this.logger,
-        {
-          feature: 'image-search.translate-term',
-          endpoint: 'chat.completions',
-          model: this.models.fastTextModel,
+      const response = await callProductChat({
+        openai: this.openai,
+        logger: this.logger,
+        usage,
+        feature: 'image-search.translate-term',
+        spec: {
+          model: this.feature.model,
+          effort: 'none',
+          temperature: 0,
+          timeoutMs: this.feature.timeoutMs,
+          ...TRANSLATION_CEILING,
         },
-        () =>
-          this.openai!.chat.completions.create({
-            model: this.models.fastTextModel,
-            max_tokens: 32,
-            temperature: 0,
-            messages: [
-              {
-                role: 'system',
-                content: PIXABAY_SEARCH_TRANSLATION_SYSTEM_PROMPT,
-              },
-              { role: 'user', content: term },
-            ],
-          }),
-      );
+        messages: [
+          { role: 'system', content: PIXABAY_SEARCH_TRANSLATION_SYSTEM_PROMPT },
+          { role: 'user', content: term },
+        ],
+      });
       const translated = response.choices[0]?.message?.content?.trim();
       return translated || term;
     } catch {
