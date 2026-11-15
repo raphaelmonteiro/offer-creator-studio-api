@@ -19,6 +19,8 @@ export interface ProductChatCall {
   responseFormat?: ChatBody['response_format'];
   /** Passada da leitura da foto (`low` ou `high`), registrada no log. */
   mode?: string;
+  /** Liga as linhas de log de uma mesma leitura de foto (uma ou duas passadas). */
+  correlationId?: string;
 }
 
 export async function callProductChat(call: ProductChatCall): Promise<OpenAI.Chat.ChatCompletion> {
@@ -35,6 +37,8 @@ export async function callProductChat(call: ProductChatCall): Promise<OpenAI.Cha
       endpoint: 'chat.completions',
       model: call.spec.model,
       ...(call.mode ? { mode: call.mode } : {}),
+      ...(call.correlationId ? { correlationId: call.correlationId } : {}),
+      pricing: 'table',
     },
     () => call.openai.chat.completions.create(request, options),
   );
@@ -58,6 +62,7 @@ function warnIfEmptyOrTruncated(call: ProductChatCall, response: OpenAI.Chat.Cha
       model: call.spec.model,
       reason,
       ...(call.mode ? { mode: call.mode } : {}),
+      ...(call.correlationId ? { correlationId: call.correlationId } : {}),
     })}`,
   );
 }

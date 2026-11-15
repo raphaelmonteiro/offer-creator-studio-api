@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
+import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { GALLERY_VISION_CEILING } from '../config/openai-product-ceilings';
@@ -82,12 +83,14 @@ export class ImageMetadataService {
         this.logger.warn(`Não consegui carregar a imagem para envio à Vision: ${imageUrl}`);
         return null;
       }
-      const first = await this.callVision(dataUrl, 'low');
+      // Mesmo identificador nas linhas das duas passadas: o custo por foto sai do log (F-26).
+      const readId = randomUUID();
+      const first = await this.callVision(dataUrl, 'low', readId);
       if (!first) return null;
       if (averageConfidence(first) >= VISION_LOW_PROMOTION_THRESHOLD) {
         return first;
       }
-      const promoted = await this.callVision(dataUrl, 'high');
+      const promoted = await this.callVision(dataUrl, 'high', readId);
       return promoted ?? first;
     } catch (error) {
       this.logger.warn(`extractFromImage falhou para ${imageUrl}: ${(error as Error).message}`);
@@ -100,6 +103,7 @@ export class ImageMetadataService {
   private async callVision(
     imageData: string,
     detail: 'low' | 'high',
+    correlationId: string,
   ): Promise<ProductMetadata | null> {
     if (!this.openai) return null;
 
@@ -111,6 +115,7 @@ export class ImageMetadataService {
       logger: this.logger,
       feature: 'image-metadata.extract',
       mode: detail,
+      correlationId,
       spec: {
         model: this.feature.model,
         effort: 'low',

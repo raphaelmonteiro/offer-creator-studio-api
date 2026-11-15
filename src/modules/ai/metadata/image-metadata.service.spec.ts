@@ -127,6 +127,40 @@ describe('ImageMetadataService', () => {
       expect(create).toHaveBeenCalledTimes(1);
     });
 
+    it('as linhas de log das duas passadas trazem o mesmo identificador, e uma leitura nova traz outro', async () => {
+      const { service, create, logs } = build();
+      create
+        .mockResolvedValueOnce(metadata(0.3))
+        .mockResolvedValueOnce(metadata(0.9))
+        .mockResolvedValueOnce(metadata(0.9));
+
+      await service.extractFromImage(IMAGE_URL);
+      await service.extractFromImage(IMAGE_URL);
+
+      const finished = logs.log.mock.calls
+        .map((c) => String(c[0]))
+        .filter((l) => l.startsWith('AI operation finished '))
+        .map((l) => JSON.parse(l.slice('AI operation finished '.length)));
+      expect(finished).toHaveLength(3);
+      expect(finished[0].correlationId).toEqual(expect.any(String));
+      expect(finished[0].correlationId).toBe(finished[1].correlationId);
+      expect(finished[2].correlationId).not.toBe(finished[0].correlationId);
+      expect(finished.map((l) => l.mode)).toEqual(['low', 'high', 'low']);
+    });
+
+    it('foto cuja leitura falha: a linha de falha traz o identificador, sem custo', async () => {
+      const { service, create, logs } = build();
+      create.mockRejectedValue(openAiError(500, 'falha'));
+
+      await service.extractFromImage(IMAGE_URL);
+
+      const failed = JSON.parse(
+        String(logs.error.mock.calls[0][0]).slice('AI operation failed '.length),
+      );
+      expect(failed.correlationId).toEqual(expect.any(String));
+      expect(failed).not.toHaveProperty('estimatedCostUsd');
+    });
+
     it('segunda passada que volta nula: vale a primeira', async () => {
       const { service, create } = build();
       create

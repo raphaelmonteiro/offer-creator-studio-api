@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { llmCostUsd, LlmUsage } from '../openai-llm-pricing';
 
 export interface AiOperationContext {
   feature: string;
@@ -9,8 +10,14 @@ export interface AiOperationContext {
   quality?: string;
   mode?: string;
   inputFidelity?: string;
-  /** Liga as linhas do log a uma cena/versão (modo `sceneCall`). */
+  /** Liga as linhas do log a uma cena/versão (modo `sceneCall`) ou a uma leitura de foto (duas passadas). */
   correlationId?: string;
+  /**
+   * `table`: o custo de texto sai da tabela de preços do backend (`openai-llm-pricing.ts`) e é `null` sem preço,
+   * mesmo com `OPENAI_COST_TEXT_*` definido (D-11). Ausente: a estimativa genérica por variável de ambiente.
+   * Não vai para o log.
+   */
+  pricing?: 'table';
 }
 
 interface AiUsageMetrics {
@@ -21,7 +28,8 @@ interface AiUsageMetrics {
 
 interface AiCostMetrics extends AiUsageMetrics {
   costEstimated: boolean;
-  estimatedCostUsd?: number;
+  /** `null` (e não ausente) quando o modelo não tem preço na tabela. */
+  estimatedCostUsd?: number | null;
   costSource?: string;
   billableUnits?: number;
   requestId?: string;
@@ -44,7 +52,7 @@ export async function withAiLogging<T>(
         ...base,
         durationMs: Date.now() - startedAt,
         status: 'success',
-        ...buildCostMetrics(base, result),
+        ...buildCostMetrics(base, result, context.pricing),
       })}`,
     );
     return result;
@@ -75,7 +83,11 @@ function sanitizeContext(context: AiOperationContext): AiOperationContext {
   };
 }
 
-function buildCostMetrics(context: AiOperationContext, result: unknown): AiCostMetrics {
+function buildCostMetrics(
+  context: AiOperationContext,
+  result: unknown,
+  pricing?: AiOperationContext['pricing'],
+): AiCostMetrics {
   const usage = extractUsageMetrics(result);
 
   if (context.endpoint.startsWith('images.')) {
@@ -90,7 +102,10 @@ function buildCostMetrics(context: AiOperationContext, result: unknown): AiCostM
     };
   }
 
-  const tokenCost = estimateTokenCost(context, usage);
+  const tokenCost =
+    pricing === 'table'
+      ? estimateTokenCostFromTable(context, result)
+      : estimateTokenCost(context, usage);
   return {
     ...usage,
     costEstimated: tokenCost.costEstimated,
@@ -166,6 +181,16 @@ function estimateTokenCost(
     estimatedCostUsd: roundCost(inputCost + outputCost),
     costSource: [inputRate?.source, outputRate?.source].filter(Boolean).join(','),
   };
+}
+
+/** Custo pela tabela de preços: `null` sem preço para o modelo ou sem `usage`; nunca zero por falta de dado. */
+function estimateTokenCostFromTable(
+  context: AiOperationContext,
+  result: unknown,
+): Pick<AiCostMetrics, 'costEstimated' | 'estimatedCostUsd' | 'costSource'> {
+  const usage = (result as { usage?: LlmUsage } | null)?.usage;
+  const cost = context.model ? llmCostUsd(context.model, usage) : null;
+  return { costEstimated: cost !== null, estimatedCostUsd: cost, costSource: 'pricing-table' };
 }
 
 function estimateImageCost(
