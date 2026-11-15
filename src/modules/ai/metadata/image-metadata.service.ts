@@ -3,8 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { getOpenAiModelConfig, OpenAiModelConfig } from '../config/openai-models.config';
-import { withAiLogging } from '../utils/ai-telemetry.util';
+import { GALLERY_VISION_CEILING } from '../config/openai-product-ceilings';
+import {
+  getProductAiConfig,
+  ProductAiFeatureConfig,
+} from '../config/openai-product-features.config';
+import { callProductChat } from '../utils/ai-product-chat.util';
 import {
   averageConfidence,
   parseMetadataLenient,
@@ -13,7 +17,9 @@ import {
 import { TaxonomyService } from './taxonomy/taxonomy.service';
 import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
-const MODEL_VERSION = 'vision-v1-2026-06';
+// Versão gravada com o resultado (D-8): identifica o modelo, para a volta pela variável ficar legível.
+// `vision-v1-2026-06` era a versão dos modelos gpt-4o.
+const MODEL_VERSION_PREFIX = 'vision-v2-2026-11';
 const VISION_LOW_PROMOTION_THRESHOLD = 0.5;
 const DEFAULT_MAX_CONCURRENCY = 4;
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
@@ -30,7 +36,8 @@ const MIME_BY_EXT: Record<string, string> = {
 export class ImageMetadataService {
   private readonly logger = new Logger(ImageMetadataService.name);
   private readonly openai: OpenAI | null;
-  private readonly models: OpenAiModelConfig;
+  private readonly feature: ProductAiFeatureConfig;
+  private readonly modelVersionLabel: string;
   private readonly enabled: boolean;
   private readonly maxConcurrency: number;
   private readonly uploadDest: string;
@@ -42,7 +49,8 @@ export class ImageMetadataService {
     private readonly configService: ConfigService,
     private readonly taxonomy: TaxonomyService,
   ) {
-    this.models = getOpenAiModelConfig(configService);
+    this.feature = getProductAiConfig(configService).galleryVision;
+    this.modelVersionLabel = `${MODEL_VERSION_PREFIX}:${this.feature.model}`;
     const apiKey = configService.get<string>('OPENAI_API_KEY');
     this.openai = apiKey ? new OpenAI({ apiKey }) : null;
     this.enabled = configService.get<string>('AI_IMAGE_METADATA_ENABLED', 'true') !== 'false';
@@ -62,7 +70,7 @@ export class ImageMetadataService {
   }
 
   modelVersion(): string {
-    return MODEL_VERSION;
+    return this.modelVersionLabel;
   }
 
   async extractFromImage(imageUrl: string): Promise<ProductMetadata | null> {
@@ -98,32 +106,30 @@ export class ImageMetadataService {
     const systemPrompt = this.buildSystemPrompt();
     const userPrompt = this.buildUserPrompt();
 
-    const response = (await withAiLogging(
-      this.logger,
-      {
-        feature: 'image-metadata.extract',
-        endpoint: 'chat.completions',
-        model: this.models.fastTextModel,
-        mode: detail,
+    const response = await callProductChat({
+      openai: this.openai,
+      logger: this.logger,
+      feature: 'image-metadata.extract',
+      mode: detail,
+      spec: {
+        model: this.feature.model,
+        effort: 'low',
+        temperature: 0.1,
+        timeoutMs: this.feature.timeoutMs,
+        ...GALLERY_VISION_CEILING,
       },
-      () =>
-        this.openai!.chat.completions.create({
-          model: this.models.fastTextModel,
-          temperature: 0.1,
-          max_tokens: 900,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: systemPrompt },
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: userPrompt },
-                { type: 'image_url', image_url: { url: imageData, detail } },
-              ],
-            },
+      messages: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: userPrompt },
+            { type: 'image_url', image_url: { url: imageData, detail } },
           ],
-        } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming),
-    )) as OpenAI.Chat.ChatCompletion;
+        },
+      ],
+      responseFormat: { type: 'json_object' },
+    });
 
     const raw = response.choices[0]?.message?.content ?? '';
     if (!raw.trim()) return null;
@@ -138,7 +144,7 @@ export class ImageMetadataService {
 
     return parseMetadataLenient(parsed, {
       source: 'vision',
-      modelVersion: MODEL_VERSION,
+      modelVersion: this.modelVersionLabel,
     });
   }
 
