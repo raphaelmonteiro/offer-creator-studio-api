@@ -3,8 +3,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { SmartValidationPipe } from './common/pipes/smart-validation.pipe';
+import { configureHttpApp } from './common/config/http-app.config';
 import { pinUploadsDirEnv, resolveUploadsDir } from './common/config/uploads-dir';
 
 async function bootstrap() {
@@ -13,36 +12,9 @@ async function bootstrap() {
     bodyParser: false, // Disable default body parser to have full control
   });
 
-  // Register body parsers manually with conditional logic
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const bodyParser = require('body-parser');
-
-  // JSON body parser - skip for multipart requests
-  app.use((req: any, res: any, next: any) => {
-    const contentType = req.headers['content-type'] || '';
-
-    if (contentType.includes('multipart/form-data')) {
-      // Skip body parsing for multipart - FileInterceptor will handle it
-      return next();
-    }
-
-    // Apply JSON parser for non-multipart requests
-    bodyParser.json({ limit: '100mb' })(req, res, next);
-  });
-
-  // URL encoded body parser - skip for multipart requests
-  app.use((req: any, res: any, next: any) => {
-    const contentType = req.headers['content-type'] || '';
-
-    if (contentType.includes('multipart/form-data')) {
-      return next();
-    }
-
-    bodyParser.urlencoded({ limit: '100mb', extended: true })(req, res, next);
-  });
-
-  // Global prefix
-  app.setGlobalPrefix('v1');
+  // Body parsers (JSON até 100 MB, sem ler multipart), prefixo `v1`, filtro e pipe globais: compartilhados com o
+  // app de teste do e2e (`common/config/http-app.config.ts`).
+  configureHttpApp(app);
 
   // CORS
   app.enableCors();
@@ -64,19 +36,6 @@ async function bootstrap() {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     },
   });
-
-  // Global exception filter
-  app.useGlobalFilters(new HttpExceptionFilter());
-
-  // Global validation pipe with smart handling for multipart requests
-  app.useGlobalPipes(
-    new SmartValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      skipMissingProperties: false,
-    }),
-  );
 
   // Swagger documentation
   const config = new DocumentBuilder()
