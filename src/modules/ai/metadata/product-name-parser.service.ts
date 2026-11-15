@@ -1,18 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
-import { getOpenAiModelConfig, OpenAiModelConfig } from '../config/openai-models.config';
-import { withAiLogging } from '../utils/ai-telemetry.util';
+import { NAME_PARSER_CEILING } from '../config/openai-product-ceilings';
+import {
+  getProductAiConfig,
+  ProductAiFeatureConfig,
+} from '../config/openai-product-features.config';
+import { callProductChat } from '../utils/ai-product-chat.util';
 import { parseMetadataLenient, ProductMetadata } from './product-metadata.schema';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
 
-const MODEL_VERSION = 'name-parse-v1-2026-06';
+// Versão gravada com o resultado (D-8): identifica o modelo, para a volta pela variável ficar legível.
+// `name-parse-v1-2026-06` era a versão dos modelos gpt-4o.
+const MODEL_VERSION_PREFIX = 'name-parse-v2-2026-11';
 const CACHE_MAX_ENTRIES = 2000;
 // Cada produto produz ~250-400 tokens de saída (schema completo + few-shots
-// ricos). Com BATCH_SIZE=8 e max_tokens=8000, mantemos margem confortável
-// (~3000 tokens) sem truncar o JSON no meio.
+// ricos). Com BATCH_SIZE=8 e o teto de saída de NAME_PARSER_CEILING, mantemos margem confortável
+// sem truncar o JSON no meio (o teto da família gpt-6 inclui o raciocínio).
 const BATCH_SIZE = 8;
-const MAX_OUTPUT_TOKENS = 8000;
 
 interface ParseInput {
   name: string;
@@ -28,7 +33,8 @@ const NUMERIC = /\d/;
 export class ProductNameParserService {
   private readonly logger = new Logger(ProductNameParserService.name);
   private readonly openai: OpenAI | null;
-  private readonly models: OpenAiModelConfig;
+  private readonly feature: ProductAiFeatureConfig;
+  private readonly modelVersionLabel: string;
   private readonly enabled: boolean;
   private readonly cache = new Map<string, ProductMetadata>();
 
@@ -36,7 +42,8 @@ export class ProductNameParserService {
     private readonly configService: ConfigService,
     private readonly taxonomy: TaxonomyService,
   ) {
-    this.models = getOpenAiModelConfig(configService);
+    this.feature = getProductAiConfig(configService).nameParser;
+    this.modelVersionLabel = `${MODEL_VERSION_PREFIX}:${this.feature.model}`;
     const apiKey = configService.get<string>('OPENAI_API_KEY');
     this.openai = apiKey ? new OpenAI({ apiKey }) : null;
     this.enabled = configService.get<string>('AI_NAME_PARSER_ENABLED', 'true') !== 'false';
@@ -47,7 +54,7 @@ export class ProductNameParserService {
   }
 
   modelVersion(): string {
-    return MODEL_VERSION;
+    return this.modelVersionLabel;
   }
 
   async parseNames(inputs: ParseInput[]): Promise<(ProductMetadata | null)[]> {
@@ -135,25 +142,23 @@ export class ProductNameParserService {
     const userPrompt = this.buildUserPrompt(inputs);
 
     try {
-      const response = (await withAiLogging(
-        this.logger,
-        {
-          feature: 'product-name-parser.batch',
-          endpoint: 'chat.completions',
-          model: this.models.fastTextModel,
+      const response = await callProductChat({
+        openai: this.openai,
+        logger: this.logger,
+        feature: 'product-name-parser.batch',
+        spec: {
+          model: this.feature.model,
+          effort: 'low',
+          temperature: 0.1,
+          timeoutMs: this.feature.timeoutMs,
+          ...NAME_PARSER_CEILING,
         },
-        () =>
-          this.openai!.chat.completions.create({
-            model: this.models.fastTextModel,
-            temperature: 0.1,
-            max_tokens: MAX_OUTPUT_TOKENS,
-            response_format: { type: 'json_object' },
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt },
-            ],
-          } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming),
-      )) as OpenAI.Chat.ChatCompletion;
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        responseFormat: { type: 'json_object' },
+      });
 
       const raw = response.choices[0]?.message?.content ?? '';
       if (!raw.trim()) return inputs.map(() => null);
@@ -176,7 +181,7 @@ export class ProductNameParserService {
       for (let i = 0; i < Math.min(items.length, inputs.length); i++) {
         out[i] = parseMetadataLenient(items[i], {
           source: 'name-parse',
-          modelVersion: MODEL_VERSION,
+          modelVersion: this.modelVersionLabel,
         });
       }
       return out;
