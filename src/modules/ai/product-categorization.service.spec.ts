@@ -1,10 +1,10 @@
-import { ConfigService } from '@nestjs/config';
 import { ProductCategorizationService } from './product-categorization.service';
 import { AI_RESPONSE_FORMATS } from './schemas/ai-response.schemas';
 import { PRODUCT_CATEGORIZATION_SYSTEM_PROMPT } from './prompts/product-categorization.prompts';
 import { AiUsageCollector } from './utils/ai-usage';
 import {
   chatResponse,
+  fakeConfig,
   installFakeOpenAi,
   openAiError,
   spyOnLogger,
@@ -12,7 +12,7 @@ import {
 
 function build(env: Record<string, string> = {}) {
   const service = new ProductCategorizationService(
-    new ConfigService({ OPENAI_API_KEY: 'sk-teste', ...env }),
+    fakeConfig({ OPENAI_API_KEY: 'sk-teste', ...env }),
   );
   const create = installFakeOpenAi(service);
   const logs = spyOnLogger(service);
@@ -175,7 +175,7 @@ describe('ProductCategorizationService', () => {
   });
 
   it('sem a chave da OpenAI: "Sem categoria", sem chamada', async () => {
-    const service = new ProductCategorizationService(new ConfigService({}));
+    const service = new ProductCategorizationService(fakeConfig({}));
     spyOnLogger(service);
     const result = await service.categorizeProducts(request(1));
     expect(result.assignments[0].category).toBe('Sem categoria');

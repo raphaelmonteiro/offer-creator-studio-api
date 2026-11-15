@@ -36,7 +36,7 @@ import { ProductNameParserService } from './metadata/product-name-parser.service
 import { PixabayService } from './pixabay.service';
 import { ProductCategorizationService } from './product-categorization.service';
 import { SpellCheckService } from './spell-check.service';
-import { installFakeOpenAi, spyOnLogger } from './utils/openai-chat.testutil';
+import { fakeConfig, installFakeOpenAi, spyOnLogger } from './utils/openai-chat.testutil';
 
 export const SECRET = 'segredo-de-teste';
 export const USAGE = { prompt_tokens: 1000, completion_tokens: 200 };
@@ -183,7 +183,7 @@ async function startApp(moduleFixture: TestingModule): Promise<INestApplication>
 
 /** Sobe os controllers reais com os serviços reais das cinco features e o provedor (OpenAI) simulado. */
 export async function buildApp(env: Record<string, string> = {}) {
-  const config = new ConfigService({
+  const config = fakeConfig({
     OPENAI_API_KEY: 'sk-teste',
     PIXABAY_API_KEY: 'pk-teste',
     UPLOAD_DEST: uploadDir,

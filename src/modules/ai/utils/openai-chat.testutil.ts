@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 /** Apoio dos testes das cinco features de IA de produto: cliente simulado, sem nenhuma chamada real à OpenAI. */
 export interface FakeUsage {
@@ -46,4 +47,15 @@ export function spyOnLogger(service: object): LoggerSpies {
   const lines = () =>
     [log, warn, error].flatMap((spy) => spy.mock.calls.map((call) => String(call[0])));
   return { log, warn, error, lines };
+}
+
+/**
+ * Configuração só com o que o teste passa. O `ConfigService` real dá prioridade ao `process.env`, então uma chave
+ * da OpenAI (ou uma variável de modelo) no ambiente de quem roda a suíte mudaria o teste e, sem a chave
+ * simulada, poderia sair uma chamada real.
+ */
+export function fakeConfig(env: Record<string, string> = {}): ConfigService {
+  return {
+    get: (key: string, fallback?: unknown) => (key in env ? env[key] : fallback),
+  } as unknown as ConfigService;
 }

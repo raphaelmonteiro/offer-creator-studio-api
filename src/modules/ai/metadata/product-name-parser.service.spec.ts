@@ -1,9 +1,9 @@
-import { ConfigService } from '@nestjs/config';
 import { ProductNameParserService } from './product-name-parser.service';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
 import { AiUsageCollector } from '../utils/ai-usage';
 import {
   chatResponse,
+  fakeConfig,
   installFakeOpenAi,
   openAiError,
   spyOnLogger,
@@ -12,7 +12,7 @@ import {
 function build(env: Record<string, string> = {}) {
   const taxonomy = { promptList: () => '101|Mercearia > Arroz' } as unknown as TaxonomyService;
   const service = new ProductNameParserService(
-    new ConfigService({ OPENAI_API_KEY: 'sk-teste', ...env }),
+    fakeConfig({ OPENAI_API_KEY: 'sk-teste', ...env }),
     taxonomy,
   );
   const create = installFakeOpenAi(service);
@@ -204,7 +204,7 @@ describe('ProductNameParserService', () => {
     });
 
     it('sem a chave da OpenAI: resultado nulo e nenhuma chamada', async () => {
-      const service = new ProductNameParserService(new ConfigService({}), {
+      const service = new ProductNameParserService(fakeConfig({}), {
         promptList: () => '',
       } as unknown as TaxonomyService);
       expect(await service.parseNames(NAMES(1))).toEqual([null]);

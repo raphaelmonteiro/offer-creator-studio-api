@@ -1,4 +1,3 @@
-import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -7,6 +6,7 @@ import { TaxonomyService } from './taxonomy/taxonomy.service';
 import { AiUsageCollector } from '../utils/ai-usage';
 import {
   chatResponse,
+  fakeConfig,
   installFakeOpenAi,
   openAiError,
   spyOnLogger,
@@ -25,7 +25,7 @@ afterAll(() => fs.rmSync(uploadDir, { recursive: true, force: true }));
 function build(env: Record<string, string> = {}) {
   const taxonomy = { promptList: () => '101|Mercearia > Arroz' } as unknown as TaxonomyService;
   const service = new ImageMetadataService(
-    new ConfigService({ OPENAI_API_KEY: 'sk-teste', UPLOAD_DEST: uploadDir, ...env }),
+    fakeConfig({ OPENAI_API_KEY: 'sk-teste', UPLOAD_DEST: uploadDir, ...env }),
     taxonomy,
   );
   const create = installFakeOpenAi(service);

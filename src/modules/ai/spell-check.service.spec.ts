@@ -1,8 +1,7 @@
-import { ConfigService } from '@nestjs/config';
 import { SpellCheckService } from './spell-check.service';
 import { AI_RESPONSE_FORMATS } from './schemas/ai-response.schemas';
 import { SPELLCHECK_SYSTEM_PROMPT } from './prompts/spellcheck.prompts';
-import { chatResponse, openAiError, spyOnLogger } from './utils/openai-chat.testutil';
+import { chatResponse, fakeConfig, openAiError, spyOnLogger } from './utils/openai-chat.testutil';
 import { answer, build, CORRECTION, products } from './spell-check.service.testutil';
 
 describe('SpellCheckService', () => {
@@ -97,7 +96,7 @@ describe('SpellCheckService', () => {
     });
 
     it('sem a chave da OpenAI: rejeita sem chamar', async () => {
-      const service = new SpellCheckService(new ConfigService({}));
+      const service = new SpellCheckService(fakeConfig({}));
       spyOnLogger(service);
       await expect(service.spellCheck(products(1))).rejects.toThrow('OPENAI_API_KEY');
     });

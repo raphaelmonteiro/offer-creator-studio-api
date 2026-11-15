@@ -1,10 +1,10 @@
-import { ConfigService } from '@nestjs/config';
 import { PixabayService } from './pixabay.service';
 import { PIXABAY_SEARCH_TRANSLATION_SYSTEM_PROMPT } from './prompts/image-search.prompts';
 import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
 import { AiUsageCollector } from './utils/ai-usage';
 import {
   chatResponse,
+  fakeConfig,
   installFakeOpenAi,
   openAiError,
   spyOnLogger,
@@ -16,7 +16,7 @@ const fetchMock = fetchWithTimeout as unknown as jest.Mock;
 
 function build(env: Record<string, string> = {}) {
   const service = new PixabayService(
-    new ConfigService({ OPENAI_API_KEY: 'sk-teste', PIXABAY_API_KEY: 'pk-teste', ...env }),
+    fakeConfig({ OPENAI_API_KEY: 'sk-teste', PIXABAY_API_KEY: 'pk-teste', ...env }),
     {} as never,
     {} as never,
   );
@@ -164,7 +164,7 @@ describe('PixabayService, tradução do termo', () => {
 
   it('sem a chave da OpenAI: busca com o termo original, sem chamada', async () => {
     const service = new PixabayService(
-      new ConfigService({ PIXABAY_API_KEY: 'pk-teste' }),
+      fakeConfig({ PIXABAY_API_KEY: 'pk-teste' }),
       {} as never,
       {} as never,
     );
