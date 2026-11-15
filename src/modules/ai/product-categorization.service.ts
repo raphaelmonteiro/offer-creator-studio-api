@@ -10,12 +10,17 @@ import {
   ProductCategorizationResponseDto,
 } from './dto/product-categorization-response.dto';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
+import { categorizationCeiling } from './config/openai-product-ceilings';
+import {
+  getProductAiConfig,
+  ProductAiFeatureConfig,
+} from './config/openai-product-features.config';
 import {
   AI_RESPONSE_FORMATS,
   parseProductCategorizationResponse,
 } from './schemas/ai-response.schemas';
 import { PRODUCT_CATEGORIZATION_SYSTEM_PROMPT } from './prompts/product-categorization.prompts';
-import { withAiLogging } from './utils/ai-telemetry.util';
+import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
 
 export const DEFAULT_PRODUCT_CATEGORIES = [
   'Hortifruti',
@@ -42,22 +47,16 @@ interface ProductCategoryCandidate {
   duplicateProductIds: string[];
 }
 
-interface StructuredChatCompletionOptions<T> {
-  feature: string;
-  model: string;
-  request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
-  parse: (raw: string) => T;
-  emptyResponseMessage: string;
-}
-
 @Injectable()
 export class ProductCategorizationService {
   private readonly logger = new Logger(ProductCategorizationService.name);
   private readonly openai: OpenAI | null;
   private readonly models: OpenAiModelConfig;
+  private readonly feature: ProductAiFeatureConfig;
 
   constructor(private readonly configService: ConfigService) {
     this.models = getOpenAiModelConfig(configService);
+    this.feature = getProductAiConfig(configService).categorization;
 
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
     if (!apiKey) {
@@ -157,79 +156,26 @@ export class ProductCategorizationService {
       2,
     );
 
-    return this.createStructuredChatCompletion({
+    return createStructuredChatCompletion({
+      openai: this.openai!,
+      logger: this.logger,
       feature: 'product-categorization.batch',
-      model: this.models.fastTextModel,
-      emptyResponseMessage: 'Resposta vazia da IA',
-      parse: parseProductCategorizationResponse,
-      request: {
-        model: this.models.fastTextModel,
-        response_format: AI_RESPONSE_FORMATS.productCategorization,
-        max_tokens: Math.min(4096, 300 + candidates.length * 90),
+      spec: {
+        model: this.feature.model,
+        effort: 'none',
         temperature: 0,
-        messages: [
-          { role: 'system', content: PRODUCT_CATEGORIZATION_SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
+        timeoutMs: this.feature.timeoutMs,
+        ...categorizationCeiling(candidates.length),
       },
+      messages: [
+        { role: 'system', content: PRODUCT_CATEGORIZATION_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+      responseFormat: AI_RESPONSE_FORMATS.productCategorization,
+      parse: parseProductCategorizationResponse,
+      emptyResponseMessage: 'Resposta vazia da IA',
+      retryAttempts: this.models.structuredResponseRetryAttempts,
     });
-  }
-
-  private async createStructuredChatCompletion<T>(
-    options: StructuredChatCompletionOptions<T>,
-  ): Promise<T> {
-    const maxAttempts = this.models.structuredResponseRetryAttempts + 1;
-    const messages = [...options.request.messages];
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const response = await withAiLogging(
-        this.logger,
-        {
-          feature: options.feature,
-          endpoint: 'chat.completions',
-          model: options.model,
-        },
-        () =>
-          this.openai!.chat.completions.create({
-            ...options.request,
-            messages,
-          }),
-      );
-
-      const raw = response.choices[0]?.message?.content;
-      try {
-        if (!raw) throw new Error(options.emptyResponseMessage);
-        return options.parse(raw);
-      } catch (error) {
-        lastError = error;
-        if (attempt >= maxAttempts) {
-          throw error;
-        }
-
-        const reason = this.getStructuredResponseRetryReason(error);
-        this.logger.warn(
-          `Structured response retry ${JSON.stringify({
-            feature: options.feature,
-            attempt,
-            nextAttempt: attempt + 1,
-            maxAttempts,
-            reason,
-            model: options.model,
-          })}`,
-        );
-
-        messages.push({
-          role: 'user',
-          content:
-            'The previous response was invalid for the expected JSON schema. ' +
-            `Validation error: ${reason}. ` +
-            'Return only valid JSON for the expected schema, without markdown or explanations.',
-        });
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('Resposta estruturada inválida da IA');
   }
 
   private normalizeAllowedCategories(categories?: string[]): string[] {
@@ -387,13 +333,5 @@ export class ProductCategorizationService {
       chunks.push(items.slice(index, index + size));
     }
     return chunks;
-  }
-
-  private getStructuredResponseRetryReason(error: unknown): string {
-    if (error instanceof Error && error.message) {
-      return error.message.slice(0, 180);
-    }
-
-    return 'structured-response-validation-failed';
   }
 }
