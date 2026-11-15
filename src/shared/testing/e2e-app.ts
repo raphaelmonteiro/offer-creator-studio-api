@@ -12,11 +12,11 @@ import { AuthService } from '../../modules/auth/auth.service';
 import { JwtStrategy } from '../../modules/auth/strategies/jwt.strategy';
 import { EmailService } from '../../modules/email/email.service';
 import { UploadsService } from '../../modules/uploads/uploads.service';
+import { E2E_CDN_URL } from './e2e-seed-identity';
 import { E2E_TEST_ENTITIES } from './e2e-test-db';
 
 export const E2E_JWT_SECRET = 'segredo-e2e-do-flyer-pro';
 export const E2E_JWT_REFRESH_SECRET = 'segredo-refresh-e2e-do-flyer-pro';
-export const E2E_CDN_URL = 'http://cdn.e2e.test/uploads';
 
 /** Chaves de provedores pagos do bloco `x-safe-env` do compose: vazias durante a suíte (A-7). */
 export const PAID_KEYS = [
