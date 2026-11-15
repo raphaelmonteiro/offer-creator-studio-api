@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { ProductCategorizationService } from './product-categorization.service';
 import { AI_RESPONSE_FORMATS } from './schemas/ai-response.schemas';
 import { PRODUCT_CATEGORIZATION_SYSTEM_PROMPT } from './prompts/product-categorization.prompts';
+import { AiUsageCollector } from './utils/ai-usage';
 import {
   chatResponse,
   installFakeOpenAi,
@@ -195,5 +196,63 @@ describe('ProductCategorizationService', () => {
     await service.categorizeProducts(request(2));
     expect(logs.warn).not.toHaveBeenCalled();
     expect(logs.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('ProductCategorizationService, uso por invocação (U0.7)', () => {
+  const withTokens = (response: ReturnType<typeof answerBatch>) => ({
+    ...response,
+    usage: { prompt_tokens: 1000, completion_tokens: 200 },
+  });
+
+  it('100 produtos (3 lotes): soma os tokens e o custo das 3 chamadas', async () => {
+    const { service, create } = build();
+    create.mockImplementation(async (body) => withTokens(answerBatch(body)));
+    const usage = new AiUsageCollector();
+
+    await service.categorizeProducts(request(100), { usage });
+
+    expect(usage.snapshot()).toEqual({
+      model: 'gpt-6-luna',
+      models: ['gpt-6-luna'],
+      calls: 3,
+      inputTokens: 3000,
+      outputTokens: 600,
+      costUsd: 0.0006,
+    });
+  });
+
+  it('quem não pede o uso recebe o mesmo resultado', async () => {
+    const { service, create } = build();
+    create.mockImplementation(async (body) => withTokens(answerBatch(body)));
+    const withUsage = await service.categorizeProducts(request(5), {
+      usage: new AiUsageCollector(),
+    });
+    expect(await service.categorizeProducts(request(5))).toEqual(withUsage);
+  });
+
+  it('sem chamada (categoria existente ou flag desligada): zero tokens e custo 0', async () => {
+    const off = build({ AI_PRODUCT_CATEGORIZATION_ENABLED: 'false' });
+    const usage = new AiUsageCollector();
+    await off.service.categorizeProducts(request(2), { usage });
+    expect(usage.snapshot()).toMatchObject({
+      model: 'gpt-6-luna',
+      calls: 0,
+      inputTokens: 0,
+      costUsd: 0,
+    });
+  });
+
+  it('a nova tentativa entra na soma, e o lote que falha fica de fora', async () => {
+    const { service, create } = build();
+    create
+      .mockResolvedValueOnce({
+        ...chatResponse({ content: '{"assignments": 1}' }),
+        usage: { prompt_tokens: 100, completion_tokens: 10 },
+      })
+      .mockRejectedValueOnce(openAiError(500, 'falha'));
+    const usage = new AiUsageCollector();
+    await expect(service.categorizeProducts(request(1), { usage })).rejects.toThrow('falha');
+    expect(usage.snapshot()).toMatchObject({ calls: 1, inputTokens: 100, outputTokens: 10 });
   });
 });

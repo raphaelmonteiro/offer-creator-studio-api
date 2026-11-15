@@ -13,6 +13,7 @@ import { SPELLCHECK_CEILING } from './config/openai-product-ceilings';
 import { AI_RESPONSE_FORMATS, parseSpellCheckResponse } from './schemas/ai-response.schemas';
 import { SPELLCHECK_SYSTEM_PROMPT } from './prompts/spellcheck.prompts';
 import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
+import { AiUsageCollector, AiUsageOptions } from './utils/ai-usage';
 import { runWithConcurrency } from './utils/run-with-concurrency.util';
 
 const BATCH_SIZE = 10;
@@ -48,7 +49,11 @@ export class SpellCheckService {
     }
   }
 
-  async spellCheck(products: SpellCheckProductDto[]): Promise<SpellCheckResponseDto> {
+  async spellCheck(
+    products: SpellCheckProductDto[],
+    options: AiUsageOptions = {},
+  ): Promise<SpellCheckResponseDto> {
+    options.usage?.declareModel(this.feature.model);
     if (!this.enabled) {
       throw new Error('AI_SPELLCHECK_ENABLED=false: revisão ortográfica desligada');
     }
@@ -76,14 +81,17 @@ export class SpellCheckService {
     }
 
     const batchResults = await runWithConcurrency(batches, this.concurrency, (batch) =>
-      this.checkBatch(batch),
+      this.checkBatch(batch, options.usage),
     );
     const corrections = batchResults.flat();
 
     return { corrections };
   }
 
-  private async checkBatch(items: SpellCheckItem[]): Promise<CorrectionDto[]> {
+  private async checkBatch(
+    items: SpellCheckItem[],
+    usage?: AiUsageCollector,
+  ): Promise<CorrectionDto[]> {
     const userPrompt =
       'Analise os seguintes itens e retorne apenas os que possuem erros ortográficos:\n\n' +
       JSON.stringify(items, null, 2);
@@ -91,6 +99,7 @@ export class SpellCheckService {
     return createStructuredChatCompletion({
       openai: this.openai!,
       logger: this.logger,
+      usage,
       feature: 'spell-check.batch',
       spec: {
         model: this.feature.model,

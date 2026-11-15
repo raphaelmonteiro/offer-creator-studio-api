@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { ProductNameParserService } from './product-name-parser.service';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
+import { AiUsageCollector } from '../utils/ai-usage';
 import {
   chatResponse,
   installFakeOpenAi,
@@ -208,5 +209,99 @@ describe('ProductNameParserService', () => {
       } as unknown as TaxonomyService);
       expect(await service.parseNames(NAMES(1))).toEqual([null]);
     });
+  });
+});
+
+describe('ProductNameParserService, uso por invocação (U0.7)', () => {
+  const tokens = { prompt_tokens: 1000, completion_tokens: 200 };
+  const answerWithTokens = (count: number) => ({ ...answerEach(count), usage: tokens });
+
+  it('2 lotes: soma os tokens e o custo das duas chamadas', async () => {
+    const { service, create } = build();
+    create.mockImplementation(async (body: { messages: Array<{ content: string }> }) =>
+      answerWithTokens((body.messages[1].content.match(/^\d+\. "/gm) ?? []).length),
+    );
+    const usage = new AiUsageCollector();
+
+    await service.parseNames(NAMES(16), { usage });
+
+    expect(usage.snapshot()).toEqual({
+      model: 'gpt-6-luna',
+      models: ['gpt-6-luna'],
+      calls: 2,
+      inputTokens: 2000,
+      outputTokens: 400,
+      costUsd: 0.0004,
+    });
+  });
+
+  it('nomes já lidos pelo processo (cache): nenhuma chamada, zero tokens e custo 0', async () => {
+    const { service, create } = build();
+    create.mockResolvedValue(answerWithTokens(8));
+    await service.parseNames(NAMES(8));
+    const usage = new AiUsageCollector();
+
+    const again = await service.parseNames(NAMES(8), { usage });
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(again.every((r) => r !== null)).toBe(true);
+    expect(usage.snapshot()).toMatchObject({
+      model: 'gpt-6-luna',
+      calls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+  });
+
+  it('AI_NAME_PARSER_ENABLED=false: resultado nulo e uso zero', async () => {
+    const { service } = build({ AI_NAME_PARSER_ENABLED: 'false' });
+    const usage = new AiUsageCollector();
+    expect(await service.parseNames(NAMES(3), { usage })).toEqual([null, null, null]);
+    expect(usage.snapshot()).toMatchObject({ calls: 0, inputTokens: 0, costUsd: 0 });
+  });
+
+  it('segundo lote falhou antes do usage: o uso soma só o primeiro', async () => {
+    const { service, create, logs } = build();
+    create
+      .mockResolvedValueOnce(answerWithTokens(8))
+      .mockRejectedValueOnce(openAiError(500, 'falha'));
+    const usage = new AiUsageCollector();
+
+    const result = await service.parseNames(NAMES(16), { usage });
+
+    expect(result.slice(0, 8).every((r) => r !== null)).toBe(true);
+    expect(result.slice(8).every((r) => r === null)).toBe(true);
+    expect(usage.snapshot()).toMatchObject({ calls: 1, inputTokens: 1000, outputTokens: 200 });
+    expect(logs.lines().some((l) => l.startsWith('AI operation failed'))).toBe(true);
+  });
+
+  it('item a item: soma a chamada do lote e as de cada item', async () => {
+    const { service, create } = build();
+    create
+      .mockResolvedValueOnce({ ...chatResponse({ content: '' }), usage: tokens })
+      .mockResolvedValue(answerWithTokens(1));
+    const usage = new AiUsageCollector();
+
+    await service.parseNames(NAMES(2), { usage });
+
+    expect(usage.snapshot()).toMatchObject({ calls: 3, inputTokens: 3000, outputTokens: 600 });
+  });
+
+  it('quem não pede o uso (importador da DotCompany) recebe o resultado de hoje', async () => {
+    const { service, create } = build();
+    create.mockResolvedValue(answerWithTokens(2));
+    const withUsage = await service.parseNames(NAMES(2), { usage: new AiUsageCollector() });
+    const other = build();
+    other.create.mockResolvedValue(answerWithTokens(2));
+    expect(await other.service.parseNames(NAMES(2))).toEqual(withUsage);
+  });
+
+  it('parseSingle repassa o coletor', async () => {
+    const { service, create } = build();
+    create.mockResolvedValue(answerWithTokens(1));
+    const usage = new AiUsageCollector();
+    await service.parseSingle({ name: 'ARROZ' }, { usage });
+    expect(usage.snapshot()).toMatchObject({ calls: 1, inputTokens: 1000 });
   });
 });

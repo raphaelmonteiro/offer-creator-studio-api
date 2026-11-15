@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { PixabayService } from './pixabay.service';
 import { PIXABAY_SEARCH_TRANSLATION_SYSTEM_PROMPT } from './prompts/image-search.prompts';
 import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
+import { AiUsageCollector } from './utils/ai-usage';
 import {
   chatResponse,
   installFakeOpenAi,
@@ -183,5 +184,48 @@ describe('PixabayService, tradução do termo', () => {
     const { service, create } = build({ PIXABAY_API_KEY: '' });
     await expect(service.searchImages('salsinha')).rejects.toThrow('PIXABAY_API_KEY');
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe('PixabayService, uso por invocação (U0.7)', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(pixabayHits());
+  });
+
+  it('a tradução entrega modelo, tokens e custo (1.000 e 200 em Luna = US$ 0,0002)', async () => {
+    const { service, create } = build();
+    create.mockResolvedValue(
+      chatResponse({ content: 'parsley', usage: { prompt_tokens: 1000, completion_tokens: 200 } }),
+    );
+    const usage = new AiUsageCollector();
+
+    await service.searchImages('salsinha', undefined, { usage });
+
+    expect(usage.snapshot()).toEqual({
+      model: 'gpt-6-luna',
+      models: ['gpt-6-luna'],
+      calls: 1,
+      inputTokens: 1000,
+      outputTokens: 200,
+      costUsd: 0.0002,
+    });
+  });
+
+  it('tradução que falhou ou sem chave: zero tokens e custo 0', async () => {
+    const { service, create } = build();
+    create.mockRejectedValue(openAiError(500, 'falha'));
+    const usage = new AiUsageCollector();
+    await service.searchImages('salsinha', undefined, { usage });
+    expect(usage.snapshot()).toMatchObject({ calls: 0, inputTokens: 0, costUsd: 0 });
+  });
+
+  it('quem não pede o uso recebe o mesmo resultado', async () => {
+    const { service, create } = build();
+    create.mockResolvedValue(chatResponse({ content: 'parsley' }));
+    const withUsage = await service.searchImages('salsinha', 'food', {
+      usage: new AiUsageCollector(),
+    });
+    expect(await service.searchImages('salsinha', 'food')).toEqual(withUsage);
   });
 });

@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { ImageMetadataService } from './image-metadata.service';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
+import { AiUsageCollector } from '../utils/ai-usage';
 import {
   chatResponse,
   installFakeOpenAi,
@@ -268,5 +269,61 @@ describe('ImageMetadataService', () => {
 
     expect(create).toHaveBeenCalledTimes(10);
     expect(peak).toBe(4);
+  });
+});
+
+describe('ImageMetadataService, uso por invocação (U0.7)', () => {
+  const tokens = { prompt_tokens: 2000, completion_tokens: 300 };
+  const read = (confidence: number) => ({ ...metadata(confidence), usage: tokens });
+
+  it('foto com segunda passada: o uso soma as duas chamadas (Terra, US$ 0,007)', async () => {
+    const { service, create } = build();
+    create.mockResolvedValueOnce(read(0.3)).mockResolvedValueOnce(read(0.9));
+    const usage = new AiUsageCollector();
+
+    await service.extractFromImage(IMAGE_URL, { usage });
+
+    expect(usage.snapshot()).toEqual({
+      model: 'gpt-6.1-terra',
+      models: ['gpt-6.1-terra'],
+      calls: 2,
+      inputTokens: 4000,
+      outputTokens: 600,
+      costUsd: 0.007,
+    });
+  });
+
+  it('uma passada só: custo de US$ 0,0035', async () => {
+    const { service, create } = build();
+    create.mockResolvedValue(read(0.9));
+    const usage = new AiUsageCollector();
+    await service.extractFromImage(IMAGE_URL, { usage });
+    expect(usage.snapshot()).toMatchObject({ calls: 1, costUsd: 0.0035 });
+  });
+
+  it('flag desligada e imagem que não carrega: zero tokens e custo 0', async () => {
+    const off = build({ AI_IMAGE_METADATA_ENABLED: 'false' });
+    const usage = new AiUsageCollector();
+    await off.service.extractFromImage(IMAGE_URL, { usage });
+    expect(usage.snapshot()).toMatchObject({ model: 'gpt-6.1-terra', calls: 0, costUsd: 0 });
+  });
+
+  it('leitura que falhou antes do usage: fora da soma', async () => {
+    const { service, create } = build();
+    create.mockRejectedValue(new Error('Request timed out.'));
+    const usage = new AiUsageCollector();
+    await service.extractFromImage(IMAGE_URL, { usage });
+    expect(usage.snapshot()).toMatchObject({ calls: 0, inputTokens: 0, costUsd: 0 });
+  });
+
+  it('quem não pede o uso recebe o mesmo resultado', async () => {
+    const first = build();
+    first.create.mockResolvedValue(read(0.9));
+    const second = build();
+    second.create.mockResolvedValue(read(0.9));
+    const withUsage = await first.service.extractFromImage(IMAGE_URL, {
+      usage: new AiUsageCollector(),
+    });
+    expect(await second.service.extractFromImage(IMAGE_URL)).toEqual(withUsage);
   });
 });

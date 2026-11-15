@@ -52,6 +52,15 @@ export function llmCostUsd(model: string, usage: LlmUsage | null | undefined): n
   return price ? costFromPrices(price, usage) : null;
 }
 
+/** Preço de cache que a página não informa vale a entrada cheia (D-11). */
+function withCacheRates(price: LlmPrices): Required<LlmPrices> {
+  return {
+    ...price,
+    cachedInput: price.cachedInput ?? price.input,
+    cacheWrite: price.cacheWrite ?? price.input,
+  };
+}
+
 /** O cálculo de `llmCostUsd` para um preço dado (separado para testar o preço de cache ausente). */
 export function costFromPrices(
   price: LlmPrices,
@@ -64,11 +73,12 @@ export function costFromPrices(
   const written = details?.cache_write_tokens ?? 0;
   const fresh = Math.max(0, input - cached - written);
   const output = usage.output_tokens ?? usage.completion_tokens ?? 0;
+  const rate = withCacheRates(price);
   const cost =
-    (fresh * price.input +
-      cached * (price.cachedInput ?? price.input) +
-      written * (price.cacheWrite ?? price.input) +
-      output * price.output) /
+    (fresh * rate.input +
+      cached * rate.cachedInput +
+      written * rate.cacheWrite +
+      output * rate.output) /
     MILLION;
   return Math.round(cost * MILLION) / MILLION;
 }

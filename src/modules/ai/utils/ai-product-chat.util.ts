@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { buildChatCompletionParams, ChatCallSpec } from '../config/openai-chat-params';
 import { withAiLogging } from './ai-telemetry.util';
+import { AiUsageCollector } from './ai-usage';
 
 type ChatBody = OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
 
@@ -21,6 +22,8 @@ export interface ProductChatCall {
   mode?: string;
   /** Liga as linhas de log de uma mesma leitura de foto (uma ou duas passadas). */
   correlationId?: string;
+  /** Coletor do uso da invocação (D-12); a chamada que falha não entra. */
+  usage?: AiUsageCollector;
 }
 
 export async function callProductChat(call: ProductChatCall): Promise<OpenAI.Chat.ChatCompletion> {
@@ -42,6 +45,7 @@ export async function callProductChat(call: ProductChatCall): Promise<OpenAI.Cha
     },
     () => call.openai.chat.completions.create(request, options),
   );
+  call.usage?.record(call.spec.model, response.usage);
   warnIfEmptyOrTruncated(call, response);
   return response;
 }

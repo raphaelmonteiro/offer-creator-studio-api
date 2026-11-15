@@ -7,6 +7,7 @@ import {
   ProductAiFeatureConfig,
 } from '../config/openai-product-features.config';
 import { callProductChat } from '../utils/ai-product-chat.util';
+import { AiUsageCollector, AiUsageOptions } from '../utils/ai-usage';
 import { parseMetadataLenient, ProductMetadata } from './product-metadata.schema';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
 
@@ -57,7 +58,11 @@ export class ProductNameParserService {
     return this.modelVersionLabel;
   }
 
-  async parseNames(inputs: ParseInput[]): Promise<(ProductMetadata | null)[]> {
+  async parseNames(
+    inputs: ParseInput[],
+    options: AiUsageOptions = {},
+  ): Promise<(ProductMetadata | null)[]> {
+    options.usage?.declareModel(this.feature.model);
     if (!this.isEnabled() || inputs.length === 0) {
       return inputs.map(() => null);
     }
@@ -78,7 +83,10 @@ export class ProductNameParserService {
 
     for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
       const slice = toFetch.slice(i, i + BATCH_SIZE);
-      let parsedBatch = await this.callLlm(slice.map((s) => s.payload));
+      let parsedBatch = await this.callLlm(
+        slice.map((s) => s.payload),
+        options.usage,
+      );
 
       // Fallback: if every item in the batch came back null (almost always
       // means the JSON was truncated or invalid), retry item-by-item. Costs a
@@ -88,7 +96,7 @@ export class ProductNameParserService {
         this.logger.warn(`Batch de ${slice.length} retornou tudo null; tentando item a item.`);
         parsedBatch = [];
         for (const item of slice) {
-          const [single] = await this.callLlm([item.payload]);
+          const [single] = await this.callLlm([item.payload], options.usage);
           parsedBatch.push(single ?? null);
         }
       }
@@ -105,8 +113,11 @@ export class ProductNameParserService {
     return results;
   }
 
-  async parseSingle(input: ParseInput): Promise<ProductMetadata | null> {
-    const [result] = await this.parseNames([input]);
+  async parseSingle(
+    input: ParseInput,
+    options: AiUsageOptions = {},
+  ): Promise<ProductMetadata | null> {
+    const [result] = await this.parseNames([input], options);
     return result ?? null;
   }
 
@@ -135,7 +146,10 @@ export class ProductNameParserService {
     this.cache.set(key, metadata);
   }
 
-  private async callLlm(inputs: ParseInput[]): Promise<(ProductMetadata | null)[]> {
+  private async callLlm(
+    inputs: ParseInput[],
+    usage?: AiUsageCollector,
+  ): Promise<(ProductMetadata | null)[]> {
     if (!this.openai) return inputs.map(() => null);
 
     const systemPrompt = this.buildSystemPrompt();
@@ -145,6 +159,7 @@ export class ProductNameParserService {
       const response = await callProductChat({
         openai: this.openai,
         logger: this.logger,
+        usage,
         feature: 'product-name-parser.batch',
         spec: {
           model: this.feature.model,

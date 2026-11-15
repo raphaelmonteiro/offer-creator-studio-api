@@ -10,6 +10,7 @@ import {
   ProductAiFeatureConfig,
 } from '../config/openai-product-features.config';
 import { callProductChat } from '../utils/ai-product-chat.util';
+import { AiUsageCollector, AiUsageOptions } from '../utils/ai-usage';
 import {
   averageConfidence,
   parseMetadataLenient,
@@ -74,7 +75,11 @@ export class ImageMetadataService {
     return this.modelVersionLabel;
   }
 
-  async extractFromImage(imageUrl: string): Promise<ProductMetadata | null> {
+  async extractFromImage(
+    imageUrl: string,
+    options: AiUsageOptions = {},
+  ): Promise<ProductMetadata | null> {
+    options.usage?.declareModel(this.feature.model);
     if (!this.isEnabled()) return null;
     await this.acquire();
     try {
@@ -85,12 +90,12 @@ export class ImageMetadataService {
       }
       // Mesmo identificador nas linhas das duas passadas: o custo por foto sai do log (F-26).
       const readId = randomUUID();
-      const first = await this.callVision(dataUrl, 'low', readId);
+      const first = await this.callVision(dataUrl, 'low', readId, options.usage);
       if (!first) return null;
       if (averageConfidence(first) >= VISION_LOW_PROMOTION_THRESHOLD) {
         return first;
       }
-      const promoted = await this.callVision(dataUrl, 'high', readId);
+      const promoted = await this.callVision(dataUrl, 'high', readId, options.usage);
       return promoted ?? first;
     } catch (error) {
       this.logger.warn(`extractFromImage falhou para ${imageUrl}: ${(error as Error).message}`);
@@ -104,6 +109,7 @@ export class ImageMetadataService {
     imageData: string,
     detail: 'low' | 'high',
     correlationId: string,
+    usage?: AiUsageCollector,
   ): Promise<ProductMetadata | null> {
     if (!this.openai) return null;
 
@@ -116,6 +122,7 @@ export class ImageMetadataService {
       feature: 'image-metadata.extract',
       mode: detail,
       correlationId,
+      usage,
       spec: {
         model: this.feature.model,
         effort: 'low',

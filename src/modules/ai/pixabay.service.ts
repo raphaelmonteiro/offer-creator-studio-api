@@ -13,6 +13,7 @@ import { ImageSearchResponseDto, PixabayImageDto } from './dto/image-search-resp
 import { PIXABAY_SEARCH_TRANSLATION_SYSTEM_PROMPT } from './prompts/image-search.prompts';
 import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
 import { callProductChat } from './utils/ai-product-chat.util';
+import { AiUsageCollector, AiUsageOptions } from './utils/ai-usage';
 
 const UNITS = [
   'kg',
@@ -62,7 +63,12 @@ export class PixabayService {
     this.openai = apiKey ? new OpenAI({ apiKey }) : null;
   }
 
-  async searchImages(rawName: string, category?: PixabayCategory): Promise<ImageSearchResponseDto> {
+  async searchImages(
+    rawName: string,
+    category?: PixabayCategory,
+    options: AiUsageOptions = {},
+  ): Promise<ImageSearchResponseDto> {
+    options.usage?.declareModel(this.feature.model);
     const apiKey = this.configService.get<string>('PIXABAY_API_KEY');
     if (!apiKey) {
       this.logger.error('PIXABAY_API_KEY não configurada');
@@ -70,7 +76,7 @@ export class PixabayService {
     }
 
     const normalizedTerm = this.normalizeProductName(rawName);
-    const searchTerm = await this.translateToEnglish(normalizedTerm);
+    const searchTerm = await this.translateToEnglish(normalizedTerm, options.usage);
     const selectedCategory = category ?? 'food';
 
     const params = new URLSearchParams({
@@ -166,7 +172,7 @@ export class PixabayService {
     return result.url;
   }
 
-  private async translateToEnglish(term: string): Promise<string> {
+  private async translateToEnglish(term: string, usage?: AiUsageCollector): Promise<string> {
     if (!this.openai) {
       return term;
     }
@@ -175,6 +181,7 @@ export class PixabayService {
       const response = await callProductChat({
         openai: this.openai,
         logger: this.logger,
+        usage,
         feature: 'image-search.translate-term',
         spec: {
           model: this.feature.model,
