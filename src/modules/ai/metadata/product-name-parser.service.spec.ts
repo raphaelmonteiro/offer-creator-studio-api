@@ -235,6 +235,24 @@ describe('ProductNameParserService, uso por invocação (U0.7)', () => {
     });
   });
 
+  it('segundo lote válido sem usage: conta a chamada, soma só o primeiro e o custo é nulo', async () => {
+    const { service, create } = build();
+    create
+      .mockResolvedValueOnce(answerWithTokens(8))
+      .mockResolvedValueOnce(chatResponse({ content: answerEach(8).choices[0].message.content }));
+    const usage = new AiUsageCollector();
+
+    const result = await service.parseNames(NAMES(16), { usage });
+
+    expect(result.every((r) => r !== null)).toBe(true);
+    expect(usage.snapshot()).toMatchObject({
+      calls: 2,
+      inputTokens: 1000,
+      outputTokens: 200,
+      costUsd: null,
+    });
+  });
+
   it('nomes já lidos pelo processo (cache): nenhuma chamada, zero tokens e custo 0', async () => {
     const { service, create } = build();
     create.mockResolvedValue(answerWithTokens(8));

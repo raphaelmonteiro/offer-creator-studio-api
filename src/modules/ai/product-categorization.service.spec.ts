@@ -222,6 +222,21 @@ describe('ProductCategorizationService, uso por invocação (U0.7)', () => {
     });
   });
 
+  it('resposta válida sem usage: a linha de fim traz custo nulo e sem tokens, e a categorização responde', async () => {
+    const { service, create, logs } = build();
+    create.mockImplementation(async (body) => answerBatch(body));
+
+    const result = await service.categorizeProducts(request(2));
+
+    expect(result.assignments.map((a) => a.category)).toEqual(['Mercearia', 'Mercearia']);
+    const line = logs.lines().find((l) => l.startsWith('AI operation finished '));
+    const logged = JSON.parse(line!.slice('AI operation finished '.length));
+    expect(logged).toMatchObject({ model: 'gpt-6-luna', estimatedCostUsd: null });
+    expect(logged.feature).toEqual(expect.stringContaining('categor'));
+    expect(logged).not.toHaveProperty('inputTokens');
+    expect(logged).not.toHaveProperty('outputTokens');
+  });
+
   it('quem não pede o uso recebe o mesmo resultado', async () => {
     const { service, create } = build();
     create.mockImplementation(async (body) => withTokens(answerBatch(body)));
