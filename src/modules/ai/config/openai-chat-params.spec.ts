@@ -52,6 +52,15 @@ describe('buildChatCompletionParams, família gpt-6', () => {
     });
   });
 
+  it('esforço medium: reasoning_effort medium, sem temperature nem max_tokens', () => {
+    const { body } = buildChatCompletionParams(spec({ effort: 'medium', temperature: 0.1 }));
+    expect(body).toStrictEqual({
+      model: 'gpt-6-luna',
+      max_completion_tokens: 8192,
+      reasoning_effort: 'medium',
+    });
+  });
+
   it('esforço none com temperature 0.1 leva o valor pedido', () => {
     const { body } = buildChatCompletionParams(spec({ effort: 'none', temperature: 0.1 }));
     expect(body.temperature).toBe(0.1);
@@ -67,7 +76,7 @@ describe('buildChatCompletionParams, família gpt-6', () => {
 });
 
 describe('buildChatCompletionParams, família de hoje', () => {
-  it.each(['low', 'none'] as const)(
+  it.each(['low', 'none', 'medium'] as const)(
     'esforço %s: só max_tokens e temperature, sem reasoning_effort nem max_completion_tokens',
     (effort) => {
       const { body } = buildChatCompletionParams(

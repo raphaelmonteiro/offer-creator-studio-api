@@ -13,7 +13,7 @@ import { OPENAI_NO_SDK_RETRY } from '../../../shared/providers/openai-errors';
  *   `max_completion_tokens`. Voltar ao modelo antigo pela variável restaura a chamada de hoje.
  * - Opções de requisição: o prazo da feature e `maxRetries: 0` (o SDK não repete sozinho), em qualquer família.
  */
-export type ProductReasoningEffort = 'none' | 'low';
+export type ProductReasoningEffort = 'none' | 'low' | 'medium';
 
 /** O que vale para qualquer API: modelo, esforço, temperatura e prazo. */
 export interface ModelCallSpec {
