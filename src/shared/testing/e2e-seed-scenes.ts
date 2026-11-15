@@ -1,4 +1,6 @@
 import { ConfigService } from '@nestjs/config';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { DataSource } from 'typeorm';
 import { facesOfLayout, SceneLayout } from '../../modules/template-scenes/domain/scene-faces';
 import {
@@ -11,6 +13,10 @@ import {
 } from '../../modules/template-scenes/domain/scene-formats';
 import { TemplateScene } from '../../modules/template-scenes/entities/template-scene.entity';
 import { TemplateSceneFace } from '../../modules/template-scenes/entities/template-scene-face.entity';
+import { SceneTemplateConfiguration } from '../../modules/template-scenes/domain/scene-template.types';
+import { TemplateSceneAsset } from '../../modules/template-scenes/entities/template-scene-asset.entity';
+import { TemplateSceneVersion } from '../../modules/template-scenes/entities/template-scene-version.entity';
+import { Template } from '../../modules/templates/entities/template.entity';
 import { SceneTemplateSyncProcessor } from '../../modules/template-scenes/processors/scene-template-sync.processor';
 import { SceneFilesService } from '../../modules/template-scenes/services/scene-files.service';
 import { SceneLockService } from '../../modules/template-scenes/services/scene-lock.service';
@@ -57,6 +63,7 @@ export interface SeedFileTarget {
 /** O que a semente precisa para projetar os templates: os serviços reais do módulo, sem Nest nem fila. */
 export interface SceneSeeder {
   dataSource: DataSource;
+  target: SeedFileTarget;
   files: SceneFilesService;
   sync: SceneTemplateSyncProcessor;
 }
@@ -76,7 +83,7 @@ export function createSceneSeeder(dataSource: DataSource, target: SeedFileTarget
     files,
     new SceneTemplateFilesService(config, files),
   );
-  return { dataSource, files, sync };
+  return { dataSource, target, files, sync };
 }
 
 async function facesOf(dataSource: DataSource, sceneId: string): Promise<TemplateSceneFace[]> {
@@ -137,16 +144,50 @@ async function summarize(dataSource: DataSource, scene: TemplateScene): Promise<
   };
 }
 
-/** Cena já semeada por completo (toda face com versão e template): é reaproveitada, para o comando ser idempotente. */
-async function findCompleteScene(
-  dataSource: DataSource,
-  name: string,
-): Promise<TemplateScene | null> {
+const fileExists = (file: string) =>
+  fs.access(file).then(
+    () => true,
+    () => false,
+  );
+
+/** A master e a arte do template de cada face existem na pasta e nas URLs de agora (o comando pode mudar de pasta ou de CDN). */
+async function filesAreIntact(seeder: SceneSeeder, faces: TemplateSceneFace[]): Promise<boolean> {
+  const { dataSource, files, target } = seeder;
+  const prefix = `${target.cdnUrl.replace(/\/+$/, '')}/`;
+  for (const face of faces) {
+    const version = await dataSource.manager.findOneBy(TemplateSceneVersion, {
+      id: face.currentVersionId as string,
+    });
+    const master = await dataSource.manager.findOneBy(TemplateSceneAsset, {
+      id: version?.masterAssetId as string,
+    });
+    const template = await dataSource.manager.findOneBy(Template, {
+      id: face.templateId as string,
+    });
+    const art = (template?.configuration as SceneTemplateConfiguration | undefined)?.bodyBackground
+      ?.imageUrl;
+    if (!master || !art?.startsWith(prefix)) return false;
+    const onDisk = [
+      files.absolutePath(master.url),
+      path.join(target.uploadsDir, art.slice(prefix.length)),
+    ];
+    if (!(await Promise.all(onDisk.map(fileExists))).every(Boolean)) return false;
+  }
+  return true;
+}
+
+/**
+ * Cena já semeada por completo (toda face com versão, template e arquivos): é reaproveitada, para o comando ser
+ * idempotente. Incompleta, com arquivo faltando ou com outro endereço de CDN: é apagada e semeada de novo.
+ */
+async function findCompleteScene(seeder: SceneSeeder, name: string): Promise<TemplateScene | null> {
+  const { dataSource } = seeder;
   const scene = await dataSource.manager.findOneBy(TemplateScene, { name });
   if (!scene) return null;
   const faces = await facesOf(dataSource, scene.id);
-  if (faces.every((face) => face.currentVersionId && face.templateId)) return scene;
-  await deleteTestScenes(dataSource, [scene.id]); // sobra de uma semente que quebrou no meio
+  const complete = faces.every((face) => face.currentVersionId && face.templateId);
+  if (complete && (await filesAreIntact(seeder, faces))) return scene;
+  await deleteTestScenes(dataSource, [scene.id]); // sobra de uma semente que quebrou, ou arquivos que sumiram
   return null;
 }
 
@@ -157,7 +198,7 @@ async function findCompleteScene(
  */
 export async function seedScene(seeder: SceneSeeder, spec: SceneSpec): Promise<SeededScene> {
   const { dataSource } = seeder;
-  const existing = await findCompleteScene(dataSource, spec.name);
+  const existing = await findCompleteScene(seeder, spec.name);
   if (existing) return summarize(dataSource, existing);
   const format = findSceneFormat(spec.formatId) as SceneFormatSpec;
   const size = nativeSizeOfFormat(format);
