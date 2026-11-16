@@ -47,6 +47,35 @@ describe('entrada do template do Encarte Pro: zonas e faixas', () => {
       expect(tabloid?.faces[1].footer).toBeNull();
     });
 
+    it.each([
+      ['imageUrl ausente', { imageUrl: undefined }],
+      ['imageUrl vazio', { imageUrl: '' }],
+    ])(
+      'seção com altura e sem imagem (%s): faixa nula e zona vazia, não uma faixa sem imagem',
+      (_name, background) => {
+        const entry = entryOf({
+          templateOverrides: {
+            single: {
+              header: sectionRow('single/header', 6.15, { background }),
+              footer: sectionRow('single/footer', 4.1, { background }),
+            },
+          },
+        });
+        const [face] = entry?.faces ?? [];
+        expect(face.header).toBeNull();
+        expect(face.zones.header).toEqual({ from: 0, to: 0 });
+        expect(face.footer).toBeNull();
+        expect(face.zones.footer).toEqual({ from: 100, to: 100 });
+      },
+    );
+
+    it('seção com altura e sem o objeto background: também faixa nula', () => {
+      const header = { ...sectionRow('single/header', 6.15), background: undefined };
+      const entry = entryOf({ templateOverrides: { single: { header } } });
+      expect(entry?.faces[0].header).toBeNull();
+      expect(entry?.faces[0].zones.header).toEqual({ from: 0, to: 0 });
+    });
+
     it('zonas guardadas na face da cena não valem: vale a projeção', () => {
       const input = entryInput({
         templateOverrides: { single: { header: sectionRow('single/header', 10.25) } },
