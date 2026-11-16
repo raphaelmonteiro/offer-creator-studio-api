@@ -48,6 +48,33 @@ export function readProductAliases(
   );
 }
 
+function chosenAtOf(alias: ProductAlias): string {
+  return typeof alias.chosenAt === 'string' ? alias.chosenAt : '';
+}
+
+/** Do mais antigo para o mais novo, e dentro do teto: passando de `PRODUCT_ALIAS_MAX`, o mais antigo sai. */
+function sortAndCap(aliases: ProductAlias[]): ProductAlias[] {
+  const sorted = [...aliases].sort((a, b) => chosenAtOf(a).localeCompare(chosenAtOf(b)));
+  return sorted.slice(Math.max(0, sorted.length - PRODUCT_ALIAS_MAX));
+}
+
+/**
+ * União de duas listas de nomes pela chave: cada chave fica com a entrada de `chosenAt` mais recente (empate: a de
+ * `current`) e a lista respeita o teto, como `addProductAlias`. Quem lê o metadata, altera e regrava uma cópia velha
+ * não apaga, assim, o nome gravado nesse intervalo.
+ */
+export function unionProductAliases(
+  current: ProductAlias[],
+  incoming: ProductAlias[],
+): ProductAlias[] {
+  const byKey = new Map<string, ProductAlias>();
+  for (const alias of [...current, ...incoming]) {
+    const kept = byKey.get(alias.key);
+    if (!kept || chosenAtOf(alias) > chosenAtOf(kept)) byKey.set(alias.key, alias);
+  }
+  return sortAndCap([...byKey.values()]);
+}
+
 /**
  * Acrescenta (ou renova) o nome na lista da imagem. Nome já presente só tem o
  * `chosenAt` atualizado; passando do teto, o mais antigo sai.
@@ -63,9 +90,7 @@ export function addProductAlias(
   const current = readProductAliases(metadata);
   const existing = current.find((a) => a.key === key);
   const others = current.filter((a) => a.key !== key);
-  const next: ProductAlias[] = [...others, { name: name.trim().slice(0, 200), key, chosenAt: now }];
-  next.sort((a, b) => a.chosenAt.localeCompare(b.chosenAt));
-  const trimmed = next.slice(Math.max(0, next.length - PRODUCT_ALIAS_MAX));
+  const trimmed = sortAndCap([...others, { name: name.trim().slice(0, 200), key, chosenAt: now }]);
 
   return {
     metadata: { ...(metadata ?? {}), aliases: trimmed },
