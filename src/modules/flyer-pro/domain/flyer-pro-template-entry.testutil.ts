@@ -1,4 +1,5 @@
 import type { FlyerProFaceKey } from './flyer-pro.types';
+import { faceKeysOfLayout } from './flyer-pro-formats';
 import type { FaceRow, SceneRow, TemplateRow, TemplateSectionRow } from './flyer-pro-template-rows';
 import {
   analyzeSceneTemplate,
@@ -103,18 +104,12 @@ export interface EntryInputOptions {
   templateOverrides?: Partial<Record<FlyerProFaceKey, Partial<TemplateRow>>>;
 }
 
-const KEYS_OF_LAYOUT: Record<string, FlyerProFaceKey[]> = {
-  single: ['single'],
-  front_back: ['front', 'back'],
-  tabloid: ['outer', 'inner'],
-};
-
 /** Cena, linhas das faces e templates prontos, no formato que a função pura recebe. */
 export function entryInput(
   options: EntryInputOptions = {},
 ): TemplateEntryInput & { templates: Map<string, TemplateRow> } {
   const scene = sceneRow(options.scene);
-  const faces = options.faces ?? KEYS_OF_LAYOUT[scene.layout];
+  const faces = options.faces ?? [...faceKeysOfLayout(scene.layout)];
   const ready = options.ready ?? faces;
   const templates = new Map<string, TemplateRow>(
     ready.map((key) => [
