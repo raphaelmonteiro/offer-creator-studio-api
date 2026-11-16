@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import { sign } from 'jsonwebtoken';
 import * as os from 'os';
 import * as path from 'path';
+import * as request from 'supertest';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { HttpExceptionFilter } from '../../common/filters/http-exception.filter';
 import { ResponseInterceptor } from '../../common/interceptors/response.interceptor';
@@ -40,6 +41,7 @@ import { fakeConfig, installFakeOpenAi, spyOnLogger } from './utils/openai-chat.
 
 export const SECRET = 'segredo-de-teste';
 export const USAGE = { prompt_tokens: 1000, completion_tokens: 200 };
+export const body = (res: request.Response) => res.body as Record<string, unknown>;
 export const PRODUCT_ID = '3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b';
 let uploadDir: string;
 

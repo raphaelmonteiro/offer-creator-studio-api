@@ -6,8 +6,10 @@ import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
 import {
   bearer,
+  body,
   buildApp,
   createUploadDir,
+  PRODUCT_ID,
   removeUploadDir,
   until,
   USAGE,
@@ -18,8 +20,6 @@ import { chatResponse } from './utils/openai-chat.testutil';
 beforeAll(createUploadDir);
 afterAll(removeUploadDir);
 
-const IMAGE_ID = '3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b';
-const body = (res: request.Response) => res.body as Record<string, unknown>;
 const visionReply = () =>
   chatResponse({
     content: JSON.stringify({ title: 'ARROZ', fieldConfidence: { title: 0.9 } }),
@@ -93,7 +93,7 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
   describe('PUT /v1/gallery/images/:imageId/product-link', () => {
     const link = (payload: object) =>
       request(app.getHttpServer())
-        .put(`/v1/gallery/images/${IMAGE_ID}/product-link`)
+        .put(`/v1/gallery/images/${PRODUCT_ID}/product-link`)
         .set('Authorization', bearer())
         .send(payload);
 
@@ -111,7 +111,7 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
       expect(res.body).toStrictEqual({
         success: true,
         data: {
-          imageId: IMAGE_ID,
+          imageId: PRODUCT_ID,
           alias: { key: 'ARROZ SOLITO 1KG', added: true },
           ean: { ean: '7891000100100', status: 'invalid' },
           client: null,
@@ -129,7 +129,7 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
       expect(res.body).toStrictEqual({
         success: true,
         data: {
-          imageId: IMAGE_ID,
+          imageId: PRODUCT_ID,
           alias: { key: 'ARROZ SOLITO 1KG', added: true },
           ean: null,
           client: null,
