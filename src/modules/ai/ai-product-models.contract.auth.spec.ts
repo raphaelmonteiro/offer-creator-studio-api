@@ -30,7 +30,7 @@ describe('contrato das rotas das cinco features: autenticação', () => {
     jest.restoreAllMocks();
   });
 
-  const routes: Array<[string, 'get' | 'post', string, object | undefined]> = [
+  const routes: Array<[string, 'get' | 'post' | 'put' | 'patch', string, object | undefined]> = [
     [
       'spell-check',
       'post',
@@ -57,6 +57,19 @@ describe('contrato das rotas das cinco features: autenticação', () => {
     ],
     ['image-search', 'get', '/v1/ai/image-search?rawName=salsinha', undefined],
     ['gallery/upload', 'post', '/v1/gallery/upload', undefined],
+    [
+      'image-download',
+      'post',
+      '/v1/ai/image-download',
+      { imageUrl: 'https://pixabay.com/arroz.png', productName: 'Arroz' },
+    ],
+    [
+      'gallery/images/:imageId/product-link',
+      'put',
+      `/v1/gallery/images/${PRODUCT_ID}/product-link`,
+      { productName: 'ARROZ SOLITO 1KG' },
+    ],
+    ['gallery/:id (renomear)', 'patch', '/v1/gallery/img-1', { filename: 'arroz.jpg' }],
   ];
 
   it.each(routes)(
@@ -67,6 +80,8 @@ describe('contrato das rotas das cinco features: autenticação', () => {
       expect(res.status).toBe(401);
       expect(body(res)).toMatchObject({ success: false, error: { code: 'UNAUTHORIZED' } });
       Object.values(ctx.fakes).forEach((fake) => expect(fake).not.toHaveBeenCalled());
+      expect(ctx.dataSource.manager.query).not.toHaveBeenCalled();
+      expect(ctx.uploads.uploadFile).not.toHaveBeenCalled();
     },
   );
 

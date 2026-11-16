@@ -1,0 +1,163 @@
+// O controller puxa (via resolução por EAN) o importador de fotos, que importa `sharp` (não carrega no host).
+jest.mock('sharp', () => jest.fn());
+jest.mock('./utils/fetch-with-timeout.util', () => ({ fetchWithTimeout: jest.fn() }));
+
+import { INestApplication } from '@nestjs/common';
+import * as request from 'supertest';
+import {
+  bearer,
+  buildApp,
+  createUploadDir,
+  removeUploadDir,
+  until,
+  USAGE,
+} from './ai-product-models.contract.testutil';
+import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
+import { chatResponse } from './utils/openai-chat.testutil';
+
+beforeAll(createUploadDir);
+afterAll(removeUploadDir);
+
+const IMAGE_ID = '3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b';
+const body = (res: request.Response) => res.body as Record<string, unknown>;
+const visionReply = () =>
+  chatResponse({
+    content: JSON.stringify({ title: 'ARROZ', fieldConfidence: { title: 0.9 } }),
+    usage: USAGE,
+  });
+const pixabayImage = () => ({
+  ok: true,
+  headers: { get: (name: string) => (name === 'content-type' ? 'image/png' : null) },
+  arrayBuffer: async () => new ArrayBuffer(8),
+});
+
+/**
+ * Contrato das rotas dos dois editores que passam pela regravação dos dados da foto (change
+ * 02-fix-gallery-alias-loss, requisito "As rotas dos dois editores mantêm o contrato"): o corpo é o de hoje e a leitura
+ * por visão, simulada, segue sem segurar a resposta. O envio (`POST /v1/gallery/upload`) está em
+ * `ai-product-models.contract.spec.ts` e o 401 das rotas em `ai-product-models.contract.auth.spec.ts`.
+ */
+describe('contrato das rotas que regravam os dados da foto (provedor simulado)', () => {
+  let app: INestApplication;
+  let ctx: Awaited<ReturnType<typeof buildApp>>;
+
+  beforeEach(async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    (fetchWithTimeout as jest.Mock).mockReset().mockResolvedValue(pixabayImage());
+    ctx = await buildApp();
+    app = ctx.app;
+  });
+  afterEach(async () => {
+    await app.close();
+    jest.restoreAllMocks();
+  });
+
+  describe('POST /v1/ai/image-download', () => {
+    const download = () =>
+      request(app.getHttpServer())
+        .post('/v1/ai/image-download')
+        .set('Authorization', bearer())
+        .send({ imageUrl: 'https://pixabay.com/arroz.png', productName: 'Arroz Camil 5kg' });
+
+    it('responde success true com a imagem salva, sem esperar a leitura da foto', async () => {
+      let release!: (value: unknown) => void;
+      ctx.fakes.vision.mockReturnValue(new Promise((resolve) => (release = resolve)));
+
+      const res = await download();
+
+      expect(res.status).toBe(200);
+      expect(res.body).toStrictEqual({
+        success: true,
+        data: { imageUrl: 'http://localhost:3001/uploads/gallery/arroz.jpg' },
+      });
+      await until(() => ctx.fakes.vision.mock.calls.length === 1);
+      expect(ctx.embedding.saveImageMetadata).not.toHaveBeenCalled();
+      release(visionReply());
+      await until(() => ctx.embedding.saveImageMetadata.mock.calls.length === 1);
+    });
+
+    it('a falha do download continua HTTP 200 com success false', async () => {
+      (fetchWithTimeout as jest.Mock).mockResolvedValue({ ok: false, status: 404 });
+
+      const res = await download();
+
+      expect(res.status).toBe(200);
+      expect(body(res)).toMatchObject({
+        success: false,
+        error: { code: 'IMAGE_DOWNLOAD_ERROR' },
+      });
+      expect(ctx.fakes.vision).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('PUT /v1/gallery/images/:imageId/product-link', () => {
+    const link = (payload: object) =>
+      request(app.getHttpServer())
+        .put(`/v1/gallery/images/${IMAGE_ID}/product-link`)
+        .set('Authorization', bearer())
+        .send(payload);
+
+    function savedMetadata(): { aliases: Array<{ name: string; key: string }> } {
+      const update = ctx.dataSource.manager.query.mock.calls.find(([sql]) =>
+        String(sql).includes('UPDATE gallery_images'),
+      );
+      return JSON.parse(update[1][0]);
+    }
+
+    it('com EAN de dígito inválido responde 200 com ean.status invalid e grava o nome', async () => {
+      const res = await link({ productName: 'ARROZ SOLITO 1KG', ean: '7891000100100' });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toStrictEqual({
+        success: true,
+        data: {
+          imageId: IMAGE_ID,
+          alias: { key: 'ARROZ SOLITO 1KG', added: true },
+          ean: { ean: '7891000100100', status: 'invalid' },
+          client: null,
+        },
+      });
+      expect(savedMetadata().aliases).toMatchObject([
+        { name: 'ARROZ SOLITO 1KG', key: 'ARROZ SOLITO 1KG' },
+      ]);
+    });
+
+    it('sem EAN responde a mesma forma, com ean null, e grava o nome', async () => {
+      const res = await link({ productName: 'ARROZ SOLITO 1KG' });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toStrictEqual({
+        success: true,
+        data: {
+          imageId: IMAGE_ID,
+          alias: { key: 'ARROZ SOLITO 1KG', added: true },
+          ean: null,
+          client: null,
+        },
+      });
+      expect(savedMetadata().aliases).toHaveLength(1);
+    });
+  });
+
+  describe('PATCH /v1/gallery/:id (renomear)', () => {
+    it('responde a foto atualizada e a leitura roda depois, sem segurar a resposta', async () => {
+      let release!: (value: unknown) => void;
+      ctx.fakes.vision.mockReturnValue(new Promise((resolve) => (release = resolve)));
+
+      const res = await request(app.getHttpServer())
+        .patch('/v1/gallery/img-1')
+        .set('Authorization', bearer())
+        .send({ filename: 'arroz camil 5kg' });
+
+      expect(res.status).toBe(200);
+      expect(body(res)).toMatchObject({
+        success: true,
+        data: { id: 'img-1', filename: 'arroz camil 5kg.jpg' },
+      });
+      await until(() => ctx.fakes.vision.mock.calls.length === 1);
+      expect(ctx.embedding.saveImageMetadata).not.toHaveBeenCalled();
+      release(visionReply());
+      await until(() => ctx.embedding.saveImageMetadata.mock.calls.length === 1);
+    });
+  });
+});
