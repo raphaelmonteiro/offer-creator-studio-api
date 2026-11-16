@@ -23,6 +23,7 @@ import { AnimationsModule } from './modules/animations/animations.module';
 import { MascotsModule } from './modules/mascots/mascots.module';
 import { CommercialsModule } from './modules/commercials/commercials.module';
 import { TemplateScenesModule } from './modules/template-scenes/template-scenes.module';
+import { FlyerProModule } from './modules/flyer-pro/flyer-pro.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { TemplateScenesModule } from './modules/template-scenes/template-scenes.
     CommercialsModule,
     // sempre registrado — a flag TEMPLATE_SCENE_ENABLED age nas rotas e no consumer
     TemplateScenesModule,
+    FlyerProModule,
   ],
   providers: [
     {
