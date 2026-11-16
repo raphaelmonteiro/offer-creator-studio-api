@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import { sign } from 'jsonwebtoken';
 import * as os from 'os';
 import * as path from 'path';
+import * as request from 'supertest';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { HttpExceptionFilter } from '../../common/filters/http-exception.filter';
 import { ResponseInterceptor } from '../../common/interceptors/response.interceptor';
@@ -40,6 +41,7 @@ import { fakeConfig, installFakeOpenAi, spyOnLogger } from './utils/openai-chat.
 
 export const SECRET = 'segredo-de-teste';
 export const USAGE = { prompt_tokens: 1000, completion_tokens: 200 };
+export const body = (res: request.Response) => res.body as Record<string, unknown>;
 export const PRODUCT_ID = '3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b';
 let uploadDir: string;
 
@@ -70,11 +72,24 @@ const SAVED_IMAGE = {
   url: 'http://localhost:3001/uploads/gallery/arroz.jpg',
 };
 
+function buildUploads() {
+  return {
+    uploadFile: jest.fn().mockResolvedValue({
+      filename: SAVED_IMAGE.filename,
+      url: SAVED_IMAGE.url,
+      mimeType: 'image/jpeg',
+      size: 12,
+    }),
+  };
+}
+
+type Uploads = ReturnType<typeof buildUploads>;
+
 /** As cinco features reais, cada uma com o cliente da OpenAI trocado por um simulado (`fakes`). */
-function buildFeatures(config: ConfigService) {
+function buildFeatures(config: ConfigService, uploads: Uploads, gallery: { registerImage: never }) {
   const spell = new SpellCheckService(config);
   const categorization = new ProductCategorizationService(config);
-  const pixabay = new PixabayService(config, {} as never, {} as never);
+  const pixabay = new PixabayService(config, uploads as never, gallery as never);
   const parser = new ProductNameParserService(config, TAXONOMY);
   const vision = new ImageMetadataService(config, TAXONOMY);
   const fakes = {
@@ -98,7 +113,17 @@ function buildStorage() {
     embedAndStoreMetadataForImage: jest.fn().mockResolvedValue(true),
     embedAndStoreForImage: jest.fn().mockResolvedValue(true),
   };
-  const dataSource = { query: jest.fn().mockResolvedValue([]) };
+  // Transação da Galeria (registro da escolha): `SELECT … FOR UPDATE` acha a foto sem metadata e o resto grava.
+  const manager = {
+    query: jest.fn(async (sql: string, _params?: string[]) =>
+      /^\s*SELECT/i.test(sql) ? [{ metadata: null }] : [],
+    ),
+  };
+  const dataSource = {
+    query: jest.fn().mockResolvedValue([]),
+    transaction: jest.fn(async (work: (m: typeof manager) => unknown) => work(manager)),
+    manager,
+  };
   return { embedding, dataSource };
 }
 
@@ -125,18 +150,11 @@ function buildPhotoMatching(config: ConfigService, features: Features, storage: 
   return { matcher, eanResolution };
 }
 
-function buildGallery(features: Features, storage: Storage) {
+function buildGallery(features: Features, storage: Storage, uploads: Uploads) {
   const imagesRepo = {
     create: (value: object) => ({ ...value }),
-    save: jest.fn(async (value: object) => ({ ...value, ...SAVED_IMAGE })),
-  };
-  const uploads = {
-    uploadFile: jest.fn().mockResolvedValue({
-      filename: SAVED_IMAGE.filename,
-      url: SAVED_IMAGE.url,
-      mimeType: 'image/jpeg',
-      size: 12,
-    }),
+    save: jest.fn(async (value: object) => ({ ...SAVED_IMAGE, ...value })),
+    findOne: jest.fn(async () => ({ ...SAVED_IMAGE })),
   };
   const moduleRef = {
     get: (token: string) =>
@@ -165,7 +183,6 @@ const UNUSED_PROVIDERS = [
   EanMatchJobService,
   ClientPreferredImagesService,
   GalleryImageEanService,
-  GalleryProductLinkService,
 ].map((token) => ({ provide: token, useValue: {} }));
 
 /** Prefixo `v1`, filtro de exceção e validação como no `main.ts`. */
@@ -189,8 +206,13 @@ export async function buildApp(env: Record<string, string> = {}) {
     UPLOAD_DEST: uploadDir,
     ...env,
   });
-  const features = buildFeatures(config);
+  const uploads = buildUploads();
+  // O download do Pixabay registra a foto pela mesma Galeria real (que dispara a leitura simulada).
+  const slot = {} as { gallery: GalleryService };
+  const lazyGallery = { registerImage: (image: never) => slot.gallery.registerImage(image) };
+  const features = buildFeatures(config, uploads, lazyGallery as never);
   const storage = buildStorage();
+  const gallery = (slot.gallery = buildGallery(features, storage, uploads));
   const { matcher, eanResolution } = buildPhotoMatching(config, features, storage);
   const none = {} as never;
   const aiService = new AiService(
@@ -217,7 +239,11 @@ export async function buildApp(env: Record<string, string> = {}) {
       { provide: ProductImageMatchV2Service, useValue: matcher },
       { provide: FlyerEanResolutionService, useValue: eanResolution },
       { provide: GalleryEmbeddingService, useValue: storage.embedding },
-      { provide: GalleryService, useValue: buildGallery(features, storage) },
+      { provide: GalleryService, useValue: gallery },
+      {
+        provide: GalleryProductLinkService,
+        useValue: new GalleryProductLinkService(storage.dataSource as never, none),
+      },
       ...UNUSED_PROVIDERS,
     ],
   }).compile();
@@ -228,6 +254,7 @@ export async function buildApp(env: Record<string, string> = {}) {
     fakes: features.fakes,
     embedding: storage.embedding,
     dataSource: storage.dataSource,
+    uploads,
   };
 }
 

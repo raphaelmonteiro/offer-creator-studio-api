@@ -1,9 +1,12 @@
 import {
   addProductAlias,
   PRODUCT_ALIAS_MAX,
+  ProductAlias,
   productAliasKey,
   readProductAliases,
+  unionProductAliases,
 } from './product-alias';
+import { aliasAt, aliasesAtMax } from './product-alias.testutil';
 
 describe('productAliasKey', () => {
   it('ignora caixa, acento, pontuação e espaços repetidos, mantendo a quantidade', () => {
@@ -72,5 +75,48 @@ describe('addProductAlias', () => {
   it('metadata com aliases malformados ignora o lixo', () => {
     const r = addProductAlias({ aliases: [null, 'x', { key: 1 }] }, 'CAFE 500G', NOW)!;
     expect(readProductAliases(r.metadata)).toHaveLength(1);
+  });
+});
+
+describe('unionProductAliases', () => {
+  const A = aliasAt('A', '2026-11-01T00:00:00.000Z');
+  const B = aliasAt('B', '2026-11-02T00:00:00.000Z');
+
+  it('une as duas listas sem repetir a chave, do mais antigo para o mais novo', () => {
+    expect(unionProductAliases([B], [A, B])).toEqual([A, B]);
+    expect(unionProductAliases([], [])).toEqual([]);
+  });
+
+  it('a mesma chave fica com a entrada de chosenAt mais recente, de qualquer lado', () => {
+    const novo = aliasAt('A', '2026-11-10T00:00:00.000Z', 'a novo');
+    expect(unionProductAliases([novo], [A])).toEqual([novo]);
+    expect(unionProductAliases([A], [novo])).toEqual([novo]);
+  });
+
+  it('empate de data: vale a entrada da primeira lista', () => {
+    const outro = aliasAt('A', A.chosenAt, 'outro nome');
+    expect(unionProductAliases([A], [outro])).toEqual([A]);
+  });
+
+  it('entrada sem chosenAt perde para a que tem data', () => {
+    const semData = { name: 'a', key: 'A' } as ProductAlias;
+    expect(unionProductAliases([semData], [A])).toEqual([A]);
+  });
+
+  it('acima do teto, o mais antigo sai, como em addProductAlias', () => {
+    const lista = aliasesAtMax('P');
+    const novo = aliasAt('NOVO', '2026-12-01T00:00:00.000Z');
+    const r = unionProductAliases(lista, [novo]);
+    expect(r).toHaveLength(PRODUCT_ALIAS_MAX);
+    expect(r.map((a) => a.key)).not.toContain('P 0');
+    expect(r[r.length - 1]).toEqual(novo);
+  });
+
+  it('não altera as listas recebidas', () => {
+    const atual = [B];
+    const novos = [A];
+    unionProductAliases(atual, novos);
+    expect(atual).toEqual([B]);
+    expect(novos).toEqual([A]);
   });
 });

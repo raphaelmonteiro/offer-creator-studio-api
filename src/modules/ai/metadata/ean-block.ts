@@ -1,3 +1,4 @@
+import { ProductAlias, readProductAliases, unionProductAliases } from '../../gallery/product-alias';
 import { canOverwriteEan, EanSource, ProductMetadata } from './product-metadata.schema';
 
 /**
@@ -57,20 +58,20 @@ function keepCurrent(
   return divergentEan ? addWarning(merged, `ean-divergente:${divergentEan}`) : merged;
 }
 
-/**
- * Decide o metadata a gravar quando um processo reescreve o de uma imagem.
- *
- * - `incoming` sem EAN (ex.: nova extração por visão que não leu código) →
- *   os campos descritivos são atualizados e o bloco EAN atual é preservado;
- * - `incoming` com EAN e fonte → vale a precedência de `canOverwriteEan`;
- *   perdendo, o EAN atual fica e o lido vira aviso `ean-divergente:<ean>`;
- * - `incoming` com EAN sem fonte (leitura solta) nunca substitui um EAN com
- *   fonte; só substitui outro EAN também sem fonte (metadata legado).
- */
-export function mergeEanBlock(
+/** Põe os nomes no metadata; sem nenhum nome a chave `aliases` não existe (nem fica vazia). */
+function withAliases(metadata: ProductMetadata, aliases: ProductAlias[]): ProductMetadata {
+  if (aliases.length > 0) return { ...metadata, aliases } as ProductMetadata;
+  if (!('aliases' in metadata)) return metadata;
+  const copy: Record<string, unknown> = { ...metadata };
+  delete copy.aliases;
+  return copy as ProductMetadata;
+}
+
+/** Decide o EAN do resultado (precedência de fontes), sem olhar os nomes escolhidos. */
+function decideEanBlock(
   current: ProductMetadata | null | undefined,
   incoming: ProductMetadata,
-  options: MergeEanOptions = {},
+  options: MergeEanOptions,
 ): ProductMetadata {
   if (!current?.ean) return incoming;
 
@@ -89,4 +90,29 @@ export function mergeEanBlock(
 
   if (canOverwriteEan(currentSource, incomingSource)) return incoming;
   return keepCurrent(current, incoming, incoming.ean === current.ean ? null : incoming.ean);
+}
+
+/**
+ * Decide o metadata a gravar quando um processo reescreve o de uma imagem.
+ *
+ * - `incoming` sem EAN (ex.: nova extração por visão que não leu código) →
+ *   os campos descritivos são atualizados e o bloco EAN atual é preservado;
+ * - `incoming` com EAN e fonte → vale a precedência de `canOverwriteEan`;
+ *   perdendo, o EAN atual fica e o lido vira aviso `ean-divergente:<ean>`;
+ * - `incoming` com EAN sem fonte (leitura solta) nunca substitui um EAN com
+ *   fonte; só substitui outro EAN também sem fonte (metadata legado).
+ *
+ * Em todos os caminhos os nomes escolhidos (`aliases`) do metadata atual
+ * continuam no resultado, unidos pela chave aos que `incoming` já traga (cópia
+ * que o processo leu antes e pode estar velha), com o teto de
+ * `PRODUCT_ALIAS_MAX`; sem nenhum nome válido, a chave não existe.
+ */
+export function mergeEanBlock(
+  current: ProductMetadata | null | undefined,
+  incoming: ProductMetadata,
+  options: MergeEanOptions = {},
+): ProductMetadata {
+  const decided = decideEanBlock(current, incoming, options);
+  const aliases = unionProductAliases(readProductAliases(current), readProductAliases(incoming));
+  return withAliases(decided, aliases);
 }
