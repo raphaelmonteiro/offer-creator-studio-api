@@ -6,6 +6,7 @@ import {
   readProductAliases,
   unionProductAliases,
 } from './product-alias';
+import { aliasAt, aliasesAtMax } from './product-alias.testutil';
 
 describe('productAliasKey', () => {
   it('ignora caixa, acento, pontuação e espaços repetidos, mantendo a quantidade', () => {
@@ -78,13 +79,8 @@ describe('addProductAlias', () => {
 });
 
 describe('unionProductAliases', () => {
-  const alias = (key: string, chosenAt: string, name = key): ProductAlias => ({
-    name,
-    key,
-    chosenAt,
-  });
-  const A = alias('A', '2026-11-01T00:00:00.000Z');
-  const B = alias('B', '2026-11-02T00:00:00.000Z');
+  const A = aliasAt('A', '2026-11-01T00:00:00.000Z');
+  const B = aliasAt('B', '2026-11-02T00:00:00.000Z');
 
   it('une as duas listas sem repetir a chave, do mais antigo para o mais novo', () => {
     expect(unionProductAliases([B], [A, B])).toEqual([A, B]);
@@ -92,13 +88,13 @@ describe('unionProductAliases', () => {
   });
 
   it('a mesma chave fica com a entrada de chosenAt mais recente, de qualquer lado', () => {
-    const novo = alias('A', '2026-11-10T00:00:00.000Z', 'a novo');
+    const novo = aliasAt('A', '2026-11-10T00:00:00.000Z', 'a novo');
     expect(unionProductAliases([novo], [A])).toEqual([novo]);
     expect(unionProductAliases([A], [novo])).toEqual([novo]);
   });
 
   it('empate de data: vale a entrada da primeira lista', () => {
-    const outro = alias('A', A.chosenAt, 'outro nome');
+    const outro = aliasAt('A', A.chosenAt, 'outro nome');
     expect(unionProductAliases([A], [outro])).toEqual([A]);
   });
 
@@ -108,13 +104,11 @@ describe('unionProductAliases', () => {
   });
 
   it('acima do teto, o mais antigo sai, como em addProductAlias', () => {
-    const lista = Array.from({ length: PRODUCT_ALIAS_MAX }, (_, i) =>
-      alias(`P${i}`, `2026-11-01T00:00:${String(i).padStart(2, '0')}.000Z`),
-    );
-    const novo = alias('NOVO', '2026-12-01T00:00:00.000Z');
+    const lista = aliasesAtMax('P');
+    const novo = aliasAt('NOVO', '2026-12-01T00:00:00.000Z');
     const r = unionProductAliases(lista, [novo]);
     expect(r).toHaveLength(PRODUCT_ALIAS_MAX);
-    expect(r.map((a) => a.key)).not.toContain('P0');
+    expect(r.map((a) => a.key)).not.toContain('P 0');
     expect(r[r.length - 1]).toEqual(novo);
   });
 

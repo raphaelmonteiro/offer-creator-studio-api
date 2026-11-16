@@ -1,4 +1,5 @@
 import { PRODUCT_ALIAS_MAX, ProductAlias, readProductAliases } from '../../gallery/product-alias';
+import { aliasAt, aliasesAtMax } from '../../gallery/product-alias.testutil';
 import { mergeEanBlock } from './ean-block';
 import { ProductMetadata } from './product-metadata.schema';
 
@@ -151,17 +152,6 @@ function nomesDe(metadata: ProductMetadata): ProductAlias[] {
   return readProductAliases(metadata);
 }
 
-function aliasEntry(n: number, chosenAt: string): ProductAlias {
-  return { name: `PRODUTO ${n}`, key: `PRODUTO ${n}`, chosenAt };
-}
-
-/** 50 nomes com datas crescentes: PRODUTO 0 é o mais antigo. */
-function cinquentaNomes(): ProductAlias[] {
-  return Array.from({ length: PRODUCT_ALIAS_MAX }, (_, i) =>
-    aliasEntry(i, `2026-11-01T00:00:${String(i).padStart(2, '0')}.000Z`),
-  );
-}
-
 describe('mergeEanBlock: nomes escolhidos (aliases) em cada caminho', () => {
   it('sem EAN atual, os nomes continuam e o descritivo é o novo', () => {
     const r = mergeEanBlock(comNomes(BASE, TRES_NOMES), VISAO);
@@ -267,8 +257,8 @@ describe('mergeEanBlock: foto sem nomes', () => {
 
 describe('mergeEanBlock: nomes que chegam junto com os dados novos', () => {
   it('cópia velha não apaga o nome gravado depois da leitura dela', () => {
-    const arroz1 = aliasEntry(1, '2026-11-05T10:00:00.000Z');
-    const arroz5 = aliasEntry(5, '2026-11-06T10:00:00.000Z');
+    const arroz1 = aliasAt('PRODUTO 1', '2026-11-05T10:00:00.000Z');
+    const arroz5 = aliasAt('PRODUTO 5', '2026-11-06T10:00:00.000Z');
     const atual = comNomes(BASE, [arroz1, arroz5]);
     const copiaVelha = comNomes(VISAO, [arroz1]);
     expect(nomesDe(mergeEanBlock(atual, copiaVelha))).toEqual([arroz1, arroz5]);
@@ -277,8 +267,11 @@ describe('mergeEanBlock: nomes que chegam junto com os dados novos', () => {
   });
 
   it('mesma chave com datas diferentes fica uma vez, com a data mais recente', () => {
-    const nova = { ...aliasEntry(1, '2026-11-10T00:00:00.000Z'), name: 'Produto 1 (atual)' };
-    const velha = { ...aliasEntry(1, '2026-11-01T00:00:00.000Z'), name: 'Produto 1 (velho)' };
+    const nova = { ...aliasAt('PRODUTO 1', '2026-11-10T00:00:00.000Z'), name: 'Produto 1 (atual)' };
+    const velha = {
+      ...aliasAt('PRODUTO 1', '2026-11-01T00:00:00.000Z'),
+      name: 'Produto 1 (velho)',
+    };
     expect(nomesDe(mergeEanBlock(comNomes(BASE, [nova]), comNomes(VISAO, [velha])))).toEqual([
       nova,
     ]);
@@ -288,8 +281,8 @@ describe('mergeEanBlock: nomes que chegam junto com os dados novos', () => {
   });
 
   it('mesma chave e mesma data: vale a entrada do metadata atual', () => {
-    const noAtual = { ...aliasEntry(1, '2026-11-10T00:00:00.000Z'), name: 'do atual' };
-    const nosNovos = { ...aliasEntry(1, '2026-11-10T00:00:00.000Z'), name: 'dos novos' };
+    const noAtual = { ...aliasAt('PRODUTO 1', '2026-11-10T00:00:00.000Z'), name: 'do atual' };
+    const nosNovos = { ...aliasAt('PRODUTO 1', '2026-11-10T00:00:00.000Z'), name: 'dos novos' };
     const r = mergeEanBlock(comNomes(BASE, [noAtual]), comNomes(VISAO, [nosNovos]));
     expect(nomesDe(r)).toEqual([noAtual]);
   });
@@ -307,15 +300,15 @@ describe('mergeEanBlock: nomes que chegam junto com os dados novos', () => {
   });
 
   it('a união acima do teto fica em 50 e o mais antigo sai', () => {
-    const cinquenta = cinquentaNomes();
-    const maisAntigoDeTodos = aliasEntry(900, '2026-10-01T00:00:00.000Z');
+    const cinquenta = aliasesAtMax('PRODUTO');
+    const maisAntigoDeTodos = aliasAt('PRODUTO 900', '2026-10-01T00:00:00.000Z');
     const r = mergeEanBlock(
       comNomes(BASE, cinquenta),
       comNomes(VISAO, [maisAntigoDeTodos, ...cinquenta]),
     );
     expect(nomesDe(r)).toEqual(cinquenta);
 
-    const maisNovo = aliasEntry(901, '2026-12-01T00:00:00.000Z');
+    const maisNovo = aliasAt('PRODUTO 901', '2026-12-01T00:00:00.000Z');
     const comNovo = nomesDe(mergeEanBlock(comNomes(BASE, cinquenta), comNomes(VISAO, [maisNovo])));
     expect(comNovo).toHaveLength(PRODUCT_ALIAS_MAX);
     expect(comNovo.map((a) => a.key)).not.toContain('PRODUTO 0');
