@@ -1,5 +1,11 @@
 import type { DataSource, EntityManager } from 'typeorm';
-import type { TemplateEntryInput } from '../domain/flyer-pro-template-entry';
+import {
+  analyzeSceneTemplate,
+  isFormatSupported,
+  TemplateEntryInput,
+  toTemplateSnapshot,
+} from '../domain/flyer-pro-template-entry';
+import type { FlyerProTemplateSnapshot } from '../domain/flyer-pro.types';
 import { FlyerProSceneReader } from './flyer-pro-scene.reader';
 import { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
 
@@ -38,4 +44,11 @@ export async function failureOf(
     return { status: http.getStatus(), body: http.getResponse() };
   }
   throw new Error('a montagem não recusou');
+}
+
+/** A cópia que o montador faria com a cena como está em `input` (a hora da cópia é fixa). */
+export function snapshotOf(input: TemplateEntryInput): FlyerProTemplateSnapshot {
+  const analysis = analyzeSceneTemplate(input);
+  if (!isFormatSupported(analysis)) throw new Error('formato fora');
+  return toTemplateSnapshot(analysis, '2026-11-16T09:00:00.000Z');
 }

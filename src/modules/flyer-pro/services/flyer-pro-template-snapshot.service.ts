@@ -6,13 +6,14 @@ import {
   flyerProTemplateNotFound,
   flyerProTemplateUnsupported,
 } from '../domain/flyer-pro.errors';
-import type { FlyerProTemplateSnapshot } from '../domain/flyer-pro.types';
+import type { FlyerProTemplateSnapshot, FlyerProTemplateStatus } from '../domain/flyer-pro.types';
 import {
   isFormatSupported,
   SceneTemplateAnalysis,
   SupportedFormatAnalysis,
   toTemplateSnapshot,
 } from '../domain/flyer-pro-template-entry';
+import { compareFaces } from '../domain/flyer-pro-template-staleness';
 import { analyzeScenes } from './flyer-pro-scene-analysis';
 import { FlyerProSceneReader } from './flyer-pro-scene.reader';
 import { readWith } from './flyer-pro-read';
@@ -42,6 +43,27 @@ export class FlyerProTemplateSnapshotService {
     });
   }
 
+  /**
+   * O estado de uma cópia contra a cena de hoje: `available`, `usable`, `missingFaces`, `stale` e `staleKind`. Calculado a
+   * cada leitura, nunca gravado, e sem lançar erro de regra: cena excluída ou inexistente é `available: false` (A-6).
+   * Só `fingerprint` e `pictorialKey` entram na comparação; a `sceneRevision` da cópia nunca é lida.
+   */
+  async statusOf(
+    snapshot: Pick<FlyerProTemplateSnapshot, 'sceneId' | 'faces'>,
+    manager?: EntityManager,
+  ): Promise<FlyerProTemplateStatus> {
+    return readWith(this.dataSource, manager, async (reading) => {
+      const analysis = await this.analysisOf(reading, snapshot.sceneId);
+      if (!analysis || analysis.scene.deletedAt) return unavailableStatus();
+      return {
+        available: true,
+        usable: analysis.usable,
+        missingFaces: analysis.missingFaces,
+        ...compareFaces(snapshot.faces ?? [], analysis.faces),
+      };
+    });
+  }
+
   /** A cena de hoje, inclusive a excluída (quem chama distingue); `null` se não existe. */
   private async analysisOf(
     manager: EntityManager,
@@ -53,6 +75,15 @@ export class FlyerProTemplateSnapshotService {
     return analysis;
   }
 }
+
+/** A cópia de uma cena excluída ou inexistente: nada a comparar, e o encarte segue com a arte guardada (A-6). */
+const unavailableStatus = (): FlyerProTemplateStatus => ({
+  available: false,
+  usable: false,
+  missingFaces: [],
+  stale: false,
+  staleKind: null,
+});
 
 /** As três recusas da montagem, na ordem da spec; devolve a análise com o formato garantido. */
 function assertBuildable(analysis: SceneTemplateAnalysis | null): SupportedFormatAnalysis {
