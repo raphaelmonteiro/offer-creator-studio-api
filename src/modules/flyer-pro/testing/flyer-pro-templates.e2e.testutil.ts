@@ -6,7 +6,15 @@ import type { FlyerProFixtureScenes } from './flyer-pro-scene-fixture';
 /** Helpers do e2e da N7 (só testes): a consulta ao banco compartilhado e o que ela devolve, por página. */
 
 export type Entry = FlyerProTemplateEntry;
-export type Get = (url: string) => PromiseLike<{ status: number; body: any }>;
+
+/** O envelope da N7 como o teste o lê: a lista, a paginação e o erro. */
+export interface TemplatesBody {
+  success: boolean;
+  data: Entry[];
+  pagination: { page: number; limit: number; total: number; totalPages: number };
+  error?: { code: string };
+}
+export type Get = (url: string) => PromiseLike<{ status: number; body: TemplatesBody }>;
 
 /** A lista inteira de uma consulta, percorrendo as páginas de 50 (o banco é compartilhado, A-3). */
 export async function listAll(get: Get, query: string): Promise<Entry[]> {

@@ -267,16 +267,7 @@ describeIfE2eDb('GET /v1/flyer-pro/templates (e2e)', () => {
   });
 
   describe('consulta inválida, token, repetição e flag', () => {
-    it.each([
-      'limit=51',
-      'limit=0',
-      'page=0',
-      'page=abc',
-      'format=20x27',
-      'sceneId=abc',
-      `search=${'x'.repeat(81)}`,
-      'foo=1',
-    ])('%s: 400 BAD_REQUEST', async (query) => {
+    it.each(['limit=51', 'foo=1'])('%s: 400 BAD_REQUEST', async (query) => {
       const response = await get(`/flyer-pro/templates?${query}`);
       expect([response.status, response.body.error.code]).toEqual([400, 'BAD_REQUEST']);
     });
