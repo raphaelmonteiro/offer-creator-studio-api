@@ -54,76 +54,78 @@ describeIfE2eDb('Fixture de cenas do Encarte Pro (banco chroma_x_e2e)', () => {
     for (const _round of [1, 2]) {
       const fixture = await create();
       const { scenes } = fixture;
-      expect(Object.values(scenes).every((scene) => scene.name.endsWith(suffix))).toBe(true);
+      try {
+        expect(Object.values(scenes).every((scene) => scene.name.endsWith(suffix))).toBe(true);
 
-      const before = await rowsOf(dataSource, fixture);
-      expect(before.scenes).toBe(Object.keys(scenes).length);
+        const before = await rowsOf(dataSource, fixture);
+        expect(before.scenes).toBe(Object.keys(scenes).length);
 
-      // Frente e verso só com a Frente: o Verso nunca teve template.
-      const back = await one(
-        dataSource,
-        `SELECT "templateId" FROM template_scene_faces WHERE "sceneId" = $1 AND key = 'back'`,
-        scenes.frontOnly.id,
-      );
-      expect(back.templateId).toBeNull();
-      expect(await templateOf(dataSource, scenes.frontOnly.id, 'back')).toBeUndefined();
-      // Frente apagada pela API: a face ainda aponta para o id.
-      const front = await one(
-        dataSource,
-        `SELECT "templateId" FROM template_scene_faces WHERE "sceneId" = $1 AND key = 'front'`,
-        scenes.frontDeleted.id,
-      );
-      expect(front.templateId).not.toBeNull();
-      expect(await templateOf(dataSource, scenes.frontDeleted.id, 'front')).toBeUndefined();
-      expect(await templateOf(dataSource, scenes.frontDeleted.id, 'back')).toBeDefined();
+        // Frente e verso só com a Frente: o Verso nunca teve template.
+        const back = await one(
+          dataSource,
+          `SELECT "templateId" FROM template_scene_faces WHERE "sceneId" = $1 AND key = 'back'`,
+          scenes.frontOnly.id,
+        );
+        expect(back.templateId).toBeNull();
+        expect(await templateOf(dataSource, scenes.frontOnly.id, 'back')).toBeUndefined();
+        // Frente apagada pela API: a face ainda aponta para o id.
+        const front = await one(
+          dataSource,
+          `SELECT "templateId" FROM template_scene_faces WHERE "sceneId" = $1 AND key = 'front'`,
+          scenes.frontDeleted.id,
+        );
+        expect(front.templateId).not.toBeNull();
+        expect(await templateOf(dataSource, scenes.frontDeleted.id, 'front')).toBeUndefined();
+        expect(await templateOf(dataSource, scenes.frontDeleted.id, 'back')).toBeDefined();
 
-      // Capa de 10 cm: projetado 10,25 e as zonas da face da cena no padrão.
-      const outer = await templateOf(dataSource, scenes.cover10.id, 'outer');
-      expect(outer.configuration.header.heightCm).toBe(10.25);
-      const zones = await one(
-        dataSource,
-        `SELECT zones FROM template_scene_faces WHERE "sceneId" = $1 AND key = 'outer'`,
-        scenes.cover10.id,
-      );
-      expect(zones.zones.header.h).toBeCloseTo(0.15, 4);
+        // Capa de 10 cm: projetado 10,25 e as zonas da face da cena no padrão.
+        const outer = await templateOf(dataSource, scenes.cover10.id, 'outer');
+        expect(outer.configuration.header.heightCm).toBe(10.25);
+        const zones = await one(
+          dataSource,
+          `SELECT zones FROM template_scene_faces WHERE "sceneId" = $1 AND key = 'outer'`,
+          scenes.cover10.id,
+        );
+        expect(zones.zones.header.h).toBeCloseTo(0.15, 4);
 
-      // Camadas: logo no cabeçalho e texto no rodapé, projetados pela rotina do worker.
-      const layered = (await templateOf(dataSource, scenes.layers.id, 'single')).configuration;
-      expect(layered.header.elements.map((e: { type: string }) => e.type)).toEqual(['image']);
-      expect(layered.footer.elements.map((e: { type: string }) => e.type)).toEqual(['text']);
+        // Camadas: logo no cabeçalho e texto no rodapé, projetados pela rotina do worker.
+        const layered = (await templateOf(dataSource, scenes.layers.id, 'single')).configuration;
+        expect(layered.header.elements.map((e: { type: string }) => e.type)).toEqual(['image']);
+        expect(layered.footer.elements.map((e: { type: string }) => e.type)).toEqual(['text']);
 
-      // Cena excluída com o template órfão; reserva da face 0; sem marcador; id inexistente.
-      expect(
-        (
-          await one(
-            dataSource,
-            `SELECT "deletedAt" FROM template_scenes WHERE id = $1`,
-            scenes.deleted.id,
-          )
-        ).deletedAt,
-      ).not.toBeNull();
-      expect(await templateOf(dataSource, scenes.deleted.id, 'single')).toBeDefined();
-      const reserve = await one(
-        dataSource,
-        `SELECT f."templateId", s."approvedTemplateId" FROM template_scene_faces f JOIN template_scenes s ON s.id = f."sceneId" WHERE s.id = $1 AND f."index" = 0`,
-        scenes.reserve.id,
-      );
-      expect(reserve.templateId).toBeNull();
-      expect(reserve.approvedTemplateId).not.toBeNull();
-      const unmarked = await one(
-        dataSource,
-        `SELECT t.configuration FROM template_scene_faces f JOIN templates t ON t.id = f."templateId" WHERE f."sceneId" = $1`,
-        scenes.unmarked.id,
-      );
-      expect(unmarked.configuration.source).toBeUndefined();
-      const dangling = await one(
-        dataSource,
-        `SELECT count(*) FROM templates t JOIN template_scene_faces f ON f."templateId" = t.id WHERE f."sceneId" = $1`,
-        scenes.dangling.id,
-      );
-      expect(Number(dangling.count)).toBe(0);
-
-      await fixture.cleanup();
+        // Cena excluída com o template órfão; reserva da face 0; sem marcador; id inexistente.
+        expect(
+          (
+            await one(
+              dataSource,
+              `SELECT "deletedAt" FROM template_scenes WHERE id = $1`,
+              scenes.deleted.id,
+            )
+          ).deletedAt,
+        ).not.toBeNull();
+        expect(await templateOf(dataSource, scenes.deleted.id, 'single')).toBeDefined();
+        const reserve = await one(
+          dataSource,
+          `SELECT f."templateId", s."approvedTemplateId" FROM template_scene_faces f JOIN template_scenes s ON s.id = f."sceneId" WHERE s.id = $1 AND f."index" = 0`,
+          scenes.reserve.id,
+        );
+        expect(reserve.templateId).toBeNull();
+        expect(reserve.approvedTemplateId).not.toBeNull();
+        const unmarked = await one(
+          dataSource,
+          `SELECT t.configuration FROM template_scene_faces f JOIN templates t ON t.id = f."templateId" WHERE f."sceneId" = $1`,
+          scenes.unmarked.id,
+        );
+        expect(unmarked.configuration.source).toBeUndefined();
+        const dangling = await one(
+          dataSource,
+          `SELECT count(*) FROM templates t JOIN template_scene_faces f ON f."templateId" = t.id WHERE f."sceneId" = $1`,
+          scenes.dangling.id,
+        );
+        expect(Number(dangling.count)).toBe(0);
+      } finally {
+        await fixture.cleanup();
+      }
       expect(await rowsOf(dataSource, fixture)).toEqual({ scenes: 0, faces: 0, templates: 0 });
       expect(
         Number(

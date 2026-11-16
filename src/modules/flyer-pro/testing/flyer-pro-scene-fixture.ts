@@ -239,7 +239,7 @@ export async function createFlyerProFixture(
     frontBack5: await readyScene(seeder, `5- folheto 27x40 ${suffix}`, SINGLE, 'front_back'),
     cover10,
     layers,
-    single54: await readyScene(seeder, named('Face única', '54x40'), TABLOID, 'single'),
+    single54: await readyScene(seeder, `Face única de 54 por 40 ${suffix}`, TABLOID, 'single'),
     single20: await readyScene(seeder, `folheto-20x27. ${suffix}`, 'folheto-20x27', 'single'),
     ...(await partialScenes(seeder, suffix)),
     ...(await brokenScenes(seeder, suffix, unmarkedId)),
