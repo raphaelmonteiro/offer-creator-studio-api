@@ -1,6 +1,10 @@
 import type { FlyerProFaceKey } from './flyer-pro.types';
 import type { FaceRow, SceneRow, TemplateRow, TemplateSectionRow } from './flyer-pro-template-rows';
-import type { TemplateEntryInput } from './flyer-pro-template-entry';
+import {
+  analyzeSceneTemplate,
+  TemplateEntryInput,
+  toTemplateEntry,
+} from './flyer-pro-template-entry';
 
 export const SCENE_ID = '11111111-1111-4111-8111-111111111111';
 export const TEMPLATE_BASE = 'http://cdn.test/uploads/templates';
@@ -124,3 +128,7 @@ export function entryInput(
     templates,
   };
 }
+
+/** A entrada da lista de uma cena montada pelas opções (`null` se a cena não entra). */
+export const entryOf = (options?: EntryInputOptions) =>
+  toTemplateEntry(analyzeSceneTemplate(entryInput(options)));
