@@ -325,7 +325,7 @@ describe('mergeEanBlock: nomes que chegam junto com os dados novos', () => {
   it('entrada sem key ou sem name em texto não é levada adiante', () => {
     const lixo = [null, 'x', { key: 1, name: 'A' }, { key: 'B' }, { name: 'C' }, ABACATE];
     const r = mergeEanBlock(comNomes(DOTCOMPANY, lixo), VISAO);
-    expect(nomesDe(r)).toEqual([ABACATE]);
+    expect((r as Record<string, unknown>).aliases).toEqual([ABACATE]);
     const soLixo = mergeEanBlock(comNomes(DOTCOMPANY, [null, { key: 1 }]), VISAO);
     expect(soLixo).not.toHaveProperty('aliases');
   });
