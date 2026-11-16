@@ -7,15 +7,11 @@ import { AuthController } from '../../modules/auth/auth.controller';
 import { createE2eApp } from './e2e-app';
 import { runE2eSeedCommand } from './e2e-seed-command';
 import { FIXED_IDENTITY } from './e2e-seed-identity';
+import { fileExists } from './e2e-seed-scenes';
 import { createTempE2eDb, TempE2eDb, urlWithDatabase } from './e2e-temp-db.testutil';
 import { describeIfE2eDb, E2E_DB_ENV, E2E_DB_URL, openE2eDb } from './e2e-test-db';
 
 const CDN = 'http://localhost:3102/uploads';
-const exists = (file: string) =>
-  fs.access(file).then(
-    () => true,
-    () => false,
-  );
 
 /** O comando roda no banco `_e2e` temporário, vazio, criado e apagado pelo spec. */
 describeIfE2eDb('Comando da semente para o e2e de navegador', () => {
@@ -98,7 +94,7 @@ describeIfE2eDb('Comando da semente para o e2e de navegador', () => {
     try {
       const summary = await runE2eSeedCommand({ ...env(), UPLOAD_DEST: dir });
       for (const filename of FIXED_IDENTITY.photoFiles) {
-        expect(await exists(path.join(dir, 'gallery', filename))).toBe(true);
+        expect(await fileExists(path.join(dir, 'gallery', filename))).toBe(true);
       }
       expect(summary.images.every((url) => url.startsWith(`${CDN}/gallery/`))).toBe(true);
       const dataSource = await openE2eDb(temp.url);
@@ -110,7 +106,7 @@ describeIfE2eDb('Comando da semente para o e2e de navegador', () => {
           [FIXED_IDENTITY.sceneFrontBack],
         );
         expect(row.art.startsWith(`${CDN}/templates/scene-`)).toBe(true);
-        expect(await exists(path.join(dir, row.art.slice(CDN.length + 1)))).toBe(true);
+        expect(await fileExists(path.join(dir, row.art.slice(CDN.length + 1)))).toBe(true);
       } finally {
         await dataSource.destroy();
       }

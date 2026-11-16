@@ -144,7 +144,7 @@ async function summarize(dataSource: DataSource, scene: TemplateScene): Promise<
   };
 }
 
-const fileExists = (file: string) =>
+export const fileExists = (file: string) =>
   fs.access(file).then(
     () => true,
     () => false,

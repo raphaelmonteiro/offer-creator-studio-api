@@ -5,17 +5,13 @@ import * as request from 'supertest';
 import { DataSource } from 'typeorm';
 import { ClientsController } from '../../modules/clients/clients.controller';
 import { ClientsService } from '../../modules/clients/clients.service';
+import { SceneTemplateConfiguration } from '../../modules/template-scenes/domain/scene-template.types';
 import { Template } from '../../modules/templates/entities/template.entity';
 import { createE2eApp, E2eApp } from './e2e-app';
 import { applyE2eSeed, E2eSeed } from './e2e-seed';
+import { fileExists } from './e2e-seed-scenes';
 import { createTempE2eDb, TempE2eDb, urlWithDatabase } from './e2e-temp-db.testutil';
 import { describeIfE2eDb, E2E_DB_URL, openE2eDb } from './e2e-test-db';
-
-const exists = (file: string) =>
-  fs.access(file).then(
-    () => true,
-    () => false,
-  );
 
 /** Conta as linhas que uma semente deixa, por tabela, para comparar antes e depois da limpeza de outra. */
 async function rowsOf(dataSource: DataSource, seed: E2eSeed) {
@@ -80,7 +76,7 @@ describeIfE2eDb('Semente do e2e (banco chroma_x_e2e)', () => {
     const withLibrary = applied.clientWithLibrary;
     expect(withLibrary.headers).toEqual([expect.objectContaining({ format: '27x40' })]);
     expect(withLibrary.footers).toHaveLength(2);
-    expect(withLibrary.footer).toEqual((withLibrary.footers as any[])[0].section);
+    expect(withLibrary.footer).toEqual(withLibrary.footers[0].section);
     const legacy = applied.clientLegacyFooter;
     expect(legacy.footer).not.toBeNull();
     expect([legacy.footers, legacy.headers]).toEqual([null, null]);
@@ -95,23 +91,25 @@ describeIfE2eDb('Semente do e2e (banco chroma_x_e2e)', () => {
         const template = await dataSource.manager.findOneByOrFail(Template, {
           id: face.templateId,
         });
-        const source = (template.configuration as any).source;
+        const configuration = template.configuration as SceneTemplateConfiguration;
         expect(template.isDefault).toBe(false);
-        expect(source).toMatchObject({
+        expect(configuration.source).toMatchObject({
           kind: 'template-scene',
           sceneId: scene.id,
           faceKey: face.key,
         });
-        const artUrl = (template.configuration as any).bodyBackground.imageUrl as string;
+        const artUrl = configuration.bodyBackground.imageUrl;
         expect(artUrl.startsWith('http://cdn.e2e.test/uploads/')).toBe(true);
         expect(
-          await exists(path.join(uploadsDir, artUrl.replace('http://cdn.e2e.test/uploads/', ''))),
+          await fileExists(
+            path.join(uploadsDir, artUrl.replace('http://cdn.e2e.test/uploads/', '')),
+          ),
         ).toBe(true);
       }
     }
     expect(applied.images).toHaveLength(2);
     for (const image of applied.images) {
-      expect(await exists(path.join(uploadsDir, 'gallery', image.filename))).toBe(true);
+      expect(await fileExists(path.join(uploadsDir, 'gallery', image.filename))).toBe(true);
     }
 
     const web: E2eApp = await createE2eApp({
@@ -158,17 +156,17 @@ describeIfE2eDb('Semente do e2e (banco chroma_x_e2e)', () => {
       folders: 0,
     });
     expect(
-      await exists(
+      await fileExists(
         path.join(first.uploadsDir, 'template-scenes', first.applied.scenes.frontBack.id),
       ),
     ).toBe(false);
     expect(
-      await exists(path.join(first.uploadsDir, 'gallery', first.applied.images[0].filename)),
+      await fileExists(path.join(first.uploadsDir, 'gallery', first.applied.images[0].filename)),
     ).toBe(false);
     expect(await rowsOf(dataSource, second.applied)).toEqual(secondBefore);
     expect(secondBefore.users).toBe(1);
     expect(
-      await exists(path.join(second.uploadsDir, 'gallery', second.applied.images[0].filename)),
+      await fileExists(path.join(second.uploadsDir, 'gallery', second.applied.images[0].filename)),
     ).toBe(true);
   });
 
