@@ -140,6 +140,26 @@ describe('FlyerProTemplateSnapshotService.statusOf', () => {
     expect(b.missingFaces).toEqual([]);
   });
 
+  describe('falha do banco não vira estado (PV-3)', () => {
+    const dbError = new Error('connection terminated unexpectedly');
+    const input = entryInput(frontBack);
+
+    it.each(['findScene', 'faceRows', 'templateRows'] as const)(
+      'o erro de %s sai de statusOf, sem devolver estado, nem o de cena indisponível',
+      async (read) => {
+        const { service, reader, manager } = snapshotServiceFor(input);
+        reader[read].mockRejectedValue(dbError);
+        await expect(service.statusOf(snapshotOf(input), manager)).rejects.toBe(dbError);
+      },
+    );
+
+    it('sem manager: o erro atravessa a transação de leitura própria', async () => {
+      const { service, reader } = snapshotServiceFor(input);
+      reader.findScene.mockRejectedValue(dbError);
+      await expect(service.statusOf(snapshotOf(input))).rejects.toBe(dbError);
+    });
+  });
+
   it('lê pelo manager de quem chama, sem abrir transação, e não grava', async () => {
     const input = entryInput(frontBack);
     const { service, reader, manager, transaction, writesCalled } = snapshotServiceFor(input);
