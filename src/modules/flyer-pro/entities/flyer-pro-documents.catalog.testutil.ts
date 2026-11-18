@@ -50,8 +50,9 @@ const withoutSchema = (definition: string, schema: string): string =>
 
 /**
  * As colunas, os índices e as restrições das tabelas dadas num schema (as duas da M1, por padrão; `ALL_TABLES` traz
- * também a da M2). O padrão de `id` do encarte fica de fora: a migration usa `gen_random_uuid()` e o TypeORM
- * `uuid_generate_v4()` (o mesmo caso das cenas), e o `synchronize` não compara o padrão de chave gerada.
+ * também a da M2). O padrão de `id` do encarte e do job fica de fora: a migration usa `gen_random_uuid()` e o TypeORM
+ * `uuid_generate_v4()` (o mesmo caso das cenas), e o `synchronize` não compara o padrão de chave gerada. O padrão `smallint`
+ * `0` aparece como `'0'::smallint` no banco que o TypeORM monta e como `0` no da migration: o catálogo os trata como um.
  */
 export async function catalogOf(
   db: Query,
@@ -62,8 +63,10 @@ export async function catalogOf(
     `SELECT table_name || '.' || column_name || ': ' || data_type
             || coalesce('(' || character_maximum_length || ')', '')
             || CASE WHEN is_nullable = 'YES' THEN ' null' ELSE ' not null' END
-            || CASE WHEN column_default IS NOT NULL AND NOT (table_name = 'flyer_pro_documents' AND column_name = 'id')
-                    THEN ' default ' || column_default ELSE '' END AS definition
+            || CASE WHEN column_default IS NOT NULL
+                         AND NOT (table_name IN ('flyer_pro_documents', 'flyer_pro_jobs') AND column_name = 'id')
+                    THEN ' default ' || regexp_replace(column_default, '^''(\\d+)''::smallint$', '\\1')
+                    ELSE '' END AS definition
        FROM information_schema.columns
       WHERE table_schema = $1 AND table_name = ANY($2)
       ORDER BY 1`,

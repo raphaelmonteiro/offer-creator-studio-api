@@ -5,7 +5,7 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
-  PrimaryColumn,
+  PrimaryGeneratedColumn,
 } from 'typeorm';
 import { numericTransformer } from '../../../shared/numeric.transformer';
 import type {
@@ -22,8 +22,7 @@ import { FlyerProDocument } from './flyer-pro-document.entity';
 /**
  * O job de enriquecimento do encarte (M3): fotos, categorias e ortografia em lotes. Os nomes de chave e de índice são
  * os da migration `CreateFlyerProJobs`, inclusive o filtro do índice único parcial (um job ativo por encarte).
- * `batchSeq` é a ficha do lote e `heartbeatAt` o batimento do lote em execução. `id` tem o padrão `gen_random_uuid()` da
- * migration, e `createdByUserId` é referência lógica, sem FK. `updatedAt` e os demais carimbos são gravados por SQL.
+ * `batchSeq` é a ficha do lote e `heartbeatAt` o batimento do lote em execução. `id` é gerado pelo banco (a migration usa `gen_random_uuid()`, o TypeORM `uuid_generate_v4()`: o catálogo dos specs ignora o padrão da chave) e `createdByUserId` é referência lógica, sem FK. `updatedAt` e os demais carimbos são gravados por SQL.
  */
 @Entity('flyer_pro_jobs')
 @Index('UQ_flyer_pro_jobs_document_active', ['documentId'], {
@@ -32,11 +31,7 @@ import { FlyerProDocument } from './flyer-pro-document.entity';
 })
 @Index('IDX_flyer_pro_jobs_document_created', ['documentId', 'createdAt'])
 export class FlyerProJob {
-  @PrimaryColumn({
-    type: 'uuid',
-    primaryKeyConstraintName: 'PK_flyer_pro_jobs',
-    default: () => 'gen_random_uuid()',
-  })
+  @PrimaryGeneratedColumn('uuid', { primaryKeyConstraintName: 'PK_flyer_pro_jobs' })
   id: string;
 
   @Column({ type: 'uuid' })
@@ -96,8 +91,7 @@ export class FlyerProJob {
   @Column({ type: 'integer', default: 0 })
   batchSeq: number;
 
-  /** Padrão como expressão: o TypeORM escreveria `'0'::smallint` para o `smallint`, e a migration diz `DEFAULT 0`. */
-  @Column({ type: 'smallint', default: () => '0' })
+  @Column({ type: 'smallint', default: 0 })
   batchAttempts: number;
 
   @Column({ type: 'timestamptz', nullable: true })
