@@ -1,4 +1,3 @@
-import { IsNull } from 'typeorm';
 import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import {
@@ -87,45 +86,95 @@ describe('FlyerProDocumentsService.open (N3)', () => {
   });
 });
 
+describe('FlyerProDocumentsService.open (N3): o job do encarte', () => {
+  it('enrichment é o job que o encarte mostra, lido no manager da mesma transação REPEATABLE READ', async () => {
+    const { service, manager, jobs } = makeService();
+    const job = { id: 'job-1', status: 'done' };
+    jobs.currentView.mockResolvedValue(job);
+
+    const view = await service.open('d1');
+
+    expect(view.enrichment).toBe(job);
+    expect(jobs.currentView).toHaveBeenCalledWith(manager, 'd1');
+  });
+
+  it('encarte que nunca teve job: enrichment nulo', async () => {
+    const { service } = makeService();
+
+    expect((await service.open('d1')).enrichment).toBeNull();
+  });
+});
+
 describe('FlyerProDocumentsService.remove (N6)', () => {
+  const sqlOf = (manager: { query: jest.Mock }) =>
+    manager.query.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' '));
+
   it('exclui e responde { deleted: true }', async () => {
-    const { service, documents } = makeService();
-    documents.update.mockResolvedValue({ affected: 1 });
+    const { service } = makeService();
 
     await expect(service.remove('d1')).resolves.toEqual({ deleted: true });
   });
 
-  it('só grava deletedAt, e só onde ele ainda é nulo (as outras colunas não são tocadas)', async () => {
-    const { service, documents } = makeService();
-    documents.update.mockResolvedValue({ affected: 1 });
+  it('trava o encarte vivo, grava só deletedAt (as outras colunas não são tocadas) e depois pede a parada do job', async () => {
+    const { service, manager } = makeService();
 
     await service.remove('d1');
 
-    const [criteria, set] = documents.update.mock.calls[0];
-    expect(criteria).toEqual({ id: 'd1', deletedAt: IsNull() });
+    expect(manager.findOne).toHaveBeenCalledWith(FlyerProDocument, {
+      where: { id: 'd1' },
+      lock: { mode: 'pessimistic_write' },
+    });
+    const [entity, criteria, set] = manager.update.mock.calls[0];
+    expect(entity).toBe(FlyerProDocument);
+    expect(criteria).toEqual({ id: 'd1' });
     expect(Object.keys(set)).toEqual(['deletedAt']);
     expect(set.deletedAt()).toBe('now()');
+    expect(manager.findOne.mock.invocationCallOrder[0]).toBeLessThan(
+      manager.update.mock.invocationCallOrder[0],
+    );
+    expect(manager.update.mock.invocationCallOrder[0]).toBeLessThan(
+      manager.query.mock.invocationCallOrder[0],
+    );
   });
 
-  it.each([{ affected: 0 }, { affected: undefined }])(
-    'sem linha mudada (%j): 404 FLYER_PRO_NOT_FOUND',
-    async (result) => {
-      const { service, documents } = makeService();
-      documents.update.mockResolvedValue(result);
+  it('o pedido de parada vai só para o job ativo do encarte, com o primeiro cancelRequestedAt mantido', async () => {
+    const { service, manager } = makeService();
 
-      await expect(service.remove('d1')).rejects.toMatchObject({
-        status: 404,
-        response: { code: 'FLYER_PRO_NOT_FOUND' },
-      });
-    },
-  );
+    await service.remove('d1');
 
-  it('dois pedidos juntos: o que muda a linha responde 200 e o outro 404', async () => {
-    const { service, documents } = makeService();
-    documents.update.mockResolvedValueOnce({ affected: 1 }).mockResolvedValueOnce({ affected: 0 });
+    const [sql] = sqlOf(manager);
+    expect(sql).toContain('UPDATE "flyer_pro_jobs"');
+    expect(sql).toContain('COALESCE("cancelRequestedAt", now())');
+    expect(sql).toContain(`"documentId" = $1 AND "status" IN ('queued', 'running')`);
+    expect(manager.query.mock.calls[0][1]).toEqual(['d1']);
+  });
+
+  it('encarte inexistente ou já excluído: 404 FLYER_PRO_NOT_FOUND, sem excluir nem pedir parada', async () => {
+    const { service, manager } = makeService();
+    manager.findOne.mockResolvedValue(null);
+
+    await expect(service.remove('d1')).rejects.toMatchObject({
+      status: 404,
+      response: { code: 'FLYER_PRO_NOT_FOUND' },
+    });
+    expect(manager.update).not.toHaveBeenCalled();
+    expect(manager.query).not.toHaveBeenCalled();
+  });
+
+  it('dois pedidos juntos: o primeiro exclui e o segundo, que achou o encarte já excluído depois da trava, responde 404', async () => {
+    const { service, manager } = makeService();
+    manager.findOne.mockResolvedValueOnce(documentRow()).mockResolvedValueOnce(null);
 
     const results = await Promise.allSettled([service.remove('d1'), service.remove('d1')]);
 
     expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected']);
+    expect(manager.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('se o pedido de parada falhar, a exclusão não vale: o erro sobe e a transação aborta', async () => {
+    const { service, manager } = makeService();
+    manager.query.mockRejectedValue(new Error('banco caiu'));
+
+    await expect(service.remove('d1')).rejects.toThrow('banco caiu');
   });
 });

@@ -93,3 +93,19 @@ export async function requestJobStop(manager: EntityManager, id: string): Promis
   );
   return manager.findOneByOrFail(FlyerProJob, { id });
 }
+
+/**
+ * Grava o primeiro pedido de parada no job ativo do encarte, se houver (a exclusão do encarte, N6): o job fecha
+ * `canceled` no próximo lote que tentar assumir ou na varredura, sem chamar o provedor de novo.
+ */
+export async function requestStopOfActiveJob(
+  manager: EntityManager,
+  documentId: string,
+): Promise<void> {
+  await manager.query(
+    `UPDATE "flyer_pro_jobs"
+        SET "cancelRequestedAt" = COALESCE("cancelRequestedAt", now()), "updatedAt" = now()
+      WHERE "documentId" = $1 AND "status" IN ('queued', 'running')`,
+    [documentId],
+  );
+}

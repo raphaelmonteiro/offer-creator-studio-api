@@ -7,6 +7,7 @@ import type {
 import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import { FlyerProDocumentsService } from './flyer-pro-documents.service';
+import type { FlyerProJobsService } from './flyer-pro-jobs.service';
 import type { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
 
 /** Ajudantes dos unitários do serviço do encarte (só testes): repositórios, `manager` e montador simulados. */
@@ -109,6 +110,7 @@ export function makeService() {
     find: jest.fn().mockResolvedValue([]),
     query: jest.fn().mockResolvedValue([{ cursor: CURSOR }]),
     insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 'd1' }] }),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
   };
   const dataSource = {
     transaction: jest.fn((levelOrWork: string | Work, maybeWork?: Work) =>
@@ -117,6 +119,7 @@ export function makeService() {
     query: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
   };
   const documents = { findOne: jest.fn().mockResolvedValue(null), update: jest.fn() };
+  const jobs = { currentView: jest.fn().mockResolvedValue(null) };
   const snapshots = {
     build: jest.fn().mockResolvedValue(snapshotOf()),
     statusOf: jest.fn().mockResolvedValue(STATUS),
@@ -125,6 +128,7 @@ export function makeService() {
     dataSource as unknown as DataSource,
     documents as unknown as Repository<FlyerProDocument>,
     snapshots as unknown as FlyerProTemplateSnapshotService,
+    jobs as unknown as FlyerProJobsService,
   );
   return {
     service,
@@ -132,5 +136,6 @@ export function makeService() {
     dataSource,
     documents,
     snapshots,
+    jobs,
   };
 }

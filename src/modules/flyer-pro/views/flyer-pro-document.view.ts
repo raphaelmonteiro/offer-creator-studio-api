@@ -6,6 +6,7 @@ import type {
 } from '../domain/flyer-pro.types';
 import type { FlyerProDocument, FlyerProSlice } from '../entities/flyer-pro-document.entity';
 import type { FlyerProItem } from '../entities/flyer-pro-item.entity';
+import type { FlyerProJobView } from './flyer-pro-job.view';
 
 /**
  * As respostas do módulo montadas a partir das linhas: nada da entidade sai sem passar por aqui (`creationKey` e
@@ -72,8 +73,8 @@ export interface FlyerProDocumentView {
   items: FlyerProItemView[];
   /** O maior `updatedAt` dos itens (ou o `createdAt` do encarte sem itens), com microssegundos. */
   itemsCursor: string;
-  /** O job de enriquecimento; `null` até a migration dele (change 28). */
-  enrichment: null;
+  /** O job de enriquecimento: o ativo ou, sem ativo, o mais recente; `null` se o encarte nunca teve job. */
+  enrichment: FlyerProJobView | null;
   createdByUserId: string | null;
   updatedByUserId: string | null;
   createdAt: string;
@@ -147,6 +148,8 @@ export interface DocumentViewInput {
   items: FlyerProItem[];
   itemsCursor: string;
   templateStatus: FlyerProTemplateStatus;
+  /** O job que o encarte mostra, já na forma de leitura; `null` se nunca houve job. */
+  enrichment: FlyerProJobView | null;
 }
 
 function slicesOf(document: FlyerProDocument): FlyerProDocumentView['slices'] {
@@ -164,6 +167,7 @@ export function toDocumentView({
   items,
   itemsCursor,
   templateStatus,
+  enrichment,
 }: DocumentViewInput): FlyerProDocumentView {
   return {
     id: document.id,
@@ -187,7 +191,7 @@ export function toDocumentView({
     slices: slicesOf(document),
     items: items.map(toItemView),
     itemsCursor,
-    enrichment: null,
+    enrichment,
     createdByUserId: document.createdByUserId ?? null,
     updatedByUserId: document.updatedByUserId ?? null,
     createdAt: iso(document.createdAt),
