@@ -1,5 +1,6 @@
 import {
   flyerProAppOutdated,
+  flyerProBadRequest,
   flyerProMissingFields,
   flyerProRevisionConflict,
   flyerProSliceTooLarge,
@@ -75,12 +76,31 @@ export function isConferenceBody(body: { setup?: unknown; slices?: unknown; item
  * (422). Nenhuma toca o banco.
  */
 export function assertSaveBody(
-  body: Partial<Record<SaveRequiredField, unknown>> & SizedSaveBody,
+  body: Partial<Record<SaveRequiredField, unknown>> & SizedSaveBody & ItemsBody,
 ): void {
   const missing = missingSaveFields(body);
   if (missing.length > 0) throw flyerProMissingFields(missing);
   const oversized = firstOversizedPart(body);
   if (oversized) throw flyerProSliceTooLarge(oversized);
+  const repeated = repeatedUpsertIds(body.items?.upsert);
+  if (repeated.length > 0) {
+    throw flyerProBadRequest(`Ids repetidos em items.upsert: ${repeated.join(', ')}.`);
+  }
+}
+
+interface ItemsBody {
+  items?: { upsert?: Array<{ id: string }> | null } | null;
+}
+
+/** Os ids que aparecem mais de uma vez em `items.upsert` (forma inválida: 400, A-8). */
+export function repeatedUpsertIds(upsert?: Array<{ id: string }> | null): string[] {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const { id } of upsert ?? []) {
+    if (seen.has(id)) repeated.add(id);
+    seen.add(id);
+  }
+  return [...repeated];
 }
 
 /** O que o `PATCH` traz de `setup` e muda a resposta: a cópia da arte (cena nova ou "Atualizar arte") e o número de páginas. */

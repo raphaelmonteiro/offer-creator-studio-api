@@ -138,6 +138,17 @@ describe('assertSaveBody', () => {
     });
   });
 
+  it('ids repetidos em items.upsert são 400 BAD_REQUEST, antes de qualquer banco', () => {
+    const upsert = [{ id: 'a' }, { id: 'b' }, { id: 'a' }];
+
+    expect(responseOf({ ...BASE, items: { upsert } })).toMatchObject({
+      status: 400,
+      code: 'BAD_REQUEST',
+      message: 'Ids repetidos em items.upsert: a.',
+    });
+    expect(responseOf({ ...BASE, items: { upsert: [{ id: 'a' }, { id: 'b' }] } })).toBeNull();
+  });
+
   it('corpo válido não lança', () => {
     expect(responseOf({ ...BASE, slices: { structure: objectOf(262_144) } })).toBeNull();
   });
