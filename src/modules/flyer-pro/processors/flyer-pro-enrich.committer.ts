@@ -8,6 +8,7 @@ import {
   addTiming,
   effectiveOnlyMissing,
   failureDecision,
+  finalFields,
   markSkipped,
   retryDelaySeconds,
   withModel,
@@ -184,9 +185,8 @@ export class FlyerProEnrichCommitter {
     progress: JobColumns,
   ): Promise<CommitOutcome> {
     await updateJob(manager, current.id, {
-      phase: current.phase,
       ...progress,
-      status: 'canceled',
+      ...finalFields('canceled', progress.phase ?? current.phase),
       clearHeartbeat: true,
       finish: true,
     });

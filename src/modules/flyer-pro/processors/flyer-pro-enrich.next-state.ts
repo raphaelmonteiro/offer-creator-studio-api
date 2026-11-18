@@ -1,6 +1,7 @@
 import type { EntityManager } from 'typeorm';
 import {
   enrichError,
+  finalFields,
   needsAnotherRound,
   nextPhase,
   runnablePhases,
@@ -70,8 +71,7 @@ export async function nextState(
 
 /** `done`: a fase zera e o job fecha. */
 export const doneColumns = (cursor: EnrichCursor): JobColumns => ({
-  status: 'done',
-  phase: null,
+  ...finalFields('done', null),
   cursor,
   finish: true,
 });
@@ -83,8 +83,7 @@ export function failedColumns(
   attempts: number,
 ): JobColumns {
   return {
-    status: 'failed',
-    phase,
+    ...finalFields('failed', phase),
     error: enrichError(code, phase),
     ...(attempts > 0 ? { batchAttempts: attempts } : {}),
     clearHeartbeat: true,

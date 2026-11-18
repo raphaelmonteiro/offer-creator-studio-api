@@ -5,6 +5,7 @@ import { AnimationQueueService } from '../../../shared/queue/animation-queue.ser
 import { FLYER_PRO_ENRICH_CONFIG, FlyerProEnrichConfig } from '../config/flyer-pro-enrich.config';
 import {
   enrichError,
+  finalFields,
   isActiveStatus,
   reconcileAction,
   ReconcileAction,
@@ -96,10 +97,14 @@ export class FlyerProJobReconcilerService implements OnModuleDestroy {
     action: Exclude<ReconcileAction, 'none'>,
   ): Promise<void> {
     if (action === 'cancel') {
-      await updateJob(manager, job.id, { status: 'canceled', clearHeartbeat: true, finish: true });
+      await updateJob(manager, job.id, {
+        ...finalFields('canceled', job.phase),
+        clearHeartbeat: true,
+        finish: true,
+      });
     } else if (action === 'fail_stalled') {
       await updateJob(manager, job.id, {
-        status: 'failed',
+        ...finalFields('failed', job.phase),
         error: enrichError('JOB_STALLED', job.phase),
         batchAttempts: (job.batchAttempts ?? 0) + 1,
         clearHeartbeat: true,

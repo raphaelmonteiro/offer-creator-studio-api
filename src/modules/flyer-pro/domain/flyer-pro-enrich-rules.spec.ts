@@ -4,7 +4,6 @@ import {
   addCounts,
   addTiming,
   batchSizeOf,
-  canTransition,
   effectiveOnlyMissing,
   enrichError,
   failureDecision,
@@ -85,29 +84,10 @@ describe('conferência final', () => {
 });
 
 describe('estados do job', () => {
-  const ALLOWED: Array<[JobStatus, JobStatus]> = [
-    ['queued', 'running'],
-    ['queued', 'canceled'],
-    ['running', 'done'],
-    ['running', 'failed'],
-    ['running', 'canceled'],
-  ];
   const ALL: JobStatus[] = ['queued', 'running', 'done', 'failed', 'canceled'];
 
-  it('só as cinco transições do contrato são permitidas', () => {
-    for (const from of ALL) {
-      for (const to of ALL) {
-        const expected = ALLOWED.some(([a, b]) => a === from && b === to);
-        expect([from, to, canTransition(from, to)]).toEqual([from, to, expected]);
-      }
-    }
-  });
-
-  it('done, failed e canceled são finais; queued e running são ativos', () => {
+  it('queued e running são ativos; done, failed e canceled são finais', () => {
     expect(ALL.filter(isActiveStatus)).toEqual(['queued', 'running']);
-    for (const final of ['done', 'failed', 'canceled'] as const) {
-      expect(ALL.some((to) => canTransition(final, to))).toBe(false);
-    }
   });
 
   it('done zera a fase; failed e canceled guardam a fase em que o job parou', () => {

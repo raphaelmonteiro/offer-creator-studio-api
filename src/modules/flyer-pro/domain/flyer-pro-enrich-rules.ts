@@ -82,17 +82,6 @@ export const effectiveOnlyMissing = (onlyMissing: boolean, round: number): boole
 export const needsAnotherRound = (round: number, pending: number): boolean =>
   pending > 0 && round < ENRICH_MAX_ROUNDS;
 
-const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
-  queued: ['running', 'canceled'],
-  running: ['done', 'failed', 'canceled'],
-  done: [],
-  failed: [],
-  canceled: [],
-};
-
-export const canTransition = (from: JobStatus, to: JobStatus): boolean =>
-  TRANSITIONS[from].includes(to);
-
 export const isActiveStatus = (status: JobStatus): boolean =>
   status === 'queued' || status === 'running';
 
