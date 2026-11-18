@@ -1,4 +1,5 @@
 import { describeIfE2eDb } from '../../../shared/testing/e2e-test-db';
+import { RealFlyerProEnrich } from '../providers/flyer-pro-enrich.real';
 import { insertItems, ItemSeed } from '../testing/flyer-pro-documents.fixture';
 import {
   itemRowsOf,
@@ -232,6 +233,32 @@ describeIfE2eDb('processador do job: o fluxo dos lotes (banco de e2e, fila regis
 
       expect((await jobRowOf(db.dataSource, jobId)).cursor).toMatchObject({ round: 1 });
       expect(delivered).toBe(3);
+    });
+  });
+
+  describe('provedor real antes da change 29 (A-27)', () => {
+    it('as três fases são puladas: done com skipped AI_DISABLED, nenhum item muda, models sem mock e nenhuma chamada externa', async () => {
+      const { documentId } = await newDocument(78, mixed, 'Teste #ia-falha');
+      const before = await itemRowsOf(db.dataSource, documentId);
+      const fetchSpy = jest.spyOn(globalThis, 'fetch');
+      const world = makeEnrichWorld(db.dataSource, { port: new RealFlyerProEnrich() });
+      const jobId = await start(world, documentId);
+
+      await world.drain();
+
+      const job = await jobRowOf(db.dataSource, jobId);
+      const result = resultOf(job);
+      expect(job).toMatchObject({ status: 'done', total: 234, processed: 234, costUsd: null });
+      expect([
+        result.categorize.skipped,
+        result.spellcheck.skipped,
+        result.image_match.skipped,
+      ]).toEqual(['AI_DISABLED', 'AI_DISABLED', 'AI_DISABLED']);
+      expect(JSON.stringify(job.models ?? {})).not.toContain('mock');
+      const after = await itemRowsOf(db.dataSource, documentId);
+      expect(after).toEqual(before);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
     });
   });
 
