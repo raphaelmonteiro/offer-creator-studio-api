@@ -1,31 +1,20 @@
+import { importEntry } from '../testing/flyer-pro-imports.fixture';
 import { nestedErrorsOf } from './dto-paths.testutil';
 import { SaveFlyerProDocumentDto } from './save-flyer-pro-document.dto';
 
 const ID = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c11';
 const BASE = { mutationId: ID, expectedRevision: 0, schemaVersion: 1, engineVersion: 1 };
 
-const IMPORT = {
-  id: ID,
-  fileName: 'lista-piccin.csv',
-  fileKind: 'csv',
-  fileHash: '9f2c1a7b3d4e5f60',
-  detectedFormat: 'csv',
-  mode: 'append',
-  rowCount: 5,
-  acceptedCount: 4,
-  rejected: [{ row: 7, reason: 'PRICE_MISSING', raw: 'FEIJAO CARIOCA' }],
-};
-
 const errorsOf = (value: unknown) =>
   nestedErrorsOf(SaveFlyerProDocumentDto, { ...BASE, import: value });
-const withImport = (over: Record<string, unknown>) => errorsOf({ ...IMPORT, ...over });
+const withImport = (over: Record<string, unknown>) => errorsOf({ ...importEntry(), ...over });
 const withRejected = (entry: Record<string, unknown>) =>
-  errorsOf({ ...IMPORT, rejected: [{ ...IMPORT.rejected[0], ...entry }] });
+  errorsOf({ ...importEntry(), rejected: [{ ...importEntry().rejected[0], ...entry }] });
 
 describe('FlyerProImportDto (só a forma, 400)', () => {
   it('aceita o registro completo, sem detectedFormat e com rejected vazio', async () => {
-    expect(await errorsOf(IMPORT)).toEqual([]);
-    const { detectedFormat: _, ...withoutFormat } = IMPORT;
+    expect(await errorsOf(importEntry())).toEqual([]);
+    const { detectedFormat: _, ...withoutFormat } = importEntry();
     expect(await errorsOf(withoutFormat)).toEqual([]);
     expect(await withImport({ rejected: [] })).toEqual([]);
   });
@@ -40,11 +29,11 @@ describe('FlyerProImportDto (só a forma, 400)', () => {
     'acceptedCount',
     'rejected',
   ])('recusa o registro sem %s', async (field) => {
-    const { [field]: _, ...rest } = IMPORT as Record<string, unknown>;
+    const { [field]: _, ...rest } = importEntry() as unknown as Record<string, unknown>;
     expect(await errorsOf(rest)).toEqual([`import.${field}`]);
   });
 
-  it.each([null, 'lista.csv', 7, [], [IMPORT]])(
+  it.each([null, 'lista.csv', 7, [], [importEntry()]])(
     'recusa import=%j (não é objeto)',
     async (value) => {
       expect(await errorsOf(value)).toContain('import');
