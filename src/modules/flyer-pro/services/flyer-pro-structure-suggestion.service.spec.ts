@@ -200,7 +200,7 @@ describe('FlyerProStructureSuggestionService: ordem das conferências', () => {
     });
 
     expect(suggest).not.toHaveBeenCalled();
-    expect(limiter.tryAcquire(DOCUMENT_ID, 1000)).toBeNull();
+    expect(limiter.tryAcquire(DOCUMENT_ID, 1000)).toHaveProperty('token');
   });
 
   it('a função desligada vence o provedor indisponível', async () => {

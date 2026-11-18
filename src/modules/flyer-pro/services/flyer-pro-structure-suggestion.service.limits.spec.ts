@@ -72,7 +72,7 @@ describe('FlyerProStructureSuggestionService: uma sugestão em andamento por enc
 
     await service.suggest(DOCUMENT_ID, bodyOf()).catch(() => undefined);
 
-    expect(limiter.tryAcquire(DOCUMENT_ID, 1000)).toBeNull();
+    expect(limiter.tryAcquire(DOCUMENT_ID, 1000)).toHaveProperty('token');
   });
 
   it('a vaga é solta também quando o pedido é recusado depois de tomá-la (404, páginas, itens)', async () => {
@@ -80,7 +80,7 @@ describe('FlyerProStructureSuggestionService: uma sugestão em andamento por enc
     await expect(notFound.service.suggest(DOCUMENT_ID, bodyOf())).rejects.toMatchObject({
       status: 404,
     });
-    expect(notFound.limiter.tryAcquire(DOCUMENT_ID, 1000)).toBeNull();
+    expect(notFound.limiter.tryAcquire(DOCUMENT_ID, 1000)).toHaveProperty('token');
 
     const pages = makeSuggestionService({ document: documentRow({ format: '54x40' }) });
     await expect(
@@ -98,13 +98,13 @@ describe('FlyerProStructureSuggestionService: uma sugestão em andamento por enc
         }),
       ),
     ).rejects.toMatchObject({ status: 422 });
-    expect(pages.limiter.tryAcquire(DOCUMENT_ID, 1000)).toBeNull();
+    expect(pages.limiter.tryAcquire(DOCUMENT_ID, 1000)).toHaveProperty('token');
 
     const noItems = makeSuggestionService({ items: [] });
     await expect(noItems.service.suggest(DOCUMENT_ID, bodyOf())).rejects.toMatchObject({
       status: 422,
     });
-    expect(noItems.limiter.tryAcquire(DOCUMENT_ID, 1000)).toBeNull();
+    expect(noItems.limiter.tryAcquire(DOCUMENT_ID, 1000)).toHaveProperty('token');
   });
 });
 
@@ -126,7 +126,7 @@ describe('FlyerProStructureSuggestionService: teto de sugestões atendidas por h
 
     expect(suggest).not.toHaveBeenCalled();
     expect(mocks.findOne).not.toHaveBeenCalled();
-    expect(limiter.tryAcquire(DOCUMENT_ID, 1000)).toBeNull();
+    expect(limiter.tryAcquire(DOCUMENT_ID, 1000)).toHaveProperty('token');
   });
 
   it('o IN_FLIGHT vence o HOURLY_LIMIT quando os dois valem', async () => {

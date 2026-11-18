@@ -99,7 +99,7 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
       response: { code: 'FLYER_PRO_STRUCTURE_AI_DISABLED', details: { reason: 'NO_API_KEY' } },
     });
     expect(made.limiter.checkHourly(DOCUMENT_ID, 1)).toBeNull();
-    expect(made.limiter.tryAcquire(DOCUMENT_ID, 1000)).toBeNull();
+    expect(made.limiter.tryAcquire(DOCUMENT_ID, 1000)).toHaveProperty('token');
   });
 
   it('modelo sem preço na tabela (gpt-4o-mini): 422 DISABLED com MODEL_PRICE_UNKNOWN e o cliente não é chamado', async () => {

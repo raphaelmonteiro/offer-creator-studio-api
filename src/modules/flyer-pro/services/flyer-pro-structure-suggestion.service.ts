@@ -40,7 +40,7 @@ import {
 } from '../providers/flyer-pro-structure-ai.port';
 import { STRUCTURE_SUGGESTION_PROMPT_VERSION } from '../prompts/structure-suggestion.prompt';
 import { readWith } from './flyer-pro-read';
-import { FlyerProStructureLimiter } from './flyer-pro-structure-limiter';
+import { FlyerProStructureLimiter, isRefusal } from './flyer-pro-structure-limiter';
 import {
   readExampleRows,
   readItemsOf,
@@ -85,11 +85,11 @@ export class FlyerProStructureSuggestionService {
     assertStructureBody(body);
     assertStructureState(body);
     this.assertAvailable();
-    this.acquire(documentId);
+    const token = this.acquire(documentId);
     try {
       return await this.serve(documentId, body);
     } finally {
-      this.limiter.release(documentId);
+      this.limiter.release(documentId, token);
     }
   }
 
@@ -100,15 +100,19 @@ export class FlyerProStructureSuggestionService {
     if (reason) throw flyerProStructureAiDisabled(reason);
   }
 
-  /** Passo 2: a vaga do encarte (429 `IN_FLIGHT`) e depois o teto por hora (429 `HOURLY_LIMIT`, solta a vaga). */
-  private acquire(documentId: string): void {
-    const busy = this.limiter.tryAcquire(documentId, this.config.timeoutMs);
-    if (busy) throw flyerProStructureAiBusy(busy);
+  /**
+   * Passo 2: a vaga do encarte (429 `IN_FLIGHT`) e depois o teto por hora (429 `HOURLY_LIMIT`, solta a vaga). Devolve o
+   * token da vaga, que quem a tomou solta no fim da chamada.
+   */
+  private acquire(documentId: string): number {
+    const slot = this.limiter.tryAcquire(documentId, this.config.timeoutMs);
+    if (isRefusal(slot)) throw flyerProStructureAiBusy(slot);
     const limited = this.limiter.checkHourly(documentId, this.config.maxPerHour);
     if (limited) {
-      this.limiter.release(documentId);
+      this.limiter.release(documentId, slot.token);
       throw flyerProStructureAiBusy(limited);
     }
+    return slot.token;
   }
 
   private async serve(

@@ -1,9 +1,20 @@
-import { FlyerProStructureLimiter } from './flyer-pro-structure-limiter';
+import {
+  FlyerProStructureLimiter,
+  isRefusal,
+  type StructureSlot,
+} from './flyer-pro-structure-limiter';
 
 const DOC = '2c1d7e9b-4f6a-4b1e-9a3d-7e5f0c8b6a21';
 const OTHER = '9a0c4e12-77b3-4c5d-8e21-0f3a6b9d2c44';
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
+
+/** Toma a vaga e falha o teste se vier a recusa. */
+function acquired(limiter: FlyerProStructureLimiter, documentId = DOC): StructureSlot {
+  const result = limiter.tryAcquire(documentId, 25 * SECOND);
+  if (isRefusal(result)) throw new Error(`vaga recusada: ${result.reason}`);
+  return result;
+}
 
 /** O limitador com um relógio que o teste move. */
 function makeLimiter() {
@@ -15,17 +26,17 @@ function makeLimiter() {
 describe('FlyerProStructureLimiter: uma sugestão em andamento por encarte', () => {
   it('a primeira vaga é dada, a segunda do mesmo encarte é recusada e a de outro encarte é aceita', () => {
     const { limiter } = makeLimiter();
-    expect(limiter.tryAcquire(DOC, 25 * SECOND)).toBeNull();
+    acquired(limiter);
     expect(limiter.tryAcquire(DOC, 25 * SECOND)).toEqual({
       reason: 'IN_FLIGHT',
       retryAfterSeconds: 25,
     });
-    expect(limiter.tryAcquire(OTHER, 25 * SECOND)).toBeNull();
+    acquired(limiter, OTHER);
   });
 
   it('o retryAfterSeconds é o que falta até o prazo da chamada em andamento, arredondado para cima', () => {
     const { limiter, clock } = makeLimiter();
-    limiter.tryAcquire(DOC, 25 * SECOND);
+    acquired(limiter);
     clock.now += 1 * SECOND;
     expect(limiter.tryAcquire(DOC, 25 * SECOND)).toMatchObject({ retryAfterSeconds: 24 });
     clock.now += 500;
@@ -36,31 +47,66 @@ describe('FlyerProStructureLimiter: uma sugestão em andamento por encarte', () 
 
   it('a vaga solta (sucesso, falha ou prazo) deixa o encarte livre, e soltar de novo não faz nada', () => {
     const { limiter } = makeLimiter();
-    limiter.tryAcquire(DOC, 25 * SECOND);
-    limiter.release(DOC);
-    limiter.release(DOC);
-    expect(limiter.tryAcquire(DOC, 25 * SECOND)).toBeNull();
+    const { token } = acquired(limiter);
+    limiter.release(DOC, token);
+    limiter.release(DOC, token);
+    acquired(limiter);
   });
 
   it('soltar a vaga de um encarte não solta a de outro', () => {
     const { limiter } = makeLimiter();
-    limiter.tryAcquire(DOC, 25 * SECOND);
-    limiter.tryAcquire(OTHER, 25 * SECOND);
-    limiter.release(DOC);
+    const { token } = acquired(limiter);
+    acquired(limiter, OTHER);
+    limiter.release(DOC, token);
     expect(limiter.tryAcquire(OTHER, 25 * SECOND)).toMatchObject({ reason: 'IN_FLIGHT' });
   });
 
-  it('vaga com o prazo vencido não segura o encarte', () => {
+  it('a vaga segura o encarte até ser solta, mesmo depois do prazo (retryAfterSeconds 1)', () => {
     const { limiter, clock } = makeLimiter();
-    limiter.tryAcquire(DOC, 25 * SECOND);
+    const { token } = acquired(limiter);
     clock.now += 25 * SECOND;
-    expect(limiter.tryAcquire(DOC, 25 * SECOND)).toBeNull();
+    expect(limiter.tryAcquire(DOC, 25 * SECOND)).toEqual({
+      reason: 'IN_FLIGHT',
+      retryAfterSeconds: 1,
+    });
+    clock.now += 10 * MINUTE;
+    expect(limiter.tryAcquire(DOC, 25 * SECOND)).toMatchObject({ reason: 'IN_FLIGHT' });
+    limiter.release(DOC, token);
+    acquired(limiter);
+  });
+
+  it('soltar com o token de uma chamada antiga não solta a vaga da chamada nova', () => {
+    const { limiter, clock } = makeLimiter();
+    const first = acquired(limiter);
+    limiter.release(DOC, first.token);
+    clock.now += 1 * SECOND;
+    const second = acquired(limiter);
+    expect(second.token).not.toBe(first.token);
+    limiter.release(DOC, first.token);
+    expect(limiter.tryAcquire(DOC, 25 * SECOND)).toMatchObject({ reason: 'IN_FLIGHT' });
+    limiter.release(DOC, second.token);
+    acquired(limiter);
+  });
+
+  it('A, B e C no mesmo encarte: só A entra, e o fim de A não abre a vaga para B nem para C', () => {
+    const { limiter, clock } = makeLimiter();
+    const a = acquired(limiter);
+    clock.now += 25 * SECOND + 1;
+    expect(limiter.tryAcquire(DOC, 25 * SECOND)).toMatchObject({ reason: 'IN_FLIGHT' });
+    clock.now += 19;
+    limiter.release(DOC, a.token);
+    const b = acquired(limiter);
+    clock.now += 10;
+    expect(limiter.tryAcquire(DOC, 25 * SECOND)).toMatchObject({ reason: 'IN_FLIGHT' });
+    limiter.release(DOC, a.token);
+    expect(limiter.tryAcquire(DOC, 25 * SECOND)).toMatchObject({ reason: 'IN_FLIGHT' });
+    limiter.release(DOC, b.token);
+    acquired(limiter);
   });
 
   it('uma instância nova começa do zero (a API reiniciou)', () => {
-    const first = makeLimiter().limiter;
-    first.tryAcquire(DOC, 25 * SECOND);
-    expect(makeLimiter().limiter.tryAcquire(DOC, 25 * SECOND)).toBeNull();
+    acquired(makeLimiter().limiter);
+    acquired(makeLimiter().limiter);
   });
 });
 
@@ -127,9 +173,9 @@ describe('FlyerProStructureLimiter: teto de sugestões atendidas por hora', () =
   it('só recordServed conta: tomar e soltar a vaga, ou checar, não gasta o teto', () => {
     const { limiter } = makeLimiter();
     for (let i = 0; i < 30; i += 1) {
-      limiter.tryAcquire(DOC, 25 * SECOND);
+      const { token } = acquired(limiter);
       limiter.checkHourly(DOC, 20);
-      limiter.release(DOC);
+      limiter.release(DOC, token);
     }
     expect(limiter.checkHourly(DOC, 20)).toBeNull();
   });
