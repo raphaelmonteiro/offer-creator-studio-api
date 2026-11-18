@@ -1,3 +1,4 @@
+import type { ConfigService } from '@nestjs/config';
 import { ProductCategorizationService } from '../../ai/product-categorization.service';
 import { SpellCheckService } from '../../ai/spell-check.service';
 import type { AiUsageCollector } from '../../ai/utils/ai-usage';
@@ -41,17 +42,14 @@ export interface RealPortOptions {
   spellCall?: (call: number) => Promise<void> | void;
 }
 
-export function realPort(options: RealPortOptions = {}) {
-  const keyless = options.env?.OPENAI_API_KEY === '';
-  const config = fakeConfig({ OPENAI_API_KEY: 'sk-teste', ...options.env });
-  const categorization = new ProductCategorizationService(config);
-  const spell = new SpellCheckService(config);
-  const categorizeCreate = keyless ? jest.fn() : installFakeOpenAi(categorization);
-  const spellCreate = keyless ? jest.fn() : installFakeOpenAi(spell);
-  spyOnLogger(categorization);
-  spyOnLogger(spell);
+type ChatBody = { messages: Array<{ content: string }> };
 
-  categorizeCreate.mockImplementation(async (body: { messages: Array<{ content: string }> }) => {
+/** A categorização real sobre o cliente simulado: responde cada nome com a categoria combinada. */
+function categorizationWorld(options: RealPortOptions, keyless: boolean, config: ConfigService) {
+  const categorization = new ProductCategorizationService(config);
+  const create = keyless ? jest.fn() : installFakeOpenAi(categorization);
+  spyOnLogger(categorization);
+  create.mockImplementation(async (body: ChatBody) => {
     const sent = JSON.parse(body.messages[1].content) as {
       products: Array<{ id: string; name: string }>;
     };
@@ -63,11 +61,18 @@ export function realPort(options: RealPortOptions = {}) {
     }));
     return chatResponse({ content: JSON.stringify({ assignments }), usage: CALL_USAGE });
   });
+  return { categorization, categorizeCreate: create };
+}
 
-  let spellCalls = 0;
-  spellCreate.mockImplementation(async (body: { messages: Array<{ content: string }> }) => {
-    spellCalls += 1;
-    await options.spellCall?.(spellCalls);
+/** A ortografia real sobre o cliente simulado: corrige os nomes combinados; `spellCall` pode atrasar ou lançar. */
+function spellWorld(options: RealPortOptions, keyless: boolean, config: ConfigService) {
+  const spell = new SpellCheckService(config);
+  const create = keyless ? jest.fn() : installFakeOpenAi(spell);
+  spyOnLogger(spell);
+  let calls = 0;
+  create.mockImplementation(async (body: ChatBody) => {
+    calls += 1;
+    await options.spellCall?.(calls);
     const sent = JSON.parse(body.messages[1].content.replace(/^[^[]*/, '')) as Array<{
       productId: string;
       text: string;
@@ -82,7 +87,14 @@ export function realPort(options: RealPortOptions = {}) {
       }));
     return chatResponse({ content: JSON.stringify({ corrections }), usage: CALL_USAGE });
   });
+  return { spell, spellCreate: create };
+}
 
+export function realPort(options: RealPortOptions = {}) {
+  const keyless = options.env?.OPENAI_API_KEY === '';
+  const config = fakeConfig({ OPENAI_API_KEY: 'sk-teste', ...options.env });
+  const { categorization, categorizeCreate } = categorizationWorld(options, keyless, config);
+  const { spell, spellCreate } = spellWorld(options, keyless, config);
   const findImages = jest.fn(
     async (
       products: Array<{ id: string; name: string }>,

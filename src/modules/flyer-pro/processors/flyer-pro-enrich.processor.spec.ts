@@ -6,11 +6,8 @@ import {
   TransientProviderError,
 } from '../../../shared/providers/provider-errors';
 import { jobRow } from '../services/flyer-pro-jobs.service.testutil';
-import {
-  classifyBatchError,
-  FlyerProEnrichProcessor,
-  ProviderDeadlineError,
-} from './flyer-pro-enrich.processor';
+import { classifyBatchError, ProviderDeadlineError } from './flyer-pro-enrich.deadline';
+import { FlyerProEnrichProcessor } from './flyer-pro-enrich.processor';
 import type { UnitPlan } from './flyer-pro-enrich.types';
 
 const ITEM = {

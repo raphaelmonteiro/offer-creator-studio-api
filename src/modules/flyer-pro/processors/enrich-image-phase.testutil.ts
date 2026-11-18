@@ -1,3 +1,4 @@
+import type { ConfigService } from '@nestjs/config';
 import { FlyerEanResolutionService } from '../../ai/ean/dotcompany/flyer-ean-resolution.service';
 import { GalleryEmbeddingService } from '../../ai/gallery-embedding.service';
 import { ProductImageMatchV2Service } from '../../ai/metadata/product-image-match-v2.service';
@@ -70,33 +71,33 @@ export interface ImageWorldOptions {
   nameMatches?: Array<{ name: string; photoId: string; strength: 'strong' | 'weak' }>;
 }
 
-export function buildImageWorld(options: ImageWorldOptions = {}) {
-  const config = fakeConfig({
-    OPENAI_API_KEY: 'sk-teste',
-    EAN_FLYER_RESOLVE_ENABLED: 'false',
-    ...options.env,
-  });
-  const queries: string[] = [];
-  const query = jest.fn(async (sql: string) => {
-    queries.push(sql);
-    if (sql.includes("metadata->>'ean'")) return options.byEan ?? [];
-    if (sql.includes("metadata->'aliases'")) return aliasRows(options.byAlias ?? []);
-    return [];
-  });
+/** O embedding real sobre o cliente da OpenAI simulado: `embeddingsCreate` conta as chamadas; sem chave, sem cliente. */
+function buildEmbedding(
+  config: ConfigService,
+  keyless: boolean,
+  options: ImageWorldOptions,
+  query: jest.Mock,
+) {
   const embedding = new GalleryEmbeddingService(config, { query } as never);
   const embeddingsCreate = jest.fn(async (body: { input: string[] }) => ({
     data: body.input.map(() => ({ embedding: [0.1, 0.2] })),
   }));
-  (embedding as unknown as { openai: unknown }).openai =
-    options.env?.OPENAI_API_KEY === '' ? null : { embeddings: { create: embeddingsCreate } };
+  (embedding as unknown as { openai: unknown }).openai = keyless
+    ? null
+    : { embeddings: { create: embeddingsCreate } };
   embedding.searchByMetadataEmbedding = jest.fn(async () =>
     photoRows(options.nameMatches ?? []),
   ) as never;
   spyOnLogger(embedding);
+  return { embedding, embeddingsCreate };
+}
+
+/** A leitura do nome real: devolve a ficha de cada nome do pedido, com a marca da primeira palavra. */
+function buildParser(config: ConfigService, keyless: boolean) {
   const parser = new ProductNameParserService(config, {
     promptList: () => '10|Mercearia > Bebidas',
   } as unknown as TaxonomyService);
-  const chatCreate = options.env?.OPENAI_API_KEY === '' ? jest.fn() : installFakeOpenAi(parser);
+  const chatCreate = keyless ? jest.fn() : installFakeOpenAi(parser);
   chatCreate.mockImplementation(async (body: { messages: Array<{ content: string }> }) => {
     const names = [...body.messages[1].content.matchAll(/^\d+\. "([^"]*)"/gm)].map((m) => m[1]);
     return chatResponse({
@@ -112,22 +113,33 @@ export function buildImageWorld(options: ImageWorldOptions = {}) {
     });
   });
   spyOnLogger(parser);
-  const matcher = new ProductImageMatchV2Service(
-    embedding,
-    parser,
-    { pathSimilarity: (a: number, b: number) => (a === b ? 1 : 0) } as never,
-    config,
-  );
+  return { parser, chatCreate };
+}
+
+export function buildImageWorld(options: ImageWorldOptions = {}) {
+  const config = fakeConfig({
+    OPENAI_API_KEY: 'sk-teste',
+    EAN_FLYER_RESOLVE_ENABLED: 'false',
+    ...options.env,
+  });
+  const keyless = options.env?.OPENAI_API_KEY === '';
+  const queries: string[] = [];
+  const query = jest.fn(async (sql: string) => {
+    queries.push(sql);
+    if (sql.includes("metadata->>'ean'")) return options.byEan ?? [];
+    if (sql.includes("metadata->'aliases'")) return aliasRows(options.byAlias ?? []);
+    return [];
+  });
+  const { embedding, embeddingsCreate } = buildEmbedding(config, keyless, options, query);
+  const { parser, chatCreate } = buildParser(config, keyless);
+  const taxonomy = { pathSimilarity: (a: number, b: number) => (a === b ? 1 : 0) } as never;
+  const matcher = new ProductImageMatchV2Service(embedding, parser, taxonomy, config);
   const lookups = { resolve: jest.fn() };
-  const images = new FlyerEanResolutionService(
-    { query } as never,
-    matcher,
-    lookups as never,
-    {} as never,
-    { criarJobDoEncarte: jest.fn() } as never,
-    { wake: jest.fn() } as never,
-    config,
-  );
+  const unused = {} as never;
+  const jobs = { criarJobDoEncarte: jest.fn() } as never;
+  const runner = { wake: jest.fn() } as never;
+  const args = [{ query } as never, matcher, lookups as never, unused, jobs, runner] as const;
+  const images = new FlyerEanResolutionService(...args, config);
   const sizes = { measure: jest.fn(async () => ({ width: 800, height: 640 })) };
   const phase = new EnrichImagePhase(images, embedding, sizes);
   const writes = () => queries.filter((sql) => /^\s*(INSERT|UPDATE|DELETE)/i.test(sql));

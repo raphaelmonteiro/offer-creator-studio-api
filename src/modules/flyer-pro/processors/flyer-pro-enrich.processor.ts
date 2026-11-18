@@ -1,10 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import {
-  TerminalProviderError,
-  TransientProviderError,
-} from '../../../shared/providers/provider-errors';
 import { AiUsageCollector } from '../../ai/utils/ai-usage';
 import { FLYER_PRO_ENRICH_CONFIG, FlyerProEnrichConfig } from '../config/flyer-pro-enrich.config';
 import {
@@ -22,50 +18,10 @@ import {
   FlyerProEnrichPort,
 } from '../providers/flyer-pro-enrich.port';
 import { countEligible } from '../services/flyer-pro-job.scope';
-import { BatchFailure, FlyerProEnrichCommitter } from './flyer-pro-enrich.committer';
+import { FlyerProEnrichCommitter } from './flyer-pro-enrich.committer';
+import { classifyBatchError, withDeadline } from './flyer-pro-enrich.deadline';
 import { beat, claimBatch, readBatch } from './flyer-pro-enrich.statements';
 import type { BatchMessage, EnrichItemRow, PhaseWork, UnitPlan } from './flyer-pro-enrich.types';
-
-/** O prazo da chamada ao provedor estourou: falha transitória `AI_TIMEOUT`. */
-export class ProviderDeadlineError extends Error {
-  constructor(public readonly deadlineMs: number) {
-    super(`A chamada ao provedor passou do prazo de ${deadlineMs} ms`);
-  }
-}
-
-/**
- * Corre a chamada contra o prazo; o que chegar depois do prazo é descartado (e a rejeição tardia é engolida). Falha ou
- * prazo estourado abortam `controller`: o provedor real cancela as chamadas em andamento em vez de deixá-las correr
- * pagas (o lote será repetido, ou o job termina).
- */
-async function withDeadline<T>(
-  work: Promise<T>,
-  deadlineMs: number,
-  controller: AbortController,
-): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new ProviderDeadlineError(deadlineMs)), deadlineMs);
-  });
-  work.catch(() => undefined);
-  try {
-    return await Promise.race([work, deadline]);
-  } catch (error) {
-    controller.abort();
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** A falha do provedor (ou do prazo) como o job a registra; `null` para qualquer outro erro, que vira `INTERNAL`. */
-export function classifyBatchError(error: unknown): BatchFailure | null {
-  if (error instanceof ProviderDeadlineError) return { code: 'AI_TIMEOUT', terminal: false };
-  if (error instanceof TransientProviderError)
-    return { code: 'AI_PROVIDER_ERROR', terminal: false };
-  if (error instanceof TerminalProviderError) return { code: 'AI_PROVIDER_ERROR', terminal: true };
-  return null;
-}
 
 /** A fase que a porta conhece: a passada do EAN chama a mesma busca de fotos. */
 const stepOf = (phase: EnrichPhase): EnrichStep =>

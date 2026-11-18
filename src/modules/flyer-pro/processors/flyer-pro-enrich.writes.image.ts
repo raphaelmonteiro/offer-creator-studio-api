@@ -71,6 +71,45 @@ function appliedPhotoColumns(verdict: ImageApply, ctx: WriteContext) {
 const alsoOf = (eanStatus: ImageEanStatus | undefined): ItemWrite['also'] =>
   eanStatus === 'budget_blocked' ? 'eanBudgetBlocked' : undefined;
 
+/** Os dois `UPDATE` que quase toda foto usa: um com as colunas dadas e um de revisão (sem foto, candidatas pendentes). */
+interface ImageWriter {
+  write(
+    count: ItemWrite['count'],
+    columns: Record<string, unknown>,
+    eanStatus?: ImageEanStatus,
+  ): ItemWrite;
+  review(candidates: ImageCandidateVerdict[], eanStatus: ImageEanStatus): ItemWrite;
+}
+
+function writerOf(item: EnrichItemRow, ctx: WriteContext): ImageWriter {
+  const guard: Guard = () => imageWriteConditionSql(ctx.onlyMissing, ctx.retry);
+  const write: ImageWriter['write'] = (count, columns, eanStatus) =>
+    itemWrite(ctx, { itemId: item.id, count, also: alsoOf(eanStatus) }, columns, guard);
+  const review: ImageWriter['review'] = (candidates, eanStatus) => {
+    const suggestion = { status: 'pending' as const, candidates };
+    const imageReview = imageReviewOf(ctx, { eanStatus, applied: null, suggestion });
+    return write('review', { ...NO_PHOTO, imageStatus: 'review', imageReview }, eanStatus);
+  };
+  return { write, review };
+}
+
+/** Nada achado com a busca por nome disponível: sem foto, `applied` e `suggestion` nulos. */
+function notFoundWrite(writer: ImageWriter, ctx: WriteContext, eanStatus: ImageEanStatus) {
+  const imageReview = imageReviewOf(ctx, { eanStatus, applied: null, suggestion: null });
+  return writer.write(
+    'notFound',
+    { ...NO_PHOTO, imageStatus: 'not_found', imageReview },
+    eanStatus,
+  );
+}
+
+/** EAN em consulta: `ean_pending` sem foto, com as candidatas pelo nome guardadas se vieram. */
+function pendingWrite(writer: ImageWriter, ctx: WriteContext, candidates: ImageCandidateVerdict[]) {
+  const suggestion = candidates.length ? { status: 'pending' as const, candidates } : null;
+  const imageReview = imageReviewOf(ctx, { eanStatus: 'pending', applied: null, suggestion });
+  return writer.write('eanPending', { ...NO_PHOTO, imageStatus: 'ean_pending', imageReview });
+}
+
 /** O veredito de fotos como o `UPDATE` do item; `null` quando o item continua como estava. */
 export function planImage(
   item: EnrichItemRow,
@@ -79,43 +118,15 @@ export function planImage(
 ): ItemWrite | null {
   if (verdict.action === 'unanswered') return null;
   if (verdict.action === 'pending' && ctx.retry) return null;
-  const guard: Guard = () => imageWriteConditionSql(ctx.onlyMissing, ctx.retry);
-  const write = (
-    count: ItemWrite['count'],
-    columns: Record<string, unknown>,
-    eanStatus?: ImageEanStatus,
-  ) => itemWrite(ctx, { itemId: item.id, count, also: alsoOf(eanStatus) }, columns, guard);
-  const reviewWrite = (candidates: ImageCandidateVerdict[], eanStatus: ImageEanStatus) =>
-    write(
-      'review',
-      {
-        ...NO_PHOTO,
-        imageStatus: 'review',
-        imageReview: imageReviewOf(ctx, {
-          eanStatus,
-          applied: null,
-          suggestion: { status: 'pending', candidates },
-        }),
-      },
-      eanStatus,
-    );
-
-  if (verdict.action === 'not_found') {
-    const eanStatus = verdict.eanStatus ?? null;
-    const imageReview = imageReviewOf(ctx, { eanStatus, applied: null, suggestion: null });
-    return write('notFound', { ...NO_PHOTO, imageStatus: 'not_found', imageReview }, eanStatus);
-  }
-  if (verdict.action === 'pending') {
-    const suggestion = verdict.candidates.length
-      ? { status: 'pending' as const, candidates: verdict.candidates }
-      : null;
-    const imageReview = imageReviewOf(ctx, { eanStatus: 'pending', applied: null, suggestion });
-    return write('eanPending', { ...NO_PHOTO, imageStatus: 'ean_pending', imageReview });
-  }
+  const writer = writerOf(item, ctx);
+  if (verdict.action === 'pending') return pendingWrite(writer, ctx, verdict.candidates);
   const eanStatus = verdict.eanStatus ?? null;
+  if (verdict.action === 'not_found') return notFoundWrite(writer, ctx, eanStatus);
   if (verdict.action === 'apply' && ctx.autoApply) {
-    return write('applied', appliedPhotoColumns(verdict, ctx), eanStatus);
+    return writer.write('applied', appliedPhotoColumns(verdict, ctx), eanStatus);
   }
-  const candidates = verdict.action === 'review' ? verdict.candidates : [verdict.photo];
-  return reviewWrite(candidates, eanStatus);
+  return writer.review(
+    verdict.action === 'review' ? verdict.candidates : [verdict.photo],
+    eanStatus,
+  );
 }

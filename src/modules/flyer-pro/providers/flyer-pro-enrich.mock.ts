@@ -141,23 +141,23 @@ export class MockFlyerProEnrich implements FlyerProEnrichPort {
     photos: GalleryPhoto[],
     run: { markers: Set<Marker>; pass: number },
   ): Promise<ImageVerdict> {
-    const { markers, pass } = run;
     const hasEan = textOrNull(item.ean) !== null;
-    if (markers.has('eanPending') && hasEan) {
-      if (pass < 2 || !endsInEvenDigit(item.ean as string)) {
-        return { itemId: item.id, action: 'pending', candidates: [] };
-      }
-      const arrived = await this.imageOf(item, photos, { forceOutcome: 0 });
-      return arrived.action === 'apply' ? { ...arrived, eanStatus: 'dotcompany' } : arrived;
+    if (run.markers.has('eanPending') && hasEan)
+      return this.pendingEanVerdict(item, photos, run.pass);
+    return withNameAndCreditMarkers(await this.imageOf(item, photos), hasEan, run.markers);
+  }
+
+  /** O EAN em consulta: pendente até a segunda passada; nela, o de dígito par recebe a foto e o ímpar segue pendente. */
+  private async pendingEanVerdict(
+    item: EnrichItemInput,
+    photos: GalleryPhoto[],
+    pass: number,
+  ): Promise<ImageVerdict> {
+    if (pass < 2 || !endsInEvenDigit(item.ean as string)) {
+      return { itemId: item.id, action: 'pending', candidates: [] };
     }
-    const verdict = await this.imageOf(item, photos);
-    if (markers.has('noName') && (!hasEan || verdict.action === 'not_found')) {
-      return { itemId: item.id, action: 'unanswered' };
-    }
-    if (markers.has('noCredit') && hasEan && verdict.action !== 'unanswered') {
-      return { ...verdict, eanStatus: 'budget_blocked' } as ImageVerdict;
-    }
-    return verdict;
+    const arrived = await this.imageOf(item, photos, { forceOutcome: 0 });
+    return arrived.action === 'apply' ? { ...arrived, eanStatus: 'dotcompany' } : arrived;
   }
 
   /**
@@ -207,6 +207,21 @@ export class MockFlyerProEnrich implements FlyerProEnrichPort {
     if (!size) return { itemId: item.id, action: 'review', candidates: [picked] };
     return { itemId: item.id, action: 'apply', photo: { ...picked, ...size } };
   }
+}
+
+/** `#ia-sem-nome` e `#ia-sem-credito` sobre o veredito normal do simulado. */
+function withNameAndCreditMarkers(
+  verdict: ImageVerdict,
+  hasEan: boolean,
+  markers: Set<Marker>,
+): ImageVerdict {
+  if (markers.has('noName') && (!hasEan || verdict.action === 'not_found')) {
+    return { itemId: verdict.itemId, action: 'unanswered' };
+  }
+  if (markers.has('noCredit') && hasEan && verdict.action !== 'unanswered') {
+    return { ...verdict, eanStatus: 'budget_blocked' } as ImageVerdict;
+  }
+  return verdict;
 }
 
 /** O EAN termina em dígito par? Terminado em outra coisa, vale como ímpar (fica pendente até o fim). */
