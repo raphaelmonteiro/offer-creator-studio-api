@@ -1,24 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { llmPricesFor } from '../../ai/openai-llm-pricing';
+import { withTimeout } from '../../../shared/async/with-timeout';
 import { SCENE_VISION_CLIENT, SceneVisionClient } from '../providers/scene-vision-client';
 import { DEFAULT_VISION_MODEL, visionCostUsd } from './scene-vision.service';
 
 /** Tempo máximo da leitura do encarte (a chamada leva cerca de 3 s). */
 const READ_TIMEOUT_MS = 60_000;
-
-/** A chamada contra o relógio; o timer sai quando a chamada termina (nada fica pendurado no processo). */
-async function withTimeout<T>(call: Promise<T>, ms: number): Promise<T | 'timeout'> {
-  let timer: NodeJS.Timeout | undefined;
-  const expired = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => resolve('timeout'), ms);
-  });
-  try {
-    return await Promise.race([call, expired]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /** A leitura da visão: o JSON cru com o custo, ou o motivo da falha com o custo conhecido. */
 export type ReferenceReading =

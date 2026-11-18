@@ -109,3 +109,20 @@ export interface StructureItemRow {
   category: string | null;
   imageUrl: string | null;
 }
+
+/** Quantos itens, seções e encartes anteriores do cliente o provedor viu. */
+export interface StructureBasedOn {
+  items: number;
+  sections: number;
+  clientFlyers: number;
+}
+
+/** A resposta 200 da rota: a proposta saneada com o que a tela precisa. Tokens e custo ficam só no log. */
+export interface StructureSuggestionView extends SanitizedSuggestion {
+  suggestionId: string;
+  stateDigest: string;
+  source: 'ai' | 'mock';
+  model: string;
+  promptVersion: number;
+  basedOn: StructureBasedOn;
+}
