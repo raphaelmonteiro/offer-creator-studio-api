@@ -1,3 +1,4 @@
+import { pgErrorOf } from '../../../shared/db/pg-error';
 import type { FlyerProEnrichConfig } from '../config/flyer-pro-enrich.config';
 import type {
   EnrichError,
@@ -14,6 +15,15 @@ import type {
  * `stalled`, repetição depois de falha, decisão da varredura e os acumuladores de `result` e `models`. Sem banco e sem
  * relógio: o instante entra como argumento.
  */
+
+/** O nome do índice único parcial da M3: um job ativo por encarte. */
+export const ACTIVE_JOB_INDEX = 'UQ_flyer_pro_jobs_document_active';
+
+/** `23505` do índice de job ativo: outro job `queued` ou `running` do mesmo encarte passou na frente. */
+export function isActiveJobConflict(error: unknown): boolean {
+  const driver = pgErrorOf(error);
+  return driver?.code === '23505' && driver.constraint === ACTIVE_JOB_INDEX;
+}
 
 /** A ordem fixa das fases, qualquer que seja a ordem de `steps` no pedido. */
 export const ENRICH_PHASE_ORDER: readonly EnrichStep[] = [

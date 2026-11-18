@@ -4,8 +4,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SharedModule } from '../../shared/shared.module';
 import { AiModule } from '../ai/ai.module';
 import { FlyerProDocumentsController } from './controllers/flyer-pro-documents.controller';
+import { FlyerProEnrichmentController } from './controllers/flyer-pro-enrichment.controller';
 import { FlyerProStructureSuggestionController } from './controllers/flyer-pro-structure-suggestion.controller';
 import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.controller';
+import { FLYER_PRO_ENRICH_CONFIG, readEnrichConfig } from './config/flyer-pro-enrich.config';
 import { readStructureAiConfig, STRUCTURE_AI_CONFIG } from './config/structure-ai.config';
 import { FlyerProDocument } from './entities/flyer-pro-document.entity';
 import { FlyerProImport } from './entities/flyer-pro-import.entity';
@@ -16,6 +18,7 @@ import { FLYER_PRO_STRUCTURE_AI_PORT } from './providers/flyer-pro-structure-ai.
 import { FlyerProClientGuardService } from './services/flyer-pro-client-guard.service';
 import { FlyerProCursorService } from './services/flyer-pro-cursor.service';
 import { FlyerProDocumentsService } from './services/flyer-pro-documents.service';
+import { FlyerProJobsService } from './services/flyer-pro-jobs.service';
 import { FlyerProSaveService } from './services/flyer-pro-save.service';
 import { FlyerProImportsService } from './services/flyer-pro-imports.service';
 import { FlyerProItemsService } from './services/flyer-pro-items.service';
@@ -42,6 +45,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProTemplatesController,
     FlyerProDocumentsController,
     FlyerProStructureSuggestionController,
+    FlyerProEnrichmentController,
   ],
   providers: [
     FlyerProSceneReader,
@@ -55,8 +59,14 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProClientGuardService,
     FlyerProImportsService,
     FlyerProStructureSuggestionService,
+    FlyerProJobsService,
     // Um limitador só por processo da API: a vaga em andamento e o teto por hora vivem na memória dele.
     { provide: FlyerProStructureLimiter, useFactory: () => new FlyerProStructureLimiter() },
+    {
+      provide: FLYER_PRO_ENRICH_CONFIG,
+      useFactory: (config: ConfigService) => readEnrichConfig(config),
+      inject: [ConfigService],
+    },
     {
       provide: STRUCTURE_AI_CONFIG,
       useFactory: (config: ConfigService) => readStructureAiConfig(config),

@@ -16,7 +16,7 @@ import type {
 import { toDocumentView } from '../views/flyer-pro-document.view';
 import { assertClientExists } from './flyer-pro-client';
 import { FlyerProDocumentsListInput, listDocuments } from './flyer-pro-documents-list';
-import { readWith } from './flyer-pro-read';
+import { ITEMS_CURSOR_SQL, readWith } from './flyer-pro-read';
 import { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
 
 /** O que `POST /v1/flyer-pro/documents` devolve: o encarte e se foi criado agora (201) ou já existia (200). */
@@ -24,13 +24,6 @@ export interface FlyerProCreateResult {
   document: FlyerProDocumentView & { replayed: boolean };
   created: boolean;
 }
-
-/** O maior `updatedAt` dos itens, ou o `createdAt` do encarte sem itens, em texto com microssegundos (o `Date` só tem ms). */
-const ITEMS_CURSOR_SQL = `SELECT to_char(
-    COALESCE(
-      (SELECT max("updatedAt") FROM flyer_pro_items WHERE "documentId" = $1),
-      (SELECT "createdAt" FROM flyer_pro_documents WHERE id = $1)
-    ) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor`;
 
 /**
  * O encarte do Encarte Pro: criar (N1, idempotente pela `creationKey`), listar (N2), abrir (N3) e excluir (N6). Quem

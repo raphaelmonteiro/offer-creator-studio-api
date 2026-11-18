@@ -20,3 +20,10 @@ export async function assertLiveDocument(manager: EntityManager, id: string): Pr
   const document = await manager.findOne(FlyerProDocument, { where: { id }, select: { id: true } });
   if (!document) throw flyerProNotFound();
 }
+
+/** O maior `updatedAt` dos itens, ou o `createdAt` do encarte sem itens, em texto com microssegundos (o `Date` só tem ms). */
+export const ITEMS_CURSOR_SQL = `SELECT to_char(
+    COALESCE(
+      (SELECT max("updatedAt") FROM flyer_pro_items WHERE "documentId" = $1),
+      (SELECT "createdAt" FROM flyer_pro_documents WHERE id = $1)
+    ) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor`;

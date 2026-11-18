@@ -228,3 +228,20 @@ export const flyerProNoItems = () =>
     'Não há itens do encarte neste pedido.',
     {},
   );
+
+/** Já há um job `queued` ou `running` neste encarte; `details.jobId` é o que a tela passa a acompanhar. */
+export const flyerProEnrichmentRunning = (jobId: string) =>
+  flyerProError(
+    HttpStatus.CONFLICT,
+    'FLYER_PRO_ENRICHMENT_RUNNING',
+    'Já há uma busca em andamento neste encarte.',
+    { jobId },
+  );
+
+/** `FLYER_PRO_ENRICH_ENABLED=false`: o job está desligado neste ambiente. */
+export const flyerProEnrichmentDisabled = () =>
+  flyerProError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'FLYER_PRO_ENRICHMENT_DISABLED',
+    'A busca automática está desligada neste ambiente.',
+  );
