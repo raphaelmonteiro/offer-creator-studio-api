@@ -576,11 +576,17 @@ export class AiController {
   @Post('image-download')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Baixa e salva uma imagem do Pixabay no bucket' })
-  @ApiResponse({ status: 200, description: 'URL CDN da imagem salva' })
+  @ApiResponse({
+    status: 200,
+    description: 'URL CDN da imagem salva (`imageUrl`) e id da linha criada na Galeria (`imageId`)',
+  })
   async imageDownload(@Body() dto: ImageDownloadRequestDto) {
     try {
-      const imageUrl = await this.aiService.downloadAndSaveImage(dto.imageUrl, dto.productName);
-      return { success: true, data: { imageUrl } };
+      const { url, imageId } = await this.aiService.downloadAndSaveImage(
+        dto.imageUrl,
+        dto.productName,
+      );
+      return { success: true, data: { imageUrl: url, imageId } };
     } catch (error) {
       this.logger.error('Erro ao baixar imagem', error);
       return {

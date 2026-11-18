@@ -19,7 +19,7 @@ import { ProductCategorizationRequestDto } from './dto/product-categorization-re
 import { ProductCategorizationResponseDto } from './dto/product-categorization-response.dto';
 import { FlyerAssemblyPlanRequestDto } from './dto/flyer-assembly-plan-request.dto';
 import { FlyerAssemblyPlanResponseDto } from './dto/flyer-assembly-plan-response.dto';
-import { PixabayService } from './pixabay.service';
+import { PixabayService, SavedPixabayImage } from './pixabay.service';
 import { SpellCheckService } from './spell-check.service';
 import { TemplateGenerateService } from './template-generate.service';
 import { TemplateElementAssistantService } from './template-element-assistant.service';
@@ -61,7 +61,7 @@ export class AiService {
     return this.pixabayService.searchImages(rawName, category);
   }
 
-  async downloadAndSaveImage(imageUrl: string, productName: string): Promise<string> {
+  async downloadAndSaveImage(imageUrl: string, productName: string): Promise<SavedPixabayImage> {
     return this.pixabayService.downloadAndSaveImage(imageUrl, productName);
   }
 

@@ -68,7 +68,7 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
       expect(res.status).toBe(200);
       expect(res.body).toStrictEqual({
         success: true,
-        data: { imageUrl: 'http://localhost:3001/uploads/gallery/arroz.jpg' },
+        data: { imageUrl: 'http://localhost:3001/uploads/gallery/arroz.jpg', imageId: 'img-1' },
       });
       await until(() => ctx.fakes.vision.mock.calls.length === 1);
       expect(ctx.embedding.saveImageMetadata).not.toHaveBeenCalled();
@@ -76,17 +76,48 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
       await until(() => ctx.embedding.saveImageMetadata.mock.calls.length === 1);
     });
 
-    it('a falha do download continua HTTP 200 com success false', async () => {
+    it('a falha do download continua HTTP 200 com success false, sem imageId e sem linha nova', async () => {
       (fetchWithTimeout as jest.Mock).mockResolvedValue({ ok: false, status: 404 });
 
       const res = await download();
 
       expect(res.status).toBe(200);
-      expect(body(res)).toMatchObject({
+      expect(res.body).toStrictEqual({
         success: false,
-        error: { code: 'IMAGE_DOWNLOAD_ERROR' },
+        error: {
+          code: 'IMAGE_DOWNLOAD_ERROR',
+          message: 'Não foi possível salvar a imagem. Tente novamente.',
+        },
       });
+      expect(ctx.uploads.uploadFile).not.toHaveBeenCalled();
       expect(ctx.fakes.vision).not.toHaveBeenCalled();
+    });
+
+    it('arquivo de 12 MB: HTTP 200 com IMAGE_DOWNLOAD_ERROR, sem imageId e sem gravar nada', async () => {
+      (fetchWithTimeout as jest.Mock).mockResolvedValue({
+        ...pixabayImage(),
+        headers: {
+          get: (name: string) => (name === 'content-length' ? String(12 * 1024 * 1024) : null),
+        },
+      });
+
+      const res = await download();
+
+      expect(res.status).toBe(200);
+      expect(body(res)).toMatchObject({ success: false, error: { code: 'IMAGE_DOWNLOAD_ERROR' } });
+      expect(body(res)).not.toHaveProperty('data');
+      expect(ctx.uploads.uploadFile).not.toHaveBeenCalled();
+    });
+
+    it('imageUrl que não é URL dá 400 BAD_REQUEST, sem baixar nada', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/v1/ai/image-download')
+        .set('Authorization', bearer())
+        .send({ imageUrl: 'abc', productName: 'SALSINHA MAÇO' });
+
+      expect(res.status).toBe(400);
+      expect(body(res)).toMatchObject({ success: false, error: { code: 'BAD_REQUEST' } });
+      expect(fetchWithTimeout).not.toHaveBeenCalled();
     });
   });
 
