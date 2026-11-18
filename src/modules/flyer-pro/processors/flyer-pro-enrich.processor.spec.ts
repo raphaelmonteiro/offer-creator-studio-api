@@ -86,7 +86,9 @@ describe('FlyerProEnrichProcessor (com banco e comitador simulados)', () => {
       await handling;
 
       const [sql, params] = beats()[0];
-      expect(sql).toContain(`"batchSeq" = $2 AND "status" = 'running'`);
+      expect(sql).toContain(
+        `"batchSeq" = $2 AND "status" = 'running' AND "heartbeatAt" IS NOT NULL`,
+      );
       expect(params).toEqual(['job-1', 4]);
     });
 
@@ -252,6 +254,19 @@ describe('FlyerProEnrichProcessor (com banco e comitador simulados)', () => {
         totalMs: 150,
         providerMs: 120,
         outcome: 'gravado',
+      });
+    });
+
+    it('lote descartado (lote zumbi ou job que terminou no meio da chamada): a linha diz descartado, não gravado', async () => {
+      const { processor, committer } = build();
+      committer.commitUnit.mockResolvedValue('discarded');
+
+      await processor.handle({ jobId: 'job-1', seq: 3 });
+
+      const line = lines().find((text) => text.startsWith('Lote do job')) as string;
+      expect(JSON.parse(line.replace('Lote do job ', ''))).toMatchObject({
+        phase: 'image_match',
+        outcome: 'descartado',
       });
     });
 

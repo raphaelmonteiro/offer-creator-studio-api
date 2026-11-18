@@ -124,8 +124,15 @@ export class FlyerProEnrichProcessor {
     const items = await this.read(job, phase);
     progress.items = items.length;
     const plan = await this.plan({ job, phase, items, document, progress });
-    await this.committer.commitUnit(job, plan);
-    if (plan.work) this.logBatch(job, progress, plan.providerMs, 'gravado');
+    const outcome = await this.committer.commitUnit(job, plan);
+    if (plan.work) {
+      this.logBatch(
+        job,
+        progress,
+        plan.providerMs,
+        outcome === 'committed' ? 'gravado' : 'descartado',
+      );
+    }
   }
 
   /** A fase em andamento: a que o job guarda, ou a primeira das fases pedidas num job novo. */
