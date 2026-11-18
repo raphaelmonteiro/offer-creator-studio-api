@@ -63,4 +63,60 @@ describe('withAiLogging, chamadas fora das cinco features de produto', () => {
     expect(JSON.parse(started)).not.toHaveProperty('pricing');
     expect(finishedLine(logger)).not.toHaveProperty('pricing');
   });
+
+  it('finishedFields entra só na linha finished, lido depois da operação; started e failed não o levam', async () => {
+    const logger = new Logger('teste');
+    const log = jest.spyOn(logger, 'log').mockImplementation(() => undefined);
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    let discarded = 0;
+    const context = {
+      feature: 'f',
+      endpoint: 'responses',
+      model: 'gpt-6-luna',
+      finishedFields: () => ({ discarded }),
+    };
+
+    await withAiLogging(logger, context, async () => {
+      discarded = 2;
+      return {};
+    });
+    await expect(
+      withAiLogging(logger, context, async () => {
+        throw new Error('falhou');
+      }),
+    ).rejects.toThrow('falhou');
+
+    expect(finishedLine(logger)).toMatchObject({ discarded: 2, status: 'success' });
+    expect(String(log.mock.calls[0][0])).not.toContain('discarded');
+    expect(String(error.mock.calls[0][0])).not.toContain('discarded');
+    expect(String(error.mock.calls[0][0])).not.toContain('finishedFields');
+  });
+
+  it('sem finishedFields, a linha finished tem os mesmos campos de antes', async () => {
+    const logger = new Logger('teste');
+    jest.spyOn(logger, 'log').mockImplementation(() => undefined);
+
+    await withAiLogging(
+      logger,
+      { feature: 'f', endpoint: 'chat.completions', model: 'gpt-6-luna', pricing: 'table' },
+      async () => ({ usage: { prompt_tokens: 100, completion_tokens: 10 } }),
+    );
+
+    expect(Object.keys(finishedLine(logger)).sort()).toEqual(
+      [
+        'costEstimated',
+        'costSource',
+        'durationMs',
+        'endpoint',
+        'estimatedCostUsd',
+        'feature',
+        'inputTokens',
+        'model',
+        'outputTokens',
+        'provider',
+        'status',
+        'totalTokens',
+      ].sort(),
+    );
+  });
 });

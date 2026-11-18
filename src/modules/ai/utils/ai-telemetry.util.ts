@@ -18,6 +18,11 @@ export interface AiOperationContext {
    * Não vai para o log.
    */
   pricing?: 'table';
+  /**
+   * Campos que só a linha `finished` leva, lidos depois da operação (por exemplo a contagem do que o saneamento tirou, que só
+   * existe depois da chamada). Não vão para as linhas `started` e `failed`; ausente, as linhas ficam como sempre foram.
+   */
+  finishedFields?: () => Record<string, unknown>;
 }
 
 interface AiUsageMetrics {
@@ -53,6 +58,7 @@ export async function withAiLogging<T>(
         durationMs: Date.now() - startedAt,
         status: 'success',
         ...buildCostMetrics(base, result, context.pricing),
+        ...context.finishedFields?.(),
       })}`,
     );
     return result;
