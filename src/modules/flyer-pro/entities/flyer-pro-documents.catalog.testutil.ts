@@ -1,4 +1,4 @@
-/** O catálogo do Postgres das tabelas do encarte (M1 e M2), lido para os specs de banco (só testes). */
+/** O catálogo do Postgres das tabelas do encarte (M1 a M3), lido para os specs de banco (só testes). */
 
 export const MIGRATION_TABLES = ['flyer_pro_documents', 'flyer_pro_items'];
 
@@ -9,6 +9,17 @@ export const M2_INDEXES = ['IDX_flyer_pro_imports_document_hash', 'IDX_flyer_pro
 
 /** As três tabelas depois da M2, para os specs que comparam o banco inteiro do encarte. */
 export const ALL_TABLES = [...MIGRATION_TABLES, ...M2_TABLES];
+
+/** A tabela e os dois índices que a M3 (job de enriquecimento) acrescenta. */
+export const M3_TABLES = ['flyer_pro_jobs'];
+
+export const M3_INDEXES = [
+  'UQ_flyer_pro_jobs_document_active',
+  'IDX_flyer_pro_jobs_document_created',
+];
+
+/** As quatro tabelas depois da M3, para o spec de schema que compara as entidades com M1 a M3. */
+export const TABLES_AFTER_M3 = [...ALL_TABLES, ...M3_TABLES];
 
 export const MIGRATION_INDEXES = [
   'IDX_flyer_pro_documents_list',
