@@ -13,7 +13,9 @@ import { DotcompanyPhotoImporter } from './dotcompany-photo.importer';
 import { EanImportJobService } from './ean-import-job.service';
 import { EanImportRunner } from './ean-import.runner';
 import { productAliasKey } from '../../../gallery/product-alias';
+import { AiAbortOptions } from '../../utils/ai-abort';
 import { AiStrictOptions } from '../../utils/ai-strict';
+import { AiUsageOptions } from '../../utils/ai-usage';
 
 /** Mesmo patamar de revisão do match-v2: abaixo disso a "parecida" não vale mostrar. */
 const SIMILAR_MIN_SCORE = 0.5;
@@ -39,6 +41,9 @@ export interface EanStatusEntry {
   status: EanResolutionStatus;
   reason?: string | null;
 }
+
+/** `strict` (change 28), `usage` e `signal` (change 29): as três opções aditivas da busca de fotos do encarte. */
+export type FindImagesOptions = AiStrictOptions & AiUsageOptions & AiAbortOptions;
 
 export interface PhotoOption {
   imageId: string;
@@ -135,12 +140,13 @@ export class FlyerEanResolutionService {
 
   /**
    * Com `strict` (change 28), a falha do casamento por nome faz a chamada inteira lançar, mesmo com itens já
-   * resolvidos pelo EAN; a resolução por EAN em si não muda com a opção.
+   * resolvidos pelo EAN; a resolução por EAN em si não muda com a opção. `usage` (change 29) recebe o uso da leitura do
+   * nome e `signal` cancela as chamadas à OpenAI; a consulta à DotCompany não é cancelada (segue em segundo plano).
    */
   async findImages(
     products: ProductMatchInputV2[],
     clientId?: string | null,
-    options: AiStrictOptions = {},
+    options: FindImagesOptions = {},
   ): Promise<FlyerMatchResult> {
     const eanStatus: EanStatusEntry[] = [];
     const withEan: Array<{ product: ProductMatchInputV2; ean: string }> = [];
@@ -175,6 +181,8 @@ export class FlyerEanResolutionService {
       this.matcher.matchWithCandidates(products, clientId, {
         pinnedImageIds,
         strict: options.strict,
+        usage: options.usage,
+        signal: options.signal,
       }),
       this.resolveEans(withEan, clientId ?? null),
     ]);

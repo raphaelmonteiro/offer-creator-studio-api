@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { GalleryEmbeddingService, MetadataEmbeddingMatch } from '../gallery-embedding.service';
 import { AiAbortOptions } from '../utils/ai-abort';
 import { AiStrictOptions } from '../utils/ai-strict';
+import { AiUsageOptions } from '../utils/ai-usage';
 import { ProductNameParserService } from './product-name-parser.service';
 import { Alternative, buildEmbeddingText, ProductMetadata } from './product-metadata.schema';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
@@ -91,9 +92,10 @@ export interface MatchV2Result {
 /**
  * `strict` (change 28): a falha da leitura do nome ou do embedding sobe como `TransientProviderError` ou
  * `TerminalProviderError` em vez de virar "sem candidatas"; repassado ao leitor de nomes e ao embedding. `signal`
- * (change 29): cancela as chamadas à OpenAI em andamento.
+ * (change 29): cancela as chamadas à OpenAI em andamento. `usage` (change 29): coletor do uso da leitura do nome, a
+ * única chamada paga em tokens da busca (o embedding não tem preço na tabela).
  */
-export interface MatchV2Options extends AiStrictOptions, AiAbortOptions {
+export interface MatchV2Options extends AiStrictOptions, AiAbortOptions, AiUsageOptions {
   /**
    * Por produto, imagens que entram no pool de candidatas mesmo fora do top-N
    * por similaridade (ex.: fotos já escolhidas antes para aquele nome), para
@@ -144,7 +146,7 @@ export class ProductImageMatchV2Service {
 
     const parsed = await this.nameParser.parseNames(
       products.map((p) => ({ name: p.name, categoryHint: p.category })),
-      { strict: options.strict, signal: options.signal },
+      { strict: options.strict, signal: options.signal, usage: options.usage },
     );
     const queryEmbeddings = await this.embedQueries(products, parsed, options);
 
