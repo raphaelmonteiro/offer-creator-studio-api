@@ -1,12 +1,12 @@
 import type { EntityManager } from 'typeorm';
-import { fold } from '../../../shared/text/fold';
 import {
   categoryWriteConditionSql,
   imageWriteConditionSql,
   spellWriteConditionSql,
 } from '../domain/flyer-pro-enrich-criteria';
 import type { PhaseCounts } from '../domain/flyer-pro-enrich-rules';
-import { FLYER_PRO_CATEGORIES } from '../domain/flyer-pro-categories';
+import { canonicalCategory, keepsCurrentCategory } from '../domain/flyer-pro-enrich-category';
+import { fitCategoryReview } from '../domain/flyer-pro-enrich-review';
 import type {
   CategoryChoice,
   CategoryVerdict,
@@ -68,20 +68,11 @@ function itemWrite(
   return { sql, params, count: target.count };
 }
 
-const review = (ctx: WriteContext, extra: object) => ({
+const review = <E extends object>(ctx: WriteContext, extra: E) => ({
   checkedAt: ctx.stamp,
   jobId: ctx.jobId,
   ...extra,
 });
-
-/** A categoria na grafia da lista fechada (sem acento e sem diferença de maiúsculas), ou `null` se não é uma das 11. */
-function canonicalCategory(name: string): string | null {
-  return FLYER_PRO_CATEGORIES.find((category) => fold(category) === fold(name)) ?? null;
-}
-
-/** A categoria da planilha que a IA devolveu igual: nada a mudar, só a revisão sem sugestão. */
-const sameAsSheet = (item: EnrichItemRow, category: string): boolean =>
-  item.categorySource === 'import' && !!item.category && fold(item.category) === fold(category);
 
 /** Aplica a categoria (certeza, `autoApply` ligado, fora da planilha) ou a deixa como sugestão pendente. */
 function categoryWriteOf(
@@ -98,7 +89,11 @@ function categoryWriteOf(
     return itemWrite(
       ctx,
       target('applied'),
-      { category, categorySource: 'ai', categoryReview: review(ctx, { suggestion: accepted }) },
+      {
+        category,
+        categorySource: 'ai',
+        categoryReview: fitCategoryReview(review(ctx, { suggestion: accepted })),
+      },
       guard,
     );
   }
@@ -106,7 +101,7 @@ function categoryWriteOf(
   return itemWrite(
     ctx,
     target('suggested'),
-    { categoryReview: review(ctx, { suggestion: pending }) },
+    { categoryReview: fitCategoryReview(review(ctx, { suggestion: pending })) },
     guard,
   );
 }
@@ -129,10 +124,11 @@ function planCategory(
       guard,
     );
   if (verdict.action === 'none') return nothing();
-  const category = canonicalCategory((verdict as CategoryChoice).category);
+  const choice = verdict as CategoryChoice;
+  const category = canonicalCategory(choice.category);
   if (!category) return null;
-  if (sameAsSheet(item, category)) return nothing();
-  return categoryWriteOf(item, { verdict: verdict as CategoryChoice, category }, ctx, guard);
+  if (keepsCurrentCategory(item, { ...choice, category }, ctx.autoApply)) return nothing();
+  return categoryWriteOf(item, { verdict: choice, category }, ctx, guard);
 }
 
 function planSpelling(
