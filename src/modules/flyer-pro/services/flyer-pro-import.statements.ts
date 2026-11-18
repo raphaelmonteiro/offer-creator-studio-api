@@ -28,7 +28,7 @@ export async function findKnownImportIds(
  * (que precisa continuar para devolver o 409 certo), e o `DO NOTHING` espera o outro `PATCH` do mesmo `id` confirmar ou
  * desfazer. Devolve `true` se gravou e `false` se o `id` já existia (deste encarte ou de outro).
  */
-export async function insertImport(
+export async function insertImportIfAbsent(
   manager: EntityManager,
   documentId: string,
   userId: string,

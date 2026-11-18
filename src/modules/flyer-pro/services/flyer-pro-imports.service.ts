@@ -11,7 +11,7 @@ import type { DocumentColumns } from './flyer-pro-document-update';
 import {
   assertImportOfDocument,
   countImports,
-  insertImport,
+  insertImportIfAbsent,
   pageOfImports,
 } from './flyer-pro-import.statements';
 import { assertLiveDocument, readWith } from './flyer-pro-read';
@@ -72,7 +72,7 @@ export class FlyerProImportsService {
   ): Promise<DocumentColumns> {
     const issues = importIssues(entry);
     if (issues.length > 0) throw flyerProImportInvalid(issues);
-    if (await insertImport(manager, documentId, userId, entry)) {
+    if (await insertImportIfAbsent(manager, documentId, userId, entry)) {
       return entry.mode === 'replace' ? { pagesFrozen: false } : {};
     }
     await assertImportOfDocument(manager, documentId, entry.id);
