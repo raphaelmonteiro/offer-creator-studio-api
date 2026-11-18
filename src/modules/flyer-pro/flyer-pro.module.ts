@@ -15,6 +15,7 @@ import { FlyerProClientGuardService } from './services/flyer-pro-client-guard.se
 import { FlyerProCursorService } from './services/flyer-pro-cursor.service';
 import { FlyerProDocumentsService } from './services/flyer-pro-documents.service';
 import { FlyerProSaveService } from './services/flyer-pro-save.service';
+import { FlyerProImageLinkService } from './services/flyer-pro-image-link.service';
 import { FlyerProImportsService } from './services/flyer-pro-imports.service';
 import { FlyerProItemsService } from './services/flyer-pro-items.service';
 import { FlyerProSetupService } from './services/flyer-pro-setup.service';
@@ -51,6 +52,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProItemsService,
     FlyerProClientGuardService,
     FlyerProImportsService,
+    FlyerProImageLinkService,
     FlyerProStructureSuggestionService,
     // Um limitador só por processo da API: a vaga em andamento e o teto por hora vivem na memória dele.
     { provide: FlyerProStructureLimiter, useFactory: () => new FlyerProStructureLimiter() },

@@ -3,6 +3,7 @@ import type { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto
 import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { documentRow, STATUS } from './flyer-pro-documents.service.testutil';
 import { FlyerProSaveService } from './flyer-pro-save.service';
+import type { FlyerProImageLinkService } from './flyer-pro-image-link.service';
 import type { FlyerProImportsService } from './flyer-pro-imports.service';
 import type { FlyerProItemsService } from './flyer-pro-items.service';
 import type { FlyerProSetupService } from './flyer-pro-setup.service';
@@ -36,6 +37,12 @@ export const saveBody = (over: Record<string, unknown> = {}): SaveFlyerProDocume
     ...over,
   }) as SaveFlyerProDocumentDto;
 
+/** O registro da foto na Galeria simulado: por padrão não falha em nenhum item (`linkWarnings: []`). */
+export function makeLinkService() {
+  const links = { register: jest.fn().mockResolvedValue([]) };
+  return { links, service: links as unknown as FlyerProImageLinkService };
+}
+
 export type QueryCall = { sql: string; params: unknown[] };
 
 /** O serviço sobre um `manager` simulado: a trava devolve `stored`, o relógio devolve `STAMP`, o `UPDATE` devolve `SAVED_AT`. */
@@ -52,16 +59,18 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
   const setup = { apply: jest.fn().mockResolvedValue({}) };
   const snapshots = { statusOf: jest.fn().mockResolvedValue(STATUS) };
   const items = {
-    apply: jest.fn().mockResolvedValue({ items: [], deletedItemIds: [] }),
+    apply: jest.fn().mockResolvedValue({ items: [], deletedItemIds: [], photoChoices: [] }),
     currentOf: jest.fn().mockResolvedValue([]),
   };
   const imports = { apply: jest.fn().mockResolvedValue({}) };
+  const link = makeLinkService();
   const service = new FlyerProSaveService(
     dataSource as unknown as DataSource,
     setup as unknown as FlyerProSetupService,
     snapshots as unknown as FlyerProTemplateSnapshotService,
     items as unknown as FlyerProItemsService,
     imports as unknown as FlyerProImportsService,
+    link.service,
   );
   /** Os comandos SQL enviados ao `manager`, na ordem. */
   const calls = (): QueryCall[] =>
@@ -74,6 +83,7 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
     snapshots,
     items,
     imports,
+    links: link.links,
     calls,
     updates: () => calls().filter((call) => call.sql.startsWith('UPDATE')),
   };
