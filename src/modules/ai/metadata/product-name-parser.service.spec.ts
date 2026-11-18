@@ -1,39 +1,8 @@
 import { ProductNameParserService } from './product-name-parser.service';
+import { answerEach, build, NAMES } from './product-name-parser.testutil';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
 import { AiUsageCollector } from '../utils/ai-usage';
-import {
-  chatResponse,
-  fakeConfig,
-  installFakeOpenAi,
-  openAiError,
-  spyOnLogger,
-} from '../utils/openai-chat.testutil';
-
-function build(env: Record<string, string> = {}) {
-  const taxonomy = { promptList: () => '101|Mercearia > Arroz' } as unknown as TaxonomyService;
-  const service = new ProductNameParserService(
-    fakeConfig({ OPENAI_API_KEY: 'sk-teste', ...env }),
-    taxonomy,
-  );
-  const create = installFakeOpenAi(service);
-  const logs = spyOnLogger(service);
-  return { service, create, logs };
-}
-
-/** Resposta que devolve uma ficha mínima válida para cada nome do pedido. */
-function answerEach(count: number) {
-  return chatResponse({
-    content: JSON.stringify({
-      results: Array.from({ length: count }, (_, i) => ({
-        title: `PRODUTO ${i}`,
-        fieldConfidence: { title: 0.9 },
-      })),
-    }),
-  });
-}
-
-const NAMES = (count: number, prefix = 'ARROZ') =>
-  Array.from({ length: count }, (_, i) => ({ name: `${prefix} ${i}` }));
+import { chatResponse, fakeConfig, openAiError } from '../utils/openai-chat.testutil';
 
 describe('ProductNameParserService', () => {
   it('padrão novo: gpt-6-luna, esforço low, max_completion_tokens, json_object, sem temperature nem max_tokens', async () => {
