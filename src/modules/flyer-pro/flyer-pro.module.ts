@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.controller';
+import { FlyerProDocument } from './entities/flyer-pro-document.entity';
+import { FlyerProItem } from './entities/flyer-pro-item.entity';
 import { FlyerProSceneReader } from './services/flyer-pro-scene.reader';
 import { FlyerProTemplateSnapshotService } from './services/flyer-pro-template-snapshot.service';
 import { FlyerProTemplatesService } from './services/flyer-pro-templates.service';
@@ -10,6 +13,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
  * passar pela flag `TEMPLATE_SCENE_ENABLED`.
  */
 @Module({
+  imports: [TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem])],
   controllers: [FlyerProTemplatesController],
   providers: [FlyerProSceneReader, FlyerProTemplatesService, FlyerProTemplateSnapshotService],
   exports: [FlyerProTemplateSnapshotService],
