@@ -1,8 +1,7 @@
+import { IMPORT_ID, importEntry } from '../testing/flyer-pro-imports.fixture';
 import {
   commandsOf,
   DOCUMENT,
-  IMPORT_ID,
-  importEntry,
   makeImportsManager,
   makeImportsService,
   OTHER_DOCUMENT,

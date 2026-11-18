@@ -1,6 +1,6 @@
 import { HttpException } from '@nestjs/common';
 import { flyerProImportIdConflict, flyerProImportInvalid } from '../domain/flyer-pro.errors';
-import { IMPORT_ID, importEntry } from './flyer-pro-imports.service.testutil';
+import { IMPORT_ID, importEntry } from '../testing/flyer-pro-imports.fixture';
 import {
   columnsSetBy,
   makeSaveService,

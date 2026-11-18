@@ -1,27 +1,11 @@
 import type { DataSource, EntityManager } from 'typeorm';
-import type { FlyerProImportEntry } from '../domain/flyer-pro-import.types';
+import { IMPORT_ID } from '../testing/flyer-pro-imports.fixture';
 import { FlyerProImportsService } from './flyer-pro-imports.service';
 
-/** Ajudantes dos unitários do passo da importação (só testes): o `manager` que registra os comandos e o registro do corpo. */
+/** Ajudantes dos unitários do passo da importação (só testes): o `manager` que registra os comandos e o serviço. */
 
 export const DOCUMENT = 'd1';
 export const OTHER_DOCUMENT = 'd2';
-export const IMPORT_ID = '0b6f3d52-8e1a-4c27-9f40-6d2a7b1c5e83';
-
-/** O `import` do cenário "Importar a lista do Piccin"; `over` troca ou acrescenta o que o caso pede. */
-export const importEntry = (over: Partial<FlyerProImportEntry> = {}): FlyerProImportEntry => ({
-  id: IMPORT_ID,
-  fileName: 'lista-piccin.csv',
-  fileKind: 'csv',
-  fileHash: '9f2c1a7b3d4e5f60',
-  detectedFormat: 'csv',
-  mode: 'append',
-  rowCount: 5,
-  acceptedCount: 4,
-  rejected: [{ row: 7, reason: 'PRICE_MISSING', raw: 'FEIJAO CARIOCA' }],
-  ...over,
-});
-
 export interface ImportsManagerOptions {
   /** O encarte dono do `id` quando ele já existe; sem isso, o `INSERT` grava. */
   existingOwner?: string;
