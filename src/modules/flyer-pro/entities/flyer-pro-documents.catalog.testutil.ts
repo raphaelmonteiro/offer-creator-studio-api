@@ -1,4 +1,4 @@
-/** O catálogo do Postgres das tabelas do encarte (M1 a M3), lido para os specs de banco (só testes). */
+/** O catálogo do Postgres das tabelas do encarte (M1 a M4), lido para os specs de banco (só testes). */
 
 export const MIGRATION_TABLES = ['flyer_pro_documents', 'flyer_pro_items'];
 
@@ -20,6 +20,11 @@ export const M3_INDEXES = [
 
 /** As quatro tabelas depois da M3, para o spec de schema que compara as entidades com M1 a M3. */
 export const TABLES_AFTER_M3 = [...ALL_TABLES, ...M3_TABLES];
+
+/** A tabela e o índice que a M4 acrescenta (as exportações). A M4 só depende da M1, por isso não entra em `ALL_TABLES`. */
+export const M4_TABLES = ['flyer_pro_exports'];
+
+export const M4_INDEXES = ['IDX_flyer_pro_exports_document_created'];
 
 export const MIGRATION_INDEXES = [
   'IDX_flyer_pro_documents_list',

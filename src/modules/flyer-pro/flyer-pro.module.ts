@@ -6,6 +6,7 @@ import { SharedModule } from '../../shared/shared.module';
 import { AiModule } from '../ai/ai.module';
 import { FlyerProDocumentsController } from './controllers/flyer-pro-documents.controller';
 import { FlyerProEnrichmentController } from './controllers/flyer-pro-enrichment.controller';
+import { FlyerProExportsController } from './controllers/flyer-pro-exports.controller';
 import { FlyerProStructureSuggestionController } from './controllers/flyer-pro-structure-suggestion.controller';
 import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.controller';
 import {
@@ -15,6 +16,7 @@ import {
 } from './config/flyer-pro-enrich.config';
 import { readStructureAiConfig, STRUCTURE_AI_CONFIG } from './config/structure-ai.config';
 import { FlyerProDocument } from './entities/flyer-pro-document.entity';
+import { FlyerProExport } from './entities/flyer-pro-export.entity';
 import { FlyerProImport } from './entities/flyer-pro-import.entity';
 import { FlyerProItem } from './entities/flyer-pro-item.entity';
 import { FlyerProJob } from './entities/flyer-pro-job.entity';
@@ -32,6 +34,7 @@ import { FlyerProGalleryPhotos } from './services/flyer-pro-gallery-photos';
 import { FlyerProImageSizeService } from './services/flyer-pro-image-size.service';
 import { FlyerProJobReconcilerService } from './services/flyer-pro-job-reconciler.service';
 import { FlyerProJobsService } from './services/flyer-pro-jobs.service';
+import { FlyerProExportsService } from './services/flyer-pro-exports.service';
 import { FlyerProSaveService } from './services/flyer-pro-save.service';
 import { FlyerProImportsService } from './services/flyer-pro-imports.service';
 import { FlyerProItemsService } from './services/flyer-pro-items.service';
@@ -45,11 +48,17 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
 /**
  * Módulo do Encarte Pro (backend): a leitura dos templates das cenas do Templates v2 (N7), o montador da cópia congelada
  * do template, o encarte guardado no servidor (criar, listar, abrir e excluir: N1, N2, N3 e N6) e o serviço de guarda que
- * o módulo de clientes chama ao excluir um cliente, e a sugestão de estrutura por IA (N19, só leitura). Lê as tabelas das cenas sem passar pela flag `TEMPLATE_SCENE_ENABLED`.
+ * o módulo de clientes chama ao excluir um cliente, o registro e o histórico das exportações (N8 e N9) e a sugestão de estrutura por IA (N19, só leitura). Lê as tabelas das cenas sem passar pela flag `TEMPLATE_SCENE_ENABLED`.
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem, FlyerProImport, FlyerProJob]),
+    TypeOrmModule.forFeature([
+      FlyerProDocument,
+      FlyerProItem,
+      FlyerProImport,
+      FlyerProJob,
+      FlyerProExport,
+    ]),
     // A fila (`AnimationQueueService`) do job e, para as fases reais da change 29, os três serviços de IA que o `AiModule` exporta.
     SharedModule,
     AiModule,
@@ -57,6 +66,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
   controllers: [
     FlyerProTemplatesController,
     FlyerProDocumentsController,
+    FlyerProExportsController,
     FlyerProStructureSuggestionController,
     FlyerProEnrichmentController,
   ],
@@ -71,6 +81,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProItemsService,
     FlyerProClientGuardService,
     FlyerProImportsService,
+    FlyerProExportsService,
     FlyerProStructureSuggestionService,
     FlyerProJobsService,
     FlyerProEnrichCommitter,

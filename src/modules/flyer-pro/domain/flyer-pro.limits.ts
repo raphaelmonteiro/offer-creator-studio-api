@@ -39,6 +39,11 @@ export const FLYER_PRO_LIMITS = {
   importFileHashMaxLength: 64,
   /** `flyer_pro_imports.detectedFormat`. */
   importDetectedFormatMaxLength: 16,
+  /** `flyer_pro_exports.renderDigest`. */
+  exportRenderDigestMaxLength: 64,
+  /** `flyer_pro_exports.fileName`: de 5 (`a.png`) a 200 caracteres. */
+  exportFileNameMinLength: 5,
+  exportFileNameMaxLength: 200,
   /** Sugestão de estrutura (N19): seções, páginas, células e cota do retrato; o digest e a categoria do id da seção. */
   structureSectionMax: 16,
   structurePageMax: 4,
