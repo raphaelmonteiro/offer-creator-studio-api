@@ -1,0 +1,24 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`buildStructureDataMessage: o encarte de 8 itens, sem encartes anteriores confere com o snapshot 1`] = `
+"DADOS
+ENCARTE: Ofertas da semana 47 | folha simples 27x40 | 2 páginas | cards no nível 2 de 3
+PRODUTOS SEM LUGAR HOJE: 0
+TETO DE DESTAQUES NOVOS: 12
+PÁGINAS (página | capacidade em células | ocupadas | observação)
+1 | 8 | 6 | capa, com cabeçalho
+2 | 8 | 2 | última, com rodapé
+SEÇÕES NA ORDEM ATUAL (id | título | itens | células | página atual | fixada)
+s1 | Hortifruti | 3 | 3 | 1 | não
+s2 | Carnes | 3 | 3 | 1 | não
+s3 | Bebidas | 2 | 2 | 2 | sim
+PRODUTOS (apelido | seção | nome | preço | tipo | foto | destaque atual)
+p01 | s1 | ABACATE | 6,99 kg | simples | sim | -
+p02 | s1 | BANANA PRATA | 4,49 kg | simples | sim | -
+p03 | s1 | TOMATE | 7,99 kg | simples | não | -
+p04 | s2 | PICANHA BOVINA | 69,90 kg (de 89,90) | de/por | sim | -
+p05 | s2 | COXA E SOBRECOXA DE FRANGO | 11,99 kg | simples | sim | -
+p06 | s2 | LINGUICA TOSCANA | 18,90 kg | simples | sim | -
+p07 | s3 | CERVEJA LATA 350ML | 3,49 cada | simples | sim | -
+p08 | s3 | REFRIGERANTE 2L | 8,99 cada | simples | sim | -"
+`;
