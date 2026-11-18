@@ -102,6 +102,22 @@ export type FlyerProDocumentListItemView = Omit<
   'createdAt' | 'updatedAt'
 > & { createdAt: string; updatedAt: string };
 
+type ItemImageView = Pick<
+  FlyerProItemView,
+  'galleryImageId' | 'imageUrl' | 'imageWidth' | 'imageHeight' | 'imageOrigin' | 'imageReview'
+>;
+
+function itemImageOf(item: FlyerProItem): ItemImageView {
+  return {
+    galleryImageId: item.galleryImageId ?? null,
+    imageUrl: item.imageUrl ?? null,
+    imageWidth: item.imageWidth ?? null,
+    imageHeight: item.imageHeight ?? null,
+    imageOrigin: item.imageOrigin ?? null,
+    imageReview: item.imageReview ?? null,
+  };
+}
+
 export function toItemView(item: FlyerProItem): FlyerProItemView {
   return {
     id: item.id,
@@ -116,13 +132,8 @@ export function toItemView(item: FlyerProItem): FlyerProItemView {
     isAlcoholic: item.isAlcoholic,
     ean: item.ean ?? null,
     eanValid: item.ean ? isValidGtin(item.ean) : null,
-    galleryImageId: item.galleryImageId ?? null,
-    imageUrl: item.imageUrl ?? null,
-    imageWidth: item.imageWidth ?? null,
-    imageHeight: item.imageHeight ?? null,
-    imageOrigin: item.imageOrigin ?? null,
+    ...itemImageOf(item),
     imageStatus: item.imageStatus,
-    imageReview: item.imageReview ?? null,
     spellReview: item.spellReview ?? null,
     imported: item.imported ?? null,
     importId: null,
@@ -136,6 +147,16 @@ export interface DocumentViewInput {
   items: FlyerProItem[];
   itemsCursor: string;
   templateStatus: FlyerProTemplateStatus;
+}
+
+function slicesOf(document: FlyerProDocument): FlyerProDocumentView['slices'] {
+  return {
+    frame: document.frame ?? {},
+    structure: document.structure ?? {},
+    card: document.card ?? {},
+    assembly: document.assembly ?? {},
+    exportPrefs: document.exportPrefs ?? {},
+  };
 }
 
 export function toDocumentView({
@@ -163,13 +184,7 @@ export function toDocumentView({
     layoutSnapshot: document.layoutSnapshot ?? null,
     templateSnapshot: document.templateSnapshot,
     templateStatus,
-    slices: {
-      frame: document.frame ?? {},
-      structure: document.structure ?? {},
-      card: document.card ?? {},
-      assembly: document.assembly ?? {},
-      exportPrefs: document.exportPrefs ?? {},
-    },
+    slices: slicesOf(document),
     items: items.map(toItemView),
     itemsCursor,
     enrichment: null,
