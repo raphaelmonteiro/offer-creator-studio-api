@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Res,
@@ -19,7 +20,9 @@ import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { flyerProNotFound } from '../domain/flyer-pro.errors';
 import { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
 import { QueryFlyerProDocumentsDto } from '../dto/query-flyer-pro-documents.dto';
+import { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
 import { FlyerProDocumentsService } from '../services/flyer-pro-documents.service';
+import { FlyerProSaveService } from '../services/flyer-pro-save.service';
 
 /** Id que não é UUID também é "encarte não encontrado" (sem revelar nada além disso). */
 export const DocumentIdPipe = new ParseUUIDPipe({ exceptionFactory: () => flyerProNotFound() });
@@ -29,7 +32,10 @@ export const DocumentIdPipe = new ParseUUIDPipe({ exceptionFactory: () => flyerP
 @UseGuards(JwtAuthGuard)
 @Controller('flyer-pro/documents')
 export class FlyerProDocumentsController {
-  constructor(private readonly documents: FlyerProDocumentsService) {}
+  constructor(
+    private readonly documents: FlyerProDocumentsService,
+    private readonly saves: FlyerProSaveService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -85,6 +91,41 @@ export class FlyerProDocumentsController {
   })
   open(@Param('id', DocumentIdPipe) id: string) {
     return this.documents.open(id);
+  }
+
+  @Patch(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Salva alterações (Setup, fatias, itens) com revisão; repetir o mesmo mutationId devolve a gravação já aceita',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Gravação aceita, reenvio (replayed: true) ou regravação de conferência (applied: true ou false)',
+  })
+  @ApiResponse({ status: 400, description: 'BAD_REQUEST: corpo fora da forma ou sem obrigatórios' })
+  @ApiResponse({ status: 401, description: 'UNAUTHORIZED: sem token' })
+  @ApiResponse({
+    status: 404,
+    description:
+      'FLYER_PRO_NOT_FOUND, CLIENT_NOT_FOUND ou FLYER_PRO_TEMPLATE_NOT_FOUND (cena do setup)',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'REVISION_CONFLICT, FLYER_PRO_APP_OUTDATED ou FLYER_PRO_ITEM_ID_CONFLICT',
+  })
+  @ApiResponse({
+    status: 422,
+    description:
+      'FLYER_PRO_SLICE_TOO_LARGE, FLYER_PRO_ITEM_INVALID (issues), FLYER_PRO_ITEM_LIMIT, FLYER_PRO_FOLD_LOCKED, FLYER_PRO_PAGE_COUNT_INVALID, FLYER_PRO_TEMPLATE_UNSUPPORTED ou FLYER_PRO_TEMPLATE_INCOMPLETE',
+  })
+  save(
+    @Param('id', DocumentIdPipe) id: string,
+    @Body() dto: SaveFlyerProDocumentDto,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.saves.save(user.id, id, dto);
   }
 
   @Delete(':id')

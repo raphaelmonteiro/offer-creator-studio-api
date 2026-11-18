@@ -5,6 +5,7 @@ import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.c
 import { FlyerProDocument } from './entities/flyer-pro-document.entity';
 import { FlyerProItem } from './entities/flyer-pro-item.entity';
 import { FlyerProDocumentsService } from './services/flyer-pro-documents.service';
+import { FlyerProSaveService } from './services/flyer-pro-save.service';
 import { FlyerProSceneReader } from './services/flyer-pro-scene.reader';
 import { FlyerProTemplateSnapshotService } from './services/flyer-pro-template-snapshot.service';
 import { FlyerProTemplatesService } from './services/flyer-pro-templates.service';
@@ -22,6 +23,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProTemplatesService,
     FlyerProTemplateSnapshotService,
     FlyerProDocumentsService,
+    FlyerProSaveService,
   ],
   exports: [FlyerProTemplateSnapshotService],
 })
