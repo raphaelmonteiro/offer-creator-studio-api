@@ -102,14 +102,19 @@ export class FlyerProEnrichCommitter {
             done: false,
           };
       if (next.done) {
-        await updateJob(manager, current.id, { ...progress, ...doneColumns(next.cursor) });
+        await updateJob(manager, current.id, {
+          ...progress,
+          total: Math.max(next.total, progress.processed as number),
+          ...doneColumns(next.cursor),
+        });
         return 'committed';
       }
       await updateJob(manager, current.id, {
         ...progress,
         phase: next.phase,
         cursor: next.cursor,
-        total: next.total,
+        // Item que chegou durante a rodada e entrou nela antes de a conferência o contar: `total` nunca fica abaixo de `processed`.
+        total: Math.max(next.total, progress.processed as number),
       });
       await this.publishNext(locked, 0);
       return 'committed';

@@ -108,11 +108,15 @@ export const DOCUMENTS_URL = '/flyer-pro/documents';
 /**
  * O preparo comum dos specs de e2e das rotas do encarte: o harness com o `FlyerProModule`, um segundo usuário (Bruno), as
  * cenas da fixture da 07 (só com `scenes: true`, porque projetar as faces leva alguns segundos) e a limpeza dos encartes
- * e dos clientes da suíte antes da limpeza da semente (a FK `RESTRICT` do cliente barra a ordem inversa). Chame no corpo
- * do `describeIfE2eDb`.
+ * e dos clientes da suíte antes da limpeza da semente (a FK `RESTRICT` do cliente barra a ordem inversa). Com `jobQueue`, o
+ * app sobe a fila real no banco de e2e e o consumidor do job no próprio processo (só os specs do job). Chame no corpo do
+ * `describeIfE2eDb`.
  */
-export function useDocumentsE2e(options: { scenes: boolean }) {
-  const h = useE2eHarness({ imports: [e2eDataSourceModule(() => h.dataSource), FlyerProModule] });
+export function useDocumentsE2e(options: { scenes: boolean; jobQueue?: boolean }) {
+  const h = useE2eHarness({
+    imports: [e2eDataSourceModule(() => h.dataSource), FlyerProModule],
+    jobQueue: options.jobQueue,
+  });
   let fixture: FlyerProFixture | undefined;
   let bruno: ExtraUser;
   const extraClients: string[] = [];
