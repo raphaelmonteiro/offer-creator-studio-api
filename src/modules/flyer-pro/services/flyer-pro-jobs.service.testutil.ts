@@ -53,6 +53,8 @@ export interface JobsWorld {
   itemIdsInDocument?: string[];
   active?: FlyerProJob | null;
   latest?: FlyerProJob | null;
+  /** O job como o banco o devolve depois de um `UPDATE` do teste (o `manager` simulado não executa o SQL). */
+  reloaded?: FlyerProJob;
 }
 
 /** O `23505` do índice de job ativo, como o driver o devolve. */
@@ -75,12 +77,14 @@ export function makeJobsService(world: JobsWorld = {}, config?: Partial<FlyerPro
       inserted.push(values);
     }),
     findOneByOrFail: jest.fn(async (_entity: unknown, where: { id: string }) =>
-      jobRow({
-        ...(inserted[0] as Partial<FlyerProJob>),
-        id: where.id,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }),
+      inserted.length === 0
+        ? (state.reloaded ?? (state.active as FlyerProJob))
+        : jobRow({
+            ...(inserted[0] as Partial<FlyerProJob>),
+            id: where.id,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }),
     ),
     query: jest.fn(async (sql: string, params: unknown[] = []) => {
       if (sql.includes('to_char')) return [{ cursor: CURSOR }];

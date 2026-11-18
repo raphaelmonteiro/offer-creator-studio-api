@@ -13,9 +13,17 @@ import {
 import type { StartEnrichmentDto } from '../dto/start-enrichment.dto';
 import type { FlyerProJob } from '../entities/flyer-pro-job.entity';
 import { FlyerProJobView, toJobView } from '../views/flyer-pro-job.view';
-import { findCurrentJob, findLatestJob, insertJob } from './flyer-pro-job.statements';
+import {
+  cancelQueuedJob,
+  findCurrentJob,
+  findLatestJob,
+  insertJob,
+  lockActiveJob,
+  requestJobStop,
+} from './flyer-pro-job.statements';
 import { hasItems, ItemScope, itemsOfDocument, totalOf } from './flyer-pro-job.scope';
 import { assertLiveDocument, ITEMS_CURSOR_SQL, readWith } from './flyer-pro-read';
+import { inSavepoint } from './flyer-pro-savepoint';
 
 /** O que a criação de um job precisa: quem pede, o encarte, as fases e o escopo. */
 export interface CreateJobInput {
@@ -77,6 +85,42 @@ export class FlyerProJobsService {
       await assertLiveDocument(manager, documentId);
       return { job: await this.currentView(manager, documentId) };
     });
+  }
+
+  /**
+   * N16, idempotente: `queued` vira `canceled` na hora; `running` grava o primeiro `cancelRequestedAt` e o lote em
+   * execução fecha o job (sem lote em execução, um lote imediato com a ficha atual o fecha). Sem job ativo, `canceled:
+   * false` com o mais recente ou `null`. Trava só a linha do job (A-23).
+   */
+  async cancel(documentId: string): Promise<{ canceled: boolean; job: FlyerProJobView | null }> {
+    return this.dataSource.transaction(async (manager) => {
+      await assertLiveDocument(manager, documentId);
+      const active = await lockActiveJob(manager, documentId);
+      if (!active) {
+        const latest = await findLatestJob(manager, documentId);
+        return { canceled: false, job: latest ? await this.viewOf(manager, latest) : null };
+      }
+      const job =
+        active.status === 'queued'
+          ? await cancelQueuedJob(manager, active.id)
+          : await requestJobStop(manager, active.id);
+      if (job.status === 'running' && !job.heartbeatAt) await this.publishImmediate(manager, job);
+      return { canceled: true, job: await this.viewOf(manager, job) };
+    });
+  }
+
+  /**
+   * O lote imediato que fecha um job sem lote em execução: a mesma ficha, que o assume e vê o pedido. Se a fila falhar,
+   * a resposta não muda e o reconciliador fecha o job na varredura.
+   */
+  private async publishImmediate(manager: EntityManager, job: FlyerProJob): Promise<void> {
+    await inSavepoint(manager, 'flyer_pro_cancel_batch', () =>
+      this.queue.publish(
+        QUEUES.FLYER_PRO_ENRICH,
+        { jobId: job.id, seq: job.batchSeq },
+        { manager, retryLimit: 0, expireInSeconds: this.config.batchExpireSeconds },
+      ),
+    );
   }
 
   /**

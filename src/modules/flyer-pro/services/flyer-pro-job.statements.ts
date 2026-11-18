@@ -59,3 +59,37 @@ export async function insertJob(manager: EntityManager, job: NewJob): Promise<Fl
   });
   return manager.findOneByOrFail(FlyerProJob, { id });
 }
+
+/** O job ativo do encarte com a linha travada até o fim da transação (o N16 trava só o job, A-23), ou `null`. */
+export function lockActiveJob(
+  manager: EntityManager,
+  documentId: string,
+): Promise<FlyerProJob | null> {
+  return manager.findOne(FlyerProJob, {
+    where: { documentId, status: In([...ACTIVE]) },
+    lock: { mode: 'pessimistic_write' },
+  });
+}
+
+/** Job `queued` vira `canceled` na hora (nenhum lote começou), com o pedido gravado e `finishedAt`; devolve o job lido. */
+export async function cancelQueuedJob(manager: EntityManager, id: string): Promise<FlyerProJob> {
+  await manager.query(
+    `UPDATE "flyer_pro_jobs"
+        SET "status" = 'canceled', "cancelRequestedAt" = COALESCE("cancelRequestedAt", now()),
+            "finishedAt" = now(), "updatedAt" = now()
+      WHERE "id" = $1`,
+    [id],
+  );
+  return manager.findOneByOrFail(FlyerProJob, { id });
+}
+
+/** Grava o primeiro pedido de parada (o seguinte não o muda); devolve o job lido. O estado só muda no fim do lote. */
+export async function requestJobStop(manager: EntityManager, id: string): Promise<FlyerProJob> {
+  await manager.query(
+    `UPDATE "flyer_pro_jobs"
+        SET "cancelRequestedAt" = COALESCE("cancelRequestedAt", now()), "updatedAt" = now()
+      WHERE "id" = $1`,
+    [id],
+  );
+  return manager.findOneByOrFail(FlyerProJob, { id });
+}

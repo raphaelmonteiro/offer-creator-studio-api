@@ -69,4 +69,23 @@ export class FlyerProEnrichmentController {
   current(@Param('id', DocumentIdPipe) id: string) {
     return this.jobs.current(id);
   }
+
+  @Post(':id/enrichment/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Pede a parada do job ativo: o lote em execução termina e grava o que conferiu; nenhum lote novo começa. Idempotente',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '{ canceled, job }: canceled false (sem job ativo) traz o mais recente ou null',
+  })
+  @ApiResponse({ status: 401, description: 'UNAUTHORIZED: sem token' })
+  @ApiResponse({
+    status: 404,
+    description: 'FLYER_PRO_NOT_FOUND: inexistente, excluído ou id inválido',
+  })
+  cancel(@Param('id', DocumentIdPipe) id: string) {
+    return this.jobs.cancel(id);
+  }
 }
