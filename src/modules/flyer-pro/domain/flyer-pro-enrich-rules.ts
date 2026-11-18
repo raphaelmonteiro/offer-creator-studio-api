@@ -162,7 +162,7 @@ const ageSeconds = (since: Date, now: Date): number => (now.getTime() - since.ge
 
 /**
  * A decisão da varredura (`a3-job-enriquecimento.html#s6-4`): encarte excluído ou parada pedida sem lote em execução
- * (ou com o lote morto) fecha `canceled`; lote em execução sem batimento além do prazo sobe `batchAttempts` e, na última
+ * (ou com o lote morto) fecha `canceled`, e com o lote vivo é ele quem fecha, depois de gravar; lote em execução sem batimento além do prazo sobe `batchAttempts` e, na última
  * tentativa, falha com `JOB_STALLED`, senão é republicado; lote publicado e não assumido há mais de 300 s é republicado
  * sem contar tentativa.
  */
@@ -171,10 +171,11 @@ export function reconcileAction(
   now: Date,
   config: Pick<FlyerProEnrichConfig, 'staleSeconds' | 'maxAttempts'>,
 ): ReconcileAction {
-  if (facts.documentDeleted) return 'cancel';
   const running = facts.heartbeatAt !== null;
   const dead = running && ageSeconds(facts.heartbeatAt as Date, now) > config.staleSeconds;
-  if (facts.cancelRequestedAt && (!running || dead)) return 'cancel';
+  // Encarte excluído e parada pedida valem o mesmo: com um lote vivo, ele grava o que conferiu e fecha o job.
+  const stopping = facts.documentDeleted || facts.cancelRequestedAt !== null;
+  if (stopping && (!running || dead)) return 'cancel';
   if (dead) {
     return facts.batchAttempts + 1 >= config.maxAttempts ? 'fail_stalled' : 'republish_dead';
   }

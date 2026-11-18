@@ -220,10 +220,19 @@ describe('varredura do reconciliador', () => {
       facts({ heartbeatAt: secondsAgo(61), cancelRequestedAt: NOW }),
       'cancel',
     ],
-    ['encarte excluído', facts({ documentDeleted: true }), 'cancel'],
     [
-      'encarte excluído, com lote em dia',
+      'encarte excluído, sem lote em execução',
+      facts({ documentDeleted: true, heartbeatAt: null }),
+      'cancel',
+    ],
+    [
+      'encarte excluído, com lote em dia: o lote grava e fecha o job',
       facts({ documentDeleted: true, heartbeatAt: secondsAgo(5) }),
+      'none',
+    ],
+    [
+      'encarte excluído, com o lote morto',
+      facts({ documentDeleted: true, heartbeatAt: secondsAgo(61) }),
       'cancel',
     ],
   ])('%s: %s', (_, input, expected) => {

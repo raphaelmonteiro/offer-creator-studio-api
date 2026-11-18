@@ -9,6 +9,7 @@ import { DataSource } from 'typeorm';
 import { configureHttpApp } from '../../common/config/http-app.config';
 import { ResponseInterceptor } from '../../common/interceptors/response.interceptor';
 import { AiModule } from '../../modules/ai/ai.module';
+import { FlyerProJobReconcilerService } from '../../modules/flyer-pro/services/flyer-pro-job-reconciler.service';
 import { AuthService } from '../../modules/auth/auth.service';
 import { JwtStrategy } from '../../modules/auth/strategies/jwt.strategy';
 import { EmailService } from '../../modules/email/email.service';
@@ -160,6 +161,10 @@ export async function createE2eApp(options: E2eAppOptions): Promise<E2eApp> {
       .useModule(E2eSharedModule)
       .overrideModule(AiModule)
       .useModule(E2eAiModule.forRoot())
+      // O reconciliador varre todos os jobs do banco compartilhado, inclusive os que os specs de banco montam em paralelo:
+      // ele é provado nesses specs, com o relógio sob controle, e não roda no app dos specs HTTP.
+      .overrideProvider(FlyerProJobReconcilerService)
+      .useValue({ start: () => undefined, onModuleDestroy: () => undefined })
       .compile();
     // `bodyParser: false`: como o `main.ts`, quem lê o corpo é a configuração compartilhada.
     const app = moduleRef.createNestApplication({ bodyParser: false });

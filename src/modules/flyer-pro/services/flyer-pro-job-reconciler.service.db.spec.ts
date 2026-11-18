@@ -18,6 +18,10 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
   const NOW = new Date();
   const secondsAgo = (seconds: number) => new Date(NOW.getTime() - seconds * 1000);
 
+  /** O banco é compartilhado: a varredura age em todo job ativo, então cada caso olha só as mensagens do próprio job. */
+  const messagesOf = (world: EnrichWorld, jobId: string) =>
+    world.messages.filter((message) => message.data.jobId === jobId);
+
   const reconcilerOf = (world: EnrichWorld) =>
     new FlyerProJobReconcilerService(db.dataSource, world.queue as never, world.config);
 
@@ -39,11 +43,10 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
     const world = makeEnrichWorld(db.dataSource);
     const before = await jobRowOf(db.dataSource, id);
 
-    const acted = await reconcilerOf(world).reconcile(NOW);
+    await reconcilerOf(world).reconcile(NOW);
 
-    expect(acted).toBe(0);
     expect(await jobRowOf(db.dataSource, id)).toEqual(before);
-    expect(world.messages).toEqual([]);
+    expect(messagesOf(world, id)).toEqual([]);
   });
 
   it('lote sem batimento há 61 s: sobe batchAttempts, zera o batimento e republica a mesma ficha', async () => {
@@ -57,8 +60,8 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
       batchAttempts: 1,
       heartbeatAt: null,
     });
-    expect(world.messages).toHaveLength(1);
-    expect(world.messages[0]).toMatchObject({
+    expect(messagesOf(world, id)).toHaveLength(1);
+    expect(messagesOf(world, id)[0]).toMatchObject({
       data: { jobId: id, seq: 7 },
       options: { retryLimit: 0, expireInSeconds: 300 },
     });
@@ -86,7 +89,7 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
       },
     });
     expect(job.finishedAt).toBeInstanceOf(Date);
-    expect(world.messages).toEqual([]);
+    expect(messagesOf(world, id)).toEqual([]);
   });
 
   it('lote publicado e não assumido há 301 s: republica, atualiza updatedAt e não conta tentativa', async () => {
@@ -99,7 +102,9 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
     const job = await jobRowOf(db.dataSource, id);
     expect(job).toMatchObject({ batchAttempts: 1, status: 'running' });
     expect((job.updatedAt as Date).getTime()).toBeGreaterThan(stale.getTime());
-    expect(world.messages).toEqual([expect.objectContaining({ data: { jobId: id, seq: 7 } })]);
+    expect(messagesOf(world, id)).toEqual([
+      expect.objectContaining({ data: { jobId: id, seq: 7 } }),
+    ]);
   });
 
   it('job na fila há 301 s (mensagem perdida): também é republicado', async () => {
@@ -113,7 +118,9 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
 
     await reconcilerOf(world).reconcile(NOW);
 
-    expect(world.messages).toEqual([expect.objectContaining({ data: { jobId: id, seq: 0 } })]);
+    expect(messagesOf(world, id)).toEqual([
+      expect.objectContaining({ data: { jobId: id, seq: 0 } }),
+    ]);
   });
 
   describe('parada e encarte excluído', () => {
@@ -126,7 +133,7 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
       const job = await jobRowOf(db.dataSource, id);
       expect(job.status).toBe('canceled');
       expect(job.finishedAt).toBeInstanceOf(Date);
-      expect(world.messages).toEqual([]);
+      expect(messagesOf(world, id)).toEqual([]);
     });
 
     it('parada pedida com o lote vivo: o lote fecha o job, a varredura não mexe', async () => {
@@ -156,7 +163,7 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
       await reconcilerOf(world).reconcile(NOW);
 
       expect(await jobRowOf(db.dataSource, id)).toMatchObject({ status: 'canceled' });
-      expect(world.messages).toEqual([]);
+      expect(messagesOf(world, id)).toEqual([]);
     });
 
     it('lote imediato do N16 não publicado: na varredura seguinte o job fica canceled', async () => {
@@ -193,7 +200,7 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
 
     const up = makeEnrichWorld(db.dataSource);
     await reconcilerOf(up).reconcile(NOW);
-    expect(up.messages).toHaveLength(1);
+    expect(messagesOf(up, id)).toHaveLength(1);
     expect(await jobRowOf(db.dataSource, id)).toMatchObject({ batchAttempts: 1 });
   });
 
@@ -220,6 +227,7 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
       );
 
       await reconcilerOf(world).reconcile(new Date());
+      world.messages.splice(0, world.messages.length, ...messagesOf(world, job.id)); // só as do próprio job
       expect(world.messages).toEqual([
         expect.objectContaining({ data: { jobId: job.id, seq: 2 } }),
       ]);
