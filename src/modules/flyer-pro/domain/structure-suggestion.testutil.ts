@@ -1,4 +1,4 @@
-import type { StructureRequest } from './structure-suggestion.types';
+import type { StructureItemRow, StructureRequest } from './structure-suggestion.types';
 
 /**
  * O encarte "Ofertas da semana 47" da spec `flyer-pro-structure-suggestion` (só testes): os oito itens e o retrato que a
@@ -14,20 +14,10 @@ export const LINGUICA_ID = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c23';
 export const CERVEJA_ID = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c31';
 export const REFRI_ID = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c32';
 
-/** O item como as consultas do serviço o devolvem: só o que a sugestão lê. */
-export interface ExampleItemRow {
-  id: string;
-  name: string;
-  price: Record<string, unknown>;
-  unit: string;
-  category: string | null;
-  imageUrl: string | null;
-}
-
 const PHOTO = (name: string) => `/uploads/products/${name}.jpg`;
 
 /** Os oito itens do exemplo, na ordem do pedido; o TOMATE é o único sem foto. */
-export const EXAMPLE_ITEMS: ExampleItemRow[] = [
+export const EXAMPLE_ITEMS: StructureItemRow[] = [
   {
     id: ABACATE_ID,
     name: 'ABACATE',

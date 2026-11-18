@@ -99,3 +99,13 @@ export interface SanitizedSuggestion {
   discarded: DiscardedEntry[];
   noChange: boolean;
 }
+
+/** O item como as consultas do serviço o devolvem: só o que a sugestão lê do banco (nunca vem do pedido). */
+export interface StructureItemRow {
+  id: string;
+  name: string;
+  price: Record<string, unknown>;
+  unit: string;
+  category: string | null;
+  imageUrl: string | null;
+}
