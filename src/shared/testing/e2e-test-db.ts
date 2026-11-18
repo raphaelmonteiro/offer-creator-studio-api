@@ -4,6 +4,7 @@ import { Client } from '../../modules/clients/entities/client.entity';
 import { ClientContact } from '../../modules/clients/entities/client-contact.entity';
 import { ClientStore } from '../../modules/clients/entities/client-store.entity';
 import { FlyerProDocument } from '../../modules/flyer-pro/entities/flyer-pro-document.entity';
+import { FlyerProExport } from '../../modules/flyer-pro/entities/flyer-pro-export.entity';
 import { FlyerProImport } from '../../modules/flyer-pro/entities/flyer-pro-import.entity';
 import { FlyerProItem } from '../../modules/flyer-pro/entities/flyer-pro-item.entity';
 import { SCENE_TEST_ENTITIES } from '../../modules/template-scenes/testing/scene-test-db';
@@ -84,6 +85,7 @@ export const E2E_TEST_ENTITIES = [
   FlyerProDocument,
   FlyerProItem,
   FlyerProImport,
+  FlyerProExport,
   FlyerBuilderV2Document,
 ];
 

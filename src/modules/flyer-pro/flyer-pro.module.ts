@@ -6,6 +6,7 @@ import { FlyerProStructureSuggestionController } from './controllers/flyer-pro-s
 import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.controller';
 import { readStructureAiConfig, STRUCTURE_AI_CONFIG } from './config/structure-ai.config';
 import { FlyerProDocument } from './entities/flyer-pro-document.entity';
+import { FlyerProExport } from './entities/flyer-pro-export.entity';
 import { FlyerProImport } from './entities/flyer-pro-import.entity';
 import { FlyerProItem } from './entities/flyer-pro-item.entity';
 import { createStructureAiPort } from './providers/flyer-pro-structure-ai.factory';
@@ -29,7 +30,9 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
  * o módulo de clientes chama ao excluir um cliente, e a sugestão de estrutura por IA (N19, só leitura). Lê as tabelas das cenas sem passar pela flag `TEMPLATE_SCENE_ENABLED`.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem, FlyerProImport])],
+  imports: [
+    TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem, FlyerProImport, FlyerProExport]),
+  ],
   controllers: [
     FlyerProTemplatesController,
     FlyerProDocumentsController,

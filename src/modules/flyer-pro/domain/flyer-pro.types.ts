@@ -1,6 +1,6 @@
 /**
  * Tipos do `templateSnapshot` (a cópia congelada do template de uma cena) e da entrada da lista de templates, como em
- * A1 § 7.1 e A2 N7. O servidor monta a cópia; o cliente nunca a envia.
+ * A1 § 7.1 e A2 N7. O servidor monta a cópia; o cliente nunca a envia. No fim do arquivo, os tipos da exportação (N8).
  */
 
 export type FlyerProFormat = '27x40' | '54x40';
@@ -118,4 +118,54 @@ export interface FlyerProTemplatesListInput {
   sceneId?: string;
   page?: number;
   limit?: number;
+}
+
+/** Os formatos de arquivo da exportação (`flyer_pro_exports.format`). */
+export const FLYER_PRO_EXPORT_FORMATS = ['pdf', 'png', 'zip'] as const;
+export type ExportFormat = (typeof FLYER_PRO_EXPORT_FORMATS)[number];
+
+/** As quatro opções da etapa Exportar (`08-exportar.html#desenho`); a lista é fechada e o DTO e as regras a importam. */
+export const FLYER_PRO_EXPORT_PRESETS = [
+  'png-450-sheet',
+  'pdf-450-all',
+  'zip-450-all',
+  'png-72-sheet',
+] as const;
+export type ExportPreset = (typeof FLYER_PRO_EXPORT_PRESETS)[number];
+
+/** As opções com que o arquivo foi gerado, gravadas como vieram (`flyer_pro_exports.options`). */
+export interface ExportOptions {
+  preset: ExportPreset;
+  dpi: 450 | 72;
+  unit: 'sheet';
+  sheets: number[];
+  color: 'rgb';
+  /** Só no PDF; ausente quando o pedido não traz (ou traz `null`, que vale como ausente). */
+  jpegQuality?: number;
+  widthPx: number;
+  heightPx: number;
+  bleed: boolean;
+}
+
+/** A contagem dos alertas do Pré-flight na hora de exportar, por gravidade; o servidor guarda os três números. */
+export interface ExportPreflightCount {
+  problems: number;
+  warnings: number;
+  infos: number;
+}
+
+/**
+ * O registro de uma exportação como o corpo do N8 o traz, já sem os `null` (que valem como ausente em `fileSize`,
+ * `preflight` e `options.jpegQuality`, D-3). O pedido não traz a hora do download: o "quando" é `createdAt`.
+ */
+export interface FlyerProExportEntry {
+  id: string;
+  format: ExportFormat;
+  options: ExportOptions;
+  documentRevision: number;
+  engineVersion: number;
+  renderDigest: string;
+  fileName: string;
+  fileSize?: number;
+  preflight?: ExportPreflightCount;
 }
