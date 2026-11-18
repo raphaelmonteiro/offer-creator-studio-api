@@ -3,6 +3,7 @@ import type { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto
 import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { documentRow, STATUS } from './flyer-pro-documents.service.testutil';
 import { FlyerProSaveService } from './flyer-pro-save.service';
+import type { FlyerProImportsService } from './flyer-pro-imports.service';
 import type { FlyerProItemsService } from './flyer-pro-items.service';
 import type { FlyerProSetupService } from './flyer-pro-setup.service';
 import type { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
@@ -54,11 +55,13 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
     apply: jest.fn().mockResolvedValue({ items: [], deletedItemIds: [] }),
     currentOf: jest.fn().mockResolvedValue([]),
   };
+  const imports = { apply: jest.fn().mockResolvedValue({}) };
   const service = new FlyerProSaveService(
     dataSource as unknown as DataSource,
     setup as unknown as FlyerProSetupService,
     snapshots as unknown as FlyerProTemplateSnapshotService,
     items as unknown as FlyerProItemsService,
+    imports as unknown as FlyerProImportsService,
   );
   /** Os comandos SQL enviados ao `manager`, na ordem. */
   const calls = (): QueryCall[] =>
@@ -70,6 +73,7 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
     setup,
     snapshots,
     items,
+    imports,
     calls,
     updates: () => calls().filter((call) => call.sql.startsWith('UPDATE')),
   };

@@ -9,6 +9,7 @@ import { FlyerProClientGuardService } from './services/flyer-pro-client-guard.se
 import { FlyerProCursorService } from './services/flyer-pro-cursor.service';
 import { FlyerProDocumentsService } from './services/flyer-pro-documents.service';
 import { FlyerProSaveService } from './services/flyer-pro-save.service';
+import { FlyerProImportsService } from './services/flyer-pro-imports.service';
 import { FlyerProItemsService } from './services/flyer-pro-items.service';
 import { FlyerProSetupService } from './services/flyer-pro-setup.service';
 import { FlyerProSceneReader } from './services/flyer-pro-scene.reader';
@@ -33,6 +34,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProCursorService,
     FlyerProItemsService,
     FlyerProClientGuardService,
+    FlyerProImportsService,
   ],
   exports: [FlyerProTemplateSnapshotService, FlyerProClientGuardService],
 })

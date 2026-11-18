@@ -105,10 +105,15 @@ describe('isConferenceBody', () => {
     expect(isConferenceBody({ items: null })).toBe(false);
   });
 
-  it('setup, slices ou items presentes, mesmo vazios, fazem um PATCH normal', () => {
+  it('setup, slices, items ou import presentes, mesmo vazios, fazem um PATCH normal', () => {
     expect(isConferenceBody({ setup: {} })).toBe(false);
     expect(isConferenceBody({ slices: {} })).toBe(false);
     expect(isConferenceBody({ items: {} })).toBe(false);
+    expect(isConferenceBody({ import: {} })).toBe(false);
+  });
+
+  it('um corpo só com import nunca é regravação de conferência (a importação não seria gravada)', () => {
+    expect(isConferenceBody({ import: { id: 'i' }, layoutDigest: 'x' } as object)).toBe(false);
   });
 });
 
