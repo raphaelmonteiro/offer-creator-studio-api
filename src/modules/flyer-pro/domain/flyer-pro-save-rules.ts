@@ -6,6 +6,7 @@ import {
   flyerProSliceTooLarge,
 } from './flyer-pro.errors';
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
+import { isSent, missingFields } from './flyer-pro-presence';
 import { FLYER_PRO_SLICE_KEYS, FlyerProSliceKey, jsonBytes } from './flyer-pro-slices';
 
 /** Os quatro campos de todo `PATCH`; o pipe pula o corpo `{}`, então o serviço os confere à mão. */
@@ -17,13 +18,6 @@ export const SAVE_REQUIRED_FIELDS = [
 ] as const;
 
 type SaveRequiredField = (typeof SAVE_REQUIRED_FIELDS)[number];
-
-/** Os obrigatórios que o corpo não traz (ausentes ou nulos), na ordem do contrato. */
-export function missingSaveFields(body: Partial<Record<SaveRequiredField, unknown>>): string[] {
-  return SAVE_REQUIRED_FIELDS.filter(
-    (field) => body?.[field] === undefined || body[field] === null,
-  );
-}
 
 /** A parte do corpo que a conferência de tamanho lê. */
 export interface SizedSaveBody {
@@ -61,31 +55,29 @@ export function firstOversizedPart(body: SizedSaveBody): OversizedPart | null {
   return null;
 }
 
-const sent = (value: unknown): boolean => value !== undefined && value !== null;
-
 /**
  * Regravação de conferência: o corpo sem `setup`, `slices` nem `items` (`import` e `enrich` ainda não existem no DTO).
  * Chave presente, mesmo com objeto vazio, faz do corpo um `PATCH` normal (A-7).
  */
 export function isConferenceBody(body: { setup?: unknown; slices?: unknown; items?: unknown }) {
-  return !sent(body.setup) && !sent(body.slices) && !sent(body.items);
+  return body.setup === undefined && body.slices === undefined && body.items === undefined;
 }
 
 /**
- * As conferências do `PATCH` antes de abrir a transação, na ordem do contrato: os obrigatórios (400) e os tamanhos
- * (422). Nenhuma toca o banco.
+ * As conferências do `PATCH` antes de abrir a transação, na ordem do contrato: a forma (400: obrigatórios e ids
+ * repetidos) e depois os tamanhos (422). Nenhuma toca o banco.
  */
 export function assertSaveBody(
   body: Partial<Record<SaveRequiredField, unknown>> & SizedSaveBody & ItemsBody,
 ): void {
-  const missing = missingSaveFields(body);
+  const missing = missingFields(body, SAVE_REQUIRED_FIELDS);
   if (missing.length > 0) throw flyerProMissingFields(missing);
-  const oversized = firstOversizedPart(body);
-  if (oversized) throw flyerProSliceTooLarge(oversized);
   const repeated = repeatedUpsertIds(body.items?.upsert);
   if (repeated.length > 0) {
     throw flyerProBadRequest(`Ids repetidos em items.upsert: ${repeated.join(', ')}.`);
   }
+  const oversized = firstOversizedPart(body);
+  if (oversized) throw flyerProSliceTooLarge(oversized);
 }
 
 interface ItemsBody {
@@ -115,8 +107,8 @@ export function saveResponseFields(setup?: {
   refreshTemplate?: boolean | null;
   pageCount?: number | null;
 }): SaveResponseFields {
-  const template = sent(setup?.sceneId) || setup?.refreshTemplate === true;
-  return { template, pageCount: template || sent(setup?.pageCount) };
+  const template = isSent(setup?.sceneId) || setup?.refreshTemplate === true;
+  return { template, pageCount: template || isSent(setup?.pageCount) };
 }
 
 interface Versions {

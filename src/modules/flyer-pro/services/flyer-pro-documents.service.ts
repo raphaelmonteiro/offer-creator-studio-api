@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import type { PaginationResult } from '../../../common/utils/pagination.util';
-import { isCreationKeyConflict, missingCreateFields } from '../domain/flyer-pro-document-rules';
+import { CREATE_REQUIRED_FIELDS, isCreationKeyConflict } from '../domain/flyer-pro-document-rules';
+import { missingFields } from '../domain/flyer-pro-presence';
 import { findFlyerProFormat, sceneFormatIdOf } from '../domain/flyer-pro-formats';
 import { flyerProMissingFields, flyerProNotFound } from '../domain/flyer-pro.errors';
 import type { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
@@ -72,7 +73,7 @@ export class FlyerProDocumentsService {
    * mesma transação) e, depois do commit, a leitura do N3. Recusa não grava nem gasta a chave.
    */
   async create(dto: CreateFlyerProDocumentDto, userId: string): Promise<FlyerProCreateResult> {
-    const missing = missingCreateFields(dto as unknown as Record<string, unknown>);
+    const missing = missingFields(dto, CREATE_REQUIRED_FIELDS);
     if (missing.length > 0) throw flyerProMissingFields(missing);
     const known = await this.replayOf(dto.creationKey);
     if (known) return known;

@@ -1,5 +1,6 @@
 import { flyerProBadRequest, flyerProMissingFields, flyerProUiTooLarge } from './flyer-pro.errors';
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
+import { isSent, missingFields } from './flyer-pro-presence';
 import { jsonBytes } from './flyer-pro-slices';
 import { FLYER_PRO_STEPS } from './flyer-pro-steps';
 
@@ -8,11 +9,12 @@ import { FLYER_PRO_STEPS } from './flyer-pro-steps';
  * nulo não tem tamanho (mantém o atual).
  */
 export function assertCursorBody(body: { step?: unknown; ui?: unknown }): void {
-  if (body.step === undefined || body.step === null) throw flyerProMissingFields(['step']);
+  const missing = missingFields(body, ['step']);
+  if (missing.length > 0) throw flyerProMissingFields(missing);
   if (!(FLYER_PRO_STEPS as readonly unknown[]).includes(body.step)) {
     throw flyerProBadRequest(`Etapa inválida: use uma de ${FLYER_PRO_STEPS.join(', ')}.`);
   }
-  if (body.ui === undefined || body.ui === null) return;
+  if (!isSent(body.ui)) return;
   const bytes = jsonBytes(body.ui);
   if (bytes > FLYER_PRO_LIMITS.uiMaxBytes) {
     throw flyerProUiTooLarge({ bytes, max: FLYER_PRO_LIMITS.uiMaxBytes });

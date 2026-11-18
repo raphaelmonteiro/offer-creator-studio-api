@@ -6,6 +6,7 @@ import {
   supersede,
 } from './flyer-pro-item-review';
 import { IMAGE_GROUP_KEYS, ItemDraft } from './flyer-pro-item.types';
+import { isSent } from './flyer-pro-presence';
 
 /**
  * O que só o servidor escreve em cada item (`categorySource`, `imageStatus` e as três revisões), derivado do item
@@ -19,8 +20,6 @@ export interface DerivedItemFields {
   imageReview: ItemReview;
   spellReview: ItemReview;
 }
-
-const isSent = (value: unknown): boolean => value !== undefined && value !== null;
 
 type CategoryFields = Pick<DerivedItemFields, 'categorySource' | 'categoryReview'>;
 

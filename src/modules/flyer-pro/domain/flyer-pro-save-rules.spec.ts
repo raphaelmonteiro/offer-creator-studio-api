@@ -1,10 +1,11 @@
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
 import { HttpException } from '@nestjs/common';
+import { missingFields } from './flyer-pro-presence';
 import {
   assertSaveBody,
   firstOversizedPart,
   isConferenceBody,
-  missingSaveFields,
+  SAVE_REQUIRED_FIELDS,
 } from './flyer-pro-save-rules';
 
 const BASE = { mutationId: 'm', expectedRevision: 0, schemaVersion: 1, engineVersion: 1 };
@@ -12,9 +13,9 @@ const BASE = { mutationId: 'm', expectedRevision: 0, schemaVersion: 1, engineVer
 /** Um objeto cujo JSON tem exatamente `bytes` bytes. */
 const objectOf = (bytes: number) => ({ a: 'x'.repeat(bytes - '{"a":""}'.length) });
 
-describe('missingSaveFields', () => {
+describe('missingFields com SAVE_REQUIRED_FIELDS', () => {
   it('corpo {} lista os quatro, na ordem do contrato', () => {
-    expect(missingSaveFields({})).toEqual([
+    expect(missingFields({}, SAVE_REQUIRED_FIELDS)).toEqual([
       'mutationId',
       'expectedRevision',
       'schemaVersion',
@@ -23,11 +24,13 @@ describe('missingSaveFields', () => {
   });
 
   it('lista só o que falta; expectedRevision 0 não falta', () => {
-    expect(missingSaveFields({ ...BASE, expectedRevision: undefined })).toEqual([
+    expect(missingFields({ ...BASE, expectedRevision: undefined }, SAVE_REQUIRED_FIELDS)).toEqual([
       'expectedRevision',
     ]);
-    expect(missingSaveFields({ ...BASE, schemaVersion: null })).toEqual(['schemaVersion']);
-    expect(missingSaveFields(BASE)).toEqual([]);
+    expect(missingFields({ ...BASE, schemaVersion: null }, SAVE_REQUIRED_FIELDS)).toEqual([
+      'schemaVersion',
+    ]);
+    expect(missingFields(BASE, SAVE_REQUIRED_FIELDS)).toEqual([]);
   });
 });
 
@@ -93,7 +96,13 @@ describe('firstOversizedPart', () => {
 describe('isConferenceBody', () => {
   it('corpo só com os obrigatórios, resultados e retrato é regravação de conferência', () => {
     expect(isConferenceBody({})).toBe(true);
-    expect(isConferenceBody({ setup: null, slices: undefined })).toBe(true);
+    expect(isConferenceBody({ setup: undefined, slices: undefined })).toBe(true);
+  });
+
+  it('chave nula nunca é regravação de conferência (o pipe a recusa antes, PV-11)', () => {
+    expect(isConferenceBody({ setup: null })).toBe(false);
+    expect(isConferenceBody({ slices: null })).toBe(false);
+    expect(isConferenceBody({ items: null })).toBe(false);
   });
 
   it('setup, slices ou items presentes, mesmo vazios, fazem um PATCH normal', () => {
@@ -127,6 +136,16 @@ describe('assertSaveBody', () => {
 
   it('os obrigatórios vêm antes dos tamanhos', () => {
     const response = responseOf({ slices: { card: objectOf(300 * 1024) } });
+    expect(response).toMatchObject({ status: 400, code: 'BAD_REQUEST' });
+  });
+
+  it('ids repetidos (400) vêm antes do tamanho (422) no mesmo corpo', () => {
+    const upsert = [{ id: 'a' }, { id: 'a' }];
+    const response = responseOf({
+      ...BASE,
+      slices: { assembly: objectOf(300 * 1024) },
+      items: { upsert },
+    });
     expect(response).toMatchObject({ status: 400, code: 'BAD_REQUEST' });
   });
 

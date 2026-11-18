@@ -68,9 +68,27 @@ describe('SaveFlyerProDocumentDto', () => {
       expect(await errorsOf({ slices: { frame: 'x' } })).toEqual(['slices']);
     });
 
+    it.each(['frame', 'structure', 'card', 'assembly', 'exportPrefs'])(
+      'fatia %s nula é recusada (400), não vira NULL na coluna NOT NULL',
+      async (key) => {
+        expect(await errorsOf({ slices: { [key]: null } })).toEqual(['slices']);
+      },
+    );
+
     it('o conteúdo da fatia não é conferido', async () => {
       expect(await errorsOf({ slices: { card: { qualquer: [1, { a: null }] } } })).toEqual([]);
     });
+  });
+
+  it.each(['setup', 'slices', 'items'])(
+    '%s nulo (o objeto inteiro) é recusado como não objeto',
+    async (key) => {
+      expect(await errorsOf({ [key]: null })).toEqual([key]);
+    },
+  );
+
+  it('layoutSnapshot nulo é aceito (limpa a coluna, PV-10)', async () => {
+    expect(await errorsOf({ layoutSnapshot: null })).toEqual([]);
   });
 
   describe('setup', () => {

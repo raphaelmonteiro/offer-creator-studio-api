@@ -45,6 +45,14 @@ describe('FlyerProSaveService.save: regravação de conferência aplicada', () =
     }
   });
 
+  it('layoutSnapshot nulo limpa a coluna também na regravação de conferência (PV-10)', async () => {
+    const { service, updates } = makeSaveService(stored());
+
+    await service.save('bruno', 'd1', conference({ layoutSnapshot: null }));
+
+    expect(columnsSetBy(updates()[0])).toHaveProperty('layoutSnapshot', null);
+  });
+
   it('a resposta traz a revisão e o updatedAt de antes, que a gravação não mudou', async () => {
     const { service } = makeSaveService(stored());
 

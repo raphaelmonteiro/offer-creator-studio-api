@@ -7,6 +7,7 @@ import { canonicallyEqual } from './flyer-pro-canonical';
 import { FlyerProItemIssue } from './flyer-pro.errors';
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
 import { IMAGE_GROUP_KEYS, ItemDraft, ItemFieldKey } from './flyer-pro-item.types';
+import { isSent } from './flyer-pro-presence';
 import { priceIssueCode } from './flyer-pro-price-rules';
 import { jsonBytes } from './flyer-pro-slices';
 
@@ -22,7 +23,6 @@ const REQUIRED_KEYS = ['position', 'name', 'price', 'unit'] as const;
 const EAN_LENGTHS = [8, 12, 13, 14];
 const URL_PREFIXES = ['http://', 'https://', '/uploads/'];
 
-const isSent = (value: unknown): boolean => value !== undefined && value !== null;
 const issue = (draft: ItemDraft, field: string, code: string): FlyerProItemIssue => ({
   itemId: draft.entry.id,
   field,

@@ -9,6 +9,7 @@ import {
   Length,
   Max,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { FLYER_PRO_LIMITS } from '../domain/flyer-pro.limits';
@@ -61,19 +62,19 @@ export class SaveFlyerProDocumentDto {
   layoutSnapshot?: Record<string, unknown>;
 
   @ApiPropertyOptional({ type: FlyerProSetupPatchDto })
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @ValidateNested()
   @Type(() => FlyerProSetupPatchDto)
   setup?: FlyerProSetupPatchDto;
 
   @ApiPropertyOptional({ type: FlyerProSlicesPatchDto, description: 'Cada fatia até 256 KB' })
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @ValidateNested()
   @Type(() => FlyerProSlicesPatchDto)
   slices?: FlyerProSlicesPatchDto;
 
   @ApiPropertyOptional({ type: FlyerProItemsPatchDto })
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @ValidateNested()
   @Type(() => FlyerProItemsPatchDto)
   items?: FlyerProItemsPatchDto;

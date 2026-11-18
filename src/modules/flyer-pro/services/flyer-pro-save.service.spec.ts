@@ -133,6 +133,14 @@ describe('FlyerProSaveService.save: gravação normal', () => {
     });
   });
 
+  it('layoutSnapshot nulo limpa a coluna (PV-10); ausente não a toca', async () => {
+    const { service, updates } = makeSaveService();
+
+    await service.save('ana', 'd1', saveBody({ slices: { card: {} }, layoutSnapshot: null }));
+
+    expect(columnsSetBy(updates()[0])).toHaveProperty('layoutSnapshot', null);
+  });
+
   it('sem digests nem retrato no corpo, essas colunas não entram no UPDATE', async () => {
     const { service, updates } = makeSaveService();
 
