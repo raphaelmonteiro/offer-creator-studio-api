@@ -1,17 +1,22 @@
 import { Injectable } from '@nestjs/common';
-import { EntityManager } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { deriveItem } from '../domain/flyer-pro-item-derive';
 import { draftOf } from '../domain/flyer-pro-item-merge';
 import { validateItems } from '../domain/flyer-pro-item-rules';
+import { utcInstantOf } from '../domain/flyer-pro-instant';
 import { ItemDraft } from '../domain/flyer-pro-item.types';
 import {
   flyerProItemIdConflict,
   flyerProItemInvalid,
   flyerProItemLimit,
+  flyerProNotFound,
 } from '../domain/flyer-pro.errors';
 import { FLYER_PRO_LIMITS } from '../domain/flyer-pro.limits';
 import type { FlyerProItemsPatchDto } from '../dto/flyer-pro-items-patch.dto';
+import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import type { FlyerProItem } from '../entities/flyer-pro-item.entity';
+import { FlyerProItemView, toItemView } from '../views/flyer-pro-document.view';
 import {
   countItems,
   deleteItems,
@@ -21,6 +26,7 @@ import {
   ItemRow,
   updateItems,
 } from './flyer-pro-item.statements';
+import { readWith } from './flyer-pro-read';
 
 /** O carimbo da gravação (lido depois da trava do encarte) e o usuário do token. */
 export interface ItemsContext {
@@ -34,6 +40,28 @@ export interface ItemsOutcome {
   deletedItemIds: string[];
 }
 
+/** A leitura incremental (N12): `{ items, cursor }`. */
+export interface FlyerProItemsPage {
+  items: FlyerProItemView[];
+  cursor: string;
+}
+
+const AFTER = `($2::timestamptz IS NULL OR "updatedAt" > $2::timestamptz)`;
+
+const ITEMS_AFTER_SQL = `SELECT * FROM "flyer_pro_items"
+  WHERE "documentId" = $1 AND ${AFTER} ORDER BY "position" ASC, "id" ASC`;
+
+/**
+ * O maior `updatedAt` devolvido (UTC, microssegundos). Sem itens: o `updatedAfter` no mesmo formato ou, sem ele, o
+ * `createdAt` do encarte.
+ */
+const ITEMS_CURSOR_SQL = `SELECT to_char(
+    COALESCE(
+      (SELECT max("updatedAt") FROM "flyer_pro_items" WHERE "documentId" = $1 AND ${AFTER}),
+      $2::timestamptz,
+      (SELECT "createdAt" FROM "flyer_pro_documents" WHERE "id" = $1)
+    ) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor`;
+
 /**
  * O ramo `items` do `PATCH` (N4), dentro da transação do salvar, na ordem do contrato: apagar `delete`; ler os itens
  * citados em `upsert` (id de outro encarte é 409); mesclar; validar todos (422, com todos os `issues`); derivar o que só o
@@ -42,6 +70,27 @@ export interface ItemsOutcome {
  */
 @Injectable()
 export class FlyerProItemsService {
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  /**
+   * N12: os itens do encarte vivo, todos ou só os gravados depois de `updatedAfter` (comparado com microssegundos), em
+   * ordem de `position` e `id`, e o cursor em texto calculado no banco. Não grava nada; itens e cursor saem do mesmo
+   * instante do banco.
+   */
+  list(id: string, updatedAfter?: string): Promise<FlyerProItemsPage> {
+    const after = updatedAfter ? utcInstantOf(updatedAfter) : null;
+    return readWith(this.dataSource, undefined, async (manager) => {
+      const document = await manager.findOne(FlyerProDocument, {
+        where: { id },
+        select: { id: true },
+      });
+      if (!document) throw flyerProNotFound();
+      const items: FlyerProItem[] = await manager.query(ITEMS_AFTER_SQL, [id, after]);
+      const [{ cursor }] = await manager.query(ITEMS_CURSOR_SQL, [id, after]);
+      return { items: items.map(toItemView), cursor };
+    });
+  }
+
   async apply(
     manager: EntityManager,
     documentId: string,

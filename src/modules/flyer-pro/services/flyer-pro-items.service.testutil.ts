@@ -1,4 +1,4 @@
-import type { EntityManager } from 'typeorm';
+import type { DataSource, EntityManager } from 'typeorm';
 import type { FlyerProItemsPatchDto } from '../dto/flyer-pro-items-patch.dto';
 import type { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import { FlyerProItemsService } from './flyer-pro-items.service';
@@ -53,8 +53,20 @@ export const statementsStartingWith = (manager: ItemsManager, verb: string) =>
 export const recordsOf = (statement: { params: unknown[] }): Array<Record<string, unknown>> =>
   JSON.parse(statement.params[0] as string);
 
+/** O serviço sobre um `DataSource` simulado que entrega o `manager` (a leitura roda numa transação `REPEATABLE READ`). */
+export function makeItemsService(manager: ItemsManager = makeItemsManager()) {
+  const dataSource = {
+    transaction: jest.fn((levelOrWork: unknown, maybeWork?: (m: unknown) => unknown) =>
+      (typeof levelOrWork === 'string' ? maybeWork : (levelOrWork as (m: unknown) => unknown))(
+        manager,
+      ),
+    ),
+  };
+  return { service: new FlyerProItemsService(dataSource as unknown as DataSource), dataSource };
+}
+
 export const run = (
   manager: ItemsManager,
   patch: Partial<FlyerProItemsPatchDto>,
-  service = new FlyerProItemsService(),
+  service = makeItemsService(manager).service,
 ) => service.apply(manager, DOCUMENT, patch as FlyerProItemsPatchDto, CONTEXT);

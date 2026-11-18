@@ -20,11 +20,13 @@ import { CurrentUser } from '../../../common/decorators/user.decorator';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { flyerProNotFound } from '../domain/flyer-pro.errors';
 import { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
+import { ListFlyerProItemsQueryDto } from '../dto/list-items-query.dto';
 import { QueryFlyerProDocumentsDto } from '../dto/query-flyer-pro-documents.dto';
 import { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
 import { UpdateFlyerProCursorDto } from '../dto/update-flyer-pro-cursor.dto';
 import { FlyerProCursorService } from '../services/flyer-pro-cursor.service';
 import { FlyerProDocumentsService } from '../services/flyer-pro-documents.service';
+import { FlyerProItemsService } from '../services/flyer-pro-items.service';
 import { FlyerProSaveService } from '../services/flyer-pro-save.service';
 
 /** Id que não é UUID também é "encarte não encontrado" (sem revelar nada além disso). */
@@ -39,6 +41,7 @@ export class FlyerProDocumentsController {
     private readonly documents: FlyerProDocumentsService,
     private readonly saves: FlyerProSaveService,
     private readonly cursors: FlyerProCursorService,
+    private readonly items: FlyerProItemsService,
   ) {}
 
   @Post()
@@ -95,6 +98,22 @@ export class FlyerProDocumentsController {
   })
   open(@Param('id', DocumentIdPipe) id: string) {
     return this.documents.open(id);
+  }
+
+  @Get(':id/items')
+  @ApiOperation({
+    summary:
+      'Lê os itens do encarte, todos ou só os gravados depois de updatedAfter, com o cursor em microssegundos; não grava',
+  })
+  @ApiResponse({ status: 200, description: '{ items, cursor }' })
+  @ApiResponse({ status: 400, description: 'BAD_REQUEST: updatedAfter que não é ISO 8601' })
+  @ApiResponse({ status: 401, description: 'UNAUTHORIZED: sem token' })
+  @ApiResponse({
+    status: 404,
+    description: 'FLYER_PRO_NOT_FOUND: inexistente, excluído ou id inválido',
+  })
+  listItems(@Param('id', DocumentIdPipe) id: string, @Query() query: ListFlyerProItemsQueryDto) {
+    return this.items.list(id, query.updatedAfter);
   }
 
   @Patch(':id')

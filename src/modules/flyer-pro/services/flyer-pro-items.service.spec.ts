@@ -3,12 +3,12 @@ import { itemRow } from './flyer-pro-documents.service.testutil';
 import {
   DOCUMENT,
   makeItemsManager,
+  makeItemsService,
   recordsOf,
   run,
   statementsOf,
   statementsStartingWith,
 } from './flyer-pro-items.service.testutil';
-import { FlyerProItemsService } from './flyer-pro-items.service';
 import { STAMP } from './flyer-pro-save.service.testutil';
 
 const ABACATE = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c11';
@@ -315,7 +315,7 @@ describe('FlyerProItemsService.currentOf', () => {
   it('traz o estado atual dos itens citados que existem no encarte, sem escrever', async () => {
     const manager = makeItemsManager({ found: [[itemRow({ id: ABACATE })]] });
 
-    const items = await new FlyerProItemsService().currentOf(manager, DOCUMENT, [
+    const items = await makeItemsService(manager).service.currentOf(manager, DOCUMENT, [
       { id: ABACATE },
       { id: CERVEJA },
     ]);
@@ -327,7 +327,9 @@ describe('FlyerProItemsService.currentOf', () => {
   it('sem upsert não lê nada', async () => {
     const manager = makeItemsManager();
 
-    await expect(new FlyerProItemsService().currentOf(manager, DOCUMENT)).resolves.toEqual([]);
+    await expect(makeItemsService(manager).service.currentOf(manager, DOCUMENT)).resolves.toEqual(
+      [],
+    );
     expect(manager.find).not.toHaveBeenCalled();
   });
 });

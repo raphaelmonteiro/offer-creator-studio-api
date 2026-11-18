@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import type { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
 import type { UpdateFlyerProCursorDto } from '../dto/update-flyer-pro-cursor.dto';
 import type { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
+import type { FlyerProItemsService } from '../services/flyer-pro-items.service';
 import type { FlyerProCursorService } from '../services/flyer-pro-cursor.service';
 import type { FlyerProDocumentsService } from '../services/flyer-pro-documents.service';
 import type { FlyerProSaveService } from '../services/flyer-pro-save.service';
@@ -20,13 +21,22 @@ function setup() {
   };
   const saves = { save: jest.fn() };
   const cursors = { set: jest.fn() };
+  const items = { list: jest.fn() };
   const res = { status: jest.fn() };
   const controller = new FlyerProDocumentsController(
     documents as unknown as FlyerProDocumentsService,
     saves as unknown as FlyerProSaveService,
     cursors as unknown as FlyerProCursorService,
+    items as unknown as FlyerProItemsService,
   );
-  return { controller, documents, saves, cursors, res: res as unknown as Response & typeof res };
+  return {
+    controller,
+    documents,
+    saves,
+    cursors,
+    items,
+    res: res as unknown as Response & typeof res,
+  };
 }
 
 describe('FlyerProDocumentsController', () => {
@@ -96,6 +106,19 @@ describe('FlyerProDocumentsController', () => {
     });
 
     expect(cursors.set).toHaveBeenCalledWith('d1', body);
+  });
+
+  it('listar os itens passa o id e o updatedAfter ao serviço', async () => {
+    const { controller, items } = setup();
+    items.list.mockResolvedValue({ items: [], cursor: 'c' });
+
+    await expect(
+      controller.listItems('d1', { updatedAfter: '2026-11-14T13:05:40.412377Z' }),
+    ).resolves.toEqual({ items: [], cursor: 'c' });
+    await controller.listItems('d1', {});
+
+    expect(items.list).toHaveBeenNthCalledWith(1, 'd1', '2026-11-14T13:05:40.412377Z');
+    expect(items.list).toHaveBeenNthCalledWith(2, 'd1', undefined);
   });
 
   it('o pipe do id deixa passar um UUID e transforma o que não é UUID em 404 FLYER_PRO_NOT_FOUND', async () => {
