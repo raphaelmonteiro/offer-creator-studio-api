@@ -115,3 +115,10 @@ export function imageWriteConditionSql(onlyMissing: boolean): string {
   const open = `"imageStatus" IN ('none', 'ean_pending')`;
   return onlyMissing ? open : `(${open} OR ${IMAGE_SQL.redo})`;
 }
+
+/**
+ * A conferência da sugestão na escrita (PV-10), com `onlyMissing` ligado ou desligado: a recusa feita por pessoa depois
+ * de o lote ler o item vale sobre a nova sugestão. Ortografia: recusa do nome de agora; categoria: recusa ou bloqueio.
+ */
+export const spellWriteConditionSql = SPELL_SQL.redo;
+export const categoryWriteConditionSql = `${sugStatus('categoryReview')} NOT IN ('rejected', 'blocked')`;

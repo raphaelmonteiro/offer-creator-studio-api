@@ -1,6 +1,10 @@
 import type { EntityManager } from 'typeorm';
 import { fold } from '../../../shared/text/fold';
-import { imageWriteConditionSql } from '../domain/flyer-pro-enrich-criteria';
+import {
+  categoryWriteConditionSql,
+  imageWriteConditionSql,
+  spellWriteConditionSql,
+} from '../domain/flyer-pro-enrich-criteria';
 import type { PhaseCounts } from '../domain/flyer-pro-enrich-rules';
 import { FLYER_PRO_CATEGORIES } from '../domain/flyer-pro-categories';
 import type {
@@ -82,9 +86,10 @@ function planCategory(
   ctx: WriteContext,
 ): ItemWrite | null {
   if (verdict.action === 'unanswered') return null;
-  // Estado lido: a mesma categoria com a mesma origem (ou as duas nulas) ainda vale na hora de gravar.
+  // Estado lido: a mesma categoria com a mesma origem (ou as duas nulas) ainda vale na hora de gravar, e a sugestão não
+  // foi recusada nem bloqueada por pessoa no meio do lote.
   const guard: Guard = (p) =>
-    `"category" IS NOT DISTINCT FROM ${p(item.category)} AND "categorySource" IS NOT DISTINCT FROM ${p(item.categorySource)}`;
+    `"category" IS NOT DISTINCT FROM ${p(item.category)} AND "categorySource" IS NOT DISTINCT FROM ${p(item.categorySource)} AND ${categoryWriteConditionSql}`;
   const nothing = () =>
     itemWrite(
       ctx,
@@ -126,7 +131,7 @@ function planSpelling(
   ctx: WriteContext,
 ): ItemWrite | null {
   if (verdict.action === 'unanswered') return null;
-  const guard: Guard = (p) => `"name" = ${p(item.name)}`;
+  const guard: Guard = (p) => `"name" = ${p(item.name)} AND ${spellWriteConditionSql}`;
   const fixes = verdict.action === 'suggest' && verdict.value !== item.name;
   const suggestion = fixes
     ? { value: (verdict as { value: string }).value, status: 'pending' }

@@ -166,6 +166,41 @@ describeIfE2eDb('reconciliador do job (banco de e2e)', () => {
       expect(messagesOf(world, id)).toEqual([]);
     });
 
+    it('encarte excluído com o lote vivo: o job não muda e nada é republicado, o lote fecha o job', async () => {
+      const { id, documentId } = await activeJob({
+        heartbeatAt: secondsAgo(10),
+        cancelRequestedAt: secondsAgo(10),
+      });
+      await db.dataSource.query(
+        `UPDATE flyer_pro_documents SET "deletedAt" = now() WHERE id = $1`,
+        [documentId],
+      );
+      const world = makeEnrichWorld(db.dataSource);
+      const before = await jobRowOf(db.dataSource, id);
+
+      await reconcilerOf(world).reconcile(NOW);
+
+      expect(await jobRowOf(db.dataSource, id)).toEqual(before);
+      expect(messagesOf(world, id)).toEqual([]);
+    });
+
+    it('encarte excluído com o lote morto: o job fica canceled, batchAttempts continua 0 e nada é republicado', async () => {
+      const { id, documentId } = await activeJob({ heartbeatAt: secondsAgo(61), batchAttempts: 0 });
+      await db.dataSource.query(
+        `UPDATE flyer_pro_documents SET "deletedAt" = now() WHERE id = $1`,
+        [documentId],
+      );
+      const world = makeEnrichWorld(db.dataSource);
+
+      await reconcilerOf(world).reconcile(NOW);
+
+      expect(await jobRowOf(db.dataSource, id)).toMatchObject({
+        status: 'canceled',
+        batchAttempts: 0,
+      });
+      expect(messagesOf(world, id)).toEqual([]);
+    });
+
     it('lote imediato do N16 não publicado: na varredura seguinte o job fica canceled', async () => {
       const { id } = await activeJob({
         heartbeatAt: null,
