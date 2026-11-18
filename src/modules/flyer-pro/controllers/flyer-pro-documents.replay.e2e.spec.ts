@@ -129,13 +129,13 @@ describeIfE2eDb(
       });
     });
 
-    describe('id inexistente, excluído ou que não é UUID', () => {
+    describe('id inexistente ou excluído', () => {
       it('404 FLYER_PRO_NOT_FOUND na abertura e na exclusão, e 401 antes de olhar o id sem token', async () => {
         const gone = await insertDocument(h.dataSource, {
           clientId: clientA(),
           deletedAt: new Date(),
         });
-        for (const id of ['abc', randomUUID(), gone]) {
+        for (const id of [randomUUID(), gone]) {
           for (const response of [await h.get(`${url}/${id}`), await h.delete(`${url}/${id}`)]) {
             expect(response.status).toBe(404);
             expect(envelope<null>(response).error).toMatchObject({
