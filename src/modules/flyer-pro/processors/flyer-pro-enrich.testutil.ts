@@ -220,3 +220,13 @@ export function useEnrichDb() {
     },
   };
 }
+
+/** Itens com palavra da tabela de categorias, grafia errada e nome sem nada, em partes iguais (`ItemSeed` do índice). */
+export const mixedItems = (index: number): ItemSeed => ({
+  name: [
+    `CERVEJA PILSEN ${index}`,
+    `FILE DE TILAPIA CONJELADO ${index}`,
+    `PRODUTO ${index}`,
+    `PRODUTO ${index}`,
+  ][index % 4],
+});

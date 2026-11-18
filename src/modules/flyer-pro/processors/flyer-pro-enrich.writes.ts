@@ -1,5 +1,7 @@
+import type { EntityManager } from 'typeorm';
 import { fold } from '../../../shared/text/fold';
 import { imageWriteConditionSql } from '../domain/flyer-pro-enrich-criteria';
+import type { PhaseCounts } from '../domain/flyer-pro-enrich-rules';
 import { FLYER_PRO_CATEGORIES } from '../domain/flyer-pro-categories';
 import type {
   CategoryChoice,
@@ -227,4 +229,17 @@ export function planWrites(work: PhaseWork, ctx: WriteContext): ItemWrite[] {
     return verdict ? planImage(item, verdict, ctx) : null;
   });
   return writes.filter((write): write is ItemWrite => write !== null);
+}
+
+/** Aplica os `UPDATE` do lote; só o que afetou a linha conta (a condição do estado lido falhou: nada é gravado). */
+export async function applyWrites(
+  manager: EntityManager,
+  writes: ItemWrite[],
+): Promise<PhaseCounts> {
+  const counts: PhaseCounts = {};
+  for (const write of writes) {
+    const [rows] = await manager.query(write.sql, write.params);
+    if (rows?.length) counts[write.count] = (counts[write.count] ?? 0) + 1;
+  }
+  return counts;
 }

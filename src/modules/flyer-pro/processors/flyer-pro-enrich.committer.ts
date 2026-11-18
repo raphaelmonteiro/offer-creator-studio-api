@@ -7,31 +7,21 @@ import {
   addCounts,
   addTiming,
   effectiveOnlyMissing,
-  enrichError,
   failureDecision,
   markSkipped,
-  needsAnotherRound,
-  nextPhase,
-  PhaseCounts,
   retryDelaySeconds,
-  runnablePhases,
   withModel,
 } from '../domain/flyer-pro-enrich-rules';
-import type {
-  EnrichCursor,
-  EnrichErrorCode,
-  EnrichPhase,
-  EnrichStep,
-} from '../domain/flyer-pro-job.types';
+import type { EnrichErrorCode, EnrichPhase, EnrichStep } from '../domain/flyer-pro-job.types';
 import type { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import type { FlyerProJob } from '../entities/flyer-pro-job.entity';
-import { countEligible } from '../services/flyer-pro-job.scope';
 import { inSavepoint } from '../services/flyer-pro-savepoint';
 import { findLockedDocument, readStamp } from '../services/flyer-pro-save.statements';
 import type { JobColumns } from './flyer-pro-enrich.statements';
 import { lockJob, updateJob } from './flyer-pro-enrich.statements';
-import type { ItemWrite, UnitPlan } from './flyer-pro-enrich.types';
-import { planWrites, WriteContext } from './flyer-pro-enrich.writes';
+import type { UnitPlan } from './flyer-pro-enrich.types';
+import { doneColumns, failedColumns, FRESH_CURSOR, nextState } from './flyer-pro-enrich.next-state';
+import { applyWrites, planWrites, WriteContext } from './flyer-pro-enrich.writes';
 
 /** O resultado de uma gravação: feita, ou descartada porque a ficha não bate (lote zumbi) ou o job sumiu. */
 export type CommitOutcome = 'committed' | 'discarded';
@@ -49,8 +39,6 @@ interface Locked {
   current: FlyerProJob;
   stopping: boolean;
 }
-
-const FRESH_CURSOR: EnrichCursor = { round: 1, pass: 0, position: null, id: null };
 
 /**
  * As gravações do processador, cada uma numa transação curta: travam o encarte e depois a linha do job (A-23), conferem a
@@ -94,7 +82,7 @@ export class FlyerProEnrichCommitter {
         return this.stopped(locked, { ...progress, cursor: moved, phase: plan.phase });
       }
       const next = closes
-        ? await this.afterPhase(manager, current, plan.phase, result)
+        ? await nextState(manager, current, plan.phase, result)
         : {
             phase: plan.phase as EnrichPhase | null,
             cursor: moved,
@@ -205,62 +193,6 @@ export class FlyerProEnrichCommitter {
   }
 
   /**
-   * O que vem depois de fechar a fase: a próxima fase pedida e não pulada, ou, depois da última, a conferência final
-   * (até 3 rodadas, somando ao `total` os itens que ainda se encaixam) ou o fim do job.
-   */
-  private async afterPhase(
-    manager: EntityManager,
-    job: FlyerProJob,
-    phase: EnrichStep,
-    result: FlyerProJob['result'],
-  ) {
-    const cursor = job.cursor ?? FRESH_CURSOR;
-    const phases = runnablePhases(job.steps, result);
-    const next = nextPhase(phases, phase);
-    if (next)
-      return {
-        phase: next as EnrichPhase | null,
-        cursor: reset(cursor),
-        total: job.total,
-        done: false,
-      };
-    const pending = await this.pendingCount(manager, job, phases);
-    if (needsAnotherRound(cursor.round, pending)) {
-      const again = { round: cursor.round + 1, pass: 0, position: null, id: null };
-      return {
-        phase: phases[0] as EnrichPhase | null,
-        cursor: again,
-        total: job.total + pending,
-        done: false,
-      };
-    }
-    return {
-      phase: null as EnrichPhase | null,
-      cursor: reset(cursor),
-      total: job.total,
-      done: true,
-    };
-  }
-
-  /** Itens do escopo que ainda se encaixam em alguma fase pedida e não pulada, pelo critério de `onlyMissing` ligado. */
-  private async pendingCount(
-    manager: EntityManager,
-    job: FlyerProJob,
-    phases: EnrichStep[],
-  ): Promise<number> {
-    let pending = 0;
-    for (const phase of phases) {
-      pending += await countEligible(manager, {
-        documentId: job.documentId,
-        scope: job.itemIds,
-        phase,
-        onlyMissing: true,
-      });
-    }
-    return pending;
-  }
-
-  /**
    * Publica o próximo lote com a ficha atual, na transação, num savepoint: se a fila falhar, só a publicação é desfeita,
    * os itens do lote ficam gravados e o job termina `failed` com `QUEUE_UNAVAILABLE`.
    */
@@ -284,40 +216,4 @@ export class FlyerProEnrichCommitter {
     );
     await updateJob(manager, current.id, failedColumns('QUEUE_UNAVAILABLE', current.phase, 0));
   }
-}
-
-const reset = (cursor: EnrichCursor): EnrichCursor => ({ ...cursor, position: null, id: null });
-
-/** `done`: a fase zera e o job fecha. */
-const doneColumns = (cursor: EnrichCursor): JobColumns => ({
-  status: 'done',
-  phase: null,
-  cursor,
-  finish: true,
-});
-
-/** `failed` com o `error` do código; a fase em que o job parou fica gravada. */
-function failedColumns(
-  code: EnrichErrorCode,
-  phase: EnrichPhase | null,
-  attempts: number,
-): JobColumns {
-  return {
-    status: 'failed',
-    phase,
-    error: enrichError(code, phase),
-    ...(attempts > 0 ? { batchAttempts: attempts } : {}),
-    clearHeartbeat: true,
-    finish: true,
-  };
-}
-
-/** Aplica os `UPDATE` do lote; só o que afetou a linha conta (a condição do estado lido falhou: nada é gravado). */
-async function applyWrites(manager: EntityManager, writes: ItemWrite[]): Promise<PhaseCounts> {
-  const counts: PhaseCounts = {};
-  for (const write of writes) {
-    const [rows] = await manager.query(write.sql, write.params);
-    if (rows?.length) counts[write.count] = (counts[write.count] ?? 0) + 1;
-  }
-  return counts;
 }

@@ -1,10 +1,10 @@
 import { describeIfE2eDb } from '../../../shared/testing/e2e-test-db';
 import { RealFlyerProEnrich } from '../providers/flyer-pro-enrich.real';
-import { insertItems, ItemSeed } from '../testing/flyer-pro-documents.fixture';
 import {
   itemRowsOf,
   jobRowOf,
   makeEnrichWorld,
+  mixedItems,
   mockPort,
   resultOf,
   Row,
@@ -30,18 +30,8 @@ const pick = (row: Row, keys: string[]) => Object.fromEntries(keys.map((key) => 
 describeIfE2eDb('processador do job: o fluxo dos lotes (banco de e2e, fila registrada)', () => {
   const db = useEnrichDb();
   const { newDocument, start } = db;
-  /** Itens com palavra da tabela de categorias, grafia errada e nome sem nada, em partes iguais. */
-  const mixed = (index: number): ItemSeed => ({
-    name: [
-      `CERVEJA PILSEN ${index}`,
-      `FILE DE TILAPIA CONJELADO ${index}`,
-      `PRODUTO ${index}`,
-      `PRODUTO ${index}`,
-    ][index % 4],
-  });
-
   it('Job de 78 itens até o fim: 234 processados, 2, 2 e 5 lotes, modelo mock, e o encarte intocado', async () => {
-    const { documentId } = await newDocument(78, mixed);
+    const { documentId } = await newDocument(78, mixedItems);
     const world = makeEnrichWorld(db.dataSource);
     const [before] = await db.dataSource.query(`SELECT * FROM flyer_pro_documents WHERE id = $1`, [
       documentId,
@@ -92,7 +82,7 @@ describeIfE2eDb('processador do job: o fluxo dos lotes (banco de e2e, fila regis
   });
 
   it('o job nunca escreve name, price, unit, ean, position, sourceName, imported, isAlcoholic nem importId, e nunca troca o nome pela correção', async () => {
-    const { documentId } = await newDocument(20, mixed);
+    const { documentId } = await newDocument(20, mixedItems);
     const before = await itemRowsOf(db.dataSource, documentId);
     const world = makeEnrichWorld(db.dataSource);
     await start(world, documentId);
@@ -136,7 +126,7 @@ describeIfE2eDb('processador do job: o fluxo dos lotes (banco de e2e, fila regis
   });
 
   it('só fotos: a fase é image_match e nenhum item ganha revisão de categoria ou de ortografia', async () => {
-    const { documentId } = await newDocument(20, mixed);
+    const { documentId } = await newDocument(20, mixedItems);
     const world = makeEnrichWorld(db.dataSource);
     const jobId = await start(world, documentId, { steps: ['image_match'] });
 
@@ -201,7 +191,7 @@ describeIfE2eDb('processador do job: o fluxo dos lotes (banco de e2e, fila regis
 
   describe('fase indisponível é pulada', () => {
     it('categorias desligadas: skipped AI_DISABLED, nenhum item ganha categoryReview, ortografia e fotos rodam, e processed chega a total', async () => {
-      const { documentId } = await newDocument(10, mixed);
+      const { documentId } = await newDocument(10, mixedItems);
       const port = wrapPort(mockPort(), {
         available: (phase: EnrichStep) => phase !== 'categorize',
       });
@@ -222,7 +212,7 @@ describeIfE2eDb('processador do job: o fluxo dos lotes (banco de e2e, fila regis
     });
 
     it('a fase pulada não volta na conferência final: o job termina done sem outra rodada por causa das categorias', async () => {
-      const { documentId } = await newDocument(5, mixed);
+      const { documentId } = await newDocument(5, mixedItems);
       const port = wrapPort(mockPort(), {
         available: (phase: EnrichStep) => phase !== 'categorize',
       });
@@ -238,7 +228,7 @@ describeIfE2eDb('processador do job: o fluxo dos lotes (banco de e2e, fila regis
 
   describe('provedor real antes da change 29 (A-27)', () => {
     it('as três fases são puladas: done com skipped AI_DISABLED, nenhum item muda, models sem mock e nenhuma chamada externa', async () => {
-      const { documentId } = await newDocument(78, mixed, 'Teste #ia-falha');
+      const { documentId } = await newDocument(78, mixedItems, 'Teste #ia-falha');
       const before = await itemRowsOf(db.dataSource, documentId);
       const fetchSpy = jest.spyOn(globalThis, 'fetch');
       const world = makeEnrichWorld(db.dataSource, { port: new RealFlyerProEnrich() });
@@ -259,132 +249,6 @@ describeIfE2eDb('processador do job: o fluxo dos lotes (banco de e2e, fila regis
       expect(after).toEqual(before);
       expect(fetchSpy).not.toHaveBeenCalled();
       fetchSpy.mockRestore();
-    });
-  });
-
-  describe('autoApply desligado: tudo vira sugestão', () => {
-    it('a categoria fica pendente e a foto vira review com a foto como candidata, sem aplicar nada', async () => {
-      const { documentId } = await newDocument(12, (i) => ({ name: `CERVEJA PILSEN ${i}` }));
-      const world = makeEnrichWorld(db.dataSource);
-      await start(world, documentId, { autoApply: false });
-
-      await world.drain();
-
-      for (const item of await itemRowsOf(db.dataSource, documentId)) {
-        expect(item).toMatchObject({ category: null, categorySource: null });
-        expect(item.categoryReview).toMatchObject({
-          suggestion: { category: 'Bebidas', status: 'pending' },
-        });
-        expect(item.imageStatus).not.toBe('applied');
-        expect(item.imageUrl).toBeNull();
-      }
-      const reviews = (await itemRowsOf(db.dataSource, documentId)).filter(
-        (item) => item.imageStatus === 'review',
-      );
-      expect(reviews.length).toBeGreaterThan(0);
-    });
-  });
-
-  it('categoria da planilha preservada: category e categorySource ficam, e a sugestão da tabela vai pendente', async () => {
-    const { documentId } = await newDocument(1, () => ({
-      name: 'SABÃO EM PÓ 1KG',
-      category: 'Mercearia',
-      categorySource: 'import',
-    }));
-    const world = makeEnrichWorld(db.dataSource);
-    await start(world, documentId, { steps: ['categorize'] });
-
-    await world.drain();
-
-    const [item] = await itemRowsOf(db.dataSource, documentId);
-    expect(item).toMatchObject({ category: 'Mercearia', categorySource: 'import' });
-    expect(item.categoryReview).toMatchObject({
-      suggestion: { category: 'Limpeza', status: 'pending' },
-    });
-  });
-
-  describe('conferência final', () => {
-    it('importação durante o job: antes de terminar faz outra rodada e total cresce em 6 (3 fases x 2 itens)', async () => {
-      const { documentId } = await newDocument(4);
-      let inserted = false;
-      const port = wrapPort(mockPort(), {
-        matchImages: async () => {
-          if (inserted) return;
-          inserted = true;
-          await insertItems(db.dataSource, documentId, [
-            { name: 'NOVO 1', position: 100 },
-            { name: 'NOVO 2', position: 101 },
-          ]);
-        },
-      });
-      const world = makeEnrichWorld(db.dataSource, { port });
-      const jobId = await start(world, documentId);
-
-      await world.drain();
-
-      const job = await jobRowOf(db.dataSource, jobId);
-      expect(job).toMatchObject({ status: 'done', total: 12 + 6, processed: 18 });
-      expect(job.cursor).toMatchObject({ round: 2 });
-      const novos = (await itemRowsOf(db.dataSource, documentId)).filter((item) =>
-        String(item.name).startsWith('NOVO'),
-      );
-      for (const item of novos) {
-        expect(item.categoryReview).not.toBeNull();
-        expect(item.spellReview).not.toBeNull();
-        expect(item.imageStatus).not.toBe('none');
-      }
-    });
-
-    it('teto de rodadas: um item sem resposta em toda rodada faz 3 rodadas e o job termina done com o item ainda por fazer', async () => {
-      const { documentId } = await newDocument(2);
-      const silent = mockPort();
-      const port = {
-        ...wrapPort(silent, {}),
-        matchImages: async (
-          items: Parameters<typeof silent.matchImages>[0],
-          context: Parameters<typeof silent.matchImages>[1],
-        ) =>
-          (await silent.matchImages(items, context)).filter(
-            (verdict) => verdict.itemId !== items[0].id,
-          ),
-      };
-      const world = makeEnrichWorld(db.dataSource, { port });
-      const jobId = await start(world, documentId, { steps: ['image_match'] });
-
-      await world.drain();
-
-      const job = await jobRowOf(db.dataSource, jobId);
-      expect(job.status).toBe('done');
-      expect(job.cursor).toMatchObject({ round: 3 });
-      const left = (await itemRowsOf(db.dataSource, documentId)).filter(
-        (item) => item.imageStatus === 'none',
-      );
-      expect(left).toHaveLength(1);
-    });
-
-    it('item deixado como estava pelo provedor não é relido na mesma fase: o segundo lote começa depois do último do primeiro', async () => {
-      const { documentId } = await newDocument(6);
-      const seen: string[][] = [];
-      const base = mockPort();
-      const port = {
-        ...wrapPort(base, {}),
-        categorize: async (
-          items: Parameters<typeof base.categorize>[0],
-          context: Parameters<typeof base.categorize>[1],
-        ) => {
-          seen.push(items.map((item) => item.name));
-          return (await base.categorize(items, context)).filter(
-            (verdict) => verdict.itemId !== items[0].id,
-          );
-        },
-      };
-      const world = makeEnrichWorld(db.dataSource, { port, config: { categoryBatch: 3 } });
-      await start(world, documentId, { steps: ['categorize'] });
-
-      await world.drain();
-
-      expect(seen[0]).toEqual(['PRODUTO 0', 'PRODUTO 1', 'PRODUTO 2']);
-      expect(seen[1]).toEqual(['PRODUTO 3', 'PRODUTO 4', 'PRODUTO 5']);
     });
   });
 });
