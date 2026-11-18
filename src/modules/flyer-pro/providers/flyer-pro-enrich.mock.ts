@@ -3,6 +3,7 @@ import {
   TransientProviderError,
 } from '../../../shared/providers/provider-errors';
 import { fold } from '../../../shared/text/fold';
+import { textOrNull } from '../domain/flyer-pro-enrich-input';
 import type { EnrichStep } from '../domain/flyer-pro-job.types';
 import { FlyerProGalleryPhotos, GalleryPhoto } from '../services/flyer-pro-gallery-photos';
 import { FlyerProImageSizeService } from '../services/flyer-pro-image-size.service';
@@ -61,7 +62,7 @@ export function correctedName(name: string): string | null {
   return changed ? words.join(' ') : null;
 }
 
-type Marker = 'slow' | 'transient' | 'terminal';
+type Marker = 'slow' | 'transient' | 'terminal' | 'eanPending' | 'noName' | 'noCredit';
 
 /** Os marcadores do nome do encarte, sem diferença de maiúsculas; `#ia-falha-terminal` vence `#ia-falha`. */
 function markersOf(documentName: string): Set<Marker> {
@@ -70,6 +71,9 @@ function markersOf(documentName: string): Set<Marker> {
   if (name.includes('#ia-lenta')) markers.add('slow');
   if (name.includes('#ia-falha-terminal')) markers.add('terminal');
   else if (name.includes('#ia-falha')) markers.add('transient');
+  if (name.includes('#ia-ean-pendente')) markers.add('eanPending');
+  if (name.includes('#ia-sem-nome')) markers.add('noName');
+  if (name.includes('#ia-sem-credito')) markers.add('noCredit');
   return markers;
 }
 
@@ -119,8 +123,41 @@ export class MockFlyerProEnrich implements FlyerProEnrichPort {
     if (markers.has('terminal'))
       throw new TerminalProviderError('[simulado] falha terminal', 'provider_auth');
     if (markers.has('transient')) throw new TransientProviderError('[simulado] falha transitória');
+    context.notes.nameSearchUnavailable = markers.has('noName');
     const photos = await this.gallery.first(GALLERY_POOL);
-    return Promise.all(items.map((item) => this.imageOf(item, photos)));
+    return Promise.all(
+      items.map((item) => this.photoVerdictOf(item, photos, { markers, pass: context.pass })),
+    );
+  }
+
+  /**
+   * O veredito de fotos com os marcadores do nome do encarte (D-3 (a)): `#ia-ean-pendente` deixa pendentes os itens com EAN
+   * (na segunda passada, os de EAN terminado em dígito par recebem a foto do simulado e os de dígito ímpar seguem
+   * pendentes até o fim); `#ia-sem-nome` roda como se a busca por nome estivesse indisponível (item sem EAN e "não
+   * encontrada" continuam como estavam); `#ia-sem-credito` grava `budget_blocked` nos itens com EAN. O resto é o simulado.
+   */
+  private async photoVerdictOf(
+    item: EnrichItemInput,
+    photos: GalleryPhoto[],
+    run: { markers: Set<Marker>; pass: number },
+  ): Promise<ImageVerdict> {
+    const { markers, pass } = run;
+    const hasEan = textOrNull(item.ean) !== null;
+    if (markers.has('eanPending') && hasEan) {
+      if (pass < 2 || !endsInEvenDigit(item.ean as string)) {
+        return { itemId: item.id, action: 'pending', candidates: [] };
+      }
+      const arrived = await this.imageOf(item, photos, { forceOutcome: 0 });
+      return arrived.action === 'apply' ? { ...arrived, eanStatus: 'dotcompany' } : arrived;
+    }
+    const verdict = await this.imageOf(item, photos);
+    if (markers.has('noName') && (!hasEan || verdict.action === 'not_found')) {
+      return { itemId: item.id, action: 'unanswered' };
+    }
+    if (markers.has('noCredit') && hasEan && verdict.action !== 'unanswered') {
+      return { ...verdict, eanStatus: 'budget_blocked' } as ImageVerdict;
+    }
+    return verdict;
   }
 
   /**
@@ -152,10 +189,14 @@ export class MockFlyerProEnrich implements FlyerProEnrichPort {
     };
   }
 
-  private async imageOf(item: EnrichItemInput, photos: GalleryPhoto[]): Promise<ImageVerdict> {
+  private async imageOf(
+    item: EnrichItemInput,
+    photos: GalleryPhoto[],
+    options: { forceOutcome?: number } = {},
+  ): Promise<ImageVerdict> {
     if (photos.length === 0) return { itemId: item.id, action: 'not_found' };
     const hash = stableHash(item.sourceName ?? item.name);
-    const outcome = hash % 3;
+    const outcome = options.forceOutcome ?? hash % 3;
     if (outcome === 2) return { itemId: item.id, action: 'not_found' };
     const first = hash % photos.length;
     if (outcome === 1)
@@ -167,6 +208,12 @@ export class MockFlyerProEnrich implements FlyerProEnrichPort {
     return { itemId: item.id, action: 'apply', photo: { ...picked, ...size } };
   }
 }
+
+/** O EAN termina em dígito par? Terminado em outra coisa, vale como ímpar (fica pendente até o fim). */
+const endsInEvenDigit = (ean: string): boolean => {
+  const last = ean.trim().slice(-1);
+  return /\d/.test(last) && Number(last) % 2 === 0;
+};
 
 /** Até `count` fotos a partir de `first`, em círculo, sem repetir; a primeira tem o melhor `score`. */
 function candidatesFrom(photos: GalleryPhoto[], first: number, count = 3): ImageCandidateVerdict[] {

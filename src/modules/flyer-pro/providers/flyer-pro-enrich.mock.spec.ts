@@ -4,30 +4,14 @@ import {
 } from '../../../shared/providers/provider-errors';
 import { FLYER_PRO_CATEGORIES } from '../domain/flyer-pro-categories';
 import { CATEGORY_WORDS, SPELLING_FIXES } from './flyer-pro-enrich.mock.words';
-import {
-  categoryOfName,
-  correctedName,
-  MockFlyerProEnrich,
-  SLOW_MARKER_MS,
-  stableHash,
-} from './flyer-pro-enrich.mock';
-import { callContext, itemInput } from './flyer-pro-enrich.testutil';
+import { categoryOfName, correctedName, SLOW_MARKER_MS, stableHash } from './flyer-pro-enrich.mock';
+import { buildMock, callContext, galleryPhotos, itemInput } from './flyer-pro-enrich.testutil';
+
+const photos = galleryPhotos;
+const build = buildMock;
 
 const item = itemInput;
 const context = callContext;
-const photos = Array.from({ length: 40 }, (_, index) => ({
-  id: `foto-${index}`,
-  url: `http://localhost:3101/uploads/gallery/foto-${index}.jpg`,
-  thumbnailUrl: `http://localhost:3101/uploads/thumbnails/foto-${index}.jpg`,
-}));
-
-function build(over: { photos?: typeof photos; measure?: jest.Mock; sleep?: jest.Mock } = {}) {
-  const first = jest.fn(async (limit: number) => (over.photos ?? photos).slice(0, limit));
-  const measure = over.measure ?? jest.fn(async () => ({ width: 600, height: 1200 }));
-  const sleep = over.sleep ?? jest.fn(async () => undefined);
-  return { port: new MockFlyerProEnrich({ first }, { measure }, sleep), first, measure, sleep };
-}
-
 /** O primeiro nome de teste cujo hash cai no resultado pedido (0 aplicada, 1 revisar, 2 não encontrada). */
 function nameWithOutcome(outcome: number): string {
   for (let index = 0; ; index += 1) {
