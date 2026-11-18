@@ -161,3 +161,70 @@ export const flyerProImportIdConflict = (importId: string) =>
     'A importação pertence a outro encarte.',
     { importId },
   );
+
+/** O problema de uma conferência do retrato da Estrutura (N19). */
+export interface FlyerProStructureIssue {
+  field: string;
+  code: string;
+}
+
+/** O retrato da Estrutura incoerente: todos os problemas de uma vez em `issues`, fora de `details`. */
+export const flyerProStructureStateInvalid = (issues: FlyerProStructureIssue[]) =>
+  flyerProIssues(
+    'FLYER_PRO_STRUCTURE_STATE_INVALID',
+    'O retrato da Estrutura enviado está incoerente.',
+    issues,
+  );
+
+/** `FLAG`: variável desligada; `NO_API_KEY` e `MODEL_PRICE_UNKNOWN`: o provedor real não pode ser chamado. */
+export type StructureAiDisabledReason = 'FLAG' | 'NO_API_KEY' | 'MODEL_PRICE_UNKNOWN';
+
+export const flyerProStructureAiDisabled = (reason: StructureAiDisabledReason) =>
+  flyerProError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'FLYER_PRO_STRUCTURE_AI_DISABLED',
+    'A sugestão por IA está desligada neste ambiente.',
+    { reason },
+  );
+
+export type StructureAiBusyReason = 'IN_FLIGHT' | 'HOURLY_LIMIT';
+
+const BUSY_MESSAGES: Record<StructureAiBusyReason, string> = {
+  IN_FLIGHT: 'Já há uma sugestão em andamento para este encarte.',
+  HOURLY_LIMIT: 'Limite de sugestões por hora atingido.',
+};
+
+/** `retryAfterSeconds`: segundos, arredondados para cima, até a vaga ou a janela abrir. */
+export const flyerProStructureAiBusy = (details: {
+  reason: StructureAiBusyReason;
+  retryAfterSeconds: number;
+}) =>
+  flyerProError(
+    HttpStatus.TOO_MANY_REQUESTS,
+    'FLYER_PRO_STRUCTURE_AI_BUSY',
+    BUSY_MESSAGES[details.reason],
+    details,
+  );
+
+export type StructureAiFailureReason = 'PROVIDER_ERROR' | 'TIMEOUT' | 'INVALID_OUTPUT';
+
+/** Sem plano de reserva: `suggestionId` é o que o log da chamada traz. */
+export const flyerProStructureAiFailed = (details: {
+  reason: StructureAiFailureReason;
+  suggestionId: string;
+}) =>
+  flyerProError(
+    HttpStatus.SERVICE_UNAVAILABLE,
+    'FLYER_PRO_STRUCTURE_AI_FAILED',
+    'A sugestão não ficou pronta. Nada foi alterado.',
+    details,
+  );
+
+/** Nenhum id do pedido é item do encarte (a N14 reaproveita o código); `details` vazio, para o filtro não repetir a mensagem. */
+export const flyerProNoItems = () =>
+  flyerProError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'FLYER_PRO_NO_ITEMS',
+    'Não há itens do encarte neste pedido.',
+    {},
+  );

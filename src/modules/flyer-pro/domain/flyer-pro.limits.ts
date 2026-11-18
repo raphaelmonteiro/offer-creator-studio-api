@@ -39,4 +39,21 @@ export const FLYER_PRO_LIMITS = {
   importFileHashMaxLength: 64,
   /** `flyer_pro_imports.detectedFormat`. */
   importDetectedFormatMaxLength: 16,
+  /** Sugestão de estrutura (N19): seções, páginas, células e cota do retrato; o digest e a categoria do id da seção. */
+  structureSectionMax: 16,
+  structurePageMax: 4,
+  structureCellsMax: 4_000,
+  structureQuotaMax: 500,
+  structureDigestMaxLength: 64,
+  structureCategoryMaxLength: 40,
+  /** O `summary` e cada `reason` da resposta, cortados sem reticências. */
+  structureSummaryMaxLength: 300,
+  structureReasonMaxLength: 160,
+  /** Encartes anteriores lidos do cliente para escolher os exemplos. */
+  structureExamplesReadMax: 10,
+  /** Padrões das variáveis `FLYER_PRO_STRUCTURE_AI_*`. */
+  structureMaxPerHourDefault: 20,
+  structureMaxHeroesDefault: 12,
+  structureExamplesDefault: 3,
+  structureTimeoutMsDefault: 25_000,
 } as const;
