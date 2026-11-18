@@ -15,7 +15,7 @@ import type { StructureRequest } from '../domain/structure-suggestion.types';
 import { StructureAiFailure } from './flyer-pro-structure-ai.port';
 import { MOCK_SLOW_MS, MockFlyerProStructureAi } from './flyer-pro-structure-ai.mock';
 
-const OPTIONS = { timeoutMs: 25_000, suggestionId: '0f6d2f0e-6c1b-4c56-9a57-3d7b1e2a9c40' };
+const OPTIONS = { timeoutMs: 25_000 };
 
 function makeMock() {
   const sleep = jest.fn().mockResolvedValue(undefined);
@@ -122,7 +122,7 @@ describe('MockFlyerProStructureAi: tabela fixa', () => {
     const { mock } = makeMock();
     const ai = exampleAiRequest();
     const first = await mock.suggest(ai, OPTIONS);
-    const second = await mock.suggest(ai, { ...OPTIONS, suggestionId: 'outro' });
+    const second = await mock.suggest(ai, OPTIONS);
     expect(second).toEqual(first);
   });
 

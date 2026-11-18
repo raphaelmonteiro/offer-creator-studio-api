@@ -1,28 +1,16 @@
 import { openAiError, spyOnLogger } from '../../ai/utils/openai-chat.testutil';
-import { RealFlyerProStructureAi } from '../providers/flyer-pro-structure-ai.real';
-import {
-  fakeResponsesClient,
-  responsesResult,
-  USAGE,
-  validResult,
-} from '../providers/flyer-pro-structure-ai.testutil';
+import { responsesResult, USAGE, validResult } from '../providers/flyer-pro-structure-ai.testutil';
 import {
   bodyOf,
-  CONFIG,
   DOCUMENT_ID,
   documentRow,
+  makeRealSuggestionService,
   makeSuggestionService,
 } from './flyer-pro-structure-suggestion.service.testutil';
 
-const REAL = { ...CONFIG, provider: 'real' as const };
-
 /** O serviço com o provedor real sobre o cliente simulado e o log do serviço capturado. */
 function makeLogged(outcome?: unknown) {
-  const { client } = fakeResponsesClient(outcome);
-  const made = makeSuggestionService({
-    config: REAL,
-    port: new RealFlyerProStructureAi(REAL, client),
-  });
+  const made = makeRealSuggestionService(outcome);
   return { ...made, spies: spyOnLogger(made.service) };
 }
 

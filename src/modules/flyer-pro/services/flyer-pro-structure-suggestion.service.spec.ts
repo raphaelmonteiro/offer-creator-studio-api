@@ -53,10 +53,7 @@ describe('FlyerProStructureSuggestionService: o pedido de exemplo com o provedor
     expect(JSON.stringify(view)).not.toMatch(/usage|tokens|costUsd|estimatedCostUsd/);
     expect(view).toMatchObject({ source: 'ai', model: 'gpt-6-luna' });
     expect(suggest).toHaveBeenCalledTimes(1);
-    expect(suggest).toHaveBeenCalledWith(expect.anything(), {
-      timeoutMs: 25_000,
-      suggestionId: view.suggestionId,
-    });
+    expect(suggest).toHaveBeenCalledWith(expect.anything(), { timeoutMs: 25_000 });
   });
 
   it('o pedido ao provedor leva o nome do banco, os apelidos e 0 produto sem lugar sem o campo unplaced', async () => {

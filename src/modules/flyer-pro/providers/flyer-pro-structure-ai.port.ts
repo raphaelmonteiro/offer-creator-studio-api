@@ -7,10 +7,9 @@ import type {
 /** Token de injeção do provedor da sugestão de estrutura (`mock` ou `real`, escolhido por variável ao subir). */
 export const FLYER_PRO_STRUCTURE_AI_PORT = 'FLYER_PRO_STRUCTURE_AI_PORT';
 
-/** O prazo e o id que a chamada leva; o `suggestionId` liga a linha do log ao `details` do 503. */
+/** O que a chamada leva: o prazo dela. */
 export interface StructureAiCallOptions {
   timeoutMs: number;
-  suggestionId: string;
 }
 
 /**

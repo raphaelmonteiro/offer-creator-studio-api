@@ -3,6 +3,7 @@ import { openAiError } from '../../ai/utils/openai-chat.testutil';
 import type { StructureAiConfig } from '../config/structure-ai.config';
 import { exampleAiRequest } from '../domain/structure-ai-request.testutil';
 import { STRUCTURE_SUGGESTION_INSTRUCTIONS } from '../prompts/structure-suggestion.prompt';
+import { REAL_CONFIG } from '../services/flyer-pro-structure-suggestion.service.testutil';
 import { RealFlyerProStructureAi } from './flyer-pro-structure-ai.real';
 import {
   fakeResponsesClient,
@@ -12,21 +13,11 @@ import {
   validResult,
 } from './flyer-pro-structure-ai.testutil';
 
-const CONFIG: StructureAiConfig = {
-  enabled: true,
-  provider: 'real',
-  model: 'gpt-6-luna',
-  effort: 'low',
-  timeoutMs: 25_000,
-  maxPerHour: 20,
-  maxHeroes: 12,
-  examples: 3,
-};
-const OPTIONS = { timeoutMs: 25_000, suggestionId: '0f6d2f0e-6c1b-4c56-9a57-3d7b1e2a9c40' };
+const OPTIONS = { timeoutMs: 25_000 };
 
 function makeReal(outcome?: unknown, config: Partial<StructureAiConfig> = {}) {
   const { client, create } = fakeResponsesClient(outcome);
-  return { provider: new RealFlyerProStructureAi({ ...CONFIG, ...config }, client), create };
+  return { provider: new RealFlyerProStructureAi({ ...REAL_CONFIG, ...config }, client), create };
 }
 
 type CallBody = {
@@ -224,16 +215,22 @@ describe('RealFlyerProStructureAi: falha do provedor, sem repetir', () => {
 
 describe('RealFlyerProStructureAi: indisponível por configuração', () => {
   it('sem cliente (sem chave) o motivo é NO_API_KEY, mesmo com modelo sem preço', () => {
-    expect(new RealFlyerProStructureAi(CONFIG, null).unavailableReason()).toBe('NO_API_KEY');
+    expect(new RealFlyerProStructureAi(REAL_CONFIG, null).unavailableReason()).toBe('NO_API_KEY');
     expect(
-      new RealFlyerProStructureAi({ ...CONFIG, model: 'gpt-4o-mini' }, null).unavailableReason(),
+      new RealFlyerProStructureAi(
+        { ...REAL_CONFIG, model: 'gpt-4o-mini' },
+        null,
+      ).unavailableReason(),
     ).toBe('NO_API_KEY');
   });
 
   it('com chave e modelo sem preço na tabela o motivo é MODEL_PRICE_UNKNOWN', () => {
     const { client } = fakeResponsesClient();
     expect(
-      new RealFlyerProStructureAi({ ...CONFIG, model: 'gpt-4o-mini' }, client).unavailableReason(),
+      new RealFlyerProStructureAi(
+        { ...REAL_CONFIG, model: 'gpt-4o-mini' },
+        client,
+      ).unavailableReason(),
     ).toBe('MODEL_PRICE_UNKNOWN');
   });
 
@@ -241,14 +238,14 @@ describe('RealFlyerProStructureAi: indisponível por configuração', () => {
     const { client } = fakeResponsesClient();
     for (const model of ['gpt-6-luna', 'gpt-6.1-terra']) {
       expect(
-        new RealFlyerProStructureAi({ ...CONFIG, model }, client).unavailableReason(),
+        new RealFlyerProStructureAi({ ...REAL_CONFIG, model }, client).unavailableReason(),
       ).toBeNull();
     }
   });
 
   it('chamado sem cliente, falha sem rede', async () => {
     await expect(
-      new RealFlyerProStructureAi(CONFIG, null).suggest(exampleAiRequest(), OPTIONS),
+      new RealFlyerProStructureAi(REAL_CONFIG, null).suggest(exampleAiRequest(), OPTIONS),
     ).rejects.toMatchObject({
       reason: 'PROVIDER_ERROR',
     });

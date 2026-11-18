@@ -1,35 +1,18 @@
 import { openAiError } from '../../ai/utils/openai-chat.testutil';
-import type { StructureAiConfig } from '../config/structure-ai.config';
 import { PICANHA_ID } from '../domain/structure-suggestion.testutil';
 import { RealFlyerProStructureAi } from '../providers/flyer-pro-structure-ai.real';
-import {
-  fakeResponsesClient,
-  responsesResult,
-  validResult,
-} from '../providers/flyer-pro-structure-ai.testutil';
+import { responsesResult, validResult } from '../providers/flyer-pro-structure-ai.testutil';
 import {
   bodyOf,
-  CONFIG,
   DOCUMENT_ID,
+  makeRealSuggestionService,
   makeSuggestionService,
+  REAL_CONFIG,
 } from './flyer-pro-structure-suggestion.service.testutil';
-
-const REAL: StructureAiConfig = { ...CONFIG, provider: 'real' };
-
-/** O serviço com o provedor real sobre o cliente da OpenAI simulado (nenhuma chamada paga). */
-function makeReal(outcome?: unknown, config: Partial<StructureAiConfig> = {}) {
-  const { client, create } = fakeResponsesClient(outcome);
-  const merged = { ...REAL, ...config };
-  const made = makeSuggestionService({
-    config: merged,
-    port: new RealFlyerProStructureAi(merged, client),
-  });
-  return { ...made, create };
-}
 
 describe('FlyerProStructureSuggestionService com o provedor real (cliente simulado)', () => {
   it('200 com source ai, o modelo configurado e a versão 1 do prompt, sem tokens nem custo na resposta', async () => {
-    const { service, create } = makeReal();
+    const { service, create } = makeRealSuggestionService();
 
     const view = await service.suggest(DOCUMENT_ID, bodyOf());
 
@@ -50,7 +33,7 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
   });
 
   it('o corpo enviado pelo serviço tem o modelo, store false e o schema estrito, sem previous_response_id', async () => {
-    const { service, create } = makeReal();
+    const { service, create } = makeRealSuggestionService();
     await service.suggest(DOCUMENT_ID, bodyOf());
 
     expect(create.mock.calls[0][0]).toMatchObject({
@@ -77,7 +60,7 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
       ],
       heroes: [{ item: 'p42', size: '2x1', reason: '' }],
     };
-    const { service } = makeReal(responsesResult(JSON.stringify(output)));
+    const { service } = makeRealSuggestionService(responsesResult(JSON.stringify(output)));
 
     const view = await service.suggest(DOCUMENT_ID, bodyOf());
 
@@ -90,8 +73,8 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
 
   it('sem chave: 422 DISABLED com NO_API_KEY, o cliente não é chamado e o pedido não conta no teto', async () => {
     const made = makeSuggestionService({
-      config: REAL,
-      port: new RealFlyerProStructureAi(REAL, null),
+      config: REAL_CONFIG,
+      port: new RealFlyerProStructureAi(REAL_CONFIG, null),
     });
 
     await expect(made.service.suggest(DOCUMENT_ID, bodyOf())).rejects.toMatchObject({
@@ -103,7 +86,7 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
   });
 
   it('modelo sem preço na tabela (gpt-4o-mini): 422 DISABLED com MODEL_PRICE_UNKNOWN e o cliente não é chamado', async () => {
-    const { service, create } = makeReal(validResult(), { model: 'gpt-4o-mini' });
+    const { service, create } = makeRealSuggestionService(validResult(), { model: 'gpt-4o-mini' });
 
     await expect(service.suggest(DOCUMENT_ID, bodyOf())).rejects.toMatchObject({
       status: 422,
@@ -136,7 +119,7 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
   ])(
     '%s: 503, o cliente é chamado uma vez só e a falha não conta no teto',
     async (_name, outcome, reason) => {
-      const { service, create, limiter } = makeReal(outcome);
+      const { service, create, limiter } = makeRealSuggestionService(outcome);
 
       await expect(service.suggest(DOCUMENT_ID, bodyOf())).rejects.toMatchObject({
         status: 503,
@@ -153,13 +136,8 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
     afterEach(() => jest.useRealTimers());
 
     it('o cliente que não responde dentro do prazo é 503 TIMEOUT, chamado uma vez só', async () => {
-      const { client, create } = fakeResponsesClient();
+      const { service, create } = makeRealSuggestionService(undefined, { timeoutMs: 1000 });
       create.mockImplementation(() => new Promise(() => undefined));
-      const config = { ...REAL, timeoutMs: 1000 };
-      const { service } = makeSuggestionService({
-        config,
-        port: new RealFlyerProStructureAi(config, client),
-      });
 
       const pending = service.suggest(DOCUMENT_ID, bodyOf());
       const outcome = expect(pending).rejects.toMatchObject({

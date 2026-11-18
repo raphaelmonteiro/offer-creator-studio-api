@@ -189,7 +189,7 @@ export class FlyerProStructureSuggestionService {
   ): Promise<{ result: StructureAiResult; sanitized: SanitizedSuggestion }> {
     let discarded = 0;
     const call = async () => {
-      const result = await this.callWithDeadline(aiRequest, suggestionId);
+      const result = await this.callWithDeadline(aiRequest);
       const sanitized = sanitizeSuggestion(result.suggestion, sanitizeContext);
       discarded = sanitized.discarded.length;
       // `usage` na raiz: é de onde o log de IA lê os tokens.
@@ -216,17 +216,11 @@ export class FlyerProStructureSuggestionService {
   }
 
   /** O provedor contra o prazo (vale para o simulado também); erro que não é `StructureAiFailure` vale `PROVIDER_ERROR`. */
-  private async callWithDeadline(
-    aiRequest: StructureAiRequest,
-    suggestionId: string,
-  ): Promise<StructureAiResult> {
+  private async callWithDeadline(aiRequest: StructureAiRequest): Promise<StructureAiResult> {
     const { timeoutMs } = this.config;
     let outcome: StructureAiResult | 'timeout';
     try {
-      outcome = await withTimeout(
-        this.port.suggest(aiRequest, { timeoutMs, suggestionId }),
-        timeoutMs,
-      );
+      outcome = await withTimeout(this.port.suggest(aiRequest, { timeoutMs }), timeoutMs);
     } catch (error) {
       if (error instanceof StructureAiFailure) throw error;
       throw new StructureAiFailure(

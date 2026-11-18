@@ -6,6 +6,8 @@ import { EXAMPLE_ITEMS, exampleRequest } from '../domain/structure-suggestion.te
 import type { StructureItemRow, StructureRequest } from '../domain/structure-suggestion.types';
 import type { StructureSuggestionDto } from '../dto/structure-suggestion.dto';
 import { MockFlyerProStructureAi } from '../providers/flyer-pro-structure-ai.mock';
+import { RealFlyerProStructureAi } from '../providers/flyer-pro-structure-ai.real';
+import { fakeResponsesClient } from '../providers/flyer-pro-structure-ai.testutil';
 import type { FlyerProStructureAiPort } from '../providers/flyer-pro-structure-ai.port';
 import { FlyerProStructureLimiter } from './flyer-pro-structure-limiter';
 import { FlyerProStructureSuggestionService } from './flyer-pro-structure-suggestion.service';
@@ -27,6 +29,9 @@ export const CONFIG: StructureAiConfig = {
   maxHeroes: 12,
   examples: 3,
 };
+
+/** A mesma configuração com o provedor real (o cliente da OpenAI é sempre simulado nos testes). */
+export const REAL_CONFIG: StructureAiConfig = { ...CONFIG, provider: 'real' };
 
 export const documentRow = (over: Partial<StructureDocumentRow> = {}): StructureDocumentRow => ({
   id: DOCUMENT_ID,
@@ -113,4 +118,18 @@ export function makeSuggestionService(options: ServiceOptions = {}) {
     limiter,
   );
   return { service, limiter, mocks, writes, port, dataSource };
+}
+
+/** O serviço com o provedor real sobre o cliente da OpenAI simulado (nenhuma chamada paga); `create` é o espião do cliente. */
+export function makeRealSuggestionService(
+  outcome?: unknown,
+  config: Partial<StructureAiConfig> = {},
+) {
+  const { client, create } = fakeResponsesClient(outcome);
+  const merged = { ...REAL_CONFIG, ...config };
+  const made = makeSuggestionService({
+    config: merged,
+    port: new RealFlyerProStructureAi(merged, client),
+  });
+  return { ...made, create };
 }
