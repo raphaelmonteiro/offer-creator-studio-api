@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
-import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
+import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { FLYER_PRO_ENRICH_CONFIG, FlyerProEnrichConfig } from '../config/flyer-pro-enrich.config';
 import { isActiveJobConflict, orderedSteps } from '../domain/flyer-pro-enrich-rules';
 import {
@@ -24,6 +24,7 @@ import {
 } from './flyer-pro-job.statements';
 import { hasItems, ItemScope, itemsOfDocument, totalOf } from './flyer-pro-job.scope';
 import { assertLiveDocument, ITEMS_CURSOR_SQL, readWith } from './flyer-pro-read';
+import { publishJobBatch } from './flyer-pro-job.queue';
 import { inSavepoint } from './flyer-pro-savepoint';
 
 /** O que a criação de um job precisa: quem pede, o encarte, as fases e o escopo. */
@@ -165,10 +166,11 @@ export class FlyerProJobsService {
    */
   private async publishImmediate(manager: EntityManager, job: FlyerProJob): Promise<void> {
     await inSavepoint(manager, 'flyer_pro_cancel_batch', () =>
-      this.queue.publish(
-        QUEUES.FLYER_PRO_ENRICH,
+      publishJobBatch(
+        this.queue,
+        manager,
         { jobId: job.id, seq: job.batchSeq },
-        { manager, retryLimit: 0, expireInSeconds: this.config.batchExpireSeconds },
+        { expireInSeconds: this.config.batchExpireSeconds },
       ),
     );
   }
@@ -197,10 +199,11 @@ export class FlyerProJobsService {
       onlyMissing: input.onlyMissing,
     });
     const job = await insertJob(manager, { ...input, steps, itemIds: scope, total });
-    await this.queue.publish(
-      QUEUES.FLYER_PRO_ENRICH,
+    await publishJobBatch(
+      this.queue,
+      manager,
       { jobId: job.id, seq: 0 },
-      { manager, retryLimit: 0, expireInSeconds: this.config.batchExpireSeconds },
+      { expireInSeconds: this.config.batchExpireSeconds },
     );
     return job;
   }

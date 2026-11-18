@@ -8,10 +8,10 @@ import type {
 } from '../providers/flyer-pro-enrich.port';
 
 /** O que a fila entrega a cada lote: o job e a ficha que o lote espera encontrar (`batchSeq`). */
-export interface BatchMessage {
+export type BatchMessage = {
   jobId: string;
   seq: number;
-}
+};
 
 /** O item lido para o lote: o que o provedor vê e o estado em que ele estava, que condiciona cada escrita. */
 export interface EnrichItemRow extends EnrichItemFacts, EnrichItemInput {}

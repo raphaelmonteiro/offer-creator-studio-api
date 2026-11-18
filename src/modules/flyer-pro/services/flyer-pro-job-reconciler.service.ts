@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
-import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
+import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { FLYER_PRO_ENRICH_CONFIG, FlyerProEnrichConfig } from '../config/flyer-pro-enrich.config';
 import {
   enrichError,
@@ -11,6 +11,7 @@ import {
 } from '../domain/flyer-pro-enrich-rules';
 import type { FlyerProJob } from '../entities/flyer-pro-job.entity';
 import { lockJob, updateJob } from '../processors/flyer-pro-enrich.statements';
+import { publishJobBatch } from './flyer-pro-job.queue';
 import { inSavepoint } from './flyer-pro-savepoint';
 import { findLockedDocument } from './flyer-pro-save.statements';
 
@@ -121,10 +122,11 @@ export class FlyerProJobReconcilerService implements OnModuleDestroy {
         job.id,
         dead ? { batchAttempts: (job.batchAttempts ?? 0) + 1, clearHeartbeat: true } : {},
       );
-      await this.queue.publish(
-        QUEUES.FLYER_PRO_ENRICH,
+      await publishJobBatch(
+        this.queue,
+        manager,
         { jobId: job.id, seq: job.batchSeq },
-        { manager, retryLimit: 0, expireInSeconds: this.config.batchExpireSeconds },
+        { expireInSeconds: this.config.batchExpireSeconds },
       );
     });
     if (!done.ok) {

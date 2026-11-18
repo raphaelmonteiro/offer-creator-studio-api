@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
-import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
+import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
 import { FLYER_PRO_ENRICH_CONFIG, FlyerProEnrichConfig } from '../config/flyer-pro-enrich.config';
 import {
   addCounts,
@@ -15,6 +15,7 @@ import {
 import type { EnrichErrorCode, EnrichPhase, EnrichStep } from '../domain/flyer-pro-job.types';
 import type { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import type { FlyerProJob } from '../entities/flyer-pro-job.entity';
+import { publishJobBatch } from '../services/flyer-pro-job.queue';
 import { inSavepoint } from '../services/flyer-pro-savepoint';
 import { findLockedDocument, readStamp } from '../services/flyer-pro-save.statements';
 import type { JobColumns } from './flyer-pro-enrich.statements';
@@ -199,15 +200,11 @@ export class FlyerProEnrichCommitter {
   private async publishNext(locked: Locked, startAfterSeconds: number): Promise<void> {
     const { manager, current } = locked;
     const published = await inSavepoint(manager, 'flyer_pro_enrich_next', () =>
-      this.queue.publish(
-        QUEUES.FLYER_PRO_ENRICH,
+      publishJobBatch(
+        this.queue,
+        manager,
         { jobId: current.id, seq: current.batchSeq },
-        {
-          manager,
-          retryLimit: 0,
-          expireInSeconds: this.config.batchExpireSeconds,
-          ...(startAfterSeconds > 0 ? { startAfterSeconds } : {}),
-        },
+        { expireInSeconds: this.config.batchExpireSeconds, startAfterSeconds },
       ),
     );
     if (published.ok) return;
