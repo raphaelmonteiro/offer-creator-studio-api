@@ -1,9 +1,5 @@
-import {
-  fitCategoryReview,
-  fitReasons,
-  jsonBytes,
-  REVIEW_MAX_BYTES,
-} from './flyer-pro-enrich-review';
+import { fitCategoryReview, fitReasons, REVIEW_MAX_BYTES } from './flyer-pro-enrich-review';
+import { jsonBytes } from './flyer-pro-slices';
 
 const categoryReview = (why: string) => ({
   checkedAt: '2026-11-18T10:00:00.000Z',

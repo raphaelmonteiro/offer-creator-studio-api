@@ -1,3 +1,5 @@
+import { jsonBytes } from './flyer-pro-slices';
+
 /**
  * O corte da revisão do item em 4 KB (A-15, `FLYER_PRO_REVIEW_MAX_BYTES`): cada revisão gravada pelo job
  * (`categoryReview`, `imageReview`, `spellReview`) cabe em 4 KB de JSON. Passando, o job corta o texto do `why` da
@@ -5,8 +7,6 @@
  * ortografia. A medida é em bytes do JSON, que é o que o banco guarda.
  */
 export const REVIEW_MAX_BYTES = 4096;
-
-export const jsonBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value));
 
 /** A revisão de categoria com o `why` cortado (do fim) até a revisão inteira caber em 4 KB. */
 export function fitCategoryReview<T extends { suggestion: { why?: string | null } | null }>(
