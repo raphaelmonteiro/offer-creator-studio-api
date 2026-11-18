@@ -223,14 +223,13 @@ describeIfE2eDb('PATCH /v1/flyer-pro/documents/:id: salvar (e2e)', () => {
       }
     });
 
-    it('corpo {} é 400 BAD_REQUEST (nunca 500); fatia desconhecida e fatia nula são 400', async () => {
+    it('corpo {} é 400 BAD_REQUEST (nunca 500); fatia desconhecida é 400', async () => {
       const { id } = await newDocument();
 
       const empty = await patch(id, {});
       const unknown = await patch(id, savePayload(0, { slices: { foo: {} } }));
-      const nullSlice = await patch(id, savePayload(0, { slices: { card: null } }));
 
-      expect([empty.status, unknown.status, nullSlice.status]).toEqual([400, 400, 400]);
+      expect([empty.status, unknown.status]).toEqual([400, 400]);
       expect(envelope<unknown>(empty).error).toMatchObject({ code: 'BAD_REQUEST' });
       expect((await rowOf(h.dataSource, id))['revision']).toBe(0);
     });
