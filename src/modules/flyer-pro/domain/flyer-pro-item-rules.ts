@@ -115,6 +115,24 @@ function importedIssues(draft: ItemDraft): Issues {
   return found;
 }
 
+/**
+ * `importId` só se grava na criação. Item novo: preenchido, tem de ser de uma importação conhecida (a do corpo ou uma do
+ * encarte, lida de fora para a regra continuar pura); nulo ou ausente é item incluído à mão. Item existente: o valor
+ * diferente do gravado, inclusive `null` sobre um valor, é `IMMUTABLE_FIELD`, sem conferir se a importação existe;
+ * ausente mantém o gravado.
+ */
+function importLinkIssues(draft: ItemDraft, knownImports: ReadonlySet<string>): Issues {
+  const { entry, stored } = draft;
+  if (entry.importId === undefined) return [];
+  if (stored) {
+    return entry.importId === (stored.importId ?? null)
+      ? []
+      : [issue(draft, 'importId', 'IMMUTABLE_FIELD')];
+  }
+  const unknown = isSent(entry.importId) && !knownImports.has(entry.importId);
+  return unknown ? [issue(draft, 'importId', 'IMPORT_UNKNOWN')] : [];
+}
+
 /** Decisão incompleta ou contraditória (D-1 (a)): nenhuma é engolida em silêncio. */
 function decisionIssues(draft: ItemDraft): Issues {
   const { entry } = draft;
@@ -137,16 +155,25 @@ function decisionIssues(draft: ItemDraft): Issues {
   return found;
 }
 
-/** Todos os problemas de um item. */
-export function validateItem(draft: ItemDraft): Issues {
+/** Os ids de importação a conferir: os dos itens novos que se ligam a uma (sem repetição); item existente não conta. */
+export const importIdsOfNewItems = (drafts: ItemDraft[]): string[] => [
+  ...new Set(
+    drafts.filter((d) => !d.stored && isSent(d.entry.importId)).map((d) => d.entry.importId),
+  ),
+];
+
+/** Todos os problemas de um item; `knownImports` são os ids das importações a que um item novo pode se ligar. */
+export function validateItem(draft: ItemDraft, knownImports: ReadonlySet<string>): Issues {
   return [
     ...requiredIssues(draft),
     ...valueIssues(draft),
     ...imageIssues(draft),
     ...importedIssues(draft),
+    ...importLinkIssues(draft, knownImports),
     ...decisionIssues(draft),
   ];
 }
 
 /** Todos os problemas de todos os itens, na ordem dos itens. */
-export const validateItems = (drafts: ItemDraft[]): Issues => drafts.flatMap(validateItem);
+export const validateItems = (drafts: ItemDraft[], knownImports: ReadonlySet<string>): Issues =>
+  drafts.flatMap((draft) => validateItem(draft, knownImports));

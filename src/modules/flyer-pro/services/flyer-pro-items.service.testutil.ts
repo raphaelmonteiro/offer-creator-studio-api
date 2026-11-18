@@ -16,12 +16,15 @@ export interface ItemsManagerOptions {
   deleted?: string[][];
   /** A contagem de itens do encarte depois de gravar. */
   total?: number;
+  /** Os ids de importação deste encarte que a leitura das importações conhecidas devolve. */
+  imports?: string[];
 }
 
 export function makeItemsManager({
   found = [],
   deleted = [],
   total = 3,
+  imports = [],
 }: ItemsManagerOptions = {}) {
   const finds = [...found];
   const deletes = [...deleted];
@@ -33,6 +36,8 @@ export function makeItemsManager({
         return Promise.resolve([ids.map((id) => ({ id })), ids.length]);
       }
       if (sql.startsWith('SELECT count')) return Promise.resolve([{ total }]);
+      if (sql.includes('"flyer_pro_imports"'))
+        return Promise.resolve(imports.map((id) => ({ id })));
       return Promise.resolve([]);
     }),
   };
