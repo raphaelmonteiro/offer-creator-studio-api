@@ -14,7 +14,7 @@ import {
   nextPhase,
   runnablePhases,
 } from '../domain/flyer-pro-enrich-rules';
-import type { EnrichStep } from '../domain/flyer-pro-job.types';
+import type { EnrichPhase, EnrichStep } from '../domain/flyer-pro-job.types';
 import type { FlyerProJob } from '../entities/flyer-pro-job.entity';
 import {
   EnrichCallContext,
@@ -67,6 +67,10 @@ export function classifyBatchError(error: unknown): BatchFailure | null {
   return null;
 }
 
+/** A fase que a porta conhece: a passada do EAN chama a mesma busca de fotos. */
+const stepOf = (phase: EnrichPhase): EnrichStep =>
+  phase === 'image_ean_retry' ? 'image_match' : phase;
+
 /** O encarte do job, lido sem trava: o nome e o cliente vão ao provedor; `null` se a linha sumiu. */
 interface DocumentFacts {
   name: string;
@@ -76,10 +80,12 @@ interface DocumentFacts {
 
 /** O que a mensagem em andamento já sabe, para o log e a falha dizerem o fase, os itens e quanto levou. */
 interface Progress {
-  phase: EnrichStep | null;
+  phase: EnrichPhase | null;
   items: number;
   startedAt: number;
   providerStartedAt: number | null;
+  /** O coletor de uso da chamada em andamento: a falha do lote o lê para somar o que já foi pago. */
+  usage: AiUsageCollector | null;
 }
 
 /**
@@ -103,7 +109,13 @@ export class FlyerProEnrichProcessor {
     const startedAt = Date.now();
     const job = await claimBatch(this.dataSource, message.jobId, message.seq);
     if (!job) return;
-    const progress: Progress = { phase: null, items: 0, startedAt, providerStartedAt: null };
+    const progress: Progress = {
+      phase: null,
+      items: 0,
+      startedAt,
+      providerStartedAt: null,
+      usage: null,
+    };
     const stopBeating = this.startHeartbeat(job);
     try {
       await this.run(job, progress);
@@ -148,15 +160,15 @@ export class FlyerProEnrichProcessor {
   }
 
   /** A fase em andamento: a que o job guarda, ou a primeira das fases pedidas num job novo. */
-  private phaseOf(job: FlyerProJob): EnrichStep | null {
-    if (job.phase) return job.phase as EnrichStep;
+  private phaseOf(job: FlyerProJob): EnrichPhase | null {
+    if (job.phase) return job.phase;
     return nextPhase(runnablePhases(job.steps, job.result ?? {}), null);
   }
 
   /** O que esta mensagem faz: fecha a fase sem item, pula a fase indisponível ou chama o provedor para o lote. */
   private async plan(input: {
     job: FlyerProJob;
-    phase: EnrichStep;
+    phase: EnrichPhase;
     items: EnrichItemRow[];
     document: DocumentFacts;
     progress: Progress;
@@ -164,11 +176,13 @@ export class FlyerProEnrichProcessor {
     const { job, phase, items, progress } = input;
     const base = this.basePlan(phase, progress.startedAt);
     if (items.length === 0) return base;
-    if (!this.port.isAvailable(phase))
+    if (!this.port.isAvailable(stepOf(phase)))
       return { ...base, skipped: true, skippedItems: await this.remaining(job, phase) };
     progress.providerStartedAt = Date.now();
     const controller = new AbortController();
     const context = this.contextOf(job, input.document, controller.signal);
+    if (phase === 'image_ean_retry') context.pass = job.cursor?.pass ?? 1;
+    progress.usage = context.usage;
     const work = await withDeadline(
       this.callPort(phase, items, context),
       this.config.batchDeadlineMs,
@@ -178,27 +192,27 @@ export class FlyerProEnrichProcessor {
       ...base,
       work,
       batchSize: batchSizeOf(phase, this.config),
-      model: this.port.modelOf(phase),
+      usage: context.usage.snapshot(),
       totalMs: Date.now() - progress.startedAt,
       providerMs: Date.now() - progress.providerStartedAt,
     };
   }
 
-  private basePlan(phase: EnrichStep, startedAt: number): UnitPlan {
+  private basePlan(phase: EnrichPhase, startedAt: number): UnitPlan {
     return {
       phase,
       work: null,
       batchSize: 1,
       skipped: false,
       skippedItems: 0,
-      model: null,
+      usage: null,
       totalMs: Date.now() - startedAt,
       providerMs: 0,
     };
   }
 
   private callPort(
-    phase: EnrichStep,
+    phase: EnrichPhase,
     items: EnrichItemRow[],
     context: EnrichCallContext,
   ): Promise<PhaseWork> {
@@ -208,11 +222,16 @@ export class FlyerProEnrichProcessor {
     if (phase === 'spellcheck') {
       return this.port.spellcheck(items, context).then((verdicts) => ({ phase, items, verdicts }));
     }
-    return this.port.matchImages(items, context).then((verdicts) => ({ phase, items, verdicts }));
+    return this.port.matchImages(items, context).then((verdicts) => ({
+      phase: 'image_match',
+      items,
+      verdicts,
+      nameSearchUnavailable: context.notes.nameSearchUnavailable,
+    }));
   }
 
   /** Os itens que a fase pegaria daqui em diante: um pulo os dá por visitados, para `processed` chegar a `total`. */
-  private remaining(job: FlyerProJob, phase: EnrichStep): Promise<number> {
+  private remaining(job: FlyerProJob, phase: EnrichPhase): Promise<number> {
     return countEligible(this.dataSource.manager, {
       documentId: job.documentId,
       scope: job.itemIds ?? null,
@@ -221,7 +240,7 @@ export class FlyerProEnrichProcessor {
     });
   }
 
-  private read(job: FlyerProJob, phase: EnrichStep): Promise<EnrichItemRow[]> {
+  private read(job: FlyerProJob, phase: EnrichPhase): Promise<EnrichItemRow[]> {
     const cursor = job.cursor;
     return readBatch(this.dataSource.manager, {
       documentId: job.documentId,
@@ -283,7 +302,8 @@ export class FlyerProEnrichProcessor {
     try {
       const failure = classifyBatchError(error);
       if (failure && progress.phase) {
-        await this.committer.commitFailure(job, progress.phase, failure);
+        const usage = progress.usage?.snapshot() ?? null;
+        await this.committer.commitFailure(job, progress.phase, failure, usage);
         const providerMs = Date.now() - (progress.providerStartedAt ?? progress.startedAt);
         this.logBatch(job, progress, providerMs, `falhou ${failure.code}`);
         return;

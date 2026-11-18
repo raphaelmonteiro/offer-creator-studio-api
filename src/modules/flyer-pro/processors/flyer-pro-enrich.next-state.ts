@@ -54,7 +54,7 @@ async function pendingCount(
 export async function nextState(
   manager: EntityManager,
   job: FlyerProJob,
-  phase: EnrichStep,
+  phase: EnrichPhase,
   result: FlyerProJob['result'],
 ): Promise<NextState> {
   const cursor = job.cursor ?? FRESH_CURSOR;

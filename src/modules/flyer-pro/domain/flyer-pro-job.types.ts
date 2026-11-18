@@ -3,7 +3,7 @@
 /** As três fases que o pedido escolhe, na ordem em que o job as roda. */
 export type EnrichStep = 'categorize' | 'spellcheck' | 'image_match';
 
-/** `image_ean_retry` é a passada de EAN pendente da change 29; esta change só a reserva no tipo. */
+/** `image_ean_retry` é a passada de EAN pendente (change 29). */
 export type EnrichPhase = EnrichStep | 'image_ean_retry';
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'canceled';
@@ -19,6 +19,8 @@ export interface EnrichCursor {
   /** Último item visitado na fase, por `(position, id)`. */
   position: number | null;
   id: string | null;
+  /** O custo de alguma chamada do job ficou desconhecido: `costUsd` fica nulo até o fim (change 29, A-9). */
+  costUnknown?: true;
 }
 
 export interface EnrichTiming {

@@ -68,7 +68,7 @@ export function nextPhase(
 }
 
 /** O tamanho do lote de cada fase, da configuração. */
-export function batchSizeOf(phase: EnrichStep, config: FlyerProEnrichConfig): number {
+export function batchSizeOf(phase: EnrichPhase, config: FlyerProEnrichConfig): number {
   if (phase === 'categorize') return config.categoryBatch;
   if (phase === 'spellcheck') return config.spellBatch;
   return config.imageBatch;
@@ -206,7 +206,7 @@ export function markSkipped(result: EnrichResult, phase: EnrichStep): EnrichResu
  */
 export function addTiming(
   result: EnrichResult,
-  phase: EnrichStep,
+  phase: EnrichPhase,
   batch: { items: number; durationMs: number },
 ): EnrichResult {
   if (batch.items <= 0) return result;
@@ -222,6 +222,6 @@ export function addTiming(
 /** `models` com o modelo da fase que rodou. */
 export const withModel = (
   models: EnrichModels | null,
-  phase: EnrichStep,
+  phase: EnrichPhase,
   model: string,
 ): EnrichModels => ({ ...models, [phase]: model });

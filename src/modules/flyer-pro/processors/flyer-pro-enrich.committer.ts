@@ -2,30 +2,27 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { AnimationQueueService } from '../../../shared/queue/animation-queue.service';
+import type { AiInvocationUsage } from '../../ai/utils/ai-usage';
 import { FLYER_PRO_ENRICH_CONFIG, FlyerProEnrichConfig } from '../config/flyer-pro-enrich.config';
+import { addCost, withCostMark } from '../domain/flyer-pro-enrich-cost';
 import {
-  addCounts,
-  addTiming,
   effectiveOnlyMissing,
   failureDecision,
   finalFields,
-  markSkipped,
-  PhaseCounts,
   retryDelaySeconds,
-  withModel,
 } from '../domain/flyer-pro-enrich-rules';
 import type {
   EnrichCursor,
   EnrichErrorCode,
   EnrichPhase,
   EnrichResult,
-  EnrichStep,
 } from '../domain/flyer-pro-job.types';
 import type { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import type { FlyerProJob } from '../entities/flyer-pro-job.entity';
 import { publishJobBatch } from '../services/flyer-pro-job.queue';
 import { inSavepoint } from '../services/flyer-pro-savepoint';
 import { findLockedDocument, readStamp } from '../services/flyer-pro-save.statements';
+import { progressOf } from './flyer-pro-enrich.progress';
 import type { JobColumns } from './flyer-pro-enrich.statements';
 import { lockJob, updateJob } from './flyer-pro-enrich.statements';
 import type { UnitPlan } from './flyer-pro-enrich.types';
@@ -56,24 +53,13 @@ interface Locked {
   stopping: boolean;
 }
 
-/** O que o lote soma ao job: contagens, pulo, timing, `processed` e modelo; zera as tentativas e o batimento. */
-function progressOf(
-  current: FlyerProJob,
-  plan: UnitPlan,
-  counts: PhaseCounts | null,
-): JobColumns & { result: EnrichResult; processed: number } {
-  const visited = plan.work?.items.length ?? 0;
-  let result = counts
-    ? addCounts(current.result, plan.phase, { visited, ...counts })
-    : current.result;
-  if (plan.skipped) result = markSkipped(result, plan.phase);
-  result = addTiming(result, plan.phase, { items: visited, durationMs: plan.totalMs });
+/** O custo das chamadas pagas de uma falha de lote: `costUsd` e, se ele ficou desconhecido, a marca no cursor. */
+function paidColumns(current: FlyerProJob, usage: AiInvocationUsage | null): JobColumns {
+  const cost = addCost(current, usage);
+  const marked = cost.unknown && !current.cursor?.costUnknown;
   return {
-    processed: current.processed + (plan.skipped ? plan.skippedItems : visited),
-    result,
-    models: plan.model ? withModel(current.models, plan.phase, plan.model) : current.models,
-    batchAttempts: 0,
-    clearHeartbeat: true,
+    costUsd: cost.costUsd,
+    ...(marked ? { cursor: withCostMark(current.cursor ?? FRESH_CURSOR, true) } : {}),
   };
 }
 
@@ -115,23 +101,25 @@ export class FlyerProEnrichCommitter {
       const cursor = current.cursor ?? FRESH_CURSOR;
       const ctx = await this.writeContext(locked, cursor.round);
       const counts = plan.work ? await applyWrites(manager, planWrites(plan.work, ctx)) : null;
-      const progress = progressOf(current, plan, counts);
+      const { columns, cost } = progressOf(current, plan, counts);
       const last = plan.work?.items.at(-1);
       const moved = last ? { ...cursor, position: last.position, id: last.id } : cursor;
       if (locked.stopping) {
-        return this.stopped(locked, { ...progress, cursor: moved, phase: plan.phase });
+        const cursorOut = withCostMark(moved, cost.unknown);
+        return this.stopped(locked, { ...columns, cursor: cursorOut, phase: plan.phase });
       }
-      const next = await nextOf(locked, plan, { result: progress.result, moved });
+      const next = await nextOf(locked, plan, { result: columns.result, moved });
+      const cursorOut = withCostMark(next.cursor, cost.unknown);
       // Item que chegou durante a rodada e entrou nela antes de a conferência o contar: `total` nunca fica abaixo de `processed`.
-      const total = Math.max(next.total, progress.processed as number);
+      const total = Math.max(next.total, columns.processed);
       if (next.done) {
-        await updateJob(manager, current.id, { ...progress, total, ...doneColumns(next.cursor) });
+        await updateJob(manager, current.id, { ...columns, total, ...doneColumns(cursorOut) });
         return 'committed';
       }
       await updateJob(manager, current.id, {
-        ...progress,
+        ...columns,
         phase: next.phase,
-        cursor: next.cursor,
+        cursor: cursorOut,
         total,
       });
       await this.publishNext(locked, 0);
@@ -140,17 +128,20 @@ export class FlyerProEnrichCommitter {
   }
 
   /**
-   * Falha do provedor: o lote não grava nada nos itens. Terminal ou na última tentativa, o job termina `failed`; senão
+   * Falha do provedor: o lote não grava nada nos itens, mas o custo das chamadas já concluídas entra em `costUsd` (a
+   * ficha foi conferida: o lote descartado não soma). Terminal ou na última tentativa, o job termina `failed`; senão
    * `batchAttempts` sobe e o mesmo lote é republicado com a espera de 15 s e depois de 60 s.
    */
   commitFailure(
     job: FlyerProJob,
-    phase: EnrichStep,
+    phase: EnrichPhase,
     failure: BatchFailure,
+    usage: AiInvocationUsage | null,
   ): Promise<CommitOutcome> {
     return this.locked(job, async (locked) => {
-      if (locked.stopping) return this.stopped(locked, { clearHeartbeat: true, phase });
       const { manager, current } = locked;
+      const paid = paidColumns(current, usage);
+      if (locked.stopping) return this.stopped(locked, { clearHeartbeat: true, phase, ...paid });
       const attempts = (current.batchAttempts ?? 0) + 1;
       const decision = failureDecision({
         attempts,
@@ -158,10 +149,17 @@ export class FlyerProEnrichCommitter {
         terminal: failure.terminal,
       });
       if (decision === 'fail') {
-        await updateJob(manager, current.id, failedColumns(failure.code, phase, attempts));
+        await updateJob(manager, current.id, {
+          ...failedColumns(failure.code, phase, attempts),
+          ...paid,
+        });
         return 'committed';
       }
-      await updateJob(manager, current.id, { batchAttempts: attempts, clearHeartbeat: true });
+      await updateJob(manager, current.id, {
+        batchAttempts: attempts,
+        clearHeartbeat: true,
+        ...paid,
+      });
       await this.publishNext(locked, retryDelaySeconds(attempts) ?? 0);
       return 'committed';
     });

@@ -1,4 +1,4 @@
-import type { EnrichStep } from './flyer-pro-job.types';
+import type { EnrichPhase } from './flyer-pro-job.types';
 
 /**
  * O que cada fase do job pega no item (`a3-job-enriquecimento.html#s7-2`): o que falta fazer fica escrito no próprio item.
@@ -76,12 +76,13 @@ function imageEligible(item: EnrichItemFacts, onlyMissing: boolean): boolean {
 
 /** O item entra na fase? Com `onlyMissing` ligado, só o que a IA ainda não olhou; desligado, também o que ela já tratou sozinha. */
 export function isEligible(
-  phase: EnrichStep,
+  phase: EnrichPhase,
   item: EnrichItemFacts,
   onlyMissing: boolean,
 ): boolean {
   if (phase === 'categorize') return categorizeEligible(item, onlyMissing);
   if (phase === 'spellcheck') return spellEligible(item, onlyMissing);
+  if (phase === 'image_ean_retry') return item.imageStatus === 'ean_pending';
   return imageEligible(item, onlyMissing);
 }
 
@@ -102,14 +103,21 @@ const IMAGE_SQL = {
   redo: `(${sugStatus('imageReview')} <> 'rejected' AND ("imageStatus" IN ('none', 'not_found', 'review') OR ("imageStatus" = 'applied' AND "imageOrigin" = 'match')))`,
 };
 
-const CRITERIA_SQL: Record<EnrichStep, { onlyMissing: string; redo: string }> = {
+/** A passada do EAN lê só o que ainda está em consulta, com `onlyMissing` ligado ou desligado. */
+const EAN_RETRY_SQL = {
+  onlyMissing: `("imageStatus" = 'ean_pending')`,
+  redo: `("imageStatus" = 'ean_pending')`,
+};
+
+const CRITERIA_SQL: Record<EnrichPhase, { onlyMissing: string; redo: string }> = {
   categorize: CATEGORIZE_SQL,
   spellcheck: SPELL_SQL,
   image_match: IMAGE_SQL,
+  image_ean_retry: EAN_RETRY_SQL,
 };
 
 /** A mesma regra de `isEligible` como condição de `WHERE` sobre `flyer_pro_items`, sem parâmetros. */
-export function criterionSql(phase: EnrichStep, onlyMissing: boolean): string {
+export function criterionSql(phase: EnrichPhase, onlyMissing: boolean): string {
   const sql = CRITERIA_SQL[phase];
   return onlyMissing ? sql.onlyMissing : sql.redo;
 }

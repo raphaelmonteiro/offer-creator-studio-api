@@ -1,6 +1,6 @@
 import type { EntityManager } from 'typeorm';
 import { criterionSql } from '../domain/flyer-pro-enrich-criteria';
-import type { EnrichStep } from '../domain/flyer-pro-job.types';
+import type { EnrichPhase, EnrichStep } from '../domain/flyer-pro-job.types';
 
 /**
  * O escopo de um job (os itens do encarte e, com `itemIds`, só os citados) e a conta de quantos itens se encaixam no
@@ -37,7 +37,7 @@ export async function hasItems(manager: EntityManager, documentId: string): Prom
 /** Quantos itens do escopo se encaixam no critério da fase (com o critério de `onlyMissing` dado). */
 export async function countEligible(
   manager: EntityManager,
-  input: { documentId: string; scope: ItemScope; phase: EnrichStep; onlyMissing: boolean },
+  input: { documentId: string; scope: ItemScope; phase: EnrichPhase; onlyMissing: boolean },
 ): Promise<number> {
   const params: unknown[] = [input.documentId];
   let scopeSql = '';

@@ -4,6 +4,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queue.service';
 import { SharedModule } from '../../shared/shared.module';
 import { AiModule } from '../ai/ai.module';
+import { FlyerEanResolutionService } from '../ai/ean/dotcompany/flyer-ean-resolution.service';
+import { GalleryEmbeddingService } from '../ai/gallery-embedding.service';
+import { ProductCategorizationService } from '../ai/product-categorization.service';
+import { SpellCheckService } from '../ai/spell-check.service';
 import { FlyerProDocumentsController } from './controllers/flyer-pro-documents.controller';
 import { FlyerProEnrichmentController } from './controllers/flyer-pro-enrichment.controller';
 import { FlyerProExportsController } from './controllers/flyer-pro-exports.controller';
@@ -99,7 +103,15 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     {
       provide: FLYER_PRO_ENRICH_PORT,
       useFactory: createEnrichPort,
-      inject: [FLYER_PRO_ENRICH_CONFIG, FlyerProGalleryPhotos, FlyerProImageSizeService],
+      inject: [
+        FLYER_PRO_ENRICH_CONFIG,
+        FlyerProGalleryPhotos,
+        FlyerProImageSizeService,
+        ProductCategorizationService,
+        SpellCheckService,
+        FlyerEanResolutionService,
+        GalleryEmbeddingService,
+      ],
     },
     {
       provide: STRUCTURE_AI_CONFIG,

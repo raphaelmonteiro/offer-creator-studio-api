@@ -40,7 +40,6 @@ function build(
   };
   const port = {
     isAvailable: () => true,
-    modelOf: () => 'mock',
     matchImages: jest.fn().mockResolvedValue([]),
     ...over.port,
   };
@@ -128,10 +127,12 @@ describe('FlyerProEnrichProcessor (com banco e comitador simulados)', () => {
       await handling;
 
       expect(committer.commitUnit).not.toHaveBeenCalled();
-      expect(committer.commitFailure).toHaveBeenCalledWith(expect.anything(), 'image_match', {
-        code: 'AI_TIMEOUT',
-        terminal: false,
-      });
+      expect(committer.commitFailure).toHaveBeenCalledWith(
+        expect.anything(),
+        'image_match',
+        { code: 'AI_TIMEOUT', terminal: false },
+        { calls: 0, costUsd: 0, inputTokens: 0, model: null, models: [], outputTokens: 0 },
+      );
     });
 
     it('passou o prazo: o sinal entregue ao provedor é abortado, e a chamada abandonada deixa de ser paga', async () => {

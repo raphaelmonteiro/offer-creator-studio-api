@@ -22,6 +22,7 @@ const GALLERY_POOL = 30;
 /** Quanto o marcador `#ia-lenta` faz cada lote esperar. */
 export const SLOW_MARKER_MS = 20_000;
 const REASON = '[simulado]';
+export const MOCK_MODEL = 'mock';
 
 const upper = (text: string): string => fold(text).toUpperCase();
 
@@ -91,20 +92,18 @@ export class MockFlyerProEnrich implements FlyerProEnrichPort {
     return true;
   }
 
-  modelOf(_phase: EnrichStep): string {
-    return 'mock';
-  }
-
   async categorize(
     items: EnrichItemInput[],
     context: EnrichCallContext,
   ): Promise<CategoryVerdict[]> {
     await this.slowDown(context);
+    this.report(context);
     return items.map((item) => this.categoryOf(item));
   }
 
   async spellcheck(items: EnrichItemInput[], context: EnrichCallContext): Promise<SpellVerdict[]> {
     await this.slowDown(context);
+    this.report(context);
     return items.map((item): SpellVerdict => {
       const value = correctedName(item.name);
       return value
@@ -116,11 +115,21 @@ export class MockFlyerProEnrich implements FlyerProEnrichPort {
   async matchImages(items: EnrichItemInput[], context: EnrichCallContext): Promise<ImageVerdict[]> {
     const markers = markersOf(context.documentName);
     if (markers.has('slow')) await this.sleep(SLOW_MARKER_MS);
+    this.report(context);
     if (markers.has('terminal'))
       throw new TerminalProviderError('[simulado] falha terminal', 'provider_auth');
     if (markers.has('transient')) throw new TransientProviderError('[simulado] falha transitória');
     const photos = await this.gallery.first(GALLERY_POOL);
     return Promise.all(items.map((item) => this.imageOf(item, photos)));
+  }
+
+  /**
+   * O uso da chamada simulada: o modelo `"mock"` (vai para `models`) e uma chamada sem uso, que deixa o custo desconhecido
+   * pela mesma regra do provedor real (`costUsd` nulo).
+   */
+  private report(context: EnrichCallContext): void {
+    context.usage.declareModel(MOCK_MODEL);
+    context.usage.record(MOCK_MODEL, null);
   }
 
   private async slowDown(context: EnrichCallContext): Promise<void> {

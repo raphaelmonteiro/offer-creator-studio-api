@@ -110,8 +110,6 @@ export interface ImageApply {
 export interface FlyerProEnrichPort {
   /** A fase pode rodar? `false`: o job a pula com `skipped: 'AI_DISABLED'`, sem tocar nos itens. */
   isAvailable(phase: EnrichStep): boolean;
-  /** O modelo da fase, gravado em `models` (`"mock"` no simulado). */
-  modelOf(phase: EnrichStep): string;
   categorize(items: EnrichItemInput[], context: EnrichCallContext): Promise<CategoryVerdict[]>;
   spellcheck(items: EnrichItemInput[], context: EnrichCallContext): Promise<SpellVerdict[]>;
   matchImages(items: EnrichItemInput[], context: EnrichCallContext): Promise<ImageVerdict[]>;

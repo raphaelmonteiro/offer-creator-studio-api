@@ -91,11 +91,33 @@ describe('MockFlyerProEnrich: categorias', () => {
     expect(other).toEqual(one);
   });
 
-  it('é uma fase disponível e o modelo é "mock"', () => {
+  it('é uma fase disponível', () => {
     const { port } = build();
     for (const phase of ['categorize', 'spellcheck', 'image_match'] as const) {
       expect(port.isAvailable(phase)).toBe(true);
-      expect(port.modelOf(phase)).toBe('mock');
+    }
+  });
+
+  it('cada fase declara o modelo "mock" no coletor de uso e uma chamada sem uso: custo desconhecido, nunca zero', async () => {
+    const { port } = build();
+    const calls = {
+      categorize: () => port.categorize([item('ABACATE')], ctx.categorize),
+      spellcheck: () => port.spellcheck([item('ABACATE')], ctx.spellcheck),
+      image_match: () => port.matchImages([item('ABACATE')], ctx.image_match),
+    };
+    const ctx = {
+      categorize: context(),
+      spellcheck: context(),
+      image_match: context(),
+    };
+
+    for (const [phase, call] of Object.entries(calls)) {
+      await call();
+      expect(ctx[phase as keyof typeof ctx].usage.snapshot()).toMatchObject({
+        model: 'mock',
+        calls: 1,
+        costUsd: null,
+      });
     }
   });
 });
