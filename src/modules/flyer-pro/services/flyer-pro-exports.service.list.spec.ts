@@ -1,7 +1,6 @@
+import { DOCUMENT, exportRow } from '../testing/flyer-pro-exports.fixture';
 import {
   commandsOf,
-  DOCUMENT,
-  exportRow,
   ExportsManagerOptions,
   makeExportsManager,
   makeExportsService,

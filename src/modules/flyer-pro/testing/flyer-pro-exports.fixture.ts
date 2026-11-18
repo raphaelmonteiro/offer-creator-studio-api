@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import type { ExportOptions, FlyerProExportEntry } from '../domain/flyer-pro.types';
 import { FlyerProExport } from '../entities/flyer-pro-export.entity';
+import type { FlyerProExportRow } from '../views/flyer-pro-export.view';
 
 /**
  * Exportações para os testes do módulo `flyer-pro` (só testes): o corpo do N8 do cenário "PDF de todas as folhas do
@@ -12,6 +13,9 @@ import { FlyerProExport } from '../entities/flyer-pro-export.entity';
 export type ExportSeed = Partial<Omit<FlyerProExport, 'document'>>;
 
 export const EXPORT_ID = '5b0e2c1a-8d3f-4a4e-9c11-2f6a7d9e0b13';
+/** O encarte "Ofertas Piccin - semana 47" e a Ana, que o exportou. */
+export const DOCUMENT = '2c1d7e9b-4f6a-4b1e-9a3d-7e5f0c8b6a21';
+export const ANA = 'b02d5a10-3c4e-4f7a-9d21-6e8f0a1b2c3d';
 
 /** As opções do PDF das duas folhas do Piccin (54×40, 450 DPI); `over` troca ou acrescenta o que o caso pede. */
 export const exportOptions = (over: Partial<ExportOptions> = {}): ExportOptions => ({
@@ -58,6 +62,29 @@ export const png72Entry = (over: Partial<FlyerProExportEntry> = {}): FlyerProExp
       heightPx: 1134,
     },
     fileName: 'feira-de-sabado-folha-1-72dpi-20261114-1502.png',
+    ...over,
+  };
+};
+
+/** A linha como a consulta crua a devolve: o PDF do Piccin feito pela Ana, no `DOCUMENT`, sem arquivo guardado. */
+export const exportRow = (over: Partial<FlyerProExportRow> = {}): FlyerProExportRow => {
+  const { id, format, documentRevision, engineVersion, renderDigest, fileName } = exportEntry();
+  return {
+    id,
+    documentId: DOCUMENT,
+    documentRevision,
+    engineVersion,
+    renderDigest,
+    format,
+    options: exportOptions(),
+    fileName,
+    fileSize: '31457280',
+    preflight: { problems: 1, warnings: 3, infos: 1 },
+    filePath: null,
+    fileState: 'not_stored',
+    createdByUserId: ANA,
+    createdByName: 'Ana',
+    createdAt: new Date('2026-11-14T18:02:11.000Z'),
     ...over,
   };
 };

@@ -1,9 +1,13 @@
-import { exportEntry, exportOptions, png72Entry } from '../testing/flyer-pro-exports.fixture';
 import {
   ANA,
-  BRUNO,
   DOCUMENT,
+  exportEntry,
+  exportOptions,
   exportRow,
+  png72Entry,
+} from '../testing/flyer-pro-exports.fixture';
+import {
+  BRUNO,
   insertOf,
   OTHER_DOCUMENT,
   rejection,

@@ -1,39 +1,14 @@
 import type { DataSource, EntityManager } from 'typeorm';
 import type { CreateFlyerProExportDto } from '../dto/create-flyer-pro-export.dto';
 import type { FlyerProExportEntry } from '../domain/flyer-pro.types';
-import { exportEntry, exportOptions } from '../testing/flyer-pro-exports.fixture';
+import { ANA, DOCUMENT, exportEntry } from '../testing/flyer-pro-exports.fixture';
 import type { FlyerProExportRow } from '../views/flyer-pro-export.view';
 import { FlyerProExportsService } from './flyer-pro-exports.service';
 
 /** Ajudantes dos unitários do registro e do histórico das exportações (só testes): o `manager` e o serviço. */
 
-export const DOCUMENT = '2c1d7e9b-4f6a-4b1e-9a3d-7e5f0c8b6a21';
 export const OTHER_DOCUMENT = '8e4f1b30-6a2d-4c9b-b7d5-1f0a3c5e7d92';
-export const ANA = 'b02d5a10-3c4e-4f7a-9d21-6e8f0a1b2c3d';
 export const BRUNO = 'c13e6b21-4d5f-4a8b-8e32-7f9a1b2c3d4e';
-
-/** A linha como a consulta crua a devolve: o PDF do Piccin feito pela Ana, no `DOCUMENT`, sem arquivo guardado. */
-export const exportRow = (over: Partial<FlyerProExportRow> = {}): FlyerProExportRow => {
-  const { id, format, documentRevision, engineVersion, renderDigest, fileName } = exportEntry();
-  return {
-    id,
-    documentId: DOCUMENT,
-    documentRevision,
-    engineVersion,
-    renderDigest,
-    format,
-    options: exportOptions(),
-    fileName,
-    fileSize: '31457280',
-    preflight: { problems: 1, warnings: 3, infos: 1 },
-    filePath: null,
-    fileState: 'not_stored',
-    createdByUserId: ANA,
-    createdByName: 'Ana',
-    createdAt: new Date('2026-11-14T18:02:11.000Z'),
-    ...over,
-  };
-};
 
 export interface ExportsManagerOptions {
   /** A revisão do encarte vivo; `null` simula o encarte inexistente ou excluído (a leitura do ORM não o traz). */

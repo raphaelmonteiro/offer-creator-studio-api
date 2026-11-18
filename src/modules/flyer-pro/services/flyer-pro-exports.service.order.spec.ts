@@ -1,10 +1,7 @@
 import type { CreateFlyerProExportDto } from '../dto/create-flyer-pro-export.dto';
-import { exportOptions } from '../testing/flyer-pro-exports.fixture';
+import { ANA, DOCUMENT, exportOptions, exportRow } from '../testing/flyer-pro-exports.fixture';
 import {
-  ANA,
   commandsOf,
-  DOCUMENT,
-  exportRow,
   insertOf,
   OTHER_DOCUMENT,
   rejection,
