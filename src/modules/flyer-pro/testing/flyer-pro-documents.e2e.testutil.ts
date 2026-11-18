@@ -6,6 +6,7 @@ import type {
   FlyerProDocumentListItemView,
   FlyerProDocumentView,
 } from '../views/flyer-pro-document.view';
+import type { FlyerProSaveView } from '../views/flyer-pro-save.view';
 import {
   createExtraUser,
   ExtraUser,
@@ -43,6 +44,17 @@ export const createPayload = (
   ...ids,
   ...over,
 });
+
+/** O corpo de um `PATCH` com os quatro obrigatórios, na revisão dada e com um `mutationId` novo; `over` troca ou acrescenta. */
+export const savePayload = (revision: number, over: Record<string, unknown> = {}) => ({
+  mutationId: randomUUID(),
+  expectedRevision: revision,
+  schemaVersion: 1,
+  engineVersion: 1,
+  ...over,
+});
+
+export type SaveBody = FlyerProSaveView;
 
 export type Row = Record<string, unknown>;
 
@@ -124,6 +136,11 @@ export function useDocumentsE2e(options: { scenes: boolean }) {
     /** Os cabeçalhos do Bruno, para chamar uma rota como outro usuário. */
     asBruno: () => ({ Authorization: `Bearer ${bruno.token}` }),
     noToken: (path: string) => h.http().get(`/v1${path}`),
+    /** `PATCH` do N4 com o token da semente (a Ana); `PUT` do cursor; e o `PATCH` como outro usuário. */
+    patch: (id: string, body: object) => h.patch(`${url}/${id}`, body),
+    patchAs: (headers: Record<string, string>, id: string, body: object) =>
+      h.http().patch(`/v1${url}/${id}`).set(headers).send(body),
+    put: (path: string, body: object) => h.authed(h.http().put(`/v1${url}/${path}`)).send(body),
     /** Um cliente novo da suíte, apagado na limpeza. */
     newClient: async (name?: string) => {
       const id = await insertClient(h.dataSource, name);
