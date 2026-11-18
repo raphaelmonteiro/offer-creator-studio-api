@@ -103,3 +103,36 @@ export function exampleRequest(over: Partial<StructureRequest> = {}): StructureR
     ...over,
   };
 }
+
+/** Os itens do exemplo como o banco os recebe (sem o id, que o teste de banco gera): nome, preço, unidade, categoria e foto. */
+export const exampleItemSeeds = () =>
+  EXAMPLE_ITEMS.map(({ name, price, unit, category, imageUrl }) => ({
+    name,
+    price,
+    unit,
+    category,
+    imageUrl,
+  }));
+
+/**
+ * O retrato de exemplo com os ids dos oito itens trocados pelos `itemIds` dados (na ordem de `EXAMPLE_ITEMS`), para o teste
+ * de banco pedir a sugestão sobre os itens que gravou.
+ */
+export function exampleRequestFor(
+  itemIds: readonly string[],
+  over: Partial<StructureRequest> = {},
+): StructureRequest {
+  const swap = new Map(EXAMPLE_ITEMS.map((item, index) => [item.id, itemIds[index]]));
+  const request = exampleRequest(over);
+  return {
+    ...request,
+    sections: request.sections.map((section) => ({
+      ...section,
+      itemIds: section.itemIds.map((id) => swap.get(id) ?? id),
+    })),
+    heroes: request.heroes.map((hero) => ({
+      ...hero,
+      itemId: swap.get(hero.itemId) ?? hero.itemId,
+    })),
+  };
+}
