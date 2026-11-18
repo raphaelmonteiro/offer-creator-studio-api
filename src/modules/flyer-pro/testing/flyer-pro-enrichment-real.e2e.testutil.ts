@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as sharp from 'sharp';
 import type { DataSource } from 'typeorm';
+import { GalleryPhotoSeed, insertGalleryPhoto } from '../../../shared/testing/e2e-seed';
 
 /**
  * Fotos da Galeria do e2e do provedor real (só testes): cada foto é gravada pelo spec no banco de e2e, com o arquivo na
@@ -15,34 +15,13 @@ export interface SeededPhoto {
   height: number;
 }
 
-interface PhotoSeed {
-  filename: string;
-  width: number;
-  height: number;
-  /** O que a foto guarda em `metadata`: o EAN, ou o nome já escolhido (`aliases`). */
-  metadata: object;
-}
-
 export async function seedGalleryPhoto(
   target: { dataSource: DataSource; uploadsDir: string; cdnUrl: string },
-  seed: PhotoSeed,
+  seed: GalleryPhotoSeed,
 ): Promise<SeededPhoto> {
-  const { dataSource, uploadsDir, cdnUrl } = target;
-  const dir = path.join(uploadsDir, 'gallery');
-  await fs.mkdir(dir, { recursive: true });
-  const png = await sharp({
-    create: { width: seed.width, height: seed.height, channels: 3, background: '#2a8a3a' },
-  })
-    .png()
-    .toBuffer();
-  await fs.writeFile(path.join(dir, seed.filename), png);
-  const url = `${cdnUrl.replace(/\/+$/, '')}/gallery/${seed.filename}`;
-  const [row] = await dataSource.query(
-    `INSERT INTO gallery_images (filename, url, "thumbnailUrl", "mimeType", size, metadata, metadata_status)
-     VALUES ($1, $2, $2, 'image/png', $3, $4::jsonb, 'ready') RETURNING id`,
-    [seed.filename, url, png.length, JSON.stringify(seed.metadata)],
-  );
-  return { id: row.id, filename: seed.filename, width: seed.width, height: seed.height };
+  const { dataSource, ...files } = target;
+  const { id } = await insertGalleryPhoto(dataSource, files, seed);
+  return { id, filename: seed.filename, width: seed.width, height: seed.height };
 }
 
 /** Apaga as fotos gravadas pelo spec (linhas e arquivos). */
