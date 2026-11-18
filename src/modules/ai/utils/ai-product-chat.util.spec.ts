@@ -1,36 +1,6 @@
-import { Logger } from '@nestjs/common';
-import OpenAI from 'openai';
-import { ChatCallSpec } from '../config/openai-chat-params';
 import { callProductChat } from './ai-product-chat.util';
+import { logged, MESSAGES, setup, SPEC } from './ai-product-chat.testutil';
 import { chatResponse, openAiError } from './openai-chat.testutil';
-
-const SPEC: ChatCallSpec = {
-  model: 'gpt-6-luna',
-  effort: 'low',
-  temperature: 0,
-  timeoutMs: 30_000,
-  legacyMaxTokens: 2048,
-  maxCompletionTokens: 8192,
-};
-
-function setup() {
-  const create = jest.fn();
-  const openai = { chat: { completions: { create } } } as unknown as OpenAI;
-  const logger = new Logger('teste');
-  const log = jest.spyOn(logger, 'log').mockImplementation(() => undefined);
-  const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-  const error = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
-  return { create, openai, logger, log, warn, error };
-}
-
-/** Objeto JSON da linha de log que começa com `prefix`. */
-function logged(spy: jest.SpyInstance, prefix: string): Record<string, unknown> {
-  const line = spy.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith(prefix));
-  if (!line) throw new Error(`linha "${prefix}" não encontrada`);
-  return JSON.parse(line.slice(prefix.length));
-}
-
-const MESSAGES = [{ role: 'user' as const, content: 'oi' }];
 
 describe('callProductChat, uso e custo no log (U0.7)', () => {
   const COST_ENV = ['OPENAI_COST_TEXT_INPUT_1M_USD', 'OPENAI_COST_TEXT_OUTPUT_1M_USD'];

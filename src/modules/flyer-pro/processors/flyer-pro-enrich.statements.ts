@@ -6,7 +6,6 @@ import type {
   EnrichModels,
   EnrichPhase,
   EnrichResult,
-  EnrichStep,
   JobStatus,
 } from '../domain/flyer-pro-job.types';
 import { FlyerProJob } from '../entities/flyer-pro-job.entity';
@@ -65,6 +64,7 @@ export interface JobColumns {
   processed?: number;
   result?: EnrichResult;
   models?: EnrichModels | null;
+  costUsd?: number | null;
   error?: EnrichError | null;
   batchAttempts?: number;
   clearHeartbeat?: boolean;
@@ -104,7 +104,7 @@ const ITEM_COLUMNS = `"id", "position", "name", "sourceName", "category", "categ
 export interface BatchQuery {
   documentId: string;
   itemIds: string[] | null;
-  phase: EnrichStep;
+  phase: EnrichPhase;
   onlyMissing: boolean;
   size: number;
   /** O último item visitado na fase: o lote lê os que vêm depois dele, por `(position, id)`. */

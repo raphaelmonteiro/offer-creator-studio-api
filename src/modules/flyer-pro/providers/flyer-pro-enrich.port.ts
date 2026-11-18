@@ -1,3 +1,4 @@
+import type { AiUsageCollector } from '../../ai/utils/ai-usage';
 import type { EnrichStep } from '../domain/flyer-pro-job.types';
 
 /**
@@ -21,11 +22,27 @@ export interface EnrichItemInput {
   imported: Record<string, unknown> | null;
 }
 
-/** O que o provedor sabe do encarte e do job: o nome do encarte é o que o simulado lê para os marcadores. */
+/**
+ * O que o provedor sabe do encarte e do job: o nome do encarte é o que o simulado lê para os marcadores. `usage` é o
+ * coletor de uso da chamada (change 01), criado pelo processador: o provedor o repassa aos serviços de IA e o processador
+ * o lê depois, com a chamada concluída ou não. `signal` é abortado quando o prazo do lote estoura: o provedor real o
+ * repassa ao SDK da OpenAI, e a chamada abandonada deixa de ser paga.
+ */
 export interface EnrichCallContext {
   jobId: string;
   documentName: string;
   clientId: string;
+  usage: AiUsageCollector;
+  signal: AbortSignal;
+  /** 0 na fase de fotos; 1 a 3 na passada do EAN pendente (`image_ean_retry`). O simulado lê a passada. */
+  pass: number;
+  /** O que o provedor conta sobre a chamada além das respostas por item (o processador lê depois, como o `usage`). */
+  notes: EnrichCallNotes;
+}
+
+/** A busca de fotos rodou sem a busca por nome (embedding desligado ou sem chave): só EAN e nome já escolhido. */
+export interface EnrichCallNotes {
+  nameSearchUnavailable: boolean;
 }
 
 /**
@@ -61,25 +78,38 @@ export interface ImageCandidateVerdict extends PhotoPick {
 }
 
 /**
+ * O estado do EAN do item na busca de fotos (`imageReview.eanStatus`): `null` sem EAN. Só o simulado e o provedor real o
+ * preenchem; o escritor o grava na revisão.
+ */
+export type ImageEanStatus = string | null;
+
+/**
  * Fotos. `apply` traz a foto já com a medida (foto sem medida nunca é `apply`); `review` traz até 3 candidatas;
- * `not_found` e `unanswered` não trazem foto.
+ * `pending` é o EAN em consulta em segundo plano (com as candidatas pelo nome, se vieram); `not_found` não traz foto;
+ * `unanswered` deixa o item como estava (sem resposta, ou sem resultado com a busca por nome indisponível).
  */
 export type ImageVerdict =
   | ImageApply
-  | { itemId: string; action: 'review'; candidates: ImageCandidateVerdict[] }
-  | { itemId: string; action: 'not_found' | 'unanswered' };
+  | {
+      itemId: string;
+      action: 'review';
+      candidates: ImageCandidateVerdict[];
+      eanStatus?: ImageEanStatus;
+    }
+  | { itemId: string; action: 'pending'; candidates: ImageCandidateVerdict[] }
+  | { itemId: string; action: 'not_found'; eanStatus?: ImageEanStatus }
+  | { itemId: string; action: 'unanswered' };
 
 export interface ImageApply {
   itemId: string;
   action: 'apply';
   photo: ImageCandidateVerdict & { width: number; height: number };
+  eanStatus?: ImageEanStatus;
 }
 
 export interface FlyerProEnrichPort {
   /** A fase pode rodar? `false`: o job a pula com `skipped: 'AI_DISABLED'`, sem tocar nos itens. */
   isAvailable(phase: EnrichStep): boolean;
-  /** O modelo da fase, gravado em `models` (`"mock"` no simulado). */
-  modelOf(phase: EnrichStep): string;
   categorize(items: EnrichItemInput[], context: EnrichCallContext): Promise<CategoryVerdict[]>;
   spellcheck(items: EnrichItemInput[], context: EnrichCallContext): Promise<SpellVerdict[]>;
   matchImages(items: EnrichItemInput[], context: EnrichCallContext): Promise<ImageVerdict[]>;

@@ -4,45 +4,14 @@ import {
 } from '../../../shared/providers/provider-errors';
 import { FLYER_PRO_CATEGORIES } from '../domain/flyer-pro-categories';
 import { CATEGORY_WORDS, SPELLING_FIXES } from './flyer-pro-enrich.mock.words';
-import {
-  categoryOfName,
-  correctedName,
-  MockFlyerProEnrich,
-  SLOW_MARKER_MS,
-  stableHash,
-} from './flyer-pro-enrich.mock';
-import type { EnrichCallContext, EnrichItemInput } from './flyer-pro-enrich.port';
+import { categoryOfName, correctedName, SLOW_MARKER_MS, stableHash } from './flyer-pro-enrich.mock';
+import { buildMock, callContext, galleryPhotos, itemInput } from './flyer-pro-enrich.testutil';
 
-const item = (name: string, over: Partial<EnrichItemInput> = {}): EnrichItemInput => ({
-  id: `id-${name}`,
-  name,
-  sourceName: null,
-  category: null,
-  categorySource: null,
-  unit: 'cada',
-  ean: null,
-  position: 0,
-  imported: null,
-  ...over,
-});
-const context = (documentName = 'Ofertas Piccin semana 47'): EnrichCallContext => ({
-  jobId: 'job-1',
-  documentName,
-  clientId: 'client-1',
-});
-const photos = Array.from({ length: 40 }, (_, index) => ({
-  id: `foto-${index}`,
-  url: `http://localhost:3101/uploads/gallery/foto-${index}.jpg`,
-  thumbnailUrl: `http://localhost:3101/uploads/thumbnails/foto-${index}.jpg`,
-}));
+const photos = galleryPhotos;
+const build = buildMock;
 
-function build(over: { photos?: typeof photos; measure?: jest.Mock; sleep?: jest.Mock } = {}) {
-  const first = jest.fn(async (limit: number) => (over.photos ?? photos).slice(0, limit));
-  const measure = over.measure ?? jest.fn(async () => ({ width: 600, height: 1200 }));
-  const sleep = over.sleep ?? jest.fn(async () => undefined);
-  return { port: new MockFlyerProEnrich({ first }, { measure }, sleep), first, measure, sleep };
-}
-
+const item = itemInput;
+const context = callContext;
 /** O primeiro nome de teste cujo hash cai no resultado pedido (0 aplicada, 1 revisar, 2 não encontrada). */
 function nameWithOutcome(outcome: number): string {
   for (let index = 0; ; index += 1) {
@@ -106,11 +75,33 @@ describe('MockFlyerProEnrich: categorias', () => {
     expect(other).toEqual(one);
   });
 
-  it('é uma fase disponível e o modelo é "mock"', () => {
+  it('é uma fase disponível', () => {
     const { port } = build();
     for (const phase of ['categorize', 'spellcheck', 'image_match'] as const) {
       expect(port.isAvailable(phase)).toBe(true);
-      expect(port.modelOf(phase)).toBe('mock');
+    }
+  });
+
+  it('cada fase declara o modelo "mock" no coletor de uso e uma chamada sem uso: custo desconhecido, nunca zero', async () => {
+    const { port } = build();
+    const calls = {
+      categorize: () => port.categorize([item('ABACATE')], ctx.categorize),
+      spellcheck: () => port.spellcheck([item('ABACATE')], ctx.spellcheck),
+      image_match: () => port.matchImages([item('ABACATE')], ctx.image_match),
+    };
+    const ctx = {
+      categorize: context(),
+      spellcheck: context(),
+      image_match: context(),
+    };
+
+    for (const [phase, call] of Object.entries(calls)) {
+      await call();
+      expect(ctx[phase as keyof typeof ctx].usage.snapshot()).toMatchObject({
+        model: 'mock',
+        calls: 1,
+        costUsd: null,
+      });
     }
   });
 });
@@ -163,6 +154,8 @@ describe('MockFlyerProEnrich: fotos', () => {
       photo: { width: 600, height: 1200, galleryImageId: expect.stringMatching(/^foto-/) },
     });
     expect(measure).toHaveBeenCalledTimes(1);
+    // o simulado nunca baixa foto: mede só o arquivo do disco, de qualquer endereço da Galeria
+    expect(measure).toHaveBeenCalledWith(expect.stringContaining('/uploads/'), { offline: true });
   });
 
   it('para revisar: até 3 candidatas distintas, a melhor primeiro, com motivo [simulado]', async () => {

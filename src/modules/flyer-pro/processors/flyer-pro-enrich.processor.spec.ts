@@ -6,11 +6,8 @@ import {
   TransientProviderError,
 } from '../../../shared/providers/provider-errors';
 import { jobRow } from '../services/flyer-pro-jobs.service.testutil';
-import {
-  classifyBatchError,
-  FlyerProEnrichProcessor,
-  ProviderDeadlineError,
-} from './flyer-pro-enrich.processor';
+import { classifyBatchError, ProviderDeadlineError } from './flyer-pro-enrich.deadline';
+import { FlyerProEnrichProcessor } from './flyer-pro-enrich.processor';
 import type { UnitPlan } from './flyer-pro-enrich.types';
 
 const ITEM = {
@@ -40,7 +37,6 @@ function build(
   };
   const port = {
     isAvailable: () => true,
-    modelOf: () => 'mock',
     matchImages: jest.fn().mockResolvedValue([]),
     ...over.port,
   };
@@ -128,10 +124,59 @@ describe('FlyerProEnrichProcessor (com banco e comitador simulados)', () => {
       await handling;
 
       expect(committer.commitUnit).not.toHaveBeenCalled();
-      expect(committer.commitFailure).toHaveBeenCalledWith(expect.anything(), 'image_match', {
-        code: 'AI_TIMEOUT',
-        terminal: false,
+      expect(committer.commitFailure).toHaveBeenCalledWith(
+        expect.anything(),
+        'image_match',
+        { code: 'AI_TIMEOUT', terminal: false },
+        { calls: 0, costUsd: 0, inputTokens: 0, model: null, models: [], outputTokens: 0 },
+      );
+    });
+
+    it('passou o prazo: o sinal entregue ao provedor é abortado, e a chamada abandonada deixa de ser paga', async () => {
+      let signal: AbortSignal | undefined;
+      const never = (_items: unknown, context: { signal: AbortSignal }) => {
+        signal = context.signal;
+        return new Promise(() => undefined);
+      };
+      const { processor } = build({
+        port: { matchImages: jest.fn(never) },
+        config: { batchDeadlineMs: 5000 },
       });
+
+      const handling = processor.handle({ jobId: 'job-1', seq: 3 });
+      await jest.advanceTimersByTimeAsync(4999);
+      expect(signal?.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
+      await handling;
+
+      expect(signal?.aborted).toBe(true);
+    });
+
+    it('a chamada que falha aborta o sinal: as outras chamadas do lote não seguem pagas', async () => {
+      let signal: AbortSignal | undefined;
+      const fails = (_items: unknown, context: { signal: AbortSignal }) => {
+        signal = context.signal;
+        return Promise.reject(new TransientProviderError('HTTP 503'));
+      };
+      const { processor, committer } = build({ port: { matchImages: jest.fn(fails) } });
+
+      await processor.handle({ jobId: 'job-1', seq: 3 });
+
+      expect(signal?.aborted).toBe(true);
+      expect(committer.commitFailure).toHaveBeenCalledTimes(1);
+    });
+
+    it('chamada que termina antes do prazo: o sinal não é abortado', async () => {
+      let signal: AbortSignal | undefined;
+      const answers = (_items: unknown, context: { signal: AbortSignal }) => {
+        signal = context.signal;
+        return Promise.resolve([]);
+      };
+      const { processor } = build({ port: { matchImages: jest.fn(answers) } });
+
+      await processor.handle({ jobId: 'job-1', seq: 3 });
+
+      expect(signal?.aborted).toBe(false);
     });
 
     it('antes do prazo: o resultado vai para a gravação', async () => {

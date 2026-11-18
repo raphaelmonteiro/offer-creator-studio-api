@@ -1,4 +1,5 @@
 import type { EntityManager } from 'typeorm';
+import { canRetryEan, eanRetryDelaySeconds } from '../domain/flyer-pro-enrich-image';
 import {
   enrichError,
   finalFields,
@@ -25,6 +26,8 @@ export interface NextState {
   cursor: EnrichCursor;
   total: number;
   done: boolean;
+  /** Espera antes de o próximo lote ser assumido: só a passada do EAN pendente espera (30, 60 e 120 s). */
+  delaySeconds: number;
 }
 
 const reset = (cursor: EnrichCursor): EnrichCursor => ({ ...cursor, position: null, id: null });
@@ -48,25 +51,60 @@ async function pendingCount(
 }
 
 /**
- * O que vem depois de fechar a fase: a próxima fase pedida e não pulada, ou, depois da última, a conferência final (até
- * 3 rodadas, somando ao `total` os itens que ainda se encaixam) ou o fim do job.
+ * A próxima passada do EAN pendente, se cabe: o job pediu `image_match` (e ela não foi pulada), ainda há item
+ * `ean_pending` no escopo e o job ainda não usou as 3 passadas. A passada nova guarda o número dela no cursor e espera
+ * 30, 60 ou 120 s; o `pass` segue entre as rodadas da conferência final (no máximo 3 por job).
+ */
+async function nextEanRetry(
+  manager: EntityManager,
+  job: FlyerProJob,
+  phases: EnrichStep[],
+): Promise<NextState | null> {
+  const cursor = job.cursor ?? FRESH_CURSOR;
+  if (!phases.includes('image_match') || !canRetryEan(cursor.pass)) return null;
+  const waiting = await countEligible(manager, {
+    documentId: job.documentId,
+    scope: job.itemIds,
+    phase: 'image_ean_retry',
+    onlyMissing: true,
+  });
+  if (waiting === 0) return null;
+  const pass = cursor.pass + 1;
+  return {
+    phase: 'image_ean_retry',
+    cursor: { ...reset(cursor), pass },
+    total: job.total,
+    done: false,
+    delaySeconds: eanRetryDelaySeconds(pass),
+  };
+}
+
+/**
+ * O que vem depois de fechar a fase: a próxima fase pedida e não pulada; depois da última (ou de uma passada do EAN), a
+ * passada seguinte do EAN pendente, se cabe; senão a conferência final (até 3 rodadas, somando ao `total` os itens que
+ * ainda se encaixam) ou o fim do job. As passadas ficam fora de `total` e de `processed` (D-2 (a)).
  */
 export async function nextState(
   manager: EntityManager,
   job: FlyerProJob,
-  phase: EnrichStep,
+  phase: EnrichPhase,
   result: FlyerProJob['result'],
 ): Promise<NextState> {
   const cursor = job.cursor ?? FRESH_CURSOR;
   const phases = runnablePhases(job.steps, result);
-  const next = nextPhase(phases, phase);
-  if (next) return { phase: next, cursor: reset(cursor), total: job.total, done: false };
+  const next = phase === 'image_ean_retry' ? null : nextPhase(phases, phase);
+  if (next) {
+    return { phase: next, cursor: reset(cursor), total: job.total, done: false, delaySeconds: 0 };
+  }
+  const retry = await nextEanRetry(manager, job, phases);
+  if (retry) return retry;
   const pending = await pendingCount(manager, job, phases);
   if (needsAnotherRound(cursor.round, pending)) {
-    const again = { round: cursor.round + 1, pass: 0, position: null, id: null };
-    return { phase: phases[0], cursor: again, total: job.total + pending, done: false };
+    const again = { ...reset(cursor), round: cursor.round + 1 };
+    const total = job.total + pending;
+    return { phase: phases[0], cursor: again, total, done: false, delaySeconds: 0 };
   }
-  return { phase: null, cursor: reset(cursor), total: job.total, done: true };
+  return { phase: null, cursor: reset(cursor), total: job.total, done: true, delaySeconds: 0 };
 }
 
 /** `done`: a fase zera e o job fecha. */

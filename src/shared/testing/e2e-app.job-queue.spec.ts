@@ -45,6 +45,39 @@ describe('App de teste do e2e com a fila do job (A-21)', () => {
     expect(process.env.WORKER_ONLY).toBeUndefined();
   });
 
+  it('enrichProvider real: o provedor do job é o real, as chaves seguem vazias e as flags de IA desligadas', async () => {
+    const create = await loadHarness('postgres://usuario:senha@db-e2e:5555/chroma_x_e2e');
+    const keysBefore = [process.env.OPENAI_API_KEY, process.env.DOTCOMPANY_API_TOKEN];
+    process.env.OPENAI_API_KEY = 'sk-do-shell';
+    process.env.DOTCOMPANY_API_TOKEN = 'token-do-shell';
+
+    const running = await create({
+      dataSource: fakeDataSource,
+      uploadsDir,
+      jobQueue: true,
+      enrichProvider: 'real',
+    });
+
+    try {
+      expect(running.config.get('FLYER_PRO_ENRICH_PROVIDER')).toBe('real');
+      expect(process.env.OPENAI_API_KEY).toBe('');
+      expect(process.env.DOTCOMPANY_API_TOKEN).toBe('');
+      expect(running.config.get('AI_PRODUCT_CATEGORIZATION_ENABLED')).toBe('false');
+      expect(running.config.get('AI_SPELLCHECK_ENABLED')).toBe('false');
+      expect(running.config.get('AI_GALLERY_EMBEDDING_ENABLED')).toBe('false');
+      expect(running.config.get('EAN_FLYER_RESOLVE_ENABLED')).toBe('false');
+    } finally {
+      await running.close();
+      for (const [name, value] of [
+        ['OPENAI_API_KEY', keysBefore[0]],
+        ['DOTCOMPANY_API_TOKEN', keysBefore[1]],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   it('o flyer_db é recusado antes de subir qualquer coisa, e o process.env fica como estava', async () => {
     const create = await loadHarness('postgres://u:p@localhost:5434/flyer_db');
 

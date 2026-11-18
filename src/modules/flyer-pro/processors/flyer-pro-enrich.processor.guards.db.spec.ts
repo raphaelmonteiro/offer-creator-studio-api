@@ -114,10 +114,12 @@ describeIfE2eDb('processador do job: ficha, parada e escrita condicionada (banco
       const world = makeEnrichWorld(db.dataSource);
       const jobId = await start(world, documentId, { steps: ['image_match'] });
       const claimed = await claimBatch(db.dataSource, jobId, world.messages[0].data.seq);
-      await world.committer.commitFailure(claimed as never, 'image_match', {
-        code: 'AI_PROVIDER_ERROR',
-        terminal: false,
-      });
+      await world.committer.commitFailure(
+        claimed as never,
+        'image_match',
+        { code: 'AI_PROVIDER_ERROR', terminal: false },
+        null,
+      );
       const afterCommit = await jobRowOf(db.dataSource, jobId);
 
       await beat(db.dataSource, jobId, claimed?.batchSeq as number);

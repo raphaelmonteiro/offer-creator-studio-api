@@ -1,4 +1,4 @@
-import { GalleryEmbeddingService } from './gallery-embedding.service';
+import { fakeEmbeddingService } from './gallery-embedding.testutil';
 import { ProductCategorizationService } from './product-categorization.service';
 import { SpellCheckService } from './spell-check.service';
 import { fakeConfig } from './utils/openai-chat.testutil';
@@ -16,8 +16,7 @@ const LOCAL_ENV = {
 const categorization = (env: Record<string, string>) =>
   new ProductCategorizationService(fakeConfig(env));
 const spelling = (env: Record<string, string>) => new SpellCheckService(fakeConfig(env));
-const embedding = (env: Record<string, string>) =>
-  new GalleryEmbeddingService(fakeConfig(env), { query: jest.fn() } as never);
+const embedding = (env: Record<string, string>) => fakeEmbeddingService({ env }).embedding;
 
 describe('Disponibilidade pública dos serviços de IA de produto (change 28)', () => {
   it('categorização desligada pela flag, com a chave presente: false', () => {
@@ -38,9 +37,7 @@ describe('Disponibilidade pública dos serviços de IA de produto (change 28)', 
   });
 
   it('embedding com a flag ausente e a chave presente: true, sem chamar a OpenAI', () => {
-    const service = embedding(KEY);
-    const create = jest.fn();
-    (service as unknown as { openai: unknown }).openai = { embeddings: { create } };
+    const { embedding: service, create } = fakeEmbeddingService({ env: KEY });
 
     expect(service.isEnabled()).toBe(true);
     expect(create).not.toHaveBeenCalled();

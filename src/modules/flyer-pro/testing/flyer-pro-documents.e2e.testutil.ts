@@ -112,10 +112,15 @@ export const DOCUMENTS_URL = '/flyer-pro/documents';
  * app sobe a fila real no banco de e2e e o consumidor do job no próprio processo (só os specs do job). Chame no corpo do
  * `describeIfE2eDb`.
  */
-export function useDocumentsE2e(options: { scenes: boolean; jobQueue?: boolean }) {
+export function useDocumentsE2e(options: {
+  scenes: boolean;
+  jobQueue?: boolean;
+  enrichProvider?: 'mock' | 'real';
+}) {
   const h = useE2eHarness({
     imports: [e2eDataSourceModule(() => h.dataSource), FlyerProModule],
     jobQueue: options.jobQueue,
+    enrichProvider: options.enrichProvider,
   });
   let fixture: FlyerProFixture | undefined;
   let bruno: ExtraUser;

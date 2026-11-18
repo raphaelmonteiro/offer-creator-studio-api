@@ -9,6 +9,7 @@ import { toSql } from 'pgvector/utils';
 import { classifyOpenAiErrorStrict } from '../../shared/providers/openai-errors';
 import { mergeEanBlock, MergeEanOptions } from './metadata/ean-block';
 import { buildEmbeddingText, ProductMetadata } from './metadata/product-metadata.schema';
+import { AiAbortOptions } from './utils/ai-abort';
 import { AiStrictOptions } from './utils/ai-strict';
 
 const EMBEDDING_DIMENSIONS = 1536;
@@ -20,6 +21,9 @@ const DEFAULT_MATCH_THRESHOLD = 0.35;
 // Modesto de propósito: prioriza sem sequestrar o ranking. Configurável via env.
 const DEFAULT_PREFERENCE_BOOST = 0.15;
 const BOOTSTRAP_SQL_PATH = path.join(__dirname, '..', 'gallery', 'sql', '001_pgvector_setup.sql');
+
+/** `strict` (change 28) e `signal` (change 29): os dois aditivos. */
+export type EmbedOptions = AiStrictOptions & AiAbortOptions;
 
 export interface EmbeddingSearchOptions {
   /** Quando presente, prioriza as imagens preferidas deste cliente (Feature 12). */
@@ -195,7 +199,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
     return this.openai !== null && this.enabled;
   }
 
-  async embedText(text: string, options: AiStrictOptions = {}): Promise<number[] | null> {
+  async embedText(text: string, options: EmbedOptions = {}): Promise<number[] | null> {
     const [result] = await this.embedTexts([text], options);
     return result ?? null;
   }
@@ -204,7 +208,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
    * Com `strict` (change 28), a falha da chamada sobe classificada depois da linha de log; desligado ou sem chave
    * devolve `null` por texto, sem lançar. Sem a opção, a falha vira `null` como sempre.
    */
-  async embedTexts(texts: string[], options: AiStrictOptions = {}): Promise<(number[] | null)[]> {
+  async embedTexts(texts: string[], options: EmbedOptions = {}): Promise<(number[] | null)[]> {
     if (!this.isEnabled()) {
       return texts.map(() => null);
     }
@@ -216,10 +220,10 @@ export class GalleryEmbeddingService implements OnModuleInit {
     for (let i = 0; i < texts.length; i += OPENAI_BATCH_LIMIT) {
       const slice = texts.slice(i, i + OPENAI_BATCH_LIMIT);
       try {
-        const response = await this.openai.embeddings.create({
-          model: this.embeddingModel,
-          input: slice,
-        });
+        const body = { model: this.embeddingModel, input: slice };
+        const response = options.signal
+          ? await this.openai.embeddings.create(body, { signal: options.signal })
+          : await this.openai.embeddings.create(body);
         response.data.forEach((item, idx) => {
           results[i + idx] = item.embedding;
         });

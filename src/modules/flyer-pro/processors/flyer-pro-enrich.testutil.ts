@@ -145,7 +145,6 @@ export function wrapPort(
 ): FlyerProEnrichPort {
   return {
     isAvailable: (phase) => hooks.available?.(phase) ?? base.isAvailable(phase),
-    modelOf: (phase) => base.modelOf(phase),
     categorize: async (items, context) => {
       await hooks.categorize?.(items, context);
       return base.categorize(items, context);

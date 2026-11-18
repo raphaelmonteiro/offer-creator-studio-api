@@ -1,5 +1,5 @@
 import type { EnrichItemFacts, ReviewFacts } from './flyer-pro-enrich-criteria';
-import type { EnrichStep } from './flyer-pro-job.types';
+import type { EnrichPhase } from './flyer-pro-job.types';
 
 /**
  * A tabela de casos dos critérios das fases (só testes): o predicado (`isEligible`) e a condição de consulta
@@ -8,7 +8,7 @@ import type { EnrichStep } from './flyer-pro-job.types';
 
 export interface CriterionCase {
   label: string;
-  phase: EnrichStep;
+  phase: EnrichPhase;
   /** O item, sobre a base: sem categoria, sem revisão e sem foto. */
   item: Partial<EnrichItemFacts>;
   /** Entra na fase com `onlyMissing` ligado e desligado, nesta ordem. */
@@ -159,9 +159,29 @@ export const CRITERION_CASES: CriterionCase[] = [
     eligible: [false, false],
   },
   {
-    label: 'EAN pendente (passada da change 29)',
+    label: 'EAN pendente: a fase de fotos não o lê, a passada do EAN sim',
     phase: 'image_match',
     item: { imageStatus: 'ean_pending' },
     eligible: [false, false],
+  },
+  ...['none', 'review', 'not_found', 'removed'].map(
+    (imageStatus): CriterionCase => ({
+      label: `passada do EAN: foto ${imageStatus} não é pendente`,
+      phase: 'image_ean_retry',
+      item: { imageStatus },
+      eligible: [false, false],
+    }),
+  ),
+  {
+    label: 'passada do EAN: foto aplicada não é pendente',
+    phase: 'image_ean_retry',
+    item: { imageStatus: 'applied', imageOrigin: 'match' },
+    eligible: [false, false],
+  },
+  {
+    label: 'passada do EAN: item pendente entra, com onlyMissing ligado ou desligado',
+    phase: 'image_ean_retry',
+    item: { imageStatus: 'ean_pending' },
+    eligible: [true, true],
   },
 ];
