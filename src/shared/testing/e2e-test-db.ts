@@ -2,6 +2,8 @@ import { DataSource } from 'typeorm';
 import { Client } from '../../modules/clients/entities/client.entity';
 import { ClientContact } from '../../modules/clients/entities/client-contact.entity';
 import { ClientStore } from '../../modules/clients/entities/client-store.entity';
+import { FlyerProDocument } from '../../modules/flyer-pro/entities/flyer-pro-document.entity';
+import { FlyerProItem } from '../../modules/flyer-pro/entities/flyer-pro-item.entity';
 import { SCENE_TEST_ENTITIES } from '../../modules/template-scenes/testing/scene-test-db';
 import { createGallerySchema } from './e2e-gallery-schema';
 
@@ -72,7 +74,14 @@ export function assertE2eDbUrl(url: string | undefined): URL {
  * quem esquecer vê "relation does not exist" no próprio e2e. A Galeria não entra: as tabelas dela nascem pelo SQL do
  * app (`createGallerySchema`), e `GalleryImage` tem `synchronize: false`.
  */
-export const E2E_TEST_ENTITIES = [...SCENE_TEST_ENTITIES, Client, ClientContact, ClientStore];
+export const E2E_TEST_ENTITIES = [
+  ...SCENE_TEST_ENTITIES,
+  Client,
+  ClientContact,
+  ClientStore,
+  FlyerProDocument,
+  FlyerProItem,
+];
 
 /** A mesma trava do harness das cenas (A-5): os dois nunca montam o banco ao mesmo tempo. */
 const SYNC_LOCK_KEY = 7_770_001;
