@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsObject, ValidateIf } from 'class-validator';
+import { IsObject } from 'class-validator';
+import { ValidateIfDefined } from './validate-if-defined.decorator';
 
 /**
  * As cinco fatias do `PATCH`: objetos opacos, sem `@ValidateNested`; chave fora da lista é 400 pelo pipe global. Chave
@@ -8,27 +9,27 @@ import { IsObject, ValidateIf } from 'class-validator';
  */
 export class FlyerProSlicesPatchDto {
   @ApiPropertyOptional({ type: 'object', additionalProperties: true })
-  @ValidateIf((_, value) => value !== undefined)
+  @ValidateIfDefined()
   @IsObject()
   frame?: Record<string, unknown>;
 
   @ApiPropertyOptional({ type: 'object', additionalProperties: true })
-  @ValidateIf((_, value) => value !== undefined)
+  @ValidateIfDefined()
   @IsObject()
   structure?: Record<string, unknown>;
 
   @ApiPropertyOptional({ type: 'object', additionalProperties: true })
-  @ValidateIf((_, value) => value !== undefined)
+  @ValidateIfDefined()
   @IsObject()
   card?: Record<string, unknown>;
 
   @ApiPropertyOptional({ type: 'object', additionalProperties: true })
-  @ValidateIf((_, value) => value !== undefined)
+  @ValidateIfDefined()
   @IsObject()
   assembly?: Record<string, unknown>;
 
   @ApiPropertyOptional({ type: 'object', additionalProperties: true })
-  @ValidateIf((_, value) => value !== undefined)
+  @ValidateIfDefined()
   @IsObject()
   exportPrefs?: Record<string, unknown>;
 }

@@ -1,5 +1,4 @@
-import { plainToInstance } from 'class-transformer';
-import { validate, ValidationError } from 'class-validator';
+import { nestedErrorsOf } from './dto-paths.testutil';
 import { SaveFlyerProDocumentDto } from './save-flyer-pro-document.dto';
 
 const ID = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c11';
@@ -17,18 +16,8 @@ const IMPORT = {
   rejected: [{ row: 7, reason: 'PRICE_MISSING', raw: 'FEIJAO CARIOCA' }],
 };
 
-/** Os caminhos recusados (`import.fileHash`, `import.rejected.0.reason`), com o `whitelist` do pipe global. */
-function pathsOf(errors: ValidationError[], prefix = ''): string[] {
-  return errors.flatMap((error) => {
-    const path = prefix ? `${prefix}.${error.property}` : error.property;
-    return error.children?.length ? pathsOf(error.children, path) : [path];
-  });
-}
-
-async function errorsOf(value: unknown): Promise<string[]> {
-  const dto = plainToInstance(SaveFlyerProDocumentDto, { ...BASE, import: value });
-  return pathsOf(await validate(dto, { whitelist: true, forbidNonWhitelisted: true }));
-}
+const errorsOf = (value: unknown) =>
+  nestedErrorsOf(SaveFlyerProDocumentDto, { ...BASE, import: value });
 const withImport = (over: Record<string, unknown>) => errorsOf({ ...IMPORT, ...over });
 const withRejected = (entry: Record<string, unknown>) =>
   errorsOf({ ...IMPORT, rejected: [{ ...IMPORT.rejected[0], ...entry }] });

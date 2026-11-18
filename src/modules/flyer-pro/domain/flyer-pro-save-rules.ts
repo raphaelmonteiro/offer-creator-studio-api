@@ -81,23 +81,11 @@ export function assertSaveBody(
 }
 
 interface ItemsBody {
-  items?: { upsert?: Array<{ id: string }> | null } | null;
-}
-
-/**
- * O único ponto que trata `items.upsert` e `items.delete` nulos: viram lista vazia (como ausentes), para a primeira
- * gravação, o reenvio e a conferência de ids repetidos lerem o mesmo corpo. Sem `items`, o corpo volta como veio.
- */
-export function withoutNullItemLists<
-  B extends { items?: { upsert?: unknown[] | null; delete?: unknown[] | null } | null },
->(body: B): B {
-  if (!body.items) return body;
-  const { upsert, delete: removed } = body.items;
-  return { ...body, items: { ...body.items, upsert: upsert ?? [], delete: removed ?? [] } };
+  items?: { upsert?: Array<{ id: string }> } | null;
 }
 
 /** Os ids que aparecem mais de uma vez em `items.upsert` (forma inválida: 400, A-8). */
-export function repeatedUpsertIds(upsert?: Array<{ id: string }> | null): string[] {
+export function repeatedUpsertIds(upsert?: Array<{ id: string }>): string[] {
   const seen = new Set<string>();
   const repeated = new Set<string>();
   for (const { id } of upsert ?? []) {
