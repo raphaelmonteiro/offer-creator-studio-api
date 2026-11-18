@@ -1,5 +1,9 @@
 import type { DataSource, EntityManager, Repository } from 'typeorm';
-import type { FlyerProFormat, FlyerProTemplateSnapshot } from '../domain/flyer-pro.types';
+import type {
+  FlyerProFormat,
+  FlyerProTemplateSnapshot,
+  FlyerProTemplateStatus,
+} from '../domain/flyer-pro.types';
 import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import { FlyerProDocumentsService } from './flyer-pro-documents.service';
@@ -7,13 +11,13 @@ import type { FlyerProTemplateSnapshotService } from './flyer-pro-template-snaps
 
 /** Ajudantes dos unitários do serviço do encarte (só testes): repositórios, `manager` e montador simulados. */
 
-export const STATUS = {
+export const STATUS: FlyerProTemplateStatus = {
   available: true,
   usable: true,
   missingFaces: [],
   stale: false,
   staleKind: null,
-} as const;
+};
 
 export const CURSOR = '2026-11-14T13:05:40.412377Z';
 

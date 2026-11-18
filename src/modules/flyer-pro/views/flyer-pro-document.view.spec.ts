@@ -6,80 +6,24 @@ import {
   toItemView,
   toListItemView,
 } from './flyer-pro-document.view';
+import {
+  documentRow,
+  itemRow,
+  snapshotOf,
+  STATUS,
+} from '../services/flyer-pro-documents.service.testutil';
 
-const STATUS = { available: true, usable: true, missingFaces: [], stale: false, staleKind: null };
-const SNAPSHOT = {
-  v: 1,
-  sceneId: 's',
-  faces: [],
-} as unknown as FlyerProDocument['templateSnapshot'];
-
-function document(over: Partial<FlyerProDocument> = {}): FlyerProDocument {
-  return {
-    id: 'd1',
-    name: 'Ofertas',
-    clientId: 'c1',
-    sceneId: 's1',
-    format: '27x40',
-    pageCount: 1,
-    pagesFrozen: false,
-    step: 'products',
-    ui: {},
-    templateSnapshot: SNAPSHOT,
-    frame: {},
-    structure: {},
-    card: {},
-    assembly: {},
-    exportPrefs: {},
-    layoutSnapshot: null,
-    layoutDigest: null,
-    renderDigest: null,
-    schemaVersion: 1,
-    engineVersion: 1,
-    revision: 0,
-    lastMutationId: null,
-    creationKey: '5b1e0c3a-8f0e-4d7a-9a51-2f4c1d7e9b10',
-    createdByUserId: 'u1',
-    updatedByUserId: 'u1',
-    createdAt: new Date('2026-11-14T13:02:11.000Z'),
-    updatedAt: new Date('2026-11-14T13:02:11.000Z'),
-    deletedAt: null,
-    ...over,
-  };
-}
-
-function item(over: Partial<FlyerProItem> = {}): FlyerProItem {
-  return {
-    id: 'i1',
-    documentId: 'd1',
-    position: 0,
-    name: 'ABACATE',
-    sourceName: null,
-    price: { kind: 'simple', cents: 699 },
-    unit: 'kg',
-    category: null,
-    categorySource: null,
-    categoryReview: null,
-    isAlcoholic: false,
-    ean: null,
-    galleryImageId: null,
-    imageUrl: null,
-    imageWidth: null,
-    imageHeight: null,
-    imageOrigin: null,
-    imageStatus: 'none',
-    imageReview: null,
-    spellReview: null,
-    imported: null,
-    createdAt: new Date('2026-11-14T13:04:02.118Z'),
-    updatedAt: new Date('2026-11-14T13:05:40.412Z'),
-    ...over,
-  };
-}
+const SNAPSHOT = snapshotOf();
+const CREATION_KEY = '5b1e0c3a-8f0e-4d7a-9a51-2f4c1d7e9b10';
 
 const view = (over: Partial<FlyerProDocument> = {}, items: FlyerProItem[] = []) =>
   toDocumentView({
-    document: document(over),
+    document: documentRow({
+      name: 'Ofertas',
+      creationKey: CREATION_KEY,
+      templateSnapshot: SNAPSHOT,
+      ...over,
+    }),
     items,
     itemsCursor: '2026-11-14T13:02:11.000000Z',
     templateStatus: STATUS,
@@ -194,7 +138,7 @@ describe('toDocumentView', () => {
 
 describe('toItemView', () => {
   it('traz as colunas do item, menos documentId, mais eanValid e importId nulo', () => {
-    const result = toItemView(item());
+    const result = toItemView(itemRow());
     expect(Object.keys(result).sort()).toEqual(
       [
         'id',
@@ -234,7 +178,7 @@ describe('toItemView', () => {
     [null, null],
     [undefined, null],
   ])('eanValid de %s é %s', (ean, expected) => {
-    expect(toItemView(item({ ean: ean as string | null })).eanValid).toBe(expected);
+    expect(toItemView(itemRow({ ean: ean as string | null })).eanValid).toBe(expected);
   });
 
   it('devolve price, imported e as revisões como gravados', () => {
@@ -242,12 +186,12 @@ describe('toItemView', () => {
     const imported = { v: 1, row: 2, name: 'ABACATE' };
     const imageReview = { checkedAt: 'x', suggestion: null };
     const spellReview = { checkedName: 'ABACATE', suggestion: null };
-    const result = toItemView(item({ price, imported, imageReview, spellReview }));
+    const result = toItemView(itemRow({ price, imported, imageReview, spellReview }));
     expect(result).toMatchObject({ price, imported, imageReview, spellReview });
   });
 
   it('trata campos ausentes como nulos e datas em ISO', () => {
-    const result = toItemView(item({ sourceName: undefined, imageUrl: undefined }));
+    const result = toItemView(itemRow({ sourceName: undefined, imageUrl: undefined }));
     expect(result.sourceName).toBeNull();
     expect(result.imageUrl).toBeNull();
     expect(result.updatedAt).toBe('2026-11-14T13:05:40.412Z');
