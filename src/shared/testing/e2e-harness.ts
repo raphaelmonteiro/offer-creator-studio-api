@@ -23,7 +23,7 @@ type Called = (req: request.Test) => request.Test;
  * da limpeza da semente.
  */
 export function useE2eHarness(
-  appOptions: Pick<E2eAppOptions, 'imports' | 'controllers' | 'providers'> = {},
+  appOptions: Pick<E2eAppOptions, 'imports' | 'controllers' | 'providers' | 'jobQueue'> = {},
 ) {
   jest.setTimeout(60_000);
   const h = {} as {

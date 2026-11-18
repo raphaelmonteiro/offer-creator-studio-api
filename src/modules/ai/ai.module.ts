@@ -118,6 +118,10 @@ import { FlyerEanResolutionService } from './ean/dotcompany/flyer-ean-resolution
     OpenAiDirectorService,
     // usado pelo módulo de mascotes para recortar o fundo do PNG enviado
     BackgroundRemovalService,
+    // usados pelo job de enriquecimento do Encarte Pro (módulo flyer-pro, change 28; as fases reais são da 29)
+    FlyerEanResolutionService,
+    ProductCategorizationService,
+    SpellCheckService,
   ],
 })
 export class AiModule {}

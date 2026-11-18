@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { SharedModule } from '../../shared/shared.module';
+import { AiModule } from '../ai/ai.module';
 import { FlyerProDocumentsController } from './controllers/flyer-pro-documents.controller';
 import { FlyerProStructureSuggestionController } from './controllers/flyer-pro-structure-suggestion.controller';
 import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.controller';
@@ -32,6 +34,9 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
 @Module({
   imports: [
     TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem, FlyerProImport, FlyerProJob]),
+    // A fila (`AnimationQueueService`) do job e, para as fases reais da change 29, os três serviços de IA que o `AiModule` exporta.
+    SharedModule,
+    AiModule,
   ],
   controllers: [
     FlyerProTemplatesController,
