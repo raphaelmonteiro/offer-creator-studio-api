@@ -12,10 +12,11 @@ const withRejected = (entry: Record<string, unknown>) =>
   errorsOf({ ...importEntry(), rejected: [{ ...importEntry().rejected[0], ...entry }] });
 
 describe('FlyerProImportDto (só a forma, 400)', () => {
-  it('aceita o registro completo, sem detectedFormat e com rejected vazio', async () => {
+  it('aceita o registro completo, sem detectedFormat, com detectedFormat nulo (PV-2) e com rejected vazio', async () => {
     expect(await errorsOf(importEntry())).toEqual([]);
     const { detectedFormat: _, ...withoutFormat } = importEntry();
     expect(await errorsOf(withoutFormat)).toEqual([]);
+    expect(await withImport({ detectedFormat: null })).toEqual([]);
     expect(await withImport({ rejected: [] })).toEqual([]);
   });
 

@@ -63,6 +63,16 @@ describe('FlyerProImportsService.apply: o registro da importação', () => {
     expect(params[9]).toBe(JSON.stringify(rejected));
   });
 
+  it('detectedFormat nulo no corpo (PV-2) grava nulo, como o ausente', async () => {
+    const manager = makeImportsManager();
+    // O corpo JSON pode trazer `null`; o tipo da entrada só conhece o campo ausente.
+    const entry = importEntry({ detectedFormat: null as unknown as undefined });
+
+    await service.apply(manager, DOCUMENT, 'ana', entry);
+
+    expect(commandsOf(manager)[0].params[5]).toBeNull();
+  });
+
   it('o mesmo id já gravado neste encarte: não grava de novo, não muda a gravada e não descongela, nem no "Substituir"', async () => {
     const manager = makeImportsManager({ existingOwner: DOCUMENT });
 
