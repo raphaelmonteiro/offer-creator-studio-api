@@ -40,13 +40,14 @@ export function readEnrichConfig(
   config: ConfigService,
   logger: Warner = new Logger('FlyerProEnrichConfig'),
 ): FlyerProEnrichConfig {
-  const integer = (name: string, fallback: number) =>
-    readIntegerEnv(config, logger, { name: PREFIX + name, fallback, min: 1 });
+  const integer = (name: string, fallback: number, multipleOf?: number) =>
+    readIntegerEnv(config, logger, { name: PREFIX + name, fallback, min: 1, multipleOf });
   return {
     enabled: rawEnv(config, PREFIX + 'ENABLED') !== 'false',
     provider: readProvider(config, logger),
     concurrency: integer('CONCURRENCY', 2),
-    imageBatch: integer('IMAGE_BATCH', 16),
+    // Múltiplo de 8: cada chamada do leitor de nomes lê 8 nomes, e um lote de fotos usa chamadas inteiras.
+    imageBatch: integer('IMAGE_BATCH', 16, 8),
     categoryBatch: integer('CATEGORY_BATCH', 40),
     spellBatch: integer('SPELL_BATCH', 40),
     batchExpireSeconds: integer('BATCH_EXPIRE_SECONDS', 300),

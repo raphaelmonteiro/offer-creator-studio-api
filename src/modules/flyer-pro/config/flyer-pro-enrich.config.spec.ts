@@ -104,6 +104,75 @@ describe('readEnrichConfig', () => {
     });
   });
 
+  describe('tamanhos e prazos inválidos caem no padrão', () => {
+    it('zero, texto e lote de fotos que não é múltiplo de 8: o padrão e um aviso por variável, com nome e valor', () => {
+      const { config, warnings } = read({
+        FLYER_PRO_ENRICH_CATEGORY_BATCH: '0',
+        FLYER_PRO_ENRICH_SPELL_BATCH: 'abc',
+        FLYER_PRO_ENRICH_IMAGE_BATCH: '12',
+      });
+
+      expect([config.categoryBatch, config.spellBatch, config.imageBatch]).toEqual([40, 40, 16]);
+      expect(warnings).toHaveLength(3);
+      for (const sent of [
+        'FLYER_PRO_ENRICH_CATEGORY_BATCH="0"',
+        'FLYER_PRO_ENRICH_SPELL_BATCH="abc"',
+        'FLYER_PRO_ENRICH_IMAGE_BATCH="12"',
+      ]) {
+        expect(warnings.filter((line) => line.includes(sent))).toHaveLength(1);
+      }
+    });
+
+    const NUMERIC = [
+      ['CONCURRENCY', 'concurrency', 2],
+      ['IMAGE_BATCH', 'imageBatch', 16],
+      ['CATEGORY_BATCH', 'categoryBatch', 40],
+      ['SPELL_BATCH', 'spellBatch', 40],
+      ['BATCH_EXPIRE_SECONDS', 'batchExpireSeconds', 300],
+      ['BATCH_DEADLINE_MS', 'batchDeadlineMs', 240_000],
+      ['STALE_SECONDS', 'staleSeconds', 60],
+      ['MAX_ATTEMPTS', 'maxAttempts', 3],
+    ] as const;
+
+    it.each(
+      NUMERIC.flatMap((row) => ['0', '-5', '2.5', 'dez', '1e3x'].map((bad) => [...row, bad])),
+    )('%s inválido (%s): vale o padrão com um aviso', (name, key, fallback, bad) => {
+      const { config, warnings } = read({ [`FLYER_PRO_ENRICH_${name}`]: String(bad) });
+
+      expect(config[key]).toBe(fallback);
+      expect(warnings).toEqual([expect.stringContaining(`FLYER_PRO_ENRICH_${name}="${bad}"`)]);
+    });
+
+    it('sem teto superior: valor enorme e válido vale como veio, sem aviso', () => {
+      const { config, warnings } = read({
+        FLYER_PRO_ENRICH_CATEGORY_BATCH: '100000',
+        FLYER_PRO_ENRICH_BATCH_DEADLINE_MS: '99999999',
+      });
+
+      expect([config.categoryBatch, config.batchDeadlineMs]).toEqual([100_000, 99_999_999]);
+      expect(warnings).toEqual([]);
+    });
+
+    it('lote de fotos de 8: 78 itens pedem 10 lotes; de 24, sem aviso, pedem 4', () => {
+      const eight = read({ FLYER_PRO_ENRICH_IMAGE_BATCH: '8' });
+      const twentyFour = read({ FLYER_PRO_ENRICH_IMAGE_BATCH: '24' });
+
+      expect(Math.ceil(78 / eight.config.imageBatch)).toBe(10);
+      expect(Math.ceil(78 / twentyFour.config.imageBatch)).toBe(4);
+      expect(twentyFour.warnings).toEqual([]);
+    });
+
+    it('os padrões, 78 itens: 2 lotes de categorias, 2 de ortografia e 5 de fotos', () => {
+      const { config } = read();
+
+      expect(
+        [config.categoryBatch, config.spellBatch, config.imageBatch].map((size) =>
+          Math.ceil(78 / size),
+        ),
+      ).toEqual([2, 2, 5]);
+    });
+  });
+
   it('o backend/.env.example traz as dez variáveis com os padrões que o código usa', () => {
     const example = readFileSync(join(__dirname, '../../../../.env.example'), 'utf8');
     const defaults: Record<string, string> = {
