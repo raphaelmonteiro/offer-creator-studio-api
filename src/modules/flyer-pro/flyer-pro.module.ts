@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { GalleryModule } from '../gallery/gallery.module';
 import { FlyerProDocumentsController } from './controllers/flyer-pro-documents.controller';
 import { FlyerProStructureSuggestionController } from './controllers/flyer-pro-structure-suggestion.controller';
 import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.controller';
@@ -27,9 +28,13 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
  * Módulo do Encarte Pro (backend): a leitura dos templates das cenas do Templates v2 (N7), o montador da cópia congelada
  * do template, o encarte guardado no servidor (criar, listar, abrir e excluir: N1, N2, N3 e N6) e o serviço de guarda que
  * o módulo de clientes chama ao excluir um cliente, e a sugestão de estrutura por IA (N19, só leitura). Lê as tabelas das cenas sem passar pela flag `TEMPLATE_SCENE_ENABLED`.
+ * Importa a Galeria para registrar a escolha da foto depois do `PATCH` (change 27).
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem, FlyerProImport])],
+  imports: [
+    TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem, FlyerProImport]),
+    GalleryModule,
+  ],
   controllers: [
     FlyerProTemplatesController,
     FlyerProDocumentsController,
