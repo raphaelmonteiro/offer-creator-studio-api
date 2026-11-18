@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { QueryRunner } from 'typeorm';
 
-/** Ajudantes dos specs de migration do encarte (M1 e M2), que rodam num schema temporário (só testes). */
+/** Ajudantes dos specs de migration do encarte (M1, M2 e M4), que rodam num schema temporário (só testes). */
 
 /** O que o `QueryRunner` já tipa: o comando e os parâmetros, e as linhas de volta. */
 export type Exec = QueryRunner['query'];
@@ -70,5 +70,23 @@ export function insertItemRow(exec: Exec, documentId: string, position = 0): Pro
   return exec(
     `INSERT INTO flyer_pro_items (id, "documentId", position, name, price, unit) VALUES ($1, $2, $3, 'ABACATE', '{"kind":"simple","cents":699}', 'kg')`,
     [randomUUID(), documentId, position],
+  );
+}
+
+/** Uma exportação só com o obrigatório (os padrões da M4 cobrem o resto); `extra` acrescenta colunas. */
+export async function insertExportRow(
+  exec: Exec,
+  documentId: string,
+  id: string,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  const columns = ['id', 'documentId', 'documentRevision', 'engineVersion', 'format', 'fileName'];
+  const values: unknown[] = [id, documentId, 3, 1, 'pdf', 'ofertas-piccin.pdf'];
+  columns.push(...Object.keys(extra));
+  values.push(...Object.values(extra));
+  const marks = values.map((_, index) => `$${index + 1}`).join(', ');
+  await exec(
+    `INSERT INTO flyer_pro_exports (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${marks})`,
+    values,
   );
 }
