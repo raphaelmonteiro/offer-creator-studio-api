@@ -126,6 +126,19 @@ TEMPLATE_SCENE_VISION_MODEL / TEMPLATE_SCENE_VISION_TIMEOUT_MS
 TEMPLATE_SCENE_EDIT_QUALITY   # qualidade do redesenho da imagem inteira (padrão high)
 OPENAI_TIMEOUT_MS             # timeout por requisição do modo sceneCall (padrão 180000); NÃO é global
 TEMPLATE_SCENE_E2E_DB_URL     # só testes: banco descartável chroma_x_e2e (nunca o flyer_db); sem ela os specs de banco ficam skipped
+
+# Encarte Pro: sugestão de estrutura por IA (módulo flyer-pro, rota N19) — bloco completo em .env.example; lidas uma vez, ao subir a API
+FLYER_PRO_STRUCTURE_AI_ENABLED  # só false desliga a rota (422 FLYER_PRO_STRUCTURE_AI_DISABLED)
+FLYER_PRO_STRUCTURE_AI_PROVIDER # real (OpenAI, gasta crédito; padrão do código) | mock (sem rede e sem custo; padrão do compose local; valor desconhecido cai em mock)
+FLYER_PRO_STRUCTURE_AI_MODEL    # gpt-6-luna; precisa ter preço em openai-llm-pricing.ts, senão 422 MODEL_PRICE_UNKNOWN
+FLYER_PRO_STRUCTURE_AI_EFFORT   # esforço de raciocínio: none | low | medium (padrão low; outro valor vira low)
+FLYER_PRO_STRUCTURE_AI_TIMEOUT_MS
+                                # prazo da chamada ao provedor, vale para o mock também (padrão 25000); estourou, 503 TIMEOUT
+FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR
+                                # sugestões atendidas por encarte em 60 minutos (padrão 20); acima, 429 HOURLY_LIMIT
+FLYER_PRO_STRUCTURE_AI_MAX_HEROES
+                                # destaques novos por sugestão (padrão 12; os últimos são cortados)
+FLYER_PRO_STRUCTURE_AI_EXAMPLES # encartes anteriores do cliente usados como exemplo, de 0 a 10 (padrão 3; 0 desliga a leitura)
 FAL_API_KEY / ELEVENLABS_API_KEY / GEMINI_API_KEY
                               # pipeline real (vídeo, TTS, imagens)
 FFMPEG_PATH / FFPROBE_PATH    # binários do ffmpeg (worker); o preflight do worker reporta no /v1/health
