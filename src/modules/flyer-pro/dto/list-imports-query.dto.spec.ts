@@ -1,13 +1,9 @@
-import { plainToInstance } from 'class-transformer';
-import { validate } from 'class-validator';
+import { nestedErrorsOf } from './dto-paths.testutil';
 import { ListFlyerProImportsQueryDto } from './list-imports-query.dto';
 
-/** As propriedades recusadas, com o mesmo `transform`, `whitelist` e `forbidNonWhitelisted` do pipe global. */
-async function errorsOf(query: Record<string, unknown>): Promise<string[]> {
-  const dto = plainToInstance(ListFlyerProImportsQueryDto, query);
-  const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
-  return errors.map((error) => error.property);
-}
+/** As propriedades recusadas da consulta (sem aninhamento, os caminhos são os nomes). */
+const errorsOf = (query: Record<string, unknown>) =>
+  nestedErrorsOf(ListFlyerProImportsQueryDto, query);
 
 describe('ListFlyerProImportsQueryDto (N13)', () => {
   it('aceita a consulta vazia, page, limit nos extremos e fileHash de 1 a 64 caracteres', async () => {
