@@ -1,4 +1,8 @@
 import {
+  canRetryEan,
+  EAN_RETRY_DELAYS_SECONDS,
+  EAN_RETRY_MAX_PASSES,
+  eanRetryDelaySeconds,
   ImageSearchAnswer,
   imageSearchRequest,
   imageVerdictOf,
@@ -262,5 +266,21 @@ describe('campos opcionais de result.image_match', () => {
 
   it('sem result.image_match (fase que não rodou), nada é criado', () => {
     expect(withImageExtras({}, { nameSearchUnavailable: true, eanBudgetBlocked: 1 })).toEqual({});
+  });
+});
+
+describe('passadas do EAN pendente: quantas e quanto esperam', () => {
+  it('no máximo 3 passadas por job, com a espera de 30, 60 e 120 s', () => {
+    expect(EAN_RETRY_MAX_PASSES).toBe(3);
+    expect(EAN_RETRY_DELAYS_SECONDS).toEqual([30, 60, 120]);
+    expect([1, 2, 3].map(eanRetryDelaySeconds)).toEqual([30, 60, 120]);
+  });
+
+  it('cabe outra passada enquanto o job usou menos de 3', () => {
+    expect([0, 1, 2, 3, 4].map(canRetryEan)).toEqual([true, true, true, false, false]);
+  });
+
+  it('o maior atraso (120 s) fica abaixo dos 180 s de stalled e dos 300 s do reconciliador', () => {
+    expect(Math.max(...EAN_RETRY_DELAYS_SECONDS)).toBeLessThan(180);
   });
 });

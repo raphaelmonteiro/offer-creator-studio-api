@@ -76,6 +76,7 @@ function nextOf(
     cursor: after.moved,
     total: current.total,
     done: false,
+    delaySeconds: 0,
   });
 }
 
@@ -99,7 +100,7 @@ export class FlyerProEnrichCommitter {
     return this.locked(job, async (locked) => {
       const { manager, current } = locked;
       const cursor = current.cursor ?? FRESH_CURSOR;
-      const ctx = await this.writeContext(locked, cursor.round);
+      const ctx = await this.writeContext(locked, { round: cursor.round, plan });
       const counts = plan.work ? await applyWrites(manager, planWrites(plan.work, ctx)) : null;
       const { columns, cost } = progressOf(current, plan, counts);
       const last = plan.work?.items.at(-1);
@@ -122,7 +123,7 @@ export class FlyerProEnrichCommitter {
         cursor: cursorOut,
         total,
       });
-      await this.publishNext(locked, 0);
+      await this.publishNext(locked, next.delaySeconds);
       return 'committed';
     });
   }
@@ -194,14 +195,18 @@ export class FlyerProEnrichCommitter {
     });
   }
 
-  private async writeContext(locked: Locked, round: number): Promise<WriteContext> {
+  private async writeContext(
+    locked: Locked,
+    unit: { round: number; plan: UnitPlan },
+  ): Promise<WriteContext> {
     const { manager, current } = locked;
     return {
       stamp: await readStamp(manager),
       jobId: current.id,
       documentId: current.documentId,
       autoApply: current.autoApply,
-      onlyMissing: effectiveOnlyMissing(current.onlyMissing, round),
+      onlyMissing: effectiveOnlyMissing(current.onlyMissing, unit.round),
+      retry: unit.plan.phase === 'image_ean_retry',
     };
   }
 

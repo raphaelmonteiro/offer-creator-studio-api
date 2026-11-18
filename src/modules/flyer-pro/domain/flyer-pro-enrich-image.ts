@@ -16,6 +16,21 @@ import type { PhaseCounts } from './flyer-pro-enrich-rules';
 /** No máximo 3 candidatas por item (A-12). */
 export const MAX_CANDIDATES = 3;
 
+/**
+ * As passadas do EAN pendente (`image_ean_retry`): no máximo 3 por job, contando todas as rodadas da conferência final
+ * (A-14), com a espera de 30, 60 e 120 s antes de cada uma. O maior atraso (120 s) fica abaixo dos 180 s de `stalled` e
+ * dos 300 s em que o reconciliador republica um lote não assumido.
+ */
+export const EAN_RETRY_DELAYS_SECONDS: readonly number[] = [30, 60, 120];
+export const EAN_RETRY_MAX_PASSES = EAN_RETRY_DELAYS_SECONDS.length;
+
+/** Ainda cabe outra passada? `usedPasses` é quantas o job já começou. */
+export const canRetryEan = (usedPasses: number): boolean => usedPasses < EAN_RETRY_MAX_PASSES;
+
+/** A espera antes da passada de número `pass` (1 a 3). */
+export const eanRetryDelaySeconds = (pass: number): number =>
+  EAN_RETRY_DELAYS_SECONDS[pass - 1] ?? 0;
+
 /** A medida da foto como a fase a leu; `null` quando não deu para ler (a foto vai para revisão). */
 export interface PhotoSize {
   width: number;
