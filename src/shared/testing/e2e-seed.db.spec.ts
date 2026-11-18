@@ -5,6 +5,7 @@ import * as request from 'supertest';
 import { DataSource } from 'typeorm';
 import { ClientsController } from '../../modules/clients/clients.controller';
 import { ClientsService } from '../../modules/clients/clients.service';
+import { FlyerProClientGuardService } from '../../modules/flyer-pro/services/flyer-pro-client-guard.service';
 import { SceneTemplateConfiguration } from '../../modules/template-scenes/domain/scene-template.types';
 import { Template } from '../../modules/templates/entities/template.entity';
 import { createE2eApp, E2eApp } from './e2e-app';
@@ -116,7 +117,7 @@ describeIfE2eDb('Semente do e2e (banco chroma_x_e2e)', () => {
       dataSource,
       uploadsDir,
       controllers: [ClientsController],
-      providers: [ClientsService],
+      providers: [ClientsService, FlyerProClientGuardService],
     });
     try {
       const token = web.jwt.sign({ sub: applied.user.id, email: applied.user.email });

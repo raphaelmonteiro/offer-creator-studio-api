@@ -5,10 +5,15 @@ import { ClientsService } from './clients.service';
 import { Client } from './entities/client.entity';
 import { ClientContact } from './entities/client-contact.entity';
 import { ClientStore } from './entities/client-store.entity';
+import { FlyerProModule } from '../flyer-pro/flyer-pro.module';
 import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Client, ClientContact, ClientStore]), UploadsModule],
+  imports: [
+    TypeOrmModule.forFeature([Client, ClientContact, ClientStore]),
+    UploadsModule,
+    FlyerProModule,
+  ],
   controllers: [ClientsController],
   providers: [ClientsService],
   exports: [ClientsService, TypeOrmModule],

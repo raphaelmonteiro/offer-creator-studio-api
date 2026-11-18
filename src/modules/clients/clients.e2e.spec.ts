@@ -1,6 +1,7 @@
 import { JwtService } from '@nestjs/jwt';
 import { describeIfE2eDb } from '../../shared/testing/e2e-test-db';
 import { useE2eHarness } from '../../shared/testing/e2e-harness';
+import { FlyerProClientGuardService } from '../flyer-pro/services/flyer-pro-client-guard.service';
 import { ClientsController } from './clients.controller';
 import { ClientsService } from './clients.service';
 
@@ -9,7 +10,10 @@ import { ClientsService } from './clients.service';
  * o guard JWT, o pipe, o filtro, o interceptor e o leitor de corpo de produção, no banco `_e2e` com a semente.
  */
 describeIfE2eDb('Clientes: fumaça do harness de e2e', () => {
-  const h = useE2eHarness({ controllers: [ClientsController], providers: [ClientsService] });
+  const h = useE2eHarness({
+    controllers: [ClientsController],
+    providers: [ClientsService, FlyerProClientGuardService],
+  });
 
   it('lista com o token da semente: 200, envelope e os dois clientes semeados pelo id', async () => {
     const response = await h.get('/clients');
