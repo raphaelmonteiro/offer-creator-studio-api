@@ -1,0 +1,175 @@
+import { openAiError } from '../../ai/utils/openai-chat.testutil';
+import type { StructureAiConfig } from '../config/structure-ai.config';
+import { PICANHA_ID } from '../domain/structure-suggestion.testutil';
+import { RealFlyerProStructureAi } from '../providers/flyer-pro-structure-ai.real';
+import {
+  fakeResponsesClient,
+  responsesResult,
+  validResult,
+} from '../providers/flyer-pro-structure-ai.testutil';
+import {
+  bodyOf,
+  CONFIG,
+  DOCUMENT_ID,
+  makeSuggestionService,
+} from './flyer-pro-structure-suggestion.service.testutil';
+
+const REAL: StructureAiConfig = { ...CONFIG, provider: 'real' };
+
+/** O serviço com o provedor real sobre o cliente da OpenAI simulado (nenhuma chamada paga). */
+function makeReal(outcome?: unknown, config: Partial<StructureAiConfig> = {}) {
+  const { client, create } = fakeResponsesClient(outcome);
+  const merged = { ...REAL, ...config };
+  const made = makeSuggestionService({
+    config: merged,
+    port: new RealFlyerProStructureAi(merged, client),
+  });
+  return { ...made, create };
+}
+
+describe('FlyerProStructureSuggestionService com o provedor real (cliente simulado)', () => {
+  it('200 com source ai, o modelo configurado e a versão 1 do prompt, sem tokens nem custo na resposta', async () => {
+    const { service, create } = makeReal();
+
+    const view = await service.suggest(DOCUMENT_ID, bodyOf());
+
+    expect(view).toMatchObject({
+      source: 'ai',
+      model: 'gpt-6-luna',
+      promptVersion: 1,
+      noChange: false,
+    });
+    expect(JSON.stringify(view)).not.toMatch(/usage|tokens|costUsd|estimatedCostUsd/);
+    expect(view.sections.map((section) => [section.id, section.page])).toEqual([
+      ['cat:Carnes', 1],
+      ['cat:Hortifruti', null],
+      ['cat:Bebidas', 2],
+    ]);
+    expect(view.heroes.map((hero) => hero.itemId)).toEqual([PICANHA_ID]);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('o corpo enviado pelo serviço tem o modelo, store false e o schema estrito, sem previous_response_id', async () => {
+    const { service, create } = makeReal();
+    await service.suggest(DOCUMENT_ID, bodyOf());
+
+    expect(create.mock.calls[0][0]).toMatchObject({
+      model: 'gpt-6-luna',
+      store: false,
+      reasoning: { effort: 'low' },
+      max_output_tokens: 4000,
+      text: {
+        format: { type: 'json_schema', name: 'flyer_pro_structure_suggestion', strict: true },
+      },
+    });
+    expect(create.mock.calls[0][0]).not.toHaveProperty('previous_response_id');
+    expect(create.mock.calls[0][1]).toEqual({ timeout: 25_000, maxRetries: 0 });
+  });
+
+  it('id inventado pelo modelo (seção s7 e destaque p42) sai no saneamento, com UNKNOWN_SECTION e UNKNOWN_ITEM', async () => {
+    const output = {
+      summary: '',
+      sections: [
+        { id: 's7', page: null, reason: '' },
+        { id: 's2', page: 1, reason: 'abre' },
+        { id: 's1', page: null, reason: '' },
+        { id: 's3', page: null, reason: '' },
+      ],
+      heroes: [{ item: 'p42', size: '2x1', reason: '' }],
+    };
+    const { service } = makeReal(responsesResult(JSON.stringify(output)));
+
+    const view = await service.suggest(DOCUMENT_ID, bodyOf());
+
+    expect(view.discarded).toEqual([
+      { kind: 'section', code: 'UNKNOWN_SECTION' },
+      { kind: 'hero', code: 'UNKNOWN_ITEM' },
+    ]);
+    expect(view.heroes).toEqual([]);
+  });
+
+  it('sem chave: 422 DISABLED com NO_API_KEY, o cliente não é chamado e o pedido não conta no teto', async () => {
+    const made = makeSuggestionService({
+      config: REAL,
+      port: new RealFlyerProStructureAi(REAL, null),
+    });
+
+    await expect(made.service.suggest(DOCUMENT_ID, bodyOf())).rejects.toMatchObject({
+      status: 422,
+      response: { code: 'FLYER_PRO_STRUCTURE_AI_DISABLED', details: { reason: 'NO_API_KEY' } },
+    });
+    expect(made.limiter.checkHourly(DOCUMENT_ID, 1)).toBeNull();
+    expect(made.limiter.tryAcquire(DOCUMENT_ID, 1000)).toBeNull();
+  });
+
+  it('modelo sem preço na tabela (gpt-4o-mini): 422 DISABLED com MODEL_PRICE_UNKNOWN e o cliente não é chamado', async () => {
+    const { service, create } = makeReal(validResult(), { model: 'gpt-4o-mini' });
+
+    await expect(service.suggest(DOCUMENT_ID, bodyOf())).rejects.toMatchObject({
+      status: 422,
+      response: { details: { reason: 'MODEL_PRICE_UNKNOWN' } },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('o provedor simulado não depende de chave nem de preço: com gpt-4o-mini e sem chave responde 200 source mock', async () => {
+    const { service } = makeSuggestionService({
+      config: { provider: 'mock', model: 'gpt-4o-mini' },
+    });
+
+    await expect(service.suggest(DOCUMENT_ID, bodyOf())).resolves.toMatchObject({ source: 'mock' });
+  });
+
+  it.each([
+    [
+      'saída fora do schema',
+      responsesResult('{"summary":"","sections":[],"heroes":[],"pages":3}'),
+      'INVALID_OUTPUT',
+    ],
+    ['status incomplete', responsesResult('{}', { status: 'incomplete' }), 'INVALID_OUTPUT'],
+    ['erro 500', openAiError(500), 'PROVIDER_ERROR'],
+    [
+      '429 insufficient_quota',
+      openAiError(429, 'sem saldo', 'insufficient_quota'),
+      'PROVIDER_ERROR',
+    ],
+  ])(
+    '%s: 503, o cliente é chamado uma vez só e a falha não conta no teto',
+    async (_name, outcome, reason) => {
+      const { service, create, limiter } = makeReal(outcome);
+
+      await expect(service.suggest(DOCUMENT_ID, bodyOf())).rejects.toMatchObject({
+        status: 503,
+        response: { code: 'FLYER_PRO_STRUCTURE_AI_FAILED', details: { reason } },
+      });
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(limiter.checkHourly(DOCUMENT_ID, 1)).toBeNull();
+    },
+  );
+
+  describe('prazo', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it('o cliente que não responde dentro do prazo é 503 TIMEOUT, chamado uma vez só', async () => {
+      const { client, create } = fakeResponsesClient();
+      create.mockImplementation(() => new Promise(() => undefined));
+      const config = { ...REAL, timeoutMs: 1000 };
+      const { service } = makeSuggestionService({
+        config,
+        port: new RealFlyerProStructureAi(config, client),
+      });
+
+      const pending = service.suggest(DOCUMENT_ID, bodyOf());
+      const outcome = expect(pending).rejects.toMatchObject({
+        status: 503,
+        response: { details: { reason: 'TIMEOUT' } },
+      });
+      await jest.advanceTimersByTimeAsync(1000);
+      await outcome;
+
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+  });
+});

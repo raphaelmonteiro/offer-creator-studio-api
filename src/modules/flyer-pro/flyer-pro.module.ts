@@ -57,7 +57,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     {
       provide: FLYER_PRO_STRUCTURE_AI_PORT,
       useFactory: createStructureAiPort,
-      inject: [STRUCTURE_AI_CONFIG],
+      inject: [STRUCTURE_AI_CONFIG, ConfigService],
     },
   ],
   exports: [FlyerProTemplateSnapshotService, FlyerProClientGuardService],
