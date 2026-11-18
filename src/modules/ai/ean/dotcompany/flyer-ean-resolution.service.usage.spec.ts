@@ -1,18 +1,9 @@
 // O serviço puxa o importador de fotos → sharp, que não carrega no host.
 jest.mock('sharp', () => jest.fn());
 
-import { GalleryEmbeddingService } from '../../gallery-embedding.service';
-import { ProductImageMatchV2Service } from '../../metadata/product-image-match-v2.service';
-import { ProductNameParserService } from '../../metadata/product-name-parser.service';
-import { TaxonomyService } from '../../metadata/taxonomy/taxonomy.service';
 import { AiUsageCollector } from '../../utils/ai-usage';
-import {
-  chatResponse,
-  fakeConfig,
-  installFakeOpenAi,
-  spyOnLogger,
-} from '../../utils/openai-chat.testutil';
-import { FlyerEanResolutionService } from './flyer-ean-resolution.service';
+import { chatResponse } from '../../utils/openai-chat.testutil';
+import { buildFindImagesWorld } from './flyer-ean-resolution.testutil';
 
 const PRODUCTS = (count: number) =>
   Array.from({ length: count }, (_, index) => ({ id: `p-${index}`, name: `ARROZ MARCA ${index}` }));
@@ -28,32 +19,12 @@ const NAME_ANSWER = chatResponse({
 });
 
 /** `findImages` com a leitura de nomes real (cliente simulado, uso em cada chamada) e o embedding sem vetor. */
-function build() {
-  const config = fakeConfig({ OPENAI_API_KEY: 'sk-teste', EAN_FLYER_RESOLVE_ENABLED: 'false' });
-  const query = jest.fn().mockResolvedValue([]);
-  const embedding = new GalleryEmbeddingService(config, { query } as never);
-  (embedding as unknown as { openai: unknown }).openai = {
-    embeddings: { create: jest.fn().mockResolvedValue({ data: [] }) },
-  };
-  spyOnLogger(embedding);
-  const parser = new ProductNameParserService(config, {
-    promptList: () => '101|Mercearia > Arroz',
-  } as unknown as TaxonomyService);
-  const chatCreate = installFakeOpenAi(parser);
-  chatCreate.mockResolvedValue(NAME_ANSWER);
-  spyOnLogger(parser);
-  const matcher = new ProductImageMatchV2Service(embedding, parser, {} as never, config);
-  const service = new FlyerEanResolutionService(
-    { query } as never,
-    matcher,
-    {} as never,
-    {} as never,
-    {} as never,
-    {} as never,
-    config,
-  );
-  return { service, chatCreate };
-}
+const build = () =>
+  buildFindImagesWorld({
+    env: { EAN_FLYER_RESOLVE_ENABLED: 'false' },
+    chatAnswer: () => NAME_ANSWER,
+    embeddingsCreate: jest.fn().mockResolvedValue({ data: [] }),
+  });
 
 describe('FlyerEanResolutionService.findImages, uso da leitura do nome (change 29)', () => {
   it('16 nomes ainda não lidos: o uso traz o modelo, 2 chamadas e a soma dos tokens e dos custos', async () => {

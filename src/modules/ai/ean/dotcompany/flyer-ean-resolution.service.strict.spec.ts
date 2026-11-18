@@ -5,17 +5,8 @@ import {
   TerminalProviderError,
   TransientProviderError,
 } from '../../../../shared/providers/provider-errors';
-import { GalleryEmbeddingService } from '../../gallery-embedding.service';
-import { ProductImageMatchV2Service } from '../../metadata/product-image-match-v2.service';
-import { ProductNameParserService } from '../../metadata/product-name-parser.service';
-import { TaxonomyService } from '../../metadata/taxonomy/taxonomy.service';
-import {
-  fakeConfig,
-  installFakeOpenAi,
-  openAiError,
-  spyOnLogger,
-} from '../../utils/openai-chat.testutil';
-import { FlyerEanResolutionService } from './flyer-ean-resolution.service';
+import { openAiError } from '../../utils/openai-chat.testutil';
+import { buildFindImagesWorld } from './flyer-ean-resolution.testutil';
 
 /** EAN válido de exemplo (dígito verificador conferido). */
 const EAN = '7896000000019';
@@ -32,52 +23,12 @@ const PHOTO_BY_EAN = {
   preferred: false,
 };
 
-/**
- * O serviço real de `findImages` com o casamento por nome, o leitor de nomes e o embedding reais, e os clientes da
- * OpenAI simulados: nenhuma chamada paga. O banco devolve a foto da Galeria só na consulta por EAN.
- */
-function build(env: Record<string, string> = {}, galleryHasEan = false) {
-  const config = fakeConfig({ OPENAI_API_KEY: 'sk-teste', ...env });
-  const query = jest.fn(async (sql: string) =>
-    galleryHasEan && sql.includes("metadata->>'ean'") ? [PHOTO_BY_EAN] : [],
-  );
-  const embedding = new GalleryEmbeddingService(config, { query } as never);
-  const embeddingsCreate = jest.fn().mockRejectedValue(openAiError(503));
-  (embedding as unknown as { openai: unknown }).openai = {
-    embeddings: { create: embeddingsCreate },
-  };
-  spyOnLogger(embedding);
-  const parser = new ProductNameParserService(config, {
-    promptList: () => '101|Mercearia > Arroz',
-  } as unknown as TaxonomyService);
-  const chatCreate = installFakeOpenAi(parser);
-  chatCreate.mockRejectedValue(openAiError(503));
-  spyOnLogger(parser);
-  const matcher = new ProductImageMatchV2Service(embedding, parser, {} as never, config);
-  const lookups = {
-    resolve: jest.fn(async (eans: string[]) => ({
-      outcomes: new Map(eans.map((ean) => [ean, { ean, input: ean, status: 'not_found' }])),
-      credits: 0,
-      requests: 0,
-      blocked: null,
-      authError: null,
-    })),
-  };
-  const service = new FlyerEanResolutionService(
-    { query } as never,
-    matcher,
-    lookups as never,
-    {} as never,
-    { criarJobDoEncarte: jest.fn() } as never,
-    { wake: jest.fn() } as never,
-    config,
-  );
-  return { service, embedding, chatCreate, embeddingsCreate, lookups };
-}
+/** O banco devolve a foto da Galeria só na consulta por EAN. */
+const galleryHasEan = (sql: string) => (sql.includes("metadata->>'ean'") ? [PHOTO_BY_EAN] : []);
 
 describe('FlyerEanResolutionService.findImages, modo estrito (change 28)', () => {
   it('429 de taxa na leitura de nomes com a opção: lança TransientProviderError', async () => {
-    const { service, chatCreate } = build();
+    const { service, chatCreate } = buildFindImagesWorld();
     chatCreate.mockRejectedValue(openAiError(429, 'taxa', 'rate_limit_exceeded'));
 
     await expect(service.findImages([CERVEJA, ABACATE], null, { strict: true })).rejects.toThrow(
@@ -86,7 +37,7 @@ describe('FlyerEanResolutionService.findImages, modo estrito (change 28)', () =>
   });
 
   it('a mesma falha sem a opção: resultado vazio de hoje, sem exceção', async () => {
-    const { service, chatCreate } = build();
+    const { service, chatCreate } = buildFindImagesWorld();
     chatCreate.mockRejectedValue(openAiError(429, 'taxa', 'rate_limit_exceeded'));
 
     const result = await service.findImages([ABACATE, { id: 'p2', name: 'ARROZ 5KG' }]);
@@ -96,7 +47,9 @@ describe('FlyerEanResolutionService.findImages, modo estrito (change 28)', () =>
   });
 
   it('chave inválida no embedding com a opção: lança TerminalProviderError', async () => {
-    const { service, chatCreate, embeddingsCreate } = build({ AI_NAME_PARSER_ENABLED: 'false' });
+    const { service, chatCreate, embeddingsCreate } = buildFindImagesWorld({
+      env: { AI_NAME_PARSER_ENABLED: 'false' },
+    });
     embeddingsCreate.mockRejectedValue(openAiError(401));
 
     expect(chatCreate).not.toHaveBeenCalled();
@@ -106,7 +59,9 @@ describe('FlyerEanResolutionService.findImages, modo estrito (change 28)', () =>
   });
 
   it('leitor desligado com a opção: não lança, não chama a leitura e segue pelo texto cru', async () => {
-    const { service, chatCreate, embeddingsCreate } = build({ AI_NAME_PARSER_ENABLED: 'false' });
+    const { service, chatCreate, embeddingsCreate } = buildFindImagesWorld({
+      env: { AI_NAME_PARSER_ENABLED: 'false' },
+    });
     embeddingsCreate.mockResolvedValue({ data: [{ embedding: new Array(1536).fill(0.1) }] });
 
     const result = await service.findImages([ABACATE], null, { strict: true });
@@ -117,7 +72,7 @@ describe('FlyerEanResolutionService.findImages, modo estrito (change 28)', () =>
   });
 
   it('EAN da Galeria com a OpenAI fora do ar: lança com a opção, e sem ela devolve a foto do EAN', async () => {
-    const { service } = build({}, true);
+    const { service } = buildFindImagesWorld({ galleryRows: galleryHasEan });
 
     await expect(service.findImages([CERVEJA], null, { strict: true })).rejects.toThrow(
       TransientProviderError,
@@ -133,9 +88,8 @@ describe('FlyerEanResolutionService.findImages, modo estrito (change 28)', () =>
   });
 
   it('busca por EAN desligada: o estado do EAN é o mesmo com e sem a opção', async () => {
-    const { service, embedding, lookups } = build({
-      EAN_FLYER_RESOLVE_ENABLED: 'false',
-      AI_NAME_PARSER_ENABLED: 'false',
+    const { service, embedding, lookups } = buildFindImagesWorld({
+      env: { EAN_FLYER_RESOLVE_ENABLED: 'false', AI_NAME_PARSER_ENABLED: 'false' },
     });
     const embedTexts = jest.spyOn(embedding, 'embedTexts').mockResolvedValue([null]);
 

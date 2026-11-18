@@ -10,8 +10,8 @@ import {
   createUploadDir,
   removeUploadDir,
 } from './ai-product-models.contract.testutil';
-import { GalleryEmbeddingService } from './gallery-embedding.service';
-import { chatResponse, fakeConfig, openAiError, spyOnLogger } from './utils/openai-chat.testutil';
+import { fakeEmbeddingService } from './gallery-embedding.testutil';
+import { chatResponse, openAiError } from './utils/openai-chat.testutil';
 
 beforeAll(createUploadDir);
 afterAll(removeUploadDir);
@@ -66,9 +66,6 @@ describe('contrato da busca de fotos com o embedding em lote', () => {
   });
 
   it('segunda de três chamadas de embedding responde 503: HTTP 200 com o corpo de hoje, e só os produtos 97 a 192 ficam sem foto pelo nome', async () => {
-    const real = new GalleryEmbeddingService(fakeConfig({ OPENAI_API_KEY: 'sk-teste' }), {
-      query: jest.fn(),
-    } as never);
     const answers = async (input: { input: string[] }) => ({
       data: input.input.map(() => ({ embedding: [0.1, 0.2] })),
     });
@@ -77,8 +74,7 @@ describe('contrato da busca de fotos com o embedding em lote', () => {
       .mockImplementationOnce(answers)
       .mockRejectedValueOnce(openAiError(503))
       .mockImplementationOnce(answers);
-    (real as unknown as { openai: unknown }).openai = { embeddings: { create } };
-    const logs = spyOnLogger(real);
+    const { embedding: real, logs } = fakeEmbeddingService({ create });
     ctx.embedding.embedTexts.mockImplementation((texts: string[], options?: { strict?: boolean }) =>
       real.embedTexts(texts, options),
     );

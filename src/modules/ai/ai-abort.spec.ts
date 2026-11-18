@@ -1,20 +1,14 @@
 import { TransientProviderError } from '../../shared/providers/provider-errors';
-import { GalleryEmbeddingService } from './gallery-embedding.service';
+import { fakeEmbeddingService } from './gallery-embedding.testutil';
 import { answerEach, build as buildParser, NAMES } from './metadata/product-name-parser.testutil';
-import { fakeConfig } from './utils/openai-chat.testutil';
 
-function buildEmbedding() {
-  const service = new GalleryEmbeddingService(fakeConfig({ OPENAI_API_KEY: 'sk-teste' }), {
-    query: jest.fn(),
-  } as never);
-  const create = jest.fn().mockResolvedValue({ data: [{ embedding: [0.1] }] });
-  (service as unknown as { openai: unknown }).openai = { embeddings: { create } };
-  return { service, create };
-}
+/** O embedding real, com o cliente simulado que responde um vetor por pedido. */
+const buildEmbedding = () =>
+  fakeEmbeddingService({ create: jest.fn().mockResolvedValue({ data: [{ embedding: [0.1] }] }) });
 
 describe('opção signal das chamadas de IA de produto (change 29)', () => {
   it('embedTexts repassa o signal ao SDK', async () => {
-    const { service, create } = buildEmbedding();
+    const { embedding: service, create } = buildEmbedding();
     const { signal } = new AbortController();
 
     await service.embedTexts(['CERVEJA'], { signal });
@@ -25,7 +19,7 @@ describe('opção signal das chamadas de IA de produto (change 29)', () => {
   });
 
   it('embedTexts sem o signal chama o SDK como antes: só o corpo', async () => {
-    const { service, create } = buildEmbedding();
+    const { embedding: service, create } = buildEmbedding();
 
     await service.embedTexts(['CERVEJA']);
 
@@ -33,7 +27,7 @@ describe('opção signal das chamadas de IA de produto (change 29)', () => {
   });
 
   it('embedTexts com o signal já abortado falha como transitório no modo estrito', async () => {
-    const { service, create } = buildEmbedding();
+    const { embedding: service, create } = buildEmbedding();
     const controller = new AbortController();
     create.mockImplementation(async (_body: unknown, options: { signal: AbortSignal }) => {
       if (options.signal.aborted) throw new Error('Request was aborted.');

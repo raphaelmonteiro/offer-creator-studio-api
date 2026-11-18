@@ -1,16 +1,9 @@
-import type { ConfigService } from '@nestjs/config';
-import { FlyerEanResolutionService } from '../../ai/ean/dotcompany/flyer-ean-resolution.service';
-import { GalleryEmbeddingService } from '../../ai/gallery-embedding.service';
-import { ProductImageMatchV2Service } from '../../ai/metadata/product-image-match-v2.service';
-import { ProductMetadata } from '../../ai/metadata/product-metadata.schema';
-import { ProductNameParserService } from '../../ai/metadata/product-name-parser.service';
-import { TaxonomyService } from '../../ai/metadata/taxonomy/taxonomy.service';
 import {
-  chatResponse,
-  fakeConfig,
-  installFakeOpenAi,
-  spyOnLogger,
-} from '../../ai/utils/openai-chat.testutil';
+  buildFindImagesWorld,
+  ChatBody,
+} from '../../ai/ean/dotcompany/flyer-ean-resolution.testutil';
+import { ProductMetadata } from '../../ai/metadata/product-metadata.schema';
+import { chatResponse } from '../../ai/utils/openai-chat.testutil';
 import { productAliasKey } from '../../gallery/product-alias';
 import { EnrichImagePhase } from './enrich-image-phase';
 
@@ -71,79 +64,50 @@ export interface ImageWorldOptions {
   nameMatches?: Array<{ name: string; photoId: string; strength: 'strong' | 'weak' }>;
 }
 
-/** O embedding real sobre o cliente da OpenAI simulado: `embeddingsCreate` conta as chamadas; sem chave, sem cliente. */
-function buildEmbedding(
-  config: ConfigService,
-  keyless: boolean,
-  options: ImageWorldOptions,
-  query: jest.Mock,
-) {
-  const embedding = new GalleryEmbeddingService(config, { query } as never);
-  const embeddingsCreate = jest.fn(async (body: { input: string[] }) => ({
-    data: body.input.map(() => ({ embedding: [0.1, 0.2] })),
-  }));
-  (embedding as unknown as { openai: unknown }).openai = keyless
-    ? null
-    : { embeddings: { create: embeddingsCreate } };
-  embedding.searchByMetadataEmbedding = jest.fn(async () =>
-    photoRows(options.nameMatches ?? []),
-  ) as never;
-  spyOnLogger(embedding);
-  return { embedding, embeddingsCreate };
+/** A leitura do nome: devolve a ficha de cada nome do pedido, com a marca da primeira palavra. */
+function chatAnswer(body: ChatBody) {
+  const names = [...body.messages[1].content.matchAll(/^\d+\. "([^"]*)"/gm)].map((m) => m[1]);
+  return chatResponse({
+    content: JSON.stringify({
+      results: names.map((name) => ({
+        title: name,
+        category: { id: 10, path: ['Mercearia', 'Bebidas'] },
+        quantity: { value: 350, unit: 'ml' },
+        alternatives: [{ brand: brandOf(name), subBrand: null, variant: null }],
+        fieldConfidence: { title: 0.9 },
+      })),
+    }),
+  });
 }
 
-/** A leitura do nome real: devolve a ficha de cada nome do pedido, com a marca da primeira palavra. */
-function buildParser(config: ConfigService, keyless: boolean) {
-  const parser = new ProductNameParserService(config, {
-    promptList: () => '10|Mercearia > Bebidas',
-  } as unknown as TaxonomyService);
-  const chatCreate = keyless ? jest.fn() : installFakeOpenAi(parser);
-  chatCreate.mockImplementation(async (body: { messages: Array<{ content: string }> }) => {
-    const names = [...body.messages[1].content.matchAll(/^\d+\. "([^"]*)"/gm)].map((m) => m[1]);
-    return chatResponse({
-      content: JSON.stringify({
-        results: names.map((name) => ({
-          title: name,
-          category: { id: 10, path: ['Mercearia', 'Bebidas'] },
-          quantity: { value: 350, unit: 'ml' },
-          alternatives: [{ brand: brandOf(name), subBrand: null, variant: null }],
-          fieldConfidence: { title: 0.9 },
-        })),
-      }),
-    });
-  });
-  spyOnLogger(parser);
-  return { parser, chatCreate };
-}
+/** Um vetor para cada texto do pedido de embeddings. */
+const vectorsFor = async (body: { input: string[] }) => ({
+  data: body.input.map(() => ({ embedding: [0.1, 0.2] })),
+});
 
 export function buildImageWorld(options: ImageWorldOptions = {}) {
-  const config = fakeConfig({
-    OPENAI_API_KEY: 'sk-teste',
-    EAN_FLYER_RESOLVE_ENABLED: 'false',
-    ...options.env,
+  const world = buildFindImagesWorld({
+    env: { EAN_FLYER_RESOLVE_ENABLED: 'false', ...options.env },
+    galleryRows: (sql) => {
+      if (sql.includes("metadata->>'ean'")) return options.byEan ?? [];
+      if (sql.includes("metadata->'aliases'")) return aliasRows(options.byAlias ?? []);
+      return [];
+    },
+    chatAnswer,
+    embeddingsCreate: jest.fn(vectorsFor),
+    lookups: { resolve: jest.fn() },
+    taxonomy: { pathSimilarity: (a: number, b: number) => (a === b ? 1 : 0) },
   });
-  const keyless = options.env?.OPENAI_API_KEY === '';
-  const queries: string[] = [];
-  const query = jest.fn(async (sql: string) => {
-    queries.push(sql);
-    if (sql.includes("metadata->>'ean'")) return options.byEan ?? [];
-    if (sql.includes("metadata->'aliases'")) return aliasRows(options.byAlias ?? []);
-    return [];
-  });
-  const { embedding, embeddingsCreate } = buildEmbedding(config, keyless, options, query);
-  const { parser, chatCreate } = buildParser(config, keyless);
-  const taxonomy = { pathSimilarity: (a: number, b: number) => (a === b ? 1 : 0) } as never;
-  const matcher = new ProductImageMatchV2Service(embedding, parser, taxonomy, config);
-  const lookups = { resolve: jest.fn() };
-  const unused = {} as never;
-  const jobs = { criarJobDoEncarte: jest.fn() } as never;
-  const runner = { wake: jest.fn() } as never;
-  const args = [{ query } as never, matcher, lookups as never, unused, jobs, runner] as const;
-  const images = new FlyerEanResolutionService(...args, config);
+  world.embedding.searchByMetadataEmbedding = jest.fn(async () =>
+    photoRows(options.nameMatches ?? []),
+  ) as never;
   const sizes = { measure: jest.fn(async () => ({ width: 800, height: 640 })) };
-  const phase = new EnrichImagePhase(images, embedding, sizes);
-  const writes = () => queries.filter((sql) => /^\s*(INSERT|UPDATE|DELETE)/i.test(sql));
-  return { phase, images, embedding, sizes, query, chatCreate, embeddingsCreate, lookups, writes };
+  const phase = new EnrichImagePhase(world.service, world.embedding, sizes);
+  const writes = () =>
+    world.query.mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => /^\s*(INSERT|UPDATE|DELETE)/i.test(sql));
+  return { ...world, phase, sizes, writes };
 }
 
 /** A marca da ficha do produto: a primeira palavra do nome; a foto fraca usa outra marca, então a nota cai para a revisão. */

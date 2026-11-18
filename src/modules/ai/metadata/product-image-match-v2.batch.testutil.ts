@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
-import { GalleryEmbeddingService, MetadataEmbeddingMatch } from '../gallery-embedding.service';
-import { fakeConfig } from '../utils/openai-chat.testutil';
+import { MetadataEmbeddingMatch } from '../gallery-embedding.service';
+import { fakeEmbeddingService } from '../gallery-embedding.testutil';
 import { ProductMetadata } from './product-metadata.schema';
 import { ProductImageMatchV2Service, ProductMatchInputV2 } from './product-image-match-v2.service';
 
@@ -112,18 +112,13 @@ export function snapshotOf(matched: { result: unknown; candidates: Map<string, u
  * OpenAI simulado: `create` conta as chamadas e os textos de cada uma. A busca por similaridade é a do `searchByVector`.
  */
 export function buildRealEmbeddingService() {
-  const embedding = new GalleryEmbeddingService(fakeConfig({ OPENAI_API_KEY: 'sk-teste' }), {
-    query: jest.fn(),
-  } as never);
-  const create = jest.fn(async (body: { input: string[] }) => ({
-    data: body.input.map((text) => ({ embedding: vectorOf(text) })),
-  }));
-  (embedding as unknown as { openai: unknown }).openai = { embeddings: { create } };
+  const { embedding, create, logs } = fakeEmbeddingService({
+    create: jest.fn(async (body: { input: string[] }) => ({
+      data: body.input.map((text) => ({ embedding: vectorOf(text) })),
+    })),
+  });
   const search = jest.fn(async (vector: number[], limit: number) => searchByVector(vector, limit));
   embedding.searchByMetadataEmbedding = search as never;
-  const errorLog = jest
-    .spyOn((embedding as unknown as { logger: { error: () => void } }).logger, 'error')
-    .mockImplementation(() => undefined);
   const parseNames = jest.fn(async (inputs: Array<{ name: string }>, _options?: object) =>
     inputs.map((input) => metadataOf(input.name)),
   );
@@ -133,5 +128,5 @@ export function buildRealEmbeddingService() {
     { pathSimilarity: (a: number, b: number) => (a === b ? 1 : 0.4) } as never,
     { get: jest.fn().mockReturnValue('0') } as never,
   );
-  return { service, embedding, create, search, errorLog };
+  return { service, embedding, create, search, errorLog: logs.error };
 }
