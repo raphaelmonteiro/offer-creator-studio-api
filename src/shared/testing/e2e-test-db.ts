@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { FlyerBuilderV2Document } from '../../modules/flyer-builder-v2/entities/flyer-builder-v2-document.entity';
 import { Client } from '../../modules/clients/entities/client.entity';
 import { ClientContact } from '../../modules/clients/entities/client-contact.entity';
 import { ClientStore } from '../../modules/clients/entities/client-store.entity';
@@ -81,6 +82,7 @@ export const E2E_TEST_ENTITIES = [
   ClientStore,
   FlyerProDocument,
   FlyerProItem,
+  FlyerBuilderV2Document,
 ];
 
 /** A mesma trava do harness das cenas (A-5): os dois nunca montam o banco ao mesmo tempo. */
