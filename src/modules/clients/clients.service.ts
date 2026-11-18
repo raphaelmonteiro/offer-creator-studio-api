@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository, Like } from 'typeorm';
+import { Repository, Like } from 'typeorm';
 import { Client } from './entities/client.entity';
 import { ClientContact } from './entities/client-contact.entity';
 import { ClientStore } from './entities/client-store.entity';
@@ -8,14 +8,14 @@ import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { QueryClientDto } from './dto/query-client.dto';
 import { paginate, PaginationResult } from '../../common/utils/pagination.util';
+import { pgErrorOf } from '../../shared/db/pg-error';
 import { FlyerProClientGuardService } from '../flyer-pro/services/flyer-pro-client-guard.service';
 
 /** Código do Postgres para a recusa por chave estrangeira (`foreign_key_violation`). */
 const FOREIGN_KEY_VIOLATION = '23503';
 
 const isForeignKeyViolation = (error: unknown): boolean =>
-  error instanceof QueryFailedError &&
-  (error.driverError as { code?: string } | undefined)?.code === FOREIGN_KEY_VIOLATION;
+  pgErrorOf(error)?.code === FOREIGN_KEY_VIOLATION;
 
 @Injectable()
 export class ClientsService {
