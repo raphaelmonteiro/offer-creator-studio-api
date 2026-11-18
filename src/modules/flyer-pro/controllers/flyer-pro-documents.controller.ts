@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   UseGuards,
@@ -21,6 +22,8 @@ import { flyerProNotFound } from '../domain/flyer-pro.errors';
 import { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
 import { QueryFlyerProDocumentsDto } from '../dto/query-flyer-pro-documents.dto';
 import { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
+import { UpdateFlyerProCursorDto } from '../dto/update-flyer-pro-cursor.dto';
+import { FlyerProCursorService } from '../services/flyer-pro-cursor.service';
 import { FlyerProDocumentsService } from '../services/flyer-pro-documents.service';
 import { FlyerProSaveService } from '../services/flyer-pro-save.service';
 
@@ -35,6 +38,7 @@ export class FlyerProDocumentsController {
   constructor(
     private readonly documents: FlyerProDocumentsService,
     private readonly saves: FlyerProSaveService,
+    private readonly cursors: FlyerProCursorService,
   ) {}
 
   @Post()
@@ -126,6 +130,24 @@ export class FlyerProDocumentsController {
     @CurrentUser() user: { id: string },
   ) {
     return this.saves.save(user.id, id, dto);
+  }
+
+  @Put(':id/cursor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Grava a etapa atual e o estado de tela, sem revisão e sem 409; chegar à Montagem congela as páginas',
+  })
+  @ApiResponse({ status: 200, description: '{ step, pagesFrozen }' })
+  @ApiResponse({ status: 400, description: 'BAD_REQUEST: step ausente ou fora da lista' })
+  @ApiResponse({ status: 401, description: 'UNAUTHORIZED: sem token' })
+  @ApiResponse({
+    status: 404,
+    description: 'FLYER_PRO_NOT_FOUND: inexistente, excluído ou id inválido',
+  })
+  @ApiResponse({ status: 422, description: 'FLYER_PRO_UI_TOO_LARGE: ui acima de 16 KB' })
+  setCursor(@Param('id', DocumentIdPipe) id: string, @Body() dto: UpdateFlyerProCursorDto) {
+    return this.cursors.set(id, dto);
   }
 
   @Delete(':id')

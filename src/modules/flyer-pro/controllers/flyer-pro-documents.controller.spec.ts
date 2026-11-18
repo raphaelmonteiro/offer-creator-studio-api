@@ -2,7 +2,9 @@ import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import type { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
+import type { UpdateFlyerProCursorDto } from '../dto/update-flyer-pro-cursor.dto';
 import type { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
+import type { FlyerProCursorService } from '../services/flyer-pro-cursor.service';
 import type { FlyerProDocumentsService } from '../services/flyer-pro-documents.service';
 import type { FlyerProSaveService } from '../services/flyer-pro-save.service';
 import { DocumentIdPipe, FlyerProDocumentsController } from './flyer-pro-documents.controller';
@@ -17,12 +19,14 @@ function setup() {
     remove: jest.fn(),
   };
   const saves = { save: jest.fn() };
+  const cursors = { set: jest.fn() };
   const res = { status: jest.fn() };
   const controller = new FlyerProDocumentsController(
     documents as unknown as FlyerProDocumentsService,
     saves as unknown as FlyerProSaveService,
+    cursors as unknown as FlyerProCursorService,
   );
-  return { controller, documents, saves, res: res as unknown as Response & typeof res };
+  return { controller, documents, saves, cursors, res: res as unknown as Response & typeof res };
 }
 
 describe('FlyerProDocumentsController', () => {
@@ -79,6 +83,19 @@ describe('FlyerProDocumentsController', () => {
     await expect(controller.save('d1', body, { id: 'u1' })).resolves.toEqual({ revision: 38 });
 
     expect(saves.save).toHaveBeenCalledWith('u1', 'd1', body);
+  });
+
+  it('o cursor passa o id do encarte e o corpo ao serviço e devolve a etapa e o pagesFrozen', async () => {
+    const { controller, cursors } = setup();
+    const body = { step: 'assembly' } as UpdateFlyerProCursorDto;
+    cursors.set.mockResolvedValue({ step: 'assembly', pagesFrozen: true });
+
+    await expect(controller.setCursor('d1', body)).resolves.toEqual({
+      step: 'assembly',
+      pagesFrozen: true,
+    });
+
+    expect(cursors.set).toHaveBeenCalledWith('d1', body);
   });
 
   it('o pipe do id deixa passar um UUID e transforma o que não é UUID em 404 FLYER_PRO_NOT_FOUND', async () => {
