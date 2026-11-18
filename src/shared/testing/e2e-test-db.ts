@@ -6,6 +6,7 @@ import { ClientStore } from '../../modules/clients/entities/client-store.entity'
 import { FlyerProDocument } from '../../modules/flyer-pro/entities/flyer-pro-document.entity';
 import { FlyerProImport } from '../../modules/flyer-pro/entities/flyer-pro-import.entity';
 import { FlyerProItem } from '../../modules/flyer-pro/entities/flyer-pro-item.entity';
+import { FlyerProJob } from '../../modules/flyer-pro/entities/flyer-pro-job.entity';
 import { SCENE_TEST_ENTITIES } from '../../modules/template-scenes/testing/scene-test-db';
 import { createGallerySchema } from './e2e-gallery-schema';
 
@@ -84,6 +85,7 @@ export const E2E_TEST_ENTITIES = [
   FlyerProDocument,
   FlyerProItem,
   FlyerProImport,
+  FlyerProJob,
   FlyerBuilderV2Document,
 ];
 
