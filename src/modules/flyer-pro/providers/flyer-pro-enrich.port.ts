@@ -32,15 +32,15 @@ export interface EnrichCallContext {
  * Categorias. `apply` é "certeza": o job só aplica com `autoApply` ligado e nunca sobre a categoria da planilha;
  * `suggest` é sugestão pendente; `none` é "a IA olhou e não tem sugestão"; `unanswered` deixa o item como "falta fazer".
  */
-export type CategoryVerdict =
-  | {
-      itemId: string;
-      action: 'apply' | 'suggest';
-      category: string;
-      confidence: number;
-      why: string | null;
-    }
-  | { itemId: string; action: 'none' | 'unanswered' };
+export type CategoryVerdict = CategoryChoice | { itemId: string; action: 'none' | 'unanswered' };
+
+export interface CategoryChoice {
+  itemId: string;
+  action: 'apply' | 'suggest';
+  category: string;
+  confidence: number;
+  why: string | null;
+}
 
 /** Ortografia: nunca é aplicada sozinha. `suggest` traz o nome corrigido. */
 export type SpellVerdict =
@@ -65,13 +65,15 @@ export interface ImageCandidateVerdict extends PhotoPick {
  * `not_found` e `unanswered` não trazem foto.
  */
 export type ImageVerdict =
-  | {
-      itemId: string;
-      action: 'apply';
-      photo: ImageCandidateVerdict & { width: number; height: number };
-    }
+  | ImageApply
   | { itemId: string; action: 'review'; candidates: ImageCandidateVerdict[] }
   | { itemId: string; action: 'not_found' | 'unanswered' };
+
+export interface ImageApply {
+  itemId: string;
+  action: 'apply';
+  photo: ImageCandidateVerdict & { width: number; height: number };
+}
 
 export interface FlyerProEnrichPort {
   /** A fase pode rodar? `false`: o job a pula com `skipped: 'AI_DISABLED'`, sem tocar nos itens. */

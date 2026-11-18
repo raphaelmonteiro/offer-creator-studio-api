@@ -13,11 +13,17 @@ import { FlyerProDocument } from './entities/flyer-pro-document.entity';
 import { FlyerProImport } from './entities/flyer-pro-import.entity';
 import { FlyerProItem } from './entities/flyer-pro-item.entity';
 import { FlyerProJob } from './entities/flyer-pro-job.entity';
+import { FlyerProEnrichCommitter } from './processors/flyer-pro-enrich.committer';
+import { FlyerProEnrichProcessor } from './processors/flyer-pro-enrich.processor';
+import { createEnrichPort } from './providers/flyer-pro-enrich.factory';
+import { FLYER_PRO_ENRICH_PORT } from './providers/flyer-pro-enrich.port';
 import { createStructureAiPort } from './providers/flyer-pro-structure-ai.factory';
 import { FLYER_PRO_STRUCTURE_AI_PORT } from './providers/flyer-pro-structure-ai.port';
 import { FlyerProClientGuardService } from './services/flyer-pro-client-guard.service';
 import { FlyerProCursorService } from './services/flyer-pro-cursor.service';
 import { FlyerProDocumentsService } from './services/flyer-pro-documents.service';
+import { FlyerProGalleryPhotos } from './services/flyer-pro-gallery-photos';
+import { FlyerProImageSizeService } from './services/flyer-pro-image-size.service';
 import { FlyerProJobsService } from './services/flyer-pro-jobs.service';
 import { FlyerProSaveService } from './services/flyer-pro-save.service';
 import { FlyerProImportsService } from './services/flyer-pro-imports.service';
@@ -60,12 +66,21 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProImportsService,
     FlyerProStructureSuggestionService,
     FlyerProJobsService,
+    FlyerProEnrichCommitter,
+    FlyerProEnrichProcessor,
+    FlyerProGalleryPhotos,
+    FlyerProImageSizeService,
     // Um limitador só por processo da API: a vaga em andamento e o teto por hora vivem na memória dele.
     { provide: FlyerProStructureLimiter, useFactory: () => new FlyerProStructureLimiter() },
     {
       provide: FLYER_PRO_ENRICH_CONFIG,
       useFactory: (config: ConfigService) => readEnrichConfig(config),
       inject: [ConfigService],
+    },
+    {
+      provide: FLYER_PRO_ENRICH_PORT,
+      useFactory: createEnrichPort,
+      inject: [FLYER_PRO_ENRICH_CONFIG, FlyerProGalleryPhotos, FlyerProImageSizeService],
     },
     {
       provide: STRUCTURE_AI_CONFIG,
