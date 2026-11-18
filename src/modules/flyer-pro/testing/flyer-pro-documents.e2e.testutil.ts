@@ -6,7 +6,6 @@ import type {
   FlyerProDocumentListItemView,
   FlyerProDocumentView,
 } from '../views/flyer-pro-document.view';
-import type { FlyerProSaveView } from '../views/flyer-pro-save.view';
 import {
   createExtraUser,
   ExtraUser,
@@ -54,7 +53,15 @@ export const savePayload = (revision: number, over: Record<string, unknown> = {}
   ...over,
 });
 
-export type SaveBody = FlyerProSaveView;
+/** O item novo mínimo de um `upsert` (completo, com um `id` novo); `over` troca ou acrescenta. */
+export const newItemPayload = (over: Record<string, unknown> = {}) => ({
+  id: randomUUID(),
+  position: 0,
+  name: 'ABACATE',
+  price: { kind: 'simple', cents: 699 },
+  unit: 'kg',
+  ...over,
+});
 
 export type Row = Record<string, unknown>;
 
@@ -141,6 +148,10 @@ export function useDocumentsE2e(options: { scenes: boolean }) {
     patchAs: (headers: Record<string, string>, id: string, body: object) =>
       h.http().patch(`/v1${url}/${id}`).set(headers).send(body),
     put: (path: string, body: object) => h.authed(h.http().put(`/v1${url}/${path}`)).send(body),
+    /** `POST` do N1 na cena dada (a de frente e verso da semente, por padrão); devolve o encarte criado. */
+    newDocument: async (sceneId = h.seed.scenes.frontBack.id) =>
+      envelope<DocumentBody>(await h.post(url, createPayload({ clientId: clientA(), sceneId })))
+        .data,
     /** Um cliente novo da suíte, apagado na limpeza. */
     newClient: async (name?: string) => {
       const id = await insertClient(h.dataSource, name);

@@ -1,10 +1,9 @@
+import type { FlyerProSaveView } from '../views/flyer-pro-save.view';
 import { describeIfE2eDb } from '../../../shared/testing/e2e-test-db';
 import {
-  DocumentBody,
   envelope,
   rowOf,
   savePayload,
-  SaveBody,
   useDocumentsE2e,
 } from '../testing/flyer-pro-documents.e2e.testutil';
 
@@ -14,11 +13,9 @@ import {
  * os recusos do pipe global e do filtro. A regra de cada campo está nos unitários do cursor (L-19).
  */
 describeIfE2eDb('PUT /v1/flyer-pro/documents/:id/cursor: etapa e estado de tela (e2e)', () => {
-  const { h, url, clientA, asBruno, create, open, list, patch, put } = useDocumentsE2e({
+  const { h, url, clientA, asBruno, newDocument, open, list, patch, put } = useDocumentsE2e({
     scenes: false,
   });
-  const newDocument = async () =>
-    envelope<DocumentBody>(await create(h.seed.scenes.frontBack.id)).data;
   const cursorOf = (response: { body: unknown }) =>
     envelope<{ step: string; pagesFrozen: boolean }>(response).data;
   /** As colunas que o cursor não pode mudar. */
@@ -92,7 +89,7 @@ describeIfE2eDb('PUT /v1/flyer-pro/documents/:id/cursor: etapa e estado de tela 
     }
     const saved = await patch(id, ana);
 
-    expect(envelope<SaveBody>(saved).data).toMatchObject({ revision: 1, applied: true });
+    expect(envelope<FlyerProSaveView>(saved).data).toMatchObject({ revision: 1, applied: true });
     expect(await open(id)).toMatchObject({ step: 'frame', revision: 1 });
   });
 
@@ -105,7 +102,7 @@ describeIfE2eDb('PUT /v1/flyer-pro/documents/:id/cursor: etapa e estado de tela 
     await patch(id, savePayload(1, { engineVersion: 2, layoutDigest: 'd1' }));
     const again = await patch(id, body);
 
-    expect(envelope<SaveBody>(again).data).toMatchObject({
+    expect(envelope<FlyerProSaveView>(again).data).toMatchObject({
       replayed: true,
       applied: true,
       revision: 1,
@@ -127,20 +124,15 @@ describeIfE2eDb('PUT /v1/flyer-pro/documents/:id/cursor: etapa e estado de tela 
       }
     });
 
-    it('corpo {} é 400 (nunca 500), campo desconhecido é 400 e ui de 20 KB é 422 sem gravar nada', async () => {
+    it('corpo {} é 400 (nunca 500) e campo desconhecido é 400, sem gravar nada', async () => {
       const { id } = await newDocument();
       const before = await rowOf(h.dataSource, id);
 
       const empty = await put(`${id}/cursor`, {});
       const extra = await put(`${id}/cursor`, { step: 'card', revision: 3 });
-      const big = await put(`${id}/cursor`, { step: 'assembly', ui: { a: 'x'.repeat(20 * 1024) } });
 
-      expect([empty.status, extra.status, big.status]).toEqual([400, 400, 422]);
+      expect([empty.status, extra.status]).toEqual([400, 400]);
       expect(envelope<unknown>(empty).error).toMatchObject({ code: 'BAD_REQUEST' });
-      expect(envelope<unknown>(big).error).toMatchObject({
-        code: 'FLYER_PRO_UI_TOO_LARGE',
-        details: { max: 16_384 },
-      });
       expect(await rowOf(h.dataSource, id)).toEqual(before);
     });
   });

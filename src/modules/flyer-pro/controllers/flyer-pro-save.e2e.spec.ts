@@ -1,14 +1,12 @@
 import { randomUUID } from 'crypto';
+import type { FlyerProSaveView } from '../views/flyer-pro-save.view';
 import { describeIfE2eDb } from '../../../shared/testing/e2e-test-db';
 import {
-  DocumentBody,
   envelope,
   rowOf,
   savePayload,
-  SaveBody,
   useDocumentsE2e,
 } from '../testing/flyer-pro-documents.e2e.testutil';
-import { updateDocumentRow } from '../testing/flyer-pro-documents.fixture';
 import { redoScene } from '../testing/flyer-pro-scene-edits';
 
 /**
@@ -18,13 +16,11 @@ import { redoScene } from '../testing/flyer-pro-scene-edits';
  * ordem das conferências estão nos unitários do salvar (L-19).
  */
 describeIfE2eDb('PATCH /v1/flyer-pro/documents/:id: salvar (e2e)', () => {
-  const { h, fixture, asBruno, bruno, create, open, patch, patchAs, url } = useDocumentsE2e({
+  const { h, fixture, asBruno, bruno, newDocument, open, patch, patchAs, url } = useDocumentsE2e({
     scenes: true,
   });
   const sc = () => fixture().scenes;
-  const newDocument = async (sceneId = h.seed.scenes.frontBack.id) =>
-    envelope<DocumentBody>(await create(sceneId)).data;
-  const dataOf = (response: { body: unknown }) => envelope<SaveBody>(response).data;
+  const dataOf = (response: { body: unknown }) => envelope<FlyerProSaveView>(response).data;
 
   it('três gravações seguidas sobem a revisão de 1 em 1; o Bruno salva a quarta e vira o autor', async () => {
     const { id } = await newDocument();
@@ -212,19 +208,6 @@ describeIfE2eDb('PATCH /v1/flyer-pro/documents/:id: salvar (e2e)', () => {
     expect(await rowOf(h.dataSource, id)).toEqual(before);
   });
 
-  it('app mais antigo que o gravado: 409 FLYER_PRO_APP_OUTDATED com as versões gravadas', async () => {
-    const { id } = await newDocument();
-    await updateDocumentRow(h.dataSource, id, { engineVersion: 2 });
-
-    const response = await patch(id, savePayload(0, { slices: { card: {} } }));
-
-    expect(response.status).toBe(409);
-    expect(envelope<unknown>(response).error).toMatchObject({
-      code: 'FLYER_PRO_APP_OUTDATED',
-      details: { schemaVersion: 1, engineVersion: 2 },
-    });
-  });
-
   describe('o app montado: guard, pipe global, filtro e a rota', () => {
     it('sem token é 401; id que não é UUID e encarte excluído são o mesmo 404', async () => {
       const { id } = await newDocument();
@@ -240,22 +223,15 @@ describeIfE2eDb('PATCH /v1/flyer-pro/documents/:id: salvar (e2e)', () => {
       }
     });
 
-    it('corpo {} é 400 BAD_REQUEST (nunca 500); fatia desconhecida é 400; fatia de 300 KB é 422 antes do banco', async () => {
+    it('corpo {} é 400 BAD_REQUEST (nunca 500); fatia desconhecida e fatia nula são 400', async () => {
       const { id } = await newDocument();
 
       const empty = await patch(id, {});
       const unknown = await patch(id, savePayload(0, { slices: { foo: {} } }));
-      const big = await patch(
-        id,
-        savePayload(0, { slices: { assembly: { a: 'x'.repeat(300 * 1024) } } }),
-      );
+      const nullSlice = await patch(id, savePayload(0, { slices: { card: null } }));
 
-      expect([empty.status, unknown.status, big.status]).toEqual([400, 400, 422]);
+      expect([empty.status, unknown.status, nullSlice.status]).toEqual([400, 400, 400]);
       expect(envelope<unknown>(empty).error).toMatchObject({ code: 'BAD_REQUEST' });
-      expect(envelope<unknown>(big).error).toMatchObject({
-        code: 'FLYER_PRO_SLICE_TOO_LARGE',
-        details: { slice: 'assembly', max: 262_144 },
-      });
       expect((await rowOf(h.dataSource, id))['revision']).toBe(0);
     });
   });

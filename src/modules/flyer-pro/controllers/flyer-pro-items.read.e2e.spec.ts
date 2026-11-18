@@ -1,9 +1,8 @@
-import { randomUUID } from 'crypto';
 import { describeIfE2eDb } from '../../../shared/testing/e2e-test-db';
 import {
   createdAtText,
-  DocumentBody,
   envelope,
+  newItemPayload,
   savePayload,
   useDocumentsE2e,
 } from '../testing/flyer-pro-documents.e2e.testutil';
@@ -16,18 +15,9 @@ import type { FlyerProItemsPage } from '../services/flyer-pro-items.service';
  * está no spec do DTO (L-19).
  */
 describeIfE2eDb('GET /v1/flyer-pro/documents/:id/items: ler os itens (e2e)', () => {
-  const { h, url, clientA, asBruno, create, open, patch } = useDocumentsE2e({ scenes: false });
+  const { h, url, clientA, asBruno, newDocument, open, patch } = useDocumentsE2e({ scenes: false });
   const read = async (id: string, query = '') =>
     envelope<FlyerProItemsPage>(await h.get(`${url}/${id}/items${query}`)).data;
-  const newDocument = async () =>
-    envelope<DocumentBody>(await create(h.seed.scenes.frontBack.id)).data;
-  const abacate = () => ({
-    id: randomUUID(),
-    position: 0,
-    name: 'ABACATE',
-    price: { kind: 'simple', cents: 699 },
-    unit: 'kg',
-  });
 
   it('sem updatedAfter vêm todos por position e id, na forma da abertura, com o cursor do maior updatedAt', async () => {
     const { id, itemIds } = await insertDocumentWithItems(h.dataSource, { clientId: clientA() }, [
@@ -74,7 +64,7 @@ describeIfE2eDb('GET /v1/flyer-pro/documents/:id/items: ler os itens (e2e)', () 
 
   it('o PATCH carimba os itens depois da trava: a leitura depois do cursor da abertura traz o preço novo, e as gravações em fila crescem', async () => {
     const { id } = await newDocument();
-    const item = abacate();
+    const item = newItemPayload();
     await patch(id, savePayload(0, { items: { upsert: [item] } }));
     const opened = await open(id);
 
@@ -98,7 +88,7 @@ describeIfE2eDb('GET /v1/flyer-pro/documents/:id/items: ler os itens (e2e)', () 
 
   it('item excluído por um PATCH não aparece; fechar e reabrir: a abertura e a leitura trazem o preço gravado', async () => {
     const { id } = await newDocument();
-    const [keep, drop] = [abacate(), { ...abacate(), position: 1 }];
+    const [keep, drop] = [newItemPayload(), { ...newItemPayload(), position: 1 }];
     await patch(id, savePayload(0, { items: { upsert: [keep, drop] } }));
     const cursor = (await read(id)).cursor;
 
