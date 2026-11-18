@@ -36,17 +36,24 @@ const statusOf = (review: ReviewFacts | null): string => review?.suggestion?.sta
 const appliedByJob = (review: ReviewFacts | null): boolean =>
   statusOf(review) === 'accepted' && review?.suggestion?.auto === true;
 
-function categorizeEligible(item: EnrichItemFacts, onlyMissing: boolean): boolean {
-  const source = item.categorySource ?? null;
-  if (source === 'user') return false;
-  if (onlyMissing) {
-    const missing = (item.category ?? null) === null && source === null;
-    return item.categoryReview == null && (missing || source === 'import');
-  }
+/** Com `onlyMissing` ligado: sem categoria nem origem, ou a da planilha, e nunca olhado pela IA. */
+function categorizeMissing(item: EnrichItemFacts, source: string | null): boolean {
+  const missing = (item.category ?? null) === null && source === null;
+  return item.categoryReview == null && (missing || source === 'import');
+}
+
+/** Com `onlyMissing` desligado: o que a IA ainda pode refazer, sem recusa nem bloqueio de pessoa. */
+function categorizeRedo(item: EnrichItemFacts, source: string | null): boolean {
   if (['rejected', 'blocked'].includes(statusOf(item.categoryReview))) return false;
   return (
     source === null || source === 'import' || (source === 'ai' && appliedByJob(item.categoryReview))
   );
+}
+
+function categorizeEligible(item: EnrichItemFacts, onlyMissing: boolean): boolean {
+  const source = item.categorySource ?? null;
+  if (source === 'user') return false;
+  return onlyMissing ? categorizeMissing(item, source) : categorizeRedo(item, source);
 }
 
 function spellEligible(item: EnrichItemFacts, onlyMissing: boolean): boolean {
