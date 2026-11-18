@@ -35,11 +35,15 @@ export async function claimBatch(
   return (rows?.[0] as FlyerProJob | undefined) ?? null;
 }
 
-/** Atualiza o batimento, só enquanto a ficha do lote é a atual e o job está `running`. */
+/**
+ * Atualiza o batimento, só enquanto a ficha do lote é a atual, o job está `running` e o batimento está ligado
+ * (`claimBatch` o liga; a gravação, a falha e a republicação o zeram): um batimento que saiu antes da gravação e só
+ * chega depois dela não o ressuscita.
+ */
 export function beat(dataSource: DataSource, jobId: string, seq: number): Promise<unknown> {
   return dataSource.query(
     `UPDATE "flyer_pro_jobs" SET "heartbeatAt" = now()
-      WHERE "id" = $1 AND "batchSeq" = $2 AND "status" = 'running'`,
+      WHERE "id" = $1 AND "batchSeq" = $2 AND "status" = 'running' AND "heartbeatAt" IS NOT NULL`,
     [jobId, seq],
   );
 }

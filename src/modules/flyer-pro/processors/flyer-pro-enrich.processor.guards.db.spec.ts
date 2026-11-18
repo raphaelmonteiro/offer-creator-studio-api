@@ -8,7 +8,7 @@ import {
   useEnrichDb,
   wrapPort,
 } from './flyer-pro-enrich.testutil';
-import { claimBatch } from './flyer-pro-enrich.statements';
+import { beat, claimBatch } from './flyer-pro-enrich.statements';
 
 /** A ficha, a parada e a escrita condicionada ao estado lido, provadas contra o Postgres do banco de e2e. */
 describeIfE2eDb('processador do job: ficha, parada e escrita condicionada (banco de e2e)', () => {
@@ -105,6 +105,25 @@ describeIfE2eDb('processador do job: ficha, parada e escrita condicionada (banco
         ['PRODUTO 0', 'PRODUTO 1'],
         ['PRODUTO 2', 'PRODUTO 3'],
       ]);
+    });
+  });
+
+  describe('batimento', () => {
+    it('batimento que saiu antes da gravação e chega depois dela: o heartbeatAt continua nulo', async () => {
+      const { documentId } = await newDocument(5);
+      const world = makeEnrichWorld(db.dataSource);
+      const jobId = await start(world, documentId, { steps: ['image_match'] });
+      const claimed = await claimBatch(db.dataSource, jobId, world.messages[0].data.seq);
+      await world.committer.commitFailure(claimed as never, 'image_match', {
+        code: 'AI_PROVIDER_ERROR',
+        terminal: false,
+      });
+      const afterCommit = await jobRowOf(db.dataSource, jobId);
+
+      await beat(db.dataSource, jobId, claimed?.batchSeq as number);
+
+      expect(afterCommit).toMatchObject({ status: 'running', heartbeatAt: null });
+      expect(await jobRowOf(db.dataSource, jobId)).toEqual(afterCommit);
     });
   });
 
