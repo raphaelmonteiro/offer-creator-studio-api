@@ -87,6 +87,14 @@ describe('SaveFlyerProDocumentDto', () => {
     },
   );
 
+  it.each(['setup', 'slices', 'items'])(
+    '%s que é lista (vazia ou não) é recusado como não objeto (PV-12)',
+    async (key) => {
+      expect(await errorsOf({ [key]: [] })).toEqual([key]);
+      expect(await errorsOf({ [key]: [{}] })).toEqual([key]);
+    },
+  );
+
   it('layoutSnapshot nulo é aceito (limpa a coluna, PV-10)', async () => {
     expect(await errorsOf({ layoutSnapshot: null })).toEqual([]);
   });

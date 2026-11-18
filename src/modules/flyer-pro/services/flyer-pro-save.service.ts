@@ -7,6 +7,7 @@ import {
   isConferenceBody,
   revisionConflictOf,
   saveResponseFields,
+  withoutNullItemLists,
 } from '../domain/flyer-pro-save-rules';
 import type { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
 import type { FlyerProDocument } from '../entities/flyer-pro-document.entity';
@@ -40,7 +41,8 @@ export class FlyerProSaveService {
     private readonly items: FlyerProItemsService,
   ) {}
 
-  async save(userId: string, id: string, dto: SaveFlyerProDocumentDto): Promise<FlyerProSaveView> {
+  async save(userId: string, id: string, body: SaveFlyerProDocumentDto): Promise<FlyerProSaveView> {
+    const dto = withoutNullItemLists(body);
     assertSaveBody(dto);
     return this.dataSource.transaction((manager) => this.run(manager, userId, id, dto));
   }

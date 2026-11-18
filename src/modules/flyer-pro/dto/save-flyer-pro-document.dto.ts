@@ -63,18 +63,21 @@ export class SaveFlyerProDocumentDto {
 
   @ApiPropertyOptional({ type: FlyerProSetupPatchDto })
   @ValidateIf((_, value) => value !== undefined)
+  @IsObject()
   @ValidateNested()
   @Type(() => FlyerProSetupPatchDto)
   setup?: FlyerProSetupPatchDto;
 
   @ApiPropertyOptional({ type: FlyerProSlicesPatchDto, description: 'Cada fatia até 256 KB' })
   @ValidateIf((_, value) => value !== undefined)
+  @IsObject()
   @ValidateNested()
   @Type(() => FlyerProSlicesPatchDto)
   slices?: FlyerProSlicesPatchDto;
 
   @ApiPropertyOptional({ type: FlyerProItemsPatchDto })
   @ValidateIf((_, value) => value !== undefined)
+  @IsObject()
   @ValidateNested()
   @Type(() => FlyerProItemsPatchDto)
   items?: FlyerProItemsPatchDto;

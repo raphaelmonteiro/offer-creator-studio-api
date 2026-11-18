@@ -6,6 +6,7 @@ import {
   firstOversizedPart,
   isConferenceBody,
   SAVE_REQUIRED_FIELDS,
+  withoutNullItemLists,
 } from './flyer-pro-save-rules';
 
 const BASE = { mutationId: 'm', expectedRevision: 0, schemaVersion: 1, engineVersion: 1 };
@@ -170,5 +171,27 @@ describe('assertSaveBody', () => {
 
   it('corpo válido não lança', () => {
     expect(responseOf({ ...BASE, slices: { structure: objectOf(262_144) } })).toBeNull();
+  });
+});
+
+describe('withoutNullItemLists', () => {
+  it('upsert e delete nulos ou ausentes viram lista vazia; o resto do corpo e o replaceAll ficam', () => {
+    expect(
+      withoutNullItemLists({ a: 1, items: { upsert: null, delete: null, replaceAll: true } }),
+    ).toEqual({ a: 1, items: { upsert: [], delete: [], replaceAll: true } });
+    expect(withoutNullItemLists({ items: {} })).toEqual({ items: { upsert: [], delete: [] } });
+  });
+
+  it('listas enviadas passam como estão, e o corpo sem items volta o mesmo objeto', () => {
+    const items = { upsert: [{ id: 'a' }], delete: ['b'] };
+    expect(withoutNullItemLists({ items })).toEqual({ items });
+    const body = { mutationId: 'm', items: undefined };
+    expect(withoutNullItemLists(body)).toBe(body);
+  });
+
+  it('não altera o corpo recebido', () => {
+    const body = { items: { upsert: null } };
+    withoutNullItemLists(body);
+    expect(body).toEqual({ items: { upsert: null } });
   });
 });
