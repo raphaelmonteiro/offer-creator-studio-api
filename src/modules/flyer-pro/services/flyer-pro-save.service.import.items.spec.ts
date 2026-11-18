@@ -9,6 +9,7 @@ import { SAVED_AT, saveBody, STAMP, storedDocument } from './flyer-pro-save.serv
 import { FlyerProSaveService } from './flyer-pro-save.service';
 import type { FlyerProSetupService } from './flyer-pro-setup.service';
 import type { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
+import { fakeDataSource } from '../testing/flyer-pro-fake-db.testutil';
 
 const OTHER_DOCUMENT = 'd2';
 const newItem = (n: number, over: Record<string, unknown> = {}) => ({
@@ -57,7 +58,7 @@ function makeStatefulSave(imports: Record<string, string> = {}, foreignItems: Fl
       return Promise.resolve([]);
     }),
   };
-  const dataSource = { transaction: jest.fn((work: (m: unknown) => unknown) => work(manager)) };
+  const dataSource = fakeDataSource(manager);
   const service = new FlyerProSaveService(
     dataSource as unknown as DataSource,
     { apply: jest.fn().mockResolvedValue({}) } as unknown as FlyerProSetupService,

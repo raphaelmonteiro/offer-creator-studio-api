@@ -6,6 +6,7 @@ import { fakeConfig } from '../../ai/utils/openai-chat.testutil';
 import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { FlyerProJob } from '../entities/flyer-pro-job.entity';
 import { FlyerProJobsService } from './flyer-pro-jobs.service';
+import { fakeDataSource } from '../testing/flyer-pro-fake-db.testutil';
 
 /** Ajudantes dos unitários do serviço do job (só testes): o `manager` simulado, a fila e as linhas de job. */
 
@@ -64,10 +65,11 @@ export const activeJobViolation = () =>
     constraint: 'UQ_flyer_pro_jobs_document_active',
   } as unknown as Error);
 
-/** O serviço sobre um `manager` que responde pelo SQL e registra o que foi inserido e publicado. */
-export function makeJobsService(world: JobsWorld = {}, config?: Partial<FlyerProEnrichConfig>) {
-  const state = { documentLive: true, itemIdsInDocument: [] as string[], ...world };
-  const inserted: Array<Record<string, unknown>> = [];
+/** O `manager` simulado do serviço do job: responde pelo SQL e registra o que foi inserido. */
+function fakeJobsManager(
+  state: JobsWorld & { documentLive: boolean; itemIdsInDocument: string[] },
+  inserted: Array<Record<string, unknown>>,
+) {
   const manager = {
     findOne: jest.fn(async (entity: unknown, options: { where?: { status?: unknown } }) => {
       if (entity === FlyerProDocument) return state.documentLive ? { id: DOC } : null;
@@ -95,15 +97,19 @@ export function makeJobsService(world: JobsWorld = {}, config?: Partial<FlyerPro
         const wanted = params[1] as string[];
         return state.itemIdsInDocument.filter((id) => wanted.includes(id)).map((id) => ({ id }));
       }
-      if (sql.includes('count(*)')) return [{ n: countFor(sql, world.counts ?? {}) }];
+      if (sql.includes('count(*)')) return [{ n: countFor(sql, state.counts ?? {}) }];
       return [];
     }),
   };
-  const dataSource = {
-    transaction: jest.fn(async (...args: unknown[]) =>
-      (args[args.length - 1] as (m: unknown) => unknown)(manager),
-    ),
-  };
+  return manager;
+}
+
+/** O serviço sobre um `manager` que responde pelo SQL e registra o que foi inserido e publicado. */
+export function makeJobsService(world: JobsWorld = {}, config?: Partial<FlyerProEnrichConfig>) {
+  const state = { documentLive: true, itemIdsInDocument: [] as string[], ...world };
+  const inserted: Array<Record<string, unknown>> = [];
+  const manager = fakeJobsManager(state, inserted);
+  const dataSource = fakeDataSource(manager);
   const queue = { publish: jest.fn().mockResolvedValue('queue-job-1') };
   const enrichConfig = readEnrichConfig(fakeConfig({}), { warn: jest.fn() });
   const service = new FlyerProJobsService(

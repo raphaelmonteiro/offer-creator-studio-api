@@ -3,6 +3,7 @@ import type { FlyerProItemsPatchDto } from '../dto/flyer-pro-items-patch.dto';
 import type { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import { FlyerProItemsService } from './flyer-pro-items.service';
 import { STAMP } from './flyer-pro-save.service.testutil';
+import { fakeDataSource } from '../testing/flyer-pro-fake-db.testutil';
 
 /** Ajudantes dos unitários do ramo `items` (só testes): o `manager` que registra os comandos e a leitura dos itens. */
 
@@ -71,13 +72,7 @@ export const recordsOf = (statement: { params: unknown[] }): Array<Record<string
 
 /** O serviço sobre um `DataSource` simulado que entrega o `manager` (a leitura roda numa transação `REPEATABLE READ`). */
 export function makeItemsService(manager: ItemsManager = makeItemsManager()) {
-  const dataSource = {
-    transaction: jest.fn((levelOrWork: unknown, maybeWork?: (m: unknown) => unknown) =>
-      (typeof levelOrWork === 'string' ? maybeWork : (levelOrWork as (m: unknown) => unknown))(
-        manager,
-      ),
-    ),
-  };
+  const dataSource = fakeDataSource(manager);
   return { service: new FlyerProItemsService(dataSource as unknown as DataSource), dataSource };
 }
 

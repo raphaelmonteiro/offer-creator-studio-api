@@ -8,6 +8,7 @@ import type { FlyerProItemsService } from './flyer-pro-items.service';
 import type { FlyerProJobsService } from './flyer-pro-jobs.service';
 import type { FlyerProSetupService } from './flyer-pro-setup.service';
 import type { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
+import { fakeDataSource } from '../testing/flyer-pro-fake-db.testutil';
 
 /** Ajudantes dos unitários do salvar (só testes): o `manager` que registra os comandos e o corpo de um `PATCH`. */
 
@@ -49,7 +50,7 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
       return Promise.resolve([[], 0]);
     }),
   };
-  const dataSource = { transaction: jest.fn((work: (m: unknown) => unknown) => work(manager)) };
+  const dataSource = fakeDataSource(manager);
   const setup = { apply: jest.fn().mockResolvedValue({}) };
   const snapshots = { statusOf: jest.fn().mockResolvedValue(STATUS) };
   const items = {
