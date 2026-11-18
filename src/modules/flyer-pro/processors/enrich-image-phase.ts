@@ -54,7 +54,7 @@ export class EnrichImagePhase {
       answer.matches.map(
         async (match): Promise<[string, PhotoSize | null]> => [
           match.productId,
-          await this.sizes.measure(match.imageUrl, signal),
+          await this.sizes.measure(match.imageUrl, { signal }),
         ],
       ),
     );

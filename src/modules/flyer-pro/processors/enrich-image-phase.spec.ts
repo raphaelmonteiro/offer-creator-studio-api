@@ -129,7 +129,7 @@ describe('EnrichImagePhase: foto aplicada, candidatas e não encontrada', () => 
 
     expect(world.sizes.measure).toHaveBeenCalledWith(
       'http://cdn.teste/uploads/gallery/foto-ean.png',
-      context.signal,
+      { signal: context.signal },
     );
   });
 

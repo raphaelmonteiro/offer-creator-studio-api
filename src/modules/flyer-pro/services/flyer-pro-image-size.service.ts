@@ -12,6 +12,15 @@ export interface ImageSize {
   height: number;
 }
 
+/**
+ * `signal` cancela o download (o lote do job passou do prazo). `offline` mede só o que está no disco, sem baixar nada: o
+ * simulado do job (e o ambiente local sem rede) lê o arquivo pelo caminho `/uploads/` de qualquer endereço, como a 28 fazia.
+ */
+export interface MeasureOptions {
+  signal?: AbortSignal;
+  offline?: boolean;
+}
+
 /** Prazo do download de uma foto de fora (A-11). */
 export const MEASURE_DOWNLOAD_TIMEOUT_MS = 10_000;
 /** Teto do download: o mesmo do envio de arquivo (50 MB). */
@@ -36,17 +45,18 @@ type Source = { kind: 'disk'; file: string } | { kind: 'download' } | { kind: 'r
 export class FlyerProImageSizeService {
   constructor(private readonly config: ConfigService) {}
 
-  async measure(url: string, signal?: AbortSignal): Promise<ImageSize | null> {
-    const source = this.sourceOf(url);
+  async measure(url: string, options: MeasureOptions = {}): Promise<ImageSize | null> {
+    const source = this.sourceOf(url, options.offline === true);
     if (source.kind === 'refused') return null;
     if (source.kind === 'disk' && (await isFile(source.file))) return sizeOf(source.file);
-    const downloaded = await this.download(url, signal);
+    if (options.offline) return null;
+    const downloaded = await this.download(url, options.signal);
     return downloaded ? sizeOf(downloaded) : null;
   }
 
   /** O caminho do arquivo sob o `UPLOAD_DEST` quando a URL é do próprio servidor; senão, baixar (ou recusar). */
-  private sourceOf(url: string): Source {
-    const relative = this.uploadsRelativeOf(url);
+  private sourceOf(url: string, anyHost: boolean): Source {
+    const relative = this.uploadsRelativeOf(url, anyHost);
     if (relative === null) return { kind: 'download' };
     if (relative === '' || PARENT_SEGMENT.test(safeDecode(relative))) return { kind: 'refused' };
     const uploadsDir = resolveUploadsDir(this.config.get<string>('UPLOAD_DEST'));
@@ -54,12 +64,12 @@ export class FlyerProImageSizeService {
     return file.startsWith(uploadsDir + path.sep) ? { kind: 'disk', file } : { kind: 'refused' };
   }
 
-  /** O trecho da URL depois da pasta de uploads, se ela é do próprio servidor (`CDN_URL` ou host local); senão `null`. */
-  private uploadsRelativeOf(url: string): string | null {
+  /** O trecho da URL depois da pasta de uploads, se ela é do próprio servidor (`CDN_URL` ou host local, ou qualquer endereço com `anyHost`); senão `null`. */
+  private uploadsRelativeOf(url: string, anyHost: boolean): string | null {
     const cdn = this.config.get<string>('CDN_URL', DEFAULT_CDN_URL).replace(/\/+$/, '');
     if (url.startsWith(`${cdn}/`)) return withoutQuery(url.slice(cdn.length + 1));
     const [rawPath, host] = pathAndHost(url);
-    if (host !== null && !LOCAL_HOSTS.has(host)) return null;
+    if (!anyHost && host !== null && !LOCAL_HOSTS.has(host)) return null;
     const marker = /\/uploads\/+/.exec(rawPath);
     return marker ? rawPath.slice(marker.index + marker[0].length) : null;
   }

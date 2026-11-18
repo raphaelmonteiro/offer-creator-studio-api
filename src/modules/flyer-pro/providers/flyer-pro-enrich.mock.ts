@@ -202,7 +202,7 @@ export class MockFlyerProEnrich implements FlyerProEnrichPort {
     if (outcome === 1)
       return { itemId: item.id, action: 'review', candidates: candidatesFrom(photos, first) };
     const picked = candidatesFrom(photos, first, 1)[0];
-    const size = await this.sizes.measure(picked.url);
+    const size = await this.sizes.measure(picked.url, { offline: true });
     // Arquivo que não abre: a foto vai para revisão como candidata, nunca aplicada sem medida (D-2 (a)).
     if (!size) return { itemId: item.id, action: 'review', candidates: [picked] };
     return { itemId: item.id, action: 'apply', photo: { ...picked, ...size } };

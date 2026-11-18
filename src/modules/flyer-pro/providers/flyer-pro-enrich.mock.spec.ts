@@ -154,6 +154,8 @@ describe('MockFlyerProEnrich: fotos', () => {
       photo: { width: 600, height: 1200, galleryImageId: expect.stringMatching(/^foto-/) },
     });
     expect(measure).toHaveBeenCalledTimes(1);
+    // o simulado nunca baixa foto: mede só o arquivo do disco, de qualquer endereço da Galeria
+    expect(measure).toHaveBeenCalledWith(expect.stringContaining('/uploads/'), { offline: true });
   });
 
   it('para revisar: até 3 candidatas distintas, a melhor primeiro, com motivo [simulado]', async () => {

@@ -211,7 +211,9 @@ describe('FlyerProImageSizeService: download de URL de fora', () => {
         }),
     );
 
-    const measuring = service.measure('https://fotos.exemplo.com/x.jpg', controller.signal);
+    const measuring = service.measure('https://fotos.exemplo.com/x.jpg', {
+      signal: controller.signal,
+    });
     await new Promise((resolve) => setImmediate(resolve));
     controller.abort();
 
@@ -228,6 +230,35 @@ describe('FlyerProImageSizeService: download de URL de fora', () => {
     expect(await service.measure('')).toBeNull();
     expect(await service.measure('ftp://x/uploads2/foto.jpg')).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('FlyerProImageSizeService: modo offline (o simulado do job)', () => {
+  it('lê o arquivo pelo caminho /uploads/ de qualquer endereço, como a 28 fazia, e nunca baixa', async () => {
+    await writePhoto('offline.jpg', 640, 480);
+
+    expect(
+      await service.measure('http://192.168.68.108:3102/uploads/gallery/offline.jpg', {
+        offline: true,
+      }),
+    ).toEqual({ width: 640, height: 480 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('arquivo que não está no disco: a medida não vem e nada é baixado', async () => {
+    expect(
+      await service.measure('http://192.168.68.108:3102/uploads/gallery/sumiu.jpg', {
+        offline: true,
+      }),
+    ).toBeNull();
+    expect(await service.measure('https://fotos.exemplo.com/x.jpg', { offline: true })).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('caminho para fora da pasta de uploads continua recusado', async () => {
+    expect(
+      await service.measure('http://outro.exemplo.com/uploads/../.env', { offline: true }),
+    ).toBeNull();
   });
 });
 
