@@ -64,15 +64,18 @@ describe('FlyerProItemPatchDto (só a forma, 400)', () => {
     expect(await errorsOf({ upsert: [{ id: 'abc' }] })).toEqual(['items']);
   });
 
-  it.each([
-    'categorySource',
-    'imageStatus',
-    'categoryReview',
-    'imageReview',
-    'spellReview',
-    'importId',
-  ])('o campo do servidor %s no corpo é recusado', async (field) => {
-    expect(await upsertOf({ [field]: 'user' })).toEqual(['items']);
+  it.each(['categorySource', 'imageStatus', 'categoryReview', 'imageReview', 'spellReview'])(
+    'o campo do servidor %s no corpo é recusado',
+    async (field) => {
+      expect(await upsertOf({ [field]: 'user' })).toEqual(['items']);
+    },
+  );
+
+  it('importId aceita uuid e nulo (tratado no validador) e recusa o que não é uuid', async () => {
+    expect(await upsertOf({ importId: ID })).toEqual([]);
+    expect(await upsertOf({ importId: null })).toEqual([]);
+    expect(await upsertOf({ importId: 'abc' })).toEqual(['items']);
+    expect(await upsertOf({ importId: 12 })).toEqual(['items']);
   });
 
   it('upsert e delete aceitam 500 entradas e recusam 501; item que não é objeto é recusado', async () => {

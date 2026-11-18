@@ -52,10 +52,14 @@ describe('SaveFlyerProDocumentDto', () => {
     expect(await errorsOf({ expectedRevision: 0, schemaVersion: 2147483647 })).toEqual([]);
   });
 
-  it('campo desconhecido, inclusive `import` e `enrich`, é recusado', async () => {
+  it('campo desconhecido, inclusive `enrich` (que só chega na change 28), é recusado', async () => {
     expect(await errorsOf({ foo: 1 })).toEqual(['foo']);
-    expect(await errorsOf({ import: {} })).toEqual(['import']);
     expect(await errorsOf({ enrich: {} })).toEqual(['enrich']);
+  });
+
+  it('import é opcional; a forma dele está em flyer-pro-import.dto.spec.ts, e o objeto vazio é recusado', async () => {
+    expect(await errorsOf({ import: {} })).toEqual(['import']);
+    expect(await errorsOf({ import: null })).toEqual(['import']);
   });
 
   describe('slices', () => {

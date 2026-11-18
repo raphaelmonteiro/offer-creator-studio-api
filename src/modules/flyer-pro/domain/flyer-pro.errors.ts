@@ -119,15 +119,22 @@ export interface FlyerProItemIssue {
   code: string;
 }
 
+/** O problema de um campo do registro de uma importação. */
+export interface FlyerProImportIssue {
+  field: string;
+  code: string;
+}
+
+/** O 422 com a lista de problemas em `issues`, fora de `details`: o mesmo envelope dos itens e das importações. */
+const flyerProIssues = (code: string, message: string, issues: Array<object>) =>
+  new HttpException({ code, message, issues }, HttpStatus.UNPROCESSABLE_ENTITY);
+
 export const flyerProItemInvalid = (issues: FlyerProItemIssue[]) =>
-  new HttpException(
-    {
-      code: 'FLYER_PRO_ITEM_INVALID',
-      message: 'Há itens com dados inválidos.',
-      issues,
-    },
-    HttpStatus.UNPROCESSABLE_ENTITY,
-  );
+  flyerProIssues('FLYER_PRO_ITEM_INVALID', 'Há itens com dados inválidos.', issues);
+
+/** O registro da importação com contagens incoerentes (`COUNT_MISMATCH`, `EMPTY`). */
+export const flyerProImportInvalid = (issues: FlyerProImportIssue[]) =>
+  flyerProIssues('FLYER_PRO_IMPORT_INVALID', 'O registro da importação está incoerente.', issues);
 
 export const flyerProItemLimit = (details: { max: number; total: number }) =>
   flyerProError(
@@ -144,4 +151,13 @@ export const flyerProItemIdConflict = (itemIds: string[]) =>
     'FLYER_PRO_ITEM_ID_CONFLICT',
     'Há itens que pertencem a outro encarte.',
     { itemIds },
+  );
+
+/** O `import.id` já é de uma importação de outro encarte, vivo ou excluído. */
+export const flyerProImportIdConflict = (importId: string) =>
+  flyerProError(
+    HttpStatus.CONFLICT,
+    'FLYER_PRO_IMPORT_ID_CONFLICT',
+    'A importação pertence a outro encarte.',
+    { importId },
   );
