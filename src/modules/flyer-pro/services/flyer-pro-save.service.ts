@@ -11,6 +11,7 @@ import {
 import type { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
 import type { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { FlyerProSaveView, toSaveView } from '../views/flyer-pro-save.view';
+import type { SaveViewInput } from '../views/flyer-pro-save.view';
 import {
   lockDocument,
   readStamp,
@@ -18,8 +19,11 @@ import {
   writeConference,
   writeDocument,
 } from './flyer-pro-save.statements';
+import { FlyerProSetupService } from './flyer-pro-setup.service';
+import { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
 
-const NO_FIELDS = { template: false, pageCount: false };
+/** O que distingue as respostas entre si: reenvio ou não, aplicada ou descartada. */
+type Outcome = Pick<SaveViewInput, 'replayed' | 'applied'>;
 
 /**
  * N4: a única rota que grava o estado do encarte. Forma e tamanhos antes do banco; depois, numa transação com a linha
@@ -28,7 +32,11 @@ const NO_FIELDS = { template: false, pageCount: false };
  */
 @Injectable()
 export class FlyerProSaveService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly setup: FlyerProSetupService,
+    private readonly snapshots: FlyerProTemplateSnapshotService,
+  ) {}
 
   async save(userId: string, id: string, dto: SaveFlyerProDocumentDto): Promise<FlyerProSaveView> {
     assertSaveBody(dto);
@@ -56,22 +64,35 @@ export class FlyerProSaveService {
     document: FlyerProDocument,
     dto: SaveFlyerProDocumentDto,
   ): Promise<FlyerProSaveView | null> {
-    if (document.lastMutationId === dto.mutationId) return this.replayed(document, dto);
+    if (document.lastMutationId === dto.mutationId) {
+      return this.respond(manager, document, dto, { replayed: true, applied: true });
+    }
     assertAppNotOutdated(document, dto);
     const conference = isConferenceBody(dto);
     if (document.revision !== dto.expectedRevision) {
       if (!conference) throw revisionConflictOf(document);
-      return toSaveView({ document, replayed: false, applied: false, fields: NO_FIELDS });
+      return this.respond(manager, document, dto, { replayed: false, applied: false });
     }
     if (!conference) return null;
     await writeConference(manager, document.id, dto);
-    return toSaveView({ document, replayed: false, applied: true, fields: NO_FIELDS });
+    return this.respond(manager, document, dto, { replayed: false, applied: true });
   }
 
-  /** Reenvio: nada é gravado; a resposta traz o estado atual (`applied: true`, a revisão de agora). */
-  private replayed(document: FlyerProDocument, dto: SaveFlyerProDocumentDto): FlyerProSaveView {
+  /**
+   * A resposta pela view. Os campos da cópia da arte (e o `templateStatus`, calculado na hora sobre a cópia do
+   * encarte) só vêm quando o corpo trocou a cena ou pediu "Atualizar arte", também no reenvio.
+   */
+  private async respond(
+    manager: EntityManager,
+    document: FlyerProDocument,
+    dto: SaveFlyerProDocumentDto,
+    outcome: Outcome,
+  ): Promise<FlyerProSaveView> {
     const fields = saveResponseFields(dto.setup);
-    return toSaveView({ document, replayed: true, applied: true, fields });
+    const templateStatus = fields.template
+      ? await this.snapshots.statusOf(document.templateSnapshot, manager)
+      : undefined;
+    return toSaveView({ document, ...outcome, fields, templateStatus });
   }
 
   /** `PATCH` normal: carimbo depois da trava, uma gravação só do encarte e a resposta pela view. */
@@ -82,9 +103,10 @@ export class FlyerProSaveService {
     dto: SaveFlyerProDocumentDto,
   ): Promise<FlyerProSaveView> {
     const stamp = await readStamp(manager);
-    const columns = saveColumns(document, dto, userId, {});
+    const setupColumns = dto.setup ? await this.setup.apply(manager, document, dto.setup) : {};
+    const columns = saveColumns(document, dto, userId, setupColumns);
     const updatedAt = await writeDocument(manager, document.id, columns, stamp);
     const saved = { ...document, ...columns, updatedAt };
-    return toSaveView({ document: saved, replayed: false, applied: true, fields: NO_FIELDS });
+    return this.respond(manager, saved, dto, { replayed: false, applied: true });
   }
 }

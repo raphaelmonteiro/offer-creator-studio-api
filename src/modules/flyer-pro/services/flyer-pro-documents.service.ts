@@ -4,11 +4,7 @@ import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import type { PaginationResult } from '../../../common/utils/pagination.util';
 import { isCreationKeyConflict, missingCreateFields } from '../domain/flyer-pro-document-rules';
 import { findFlyerProFormat, sceneFormatIdOf } from '../domain/flyer-pro-formats';
-import {
-  flyerProClientNotFound,
-  flyerProMissingFields,
-  flyerProNotFound,
-} from '../domain/flyer-pro.errors';
+import { flyerProMissingFields, flyerProNotFound } from '../domain/flyer-pro.errors';
 import type { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
 import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { FlyerProItem } from '../entities/flyer-pro-item.entity';
@@ -17,6 +13,7 @@ import type {
   FlyerProDocumentView,
 } from '../views/flyer-pro-document.view';
 import { toDocumentView } from '../views/flyer-pro-document.view';
+import { assertClientExists } from './flyer-pro-client';
 import { FlyerProDocumentsListInput, listDocuments } from './flyer-pro-documents-list';
 import { readWith } from './flyer-pro-read';
 import { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
@@ -79,7 +76,7 @@ export class FlyerProDocumentsService {
     if (missing.length > 0) throw flyerProMissingFields(missing);
     const known = await this.replayOf(dto.creationKey);
     if (known) return known;
-    await this.assertClientExists(dto.clientId);
+    await assertClientExists(this.dataSource, dto.clientId);
     try {
       const id = await this.dataSource.transaction((manager) => this.insert(manager, dto, userId));
       return await this.created(id);
@@ -125,13 +122,6 @@ export class FlyerProDocumentsService {
 
   private async created(id: string): Promise<FlyerProCreateResult> {
     return { document: { ...(await this.open(id)), replayed: false }, created: true };
-  }
-
-  private async assertClientExists(clientId: string): Promise<void> {
-    const rows = await this.dataSource.query(`SELECT 1 FROM clients WHERE id = $1::uuid LIMIT 1`, [
-      clientId,
-    ]);
-    if (rows.length === 0) throw flyerProClientNotFound();
   }
 
   /** A cópia do template e a linha do encarte, na mesma transação; o formato e as páginas vêm da cópia (PU-20). */

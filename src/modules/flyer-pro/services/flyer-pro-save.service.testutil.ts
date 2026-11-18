@@ -1,8 +1,10 @@
 import type { DataSource, EntityManager } from 'typeorm';
 import type { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
 import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
-import { documentRow } from './flyer-pro-documents.service.testutil';
+import { documentRow, STATUS } from './flyer-pro-documents.service.testutil';
 import { FlyerProSaveService } from './flyer-pro-save.service';
+import type { FlyerProSetupService } from './flyer-pro-setup.service';
+import type { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
 
 /** Ajudantes dos unitários do salvar (só testes): o `manager` que registra os comandos e o corpo de um `PATCH`. */
 
@@ -45,7 +47,13 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
     }),
   };
   const dataSource = { transaction: jest.fn((work: (m: unknown) => unknown) => work(manager)) };
-  const service = new FlyerProSaveService(dataSource as unknown as DataSource);
+  const setup = { apply: jest.fn().mockResolvedValue({}) };
+  const snapshots = { statusOf: jest.fn().mockResolvedValue(STATUS) };
+  const service = new FlyerProSaveService(
+    dataSource as unknown as DataSource,
+    setup as unknown as FlyerProSetupService,
+    snapshots as unknown as FlyerProTemplateSnapshotService,
+  );
   /** Os comandos SQL enviados ao `manager`, na ordem. */
   const calls = (): QueryCall[] =>
     manager.query.mock.calls.map(([sql, params]) => ({ sql, params: params ?? [] }));
@@ -53,6 +61,8 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
     service,
     manager: manager as unknown as EntityManager & typeof manager,
     dataSource,
+    setup,
+    snapshots,
     calls,
     updates: () => calls().filter((call) => call.sql.startsWith('UPDATE')),
   };
