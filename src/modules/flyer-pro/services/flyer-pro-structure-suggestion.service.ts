@@ -1,8 +1,10 @@
 import { randomUUID } from 'crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { withTimeout } from '../../../shared/async/with-timeout';
+import type { LlmUsage } from '../../ai/openai-llm-pricing';
+import { withAiLogging } from '../../ai/utils/ai-telemetry.util';
 import { STRUCTURE_AI_CONFIG, StructureAiConfig } from '../config/structure-ai.config';
 import { resolvePageCount } from '../domain/flyer-pro-setup-rules';
 import {
@@ -10,7 +12,6 @@ import {
   flyerProStructureAiBusy,
   flyerProStructureAiDisabled,
   flyerProStructureAiFailed,
-  type StructureAiFailureReason,
 } from '../domain/flyer-pro.errors';
 import { pickDeliberateExamples, type StructureExample } from '../domain/read-structure-example';
 import {
@@ -24,8 +25,9 @@ import {
   assertStructureState,
   categorySections,
 } from '../domain/structure-suggestion-rules';
-import { sanitizeSuggestion } from '../domain/structure-suggestion-sanitize';
+import { sanitizeSuggestion, type SanitizeContext } from '../domain/structure-suggestion-sanitize';
 import type {
+  SanitizedSuggestion,
   StructureItemRow,
   StructureRequest,
   StructureSuggestionView,
@@ -58,9 +60,6 @@ const requestedItemIds = (request: StructureRequest): string[] => [
   ...new Set(request.sections.flatMap((section) => section.itemIds)),
 ];
 
-const failureReasonOf = (error: unknown): StructureAiFailureReason =>
-  error instanceof StructureAiFailure ? error.reason : 'PROVIDER_ERROR';
-
 /**
  * N19: a sugestão de estrutura do encarte. Nunca grava: só lê o encarte, os itens e os encartes anteriores do cliente. Os
  * passos, na ordem do contrato: (1) forma e coerência do retrato; (2) função ligada, provedor disponível e os freios em
@@ -70,6 +69,8 @@ const failureReasonOf = (error: unknown): StructureAiFailureReason =>
  */
 @Injectable()
 export class FlyerProStructureSuggestionService {
+  private readonly logger = new Logger(FlyerProStructureSuggestionService.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STRUCTURE_AI_CONFIG) private readonly config: StructureAiConfig,
@@ -128,8 +129,7 @@ export class FlyerProStructureSuggestionService {
       examples: context.examples,
       maxHeroes: this.config.maxHeroes,
     });
-    const result = await this.ask(aiRequest, suggestionId);
-    const sanitized = sanitizeSuggestion(result.suggestion, {
+    const { result, sanitized } = await this.ask(aiRequest, suggestionId, {
       request,
       aliases,
       itemsWithPhoto: new Set(context.items.filter((item) => item.imageUrl).map((item) => item.id)),
@@ -173,22 +173,65 @@ export class FlyerProStructureSuggestionService {
     return { document, items, examples: pickDeliberateExamples(rows, this.config.examples) };
   }
 
-  /** Passo 5: a chamada ao provedor com o prazo (vale para o simulado também); falha, prazo ou saída inválida são 503. */
+  /**
+   * Passos 5 e 6: a chamada ao provedor, com prazo, e o saneamento. Com o provedor real, os dois ficam dentro da mesma linha
+   * de log de IA (feature, modelo, tokens, custo pela tabela, `suggestionId` e a contagem do que o saneamento tirou); o
+   * simulado não escreve linha de IA. Falha, prazo ou saída inválida do provedor são 503, sem plano de reserva.
+   */
   private async ask(
+    aiRequest: StructureAiRequest,
+    suggestionId: string,
+    sanitizeContext: SanitizeContext,
+  ): Promise<{ result: StructureAiResult; sanitized: SanitizedSuggestion }> {
+    let discarded = 0;
+    const call = async () => {
+      const result = await this.callWithDeadline(aiRequest, suggestionId);
+      const sanitized = sanitizeSuggestion(result.suggestion, sanitizeContext);
+      discarded = sanitized.discarded.length;
+      // `usage` na raiz: é de onde o log de IA lê os tokens.
+      return { result, sanitized, usage: result.usage as LlmUsage | null };
+    };
+    try {
+      if (this.port.source !== 'ai') return await call();
+      return await withAiLogging(
+        this.logger,
+        {
+          feature: 'flyer-pro.structure-suggestion',
+          endpoint: 'responses',
+          model: this.config.model,
+          pricing: 'table',
+          correlationId: suggestionId,
+          finishedFields: () => ({ discarded }),
+        },
+        call,
+      );
+    } catch (error) {
+      if (!(error instanceof StructureAiFailure)) throw error;
+      throw flyerProStructureAiFailed({ reason: error.reason, suggestionId });
+    }
+  }
+
+  /** O provedor contra o prazo (vale para o simulado também); erro que não é `StructureAiFailure` vale `PROVIDER_ERROR`. */
+  private async callWithDeadline(
     aiRequest: StructureAiRequest,
     suggestionId: string,
   ): Promise<StructureAiResult> {
     const { timeoutMs } = this.config;
+    let outcome: StructureAiResult | 'timeout';
     try {
-      const outcome = await withTimeout(
+      outcome = await withTimeout(
         this.port.suggest(aiRequest, { timeoutMs, suggestionId }),
         timeoutMs,
       );
-      if (outcome === 'timeout')
-        throw new StructureAiFailure('TIMEOUT', 'Prazo da sugestão estourado');
-      return outcome;
     } catch (error) {
-      throw flyerProStructureAiFailed({ reason: failureReasonOf(error), suggestionId });
+      if (error instanceof StructureAiFailure) throw error;
+      throw new StructureAiFailure(
+        'PROVIDER_ERROR',
+        error instanceof Error ? error.message : 'Erro do provedor',
+      );
     }
+    if (outcome === 'timeout')
+      throw new StructureAiFailure('TIMEOUT', 'Prazo da sugestão estourado');
+    return outcome;
   }
 }
