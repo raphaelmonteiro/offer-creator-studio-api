@@ -1,0 +1,61 @@
+import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { rawEnv, readIntegerEnv, Warner } from './env-reader';
+
+/** Token de injeção da configuração do job de enriquecimento, lida uma vez ao subir (mudar exige reiniciar). */
+export const FLYER_PRO_ENRICH_CONFIG = 'FLYER_PRO_ENRICH_CONFIG';
+
+export type EnrichProviderName = 'real' | 'mock';
+
+export interface FlyerProEnrichConfig {
+  /** Só `false` desliga o job. */
+  enabled: boolean;
+  provider: EnrichProviderName;
+  /** Lotes simultâneos no worker. */
+  concurrency: number;
+  imageBatch: number;
+  categoryBatch: number;
+  spellBatch: number;
+  /** Prazo do lote na fila (`expireInSeconds`). */
+  batchExpireSeconds: number;
+  /** Prazo da chamada ao provedor dentro do lote. */
+  batchDeadlineMs: number;
+  /** Lote em execução sem batimento por tanto tempo é dado por morto. */
+  staleSeconds: number;
+  /** Tentativas seguidas sem avanço antes de o job falhar. */
+  maxAttempts: number;
+}
+
+const PREFIX = 'FLYER_PRO_ENRICH_';
+
+function readProvider(config: ConfigService, logger: Warner): EnrichProviderName {
+  const raw = rawEnv(config, PREFIX + 'PROVIDER');
+  if (raw === undefined || raw === 'real') return 'real';
+  if (raw !== 'mock') logger.warn(`${PREFIX}PROVIDER="${raw}" desconhecido; provedor em mock`);
+  return 'mock';
+}
+
+/** As dez variáveis `FLYER_PRO_ENRICH_*`, com os padrões do requisito e um aviso por valor inválido. */
+export function readEnrichConfig(
+  config: ConfigService,
+  logger: Warner = new Logger('FlyerProEnrichConfig'),
+): FlyerProEnrichConfig {
+  const integer = (name: string, fallback: number) =>
+    readIntegerEnv(config, logger, { name: PREFIX + name, fallback, min: 1 });
+  return {
+    enabled: rawEnv(config, PREFIX + 'ENABLED') !== 'false',
+    provider: readProvider(config, logger),
+    concurrency: integer('CONCURRENCY', 2),
+    imageBatch: integer('IMAGE_BATCH', 16),
+    categoryBatch: integer('CATEGORY_BATCH', 40),
+    spellBatch: integer('SPELL_BATCH', 40),
+    batchExpireSeconds: integer('BATCH_EXPIRE_SECONDS', 300),
+    batchDeadlineMs: integer('BATCH_DEADLINE_MS', 240_000),
+    staleSeconds: integer('STALE_SECONDS', 60),
+    maxAttempts: integer('MAX_ATTEMPTS', 3),
+  };
+}
+
+/** Só `false` desliga o job; qualquer outro valor, ou a variável ausente, o deixa ligado (lido sem a configuração inteira). */
+export const isEnrichEnabled = (config: ConfigService): boolean =>
+  rawEnv(config, PREFIX + 'ENABLED') !== 'false';
