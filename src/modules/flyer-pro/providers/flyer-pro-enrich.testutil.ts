@@ -11,6 +11,8 @@ export const callContext = (
   clientId: 'client-1',
   usage: new AiUsageCollector(),
   signal: new AbortController().signal,
+  pass: 0,
+  notes: { nameSearchUnavailable: false },
   ...over,
 });
 

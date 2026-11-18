@@ -116,9 +116,11 @@ export function criterionSql(phase: EnrichStep, onlyMissing: boolean): string {
 
 /**
  * A condição do `UPDATE` de uma foto (estado lido no início do lote): `none` ou `ean_pending` e, com `onlyMissing`
- * desligado, o estado do critério da fase. Um comando só, para o item que mudou no meio do lote não ser tocado.
+ * desligado, o estado do critério da fase; na passada do EAN, só `ean_pending`. Um comando só, para o item que mudou no
+ * meio do lote não ser tocado.
  */
-export function imageWriteConditionSql(onlyMissing: boolean): string {
+export function imageWriteConditionSql(onlyMissing: boolean, retry = false): string {
+  if (retry) return `"imageStatus" = 'ean_pending'`;
   const open = `"imageStatus" IN ('none', 'ean_pending')`;
   return onlyMissing ? open : `(${open} OR ${IMAGE_SQL.redo})`;
 }

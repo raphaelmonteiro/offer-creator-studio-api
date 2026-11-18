@@ -1,7 +1,6 @@
 import type { EntityManager } from 'typeorm';
 import {
   categoryWriteConditionSql,
-  imageWriteConditionSql,
   spellWriteConditionSql,
 } from '../domain/flyer-pro-enrich-criteria';
 import type { PhaseCounts } from '../domain/flyer-pro-enrich-rules';
@@ -10,69 +9,13 @@ import { fitCategoryReview } from '../domain/flyer-pro-enrich-review';
 import type {
   CategoryChoice,
   CategoryVerdict,
-  ImageApply,
-  ImageCandidateVerdict,
-  ImageVerdict,
   SpellVerdict,
 } from '../providers/flyer-pro-enrich.port';
+import { Guard, itemWrite, review, WriteContext } from './flyer-pro-enrich.item-write';
+import { planImage } from './flyer-pro-enrich.writes.image';
 import type { EnrichItemRow, ItemWrite, PhaseWork } from './flyer-pro-enrich.types';
 
-/**
- * O que o job escreve em cada item (`a3-job-enriquecimento.html#s8`): um `UPDATE` de um comando só por item,
- * condicionado ao estado lido no início do lote, com o carimbo do lote em `updatedAt`. Nunca `name`, `price`, `unit`,
- * `ean`, `position`, `sourceName`, `imported`, `isAlcoholic` nem `importId`; nunca `revision` do encarte.
- */
-
-/** O contexto de uma gravação: o carimbo do banco lido depois das travas e os parâmetros do job. */
-export interface WriteContext {
-  stamp: string;
-  jobId: string;
-  documentId: string;
-  autoApply: boolean;
-  /** O critério de `onlyMissing` que vale nesta rodada (da segunda em diante, sempre ligado). */
-  onlyMissing: boolean;
-}
-
-const JSONB_COLUMNS: ReadonlySet<string> = new Set([
-  'categoryReview',
-  'spellReview',
-  'imageReview',
-]);
-/** Revisão de IA do item: no máximo 4 KB. */
-const REVIEW_MAX_BYTES = 4096;
-const MAX_CANDIDATES = 3;
-
-type Guard = (param: (value: unknown) => string) => string;
-
-/** `UPDATE` do item só nas colunas dadas, com o carimbo, condicionado ao estado lido (`guard`); devolve o `id` se mudou. */
-function itemWrite(
-  ctx: WriteContext,
-  target: { itemId: string; count: ItemWrite['count'] },
-  columns: Record<string, unknown>,
-  guard: Guard,
-): ItemWrite {
-  const params: unknown[] = [];
-  const param = (value: unknown): string => {
-    params.push(value);
-    return `$${params.length}`;
-  };
-  const sets = Object.entries(columns).map(([name, value]) => {
-    const jsonb = JSONB_COLUMNS.has(name);
-    const bound = jsonb && value !== null ? JSON.stringify(value) : value;
-    return `"${name}" = ${param(bound)}${jsonb ? '::jsonb' : ''}`;
-  });
-  sets.push(`"updatedAt" = ${param(ctx.stamp)}::timestamptz`);
-  const sql = `UPDATE "flyer_pro_items" SET ${sets.join(', ')}
-    WHERE "id" = ${param(target.itemId)} AND "documentId" = ${param(ctx.documentId)} AND ${guard(param)}
-    RETURNING "id"`;
-  return { sql, params, count: target.count };
-}
-
-const review = <E extends object>(ctx: WriteContext, extra: E) => ({
-  checkedAt: ctx.stamp,
-  jobId: ctx.jobId,
-  ...extra,
-});
+/** O que o job escreve em cada item, por fase (o `UPDATE` em si é de `flyer-pro-enrich.item-write.ts`). */
 
 /** Aplica a categoria (certeza, `autoApply` ligado, fora da planilha) ou a deixa como sugestão pendente. */
 function categoryWriteOf(
@@ -147,80 +90,6 @@ function planSpelling(
   return itemWrite(ctx, target, { spellReview }, guard);
 }
 
-const NO_PHOTO = {
-  galleryImageId: null,
-  imageUrl: null,
-  imageWidth: null,
-  imageHeight: null,
-  imageOrigin: null,
-};
-
-/** Candidata no tamanho que a revisão aceita: motivos curtos primeiro, sem motivo se ainda passar de 4 KB. */
-function fitCandidates(candidates: ImageCandidateVerdict[]): ImageCandidateVerdict[] {
-  const picked = candidates.slice(0, MAX_CANDIDATES);
-  const fits = (list: ImageCandidateVerdict[]) => JSON.stringify(list).length <= REVIEW_MAX_BYTES;
-  const short = picked.map((candidate) => ({
-    ...candidate,
-    reasons: candidate.reasons.slice(0, 2),
-  }));
-  if (fits(short)) return short;
-  return picked.map((candidate) => ({ ...candidate, reasons: [] }));
-}
-
-/** A revisão de IA da foto: sem EAN nesta change, mais o que a decisão acrescenta. */
-const imageReviewOf = (ctx: WriteContext, extra: object) =>
-  review(ctx, { eanStatus: null, ...extra });
-
-/** As colunas de uma foto aplicada pelo job: a imagem da Galeria, a origem `match` e a revisão com o placar. */
-function appliedPhotoColumns(photo: ImageApply['photo'], ctx: WriteContext) {
-  const applied = {
-    score: photo.score,
-    reasons: photo.reasons,
-    isClientPreferred: photo.isClientPreferred,
-  };
-  return {
-    galleryImageId: photo.galleryImageId,
-    imageUrl: photo.url,
-    imageWidth: photo.width,
-    imageHeight: photo.height,
-    imageOrigin: 'match',
-    imageStatus: 'applied',
-    imageReview: imageReviewOf(ctx, { applied, suggestion: null }),
-  };
-}
-
-function planImage(
-  item: EnrichItemRow,
-  verdict: ImageVerdict,
-  ctx: WriteContext,
-): ItemWrite | null {
-  if (verdict.action === 'unanswered') return null;
-  const guard: Guard = () => imageWriteConditionSql(ctx.onlyMissing);
-  const target = (count: ItemWrite['count']) => ({ itemId: item.id, count });
-  if (verdict.action === 'not_found') {
-    const imageReview = imageReviewOf(ctx, { applied: null, suggestion: null });
-    return itemWrite(
-      ctx,
-      target('notFound'),
-      { ...NO_PHOTO, imageStatus: 'not_found', imageReview },
-      guard,
-    );
-  }
-  const photo = (verdict as ImageApply).photo;
-  if (verdict.action === 'apply' && ctx.autoApply) {
-    return itemWrite(ctx, target('applied'), appliedPhotoColumns(photo, ctx), guard);
-  }
-  const candidates = verdict.action === 'review' ? verdict.candidates : [photo];
-  const pending = { status: 'pending', candidates: fitCandidates(candidates) };
-  const imageReview = imageReviewOf(ctx, { applied: null, suggestion: pending });
-  return itemWrite(
-    ctx,
-    target('review'),
-    { ...NO_PHOTO, imageStatus: 'review', imageReview },
-    guard,
-  );
-}
-
 /** Os itens do lote pelo `id`, na ordem; item que o provedor não respondeu fica sem resposta (`unanswered`). */
 function verdictFor<V extends { itemId: string }>(verdicts: V[], itemId: string): V | undefined {
   return verdicts.find((verdict) => verdict.itemId === itemId);
@@ -251,7 +120,9 @@ export async function applyWrites(
   const counts: PhaseCounts = {};
   for (const write of writes) {
     const [rows] = await manager.query(write.sql, write.params);
-    if (rows?.length) counts[write.count] = (counts[write.count] ?? 0) + 1;
+    if (!rows?.length) continue;
+    counts[write.count] = (counts[write.count] ?? 0) + 1;
+    if (write.also) counts[write.also] = (counts[write.also] ?? 0) + 1;
   }
   return counts;
 }

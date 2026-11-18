@@ -1,28 +1,10 @@
 import type { CategoryVerdict } from '../providers/flyer-pro-enrich.port';
-import type { EnrichItemRow, ItemWrite } from './flyer-pro-enrich.types';
-import { planWrites, WriteContext } from './flyer-pro-enrich.writes';
-
-/** As colunas que o `UPDATE` grava, lidas do `SET` e dos parâmetros (jsonb já em objeto). */
-function columnsOf(write: ItemWrite): Record<string, unknown> {
-  const set = write.sql.slice(write.sql.indexOf('SET') + 3, write.sql.indexOf('WHERE'));
-  const columns: Record<string, unknown> = {};
-  for (const [, name, index] of set.matchAll(/"(\w+)" = \$(\d+)/g)) {
-    const value = write.params[Number(index) - 1];
-    columns[name] = typeof value === 'string' && value.startsWith('{') ? JSON.parse(value) : value;
-  }
-  return columns;
-}
-
-const ctx = (autoApply: boolean): WriteContext => ({
-  stamp: '2026-11-18T10:00:00.000Z',
-  jobId: 'job-1',
-  documentId: 'doc-1',
-  autoApply,
-  onlyMissing: false,
-});
+import type { EnrichItemRow } from './flyer-pro-enrich.types';
+import { planWrites } from './flyer-pro-enrich.writes';
+import { columnsOf, itemRow, writeContext } from './flyer-pro-enrich.writes.testutil';
 
 const item = (category: string | null, categorySource: string | null): EnrichItemRow =>
-  ({ id: 'i1', name: 'X', category, categorySource, position: 1 }) as EnrichItemRow;
+  itemRow({ category, categorySource });
 
 const choice = (action: 'apply' | 'suggest', category: string): CategoryVerdict => ({
   itemId: 'i1',
@@ -37,7 +19,7 @@ const unanswered: CategoryVerdict = { itemId: 'i1', action: 'unanswered' };
 function write(row: EnrichItemRow, verdict: CategoryVerdict, autoApply: boolean) {
   const [planned] = planWrites(
     { phase: 'categorize', items: [row], verdicts: [verdict] },
-    ctx(autoApply),
+    writeContext(autoApply),
   );
   return planned ? { count: planned.count, columns: columnsOf(planned) } : null;
 }

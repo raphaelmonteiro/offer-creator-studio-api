@@ -252,6 +252,8 @@ export class FlyerProEnrichProcessor {
       clientId: document.clientId,
       usage: new AiUsageCollector(),
       signal,
+      pass: 0,
+      notes: { nameSearchUnavailable: false },
     };
   }
 

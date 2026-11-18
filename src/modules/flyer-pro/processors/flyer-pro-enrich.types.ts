@@ -16,11 +16,15 @@ export type BatchMessage = {
 /** O item lido para o lote: o que o provedor vê e o estado em que ele estava, que condiciona cada escrita. */
 export interface EnrichItemRow extends EnrichItemFacts, EnrichItemInput {}
 
-/** Um `UPDATE` de um item, condicionado ao estado lido; `count` é a contagem do `result` que ele alimenta. */
+/**
+ * Um `UPDATE` de um item, condicionado ao estado lido; `count` é a contagem do `result` que ele alimenta e `also` uma
+ * segunda contagem (`eanBudgetBlocked`: o item gravado com o EAN sem crédito).
+ */
 export interface ItemWrite {
   sql: string;
   params: unknown[];
-  count: 'applied' | 'suggested' | 'unchanged' | 'clean' | 'review' | 'notFound';
+  count: 'applied' | 'suggested' | 'unchanged' | 'clean' | 'review' | 'notFound' | 'eanPending';
+  also?: 'eanBudgetBlocked';
 }
 
 /** A resposta do provedor com os itens que a motivaram: o necessário para planejar as escritas. */

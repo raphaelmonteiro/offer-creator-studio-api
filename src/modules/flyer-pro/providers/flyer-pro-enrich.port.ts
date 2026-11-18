@@ -34,6 +34,15 @@ export interface EnrichCallContext {
   clientId: string;
   usage: AiUsageCollector;
   signal: AbortSignal;
+  /** 0 na fase de fotos; 1 a 3 na passada do EAN pendente (`image_ean_retry`). O simulado lê a passada. */
+  pass: number;
+  /** O que o provedor conta sobre a chamada além das respostas por item (o processador lê depois, como o `usage`). */
+  notes: EnrichCallNotes;
+}
+
+/** A busca de fotos rodou sem a busca por nome (embedding desligado ou sem chave): só EAN e nome já escolhido. */
+export interface EnrichCallNotes {
+  nameSearchUnavailable: boolean;
 }
 
 /**
@@ -69,18 +78,33 @@ export interface ImageCandidateVerdict extends PhotoPick {
 }
 
 /**
+ * O estado do EAN do item na busca de fotos (`imageReview.eanStatus`): `null` sem EAN. Só o simulado e o provedor real o
+ * preenchem; o escritor o grava na revisão.
+ */
+export type ImageEanStatus = string | null;
+
+/**
  * Fotos. `apply` traz a foto já com a medida (foto sem medida nunca é `apply`); `review` traz até 3 candidatas;
- * `not_found` e `unanswered` não trazem foto.
+ * `pending` é o EAN em consulta em segundo plano (com as candidatas pelo nome, se vieram); `not_found` não traz foto;
+ * `unanswered` deixa o item como estava (sem resposta, ou sem resultado com a busca por nome indisponível).
  */
 export type ImageVerdict =
   | ImageApply
-  | { itemId: string; action: 'review'; candidates: ImageCandidateVerdict[] }
-  | { itemId: string; action: 'not_found' | 'unanswered' };
+  | {
+      itemId: string;
+      action: 'review';
+      candidates: ImageCandidateVerdict[];
+      eanStatus?: ImageEanStatus;
+    }
+  | { itemId: string; action: 'pending'; candidates: ImageCandidateVerdict[] }
+  | { itemId: string; action: 'not_found'; eanStatus?: ImageEanStatus }
+  | { itemId: string; action: 'unanswered' };
 
 export interface ImageApply {
   itemId: string;
   action: 'apply';
   photo: ImageCandidateVerdict & { width: number; height: number };
+  eanStatus?: ImageEanStatus;
 }
 
 export interface FlyerProEnrichPort {

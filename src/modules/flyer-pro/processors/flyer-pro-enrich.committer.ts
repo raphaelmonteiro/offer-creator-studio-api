@@ -36,7 +36,8 @@ import {
   NextState,
   nextState,
 } from './flyer-pro-enrich.next-state';
-import { applyWrites, planWrites, WriteContext } from './flyer-pro-enrich.writes';
+import type { WriteContext } from './flyer-pro-enrich.item-write';
+import { applyWrites, planWrites } from './flyer-pro-enrich.writes';
 
 /** O resultado de uma gravação: feita, ou descartada porque a ficha não bate (lote zumbi) ou o job sumiu. */
 export type CommitOutcome = 'committed' | 'discarded';
