@@ -1,3 +1,4 @@
+import { numericTransformer } from '../../../shared/numeric.transformer';
 import type { ExportFormat, ExportOptions, ExportPreflightCount } from '../domain/flyer-pro.types';
 
 /**
@@ -54,7 +55,7 @@ export function toExportView(row: FlyerProExportRow): FlyerProExportView {
     engineVersion: row.engineVersion,
     renderDigest: row.renderDigest ?? null,
     fileName: row.fileName,
-    fileSize: row.fileSize === null || row.fileSize === undefined ? null : Number(row.fileSize),
+    fileSize: numericTransformer.from(row.fileSize),
     preflight: row.preflight ?? null,
     fileState: row.fileState,
     hasFile: row.fileState === 'stored',
