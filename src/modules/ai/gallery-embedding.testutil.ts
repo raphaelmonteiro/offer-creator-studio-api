@@ -2,7 +2,7 @@ import { GalleryEmbeddingService } from './gallery-embedding.service';
 import { fakeConfig, LoggerSpies, spyOnLogger } from './utils/openai-chat.testutil';
 
 export interface FakeEmbeddingOptions {
-  /** O ambiente do `ConfigService` simulado; `OPENAI_API_KEY` vazia ou ausente deixa o serviço sem cliente. */
+  /** O ambiente do `ConfigService` simulado; `OPENAI_API_KEY` vazia ou ausente deixa o serviço sem cliente, como no construtor. */
   env?: Record<string, string>;
   /** O `query` do `DataSource` simulado (a busca por similaridade e as consultas da Galeria). */
   query?: jest.Mock;
@@ -12,7 +12,8 @@ export interface FakeEmbeddingOptions {
 
 /**
  * O `GalleryEmbeddingService` real com o cliente da OpenAI trocado por `{ embeddings: { create } }` (o serviço guarda o
- * SDK em `openai`) e o log silenciado: nenhuma chamada paga. Sem `OPENAI_API_KEY` no `env`, o cliente é `null`.
+ * SDK em `openai`) e o log silenciado: nenhuma chamada paga. O cliente simulado só entra onde o construtor criou um; sem
+ * `OPENAI_API_KEY` no `env`, o cliente segue `null`, como o construtor o deixa.
  */
 export function fakeEmbeddingService(options: FakeEmbeddingOptions = {}): {
   embedding: GalleryEmbeddingService;
@@ -24,8 +25,8 @@ export function fakeEmbeddingService(options: FakeEmbeddingOptions = {}): {
   const embedding = new GalleryEmbeddingService(fakeConfig(env), {
     query: options.query ?? jest.fn(),
   } as never);
-  (embedding as unknown as { openai: unknown }).openai = env.OPENAI_API_KEY
-    ? { embeddings: { create } }
-    : null;
+  // O cliente simulado entra só onde o construtor criou um: o ajudante nunca decide, a partir do `env`, o que o serviço decide.
+  const target = embedding as unknown as { openai: unknown };
+  if (target.openai) target.openai = { embeddings: { create } };
   return { embedding, create, logs: spyOnLogger(embedding) };
 }

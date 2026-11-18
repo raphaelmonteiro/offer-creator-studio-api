@@ -55,24 +55,31 @@ describeIfE2eDb(
         expect(job).toMatchObject({ status: 'done', costUsd: null });
       });
 
-      it('lote que falhou depois de pagar: o custo das 3 chamadas concluídas entra com a falha gravada', async () => {
-        const { documentId } = await newDocument(40);
-        const real = realPort({
-          spellCall: async (call) => {
-            if (call !== 4) return;
-            await new Promise((resolve) => setTimeout(resolve, 20));
-            throw openAiError(401, 'chave inválida');
-          },
-        });
-        const world = makeEnrichWorld(db.dataSource, { port: real.port });
-        const jobId = await start(world, documentId, { steps: ['spellcheck'] });
+      it.each([
+        [401, 'chave inválida', { status: 'failed', error: { phase: 'spellcheck' } }],
+        [503, 'indisponível', { status: 'running', batchAttempts: 1 }],
+      ])(
+        'lote que falhou com %i depois de pagar: o custo das 3 chamadas concluídas entra com a falha gravada',
+        async (status, message, expected) => {
+          const { documentId } = await newDocument(40);
+          const real = realPort({
+            spellCall: async (call) => {
+              if (call !== 4) return;
+              await new Promise((resolve) => setTimeout(resolve, 20));
+              throw openAiError(status, message);
+            },
+          });
+          const world = makeEnrichWorld(db.dataSource, { port: real.port });
+          const jobId = await start(world, documentId, { steps: ['spellcheck'] });
 
-        await world.drain();
+          await world.deliverOne();
 
-        const job = await jobRowOf(db.dataSource, jobId);
-        expect(job).toMatchObject({ status: 'failed', error: { phase: 'spellcheck' } });
-        expect(Number(job.costUsd)).toBeCloseTo(3 * CALL_COST, 6);
-      });
+          const job = await jobRowOf(db.dataSource, jobId);
+          expect(job).toMatchObject(expected);
+          expect(Number(job.costUsd)).toBeCloseTo(3 * CALL_COST, 6);
+          expect(job.cursor ?? {}).not.toHaveProperty('costUnknown');
+        },
+      );
 
       it('lote descartado pela ficha (o job terminou no meio da chamada): costUsd não muda', async () => {
         const { documentId } = await newDocument(10);
