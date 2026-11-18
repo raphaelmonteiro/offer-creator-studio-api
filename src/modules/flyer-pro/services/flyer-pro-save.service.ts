@@ -19,11 +19,12 @@ import {
   writeConference,
   writeDocument,
 } from './flyer-pro-save.statements';
+import { FlyerProItemsService } from './flyer-pro-items.service';
 import { FlyerProSetupService } from './flyer-pro-setup.service';
 import { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
 
 /** O que distingue as respostas entre si: reenvio ou não, aplicada ou descartada. */
-type Outcome = Pick<SaveViewInput, 'replayed' | 'applied'>;
+type Outcome = Pick<SaveViewInput, 'replayed' | 'applied' | 'items' | 'deletedItemIds'>;
 
 /**
  * N4: a única rota que grava o estado do encarte. Forma e tamanhos antes do banco; depois, numa transação com a linha
@@ -36,6 +37,7 @@ export class FlyerProSaveService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly setup: FlyerProSetupService,
     private readonly snapshots: FlyerProTemplateSnapshotService,
+    private readonly items: FlyerProItemsService,
   ) {}
 
   async save(userId: string, id: string, dto: SaveFlyerProDocumentDto): Promise<FlyerProSaveView> {
@@ -65,7 +67,8 @@ export class FlyerProSaveService {
     dto: SaveFlyerProDocumentDto,
   ): Promise<FlyerProSaveView | null> {
     if (document.lastMutationId === dto.mutationId) {
-      return this.respond(manager, document, dto, { replayed: true, applied: true });
+      const items = await this.items.currentOf(manager, document.id, dto.items?.upsert);
+      return this.respond(manager, document, dto, { replayed: true, applied: true, items });
     }
     assertAppNotOutdated(document, dto);
     const conference = isConferenceBody(dto);
@@ -104,9 +107,12 @@ export class FlyerProSaveService {
   ): Promise<FlyerProSaveView> {
     const stamp = await readStamp(manager);
     const setupColumns = dto.setup ? await this.setup.apply(manager, document, dto.setup) : {};
+    const touched = dto.items
+      ? await this.items.apply(manager, document.id, dto.items, { stamp, userId })
+      : undefined;
     const columns = saveColumns(document, dto, userId, setupColumns);
     const updatedAt = await writeDocument(manager, document.id, columns, stamp);
     const saved = { ...document, ...columns, updatedAt };
-    return this.respond(manager, saved, dto, { replayed: false, applied: true });
+    return this.respond(manager, saved, dto, { replayed: false, applied: true, ...touched });
   }
 }

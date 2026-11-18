@@ -7,6 +7,7 @@ import { FlyerProItem } from './entities/flyer-pro-item.entity';
 import { FlyerProCursorService } from './services/flyer-pro-cursor.service';
 import { FlyerProDocumentsService } from './services/flyer-pro-documents.service';
 import { FlyerProSaveService } from './services/flyer-pro-save.service';
+import { FlyerProItemsService } from './services/flyer-pro-items.service';
 import { FlyerProSetupService } from './services/flyer-pro-setup.service';
 import { FlyerProSceneReader } from './services/flyer-pro-scene.reader';
 import { FlyerProTemplateSnapshotService } from './services/flyer-pro-template-snapshot.service';
@@ -28,6 +29,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProSaveService,
     FlyerProSetupService,
     FlyerProCursorService,
+    FlyerProItemsService,
   ],
   exports: [FlyerProTemplateSnapshotService],
 })

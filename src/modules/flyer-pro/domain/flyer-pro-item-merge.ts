@@ -21,6 +21,8 @@ export function mergeItem(entry: FlyerProItemEntry, stored: StoredItem | null): 
     merged[key] = sent === undefined ? base : sent;
   }
   if (typeof merged.name === 'string') merged.name = merged.name.trim();
+  // A coluna do selo +18 não aceita nulo: `null` no corpo vale como desligado.
+  if (merged.isAlcoholic === null) merged.isAlcoholic = false;
   return merged as unknown as ItemFields;
 }
 
