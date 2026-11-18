@@ -42,6 +42,12 @@ export class FontsService {
     return font;
   }
 
+  /**
+   * Tira só a linha da tabela `fonts`; o arquivo em `<UPLOAD_DEST>/fonts/` fica de propósito. Os encartes do Encarte
+   * Pro guardam o endereço dele em `card.fonts`, e apagá-lo derrubaria esses encartes para a fonte de reserva
+   * (spec `uploaded-fonts`, change 34-add-flyer-pro-google-fonts). Nenhuma limpeza automática de uploads alcança
+   * `/uploads/fonts/`.
+   */
   async remove(id: string): Promise<void> {
     const font = await this.findOne(id);
     await this.fontRepository.remove(font);
