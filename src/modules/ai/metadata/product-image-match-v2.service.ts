@@ -93,6 +93,11 @@ export interface MatchV2Options {
    * receberem o score híbrido como as demais.
    */
   pinnedImageIds?: Map<string, string[]>;
+  /**
+   * Modo estrito (change 28): a falha da leitura do nome ou do embedding sobe como `TransientProviderError` ou
+   * `TerminalProviderError` em vez de virar "sem candidatas". Repassado ao leitor de nomes e ao embedding.
+   */
+  strict?: boolean;
 }
 
 @Injectable()
@@ -137,6 +142,7 @@ export class ProductImageMatchV2Service {
 
     const parsed = await this.nameParser.parseNames(
       products.map((p) => ({ name: p.name, categoryHint: p.category })),
+      { strict: options.strict },
     );
 
     const matches: ProductMatchHitV2[] = [];
@@ -146,12 +152,10 @@ export class ProductImageMatchV2Service {
       const product = products[i];
       const metadata = parsed[i];
 
-      const candidates = await this.scoreCandidatesForProduct(
-        product,
-        metadata,
-        clientId,
-        options.pinnedImageIds?.get(product.id),
-      );
+      const candidates = await this.scoreCandidatesForProduct(product, metadata, clientId, {
+        includeIds: options.pinnedImageIds?.get(product.id),
+        strict: options.strict,
+      });
       byProduct.set(product.id, candidates);
 
       if (this.debugEnabled) {
@@ -218,15 +222,15 @@ export class ProductImageMatchV2Service {
       categoryHint: product.category,
     });
     const sized = Math.min(Math.max(limit, 1), 24);
-    const all = await this.scoreCandidatesForProduct(product, parsed, clientId);
+    const all = await this.scoreCandidatesForProduct(product, parsed, clientId, {});
     return all.slice(0, sized);
   }
 
   private async scoreCandidatesForProduct(
     product: ProductMatchInputV2,
     metadata: ProductMetadata | null,
-    clientId?: string | null,
-    includeIds?: string[],
+    clientId: string | null | undefined,
+    pool: { includeIds?: string[]; strict?: boolean },
   ): Promise<ScoredCandidateV2[]> {
     const queryText = metadata
       ? buildEmbeddingText(metadata)
@@ -236,15 +240,15 @@ export class ProductImageMatchV2Service {
 
     if (!queryText) return [];
 
-    const queryEmbedding = await this.embedding.embedText(queryText);
+    const queryEmbedding = await this.embedding.embedText(queryText, { strict: pool.strict });
     if (!queryEmbedding) return [];
 
-    const pool = await this.embedding.searchByMetadataEmbedding(queryEmbedding, CANDIDATE_POOL, {
+    const rows = await this.embedding.searchByMetadataEmbedding(queryEmbedding, CANDIDATE_POOL, {
       clientId,
-      includeIds,
+      includeIds: pool.includeIds,
     });
 
-    const scored = pool.map((row) => this.scoreCandidate(metadata, row));
+    const scored = rows.map((row) => this.scoreCandidate(metadata, row));
 
     scored.sort((a, b) => b.score - a.score);
     return scored;

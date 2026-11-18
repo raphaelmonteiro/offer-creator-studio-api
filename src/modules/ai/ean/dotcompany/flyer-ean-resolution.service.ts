@@ -13,6 +13,7 @@ import { DotcompanyPhotoImporter } from './dotcompany-photo.importer';
 import { EanImportJobService } from './ean-import-job.service';
 import { EanImportRunner } from './ean-import.runner';
 import { productAliasKey } from '../../../gallery/product-alias';
+import { AiStrictOptions } from '../../utils/ai-strict';
 
 /** Mesmo patamar de revisão do match-v2: abaixo disso a "parecida" não vale mostrar. */
 const SIMILAR_MIN_SCORE = 0.5;
@@ -132,9 +133,14 @@ export class FlyerEanResolutionService {
     this.timeoutMs = Number.isFinite(t) && t > 0 ? t : DEFAULT_TIMEOUT_MS;
   }
 
+  /**
+   * Com `strict` (change 28), a falha do casamento por nome faz a chamada inteira lançar, mesmo com itens já
+   * resolvidos pelo EAN; a resolução por EAN em si não muda com a opção.
+   */
   async findImages(
     products: ProductMatchInputV2[],
     clientId?: string | null,
+    options: AiStrictOptions = {},
   ): Promise<FlyerMatchResult> {
     const eanStatus: EanStatusEntry[] = [];
     const withEan: Array<{ product: ProductMatchInputV2; ean: string }> = [];
@@ -166,7 +172,10 @@ export class FlyerEanResolutionService {
 
     // Casamento por nome de TODOS os produtos, em paralelo com a resolução por EAN.
     const [byName, byEan] = await Promise.all([
-      this.matcher.matchWithCandidates(products, clientId, { pinnedImageIds }),
+      this.matcher.matchWithCandidates(products, clientId, {
+        pinnedImageIds,
+        strict: options.strict,
+      }),
       this.resolveEans(withEan, clientId ?? null),
     ]);
 
