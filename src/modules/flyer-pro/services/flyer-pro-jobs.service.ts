@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
@@ -15,6 +15,7 @@ import type { FlyerProJob } from '../entities/flyer-pro-job.entity';
 import { FlyerProJobView, toJobView } from '../views/flyer-pro-job.view';
 import {
   cancelQueuedJob,
+  findActiveJob,
   findCurrentJob,
   findLatestJob,
   insertJob,
@@ -36,12 +37,20 @@ export interface CreateJobInput {
   autoApply: boolean;
 }
 
+/** O que o `PATCH` com `enrich` responde: se este salvar criou o job e o job que o encarte mostra (ou `null`). */
+export interface EnrichmentOutcome {
+  started: boolean;
+  job: FlyerProJobView | null;
+}
+
 /**
  * O job de enriquecimento do ponto de vista das rotas: iniciar (N14), ler (N15), parar (N16) e criar pelo salvar (N4).
  * Quem processa o job é o `FlyerProEnrichProcessor`; aqui só nasce, é lido e recebe o pedido de parada.
  */
 @Injectable()
 export class FlyerProJobsService {
+  private readonly logger = new Logger(FlyerProJobsService.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly queue: AnimationQueueService,
@@ -85,6 +94,47 @@ export class FlyerProJobsService {
       await assertLiveDocument(manager, documentId);
       return { job: await this.currentView(manager, documentId) };
     });
+  }
+
+  /**
+   * O passo do job do `PATCH` com `enrich` (N4), depois de gravar itens e encarte, na transação do salvar: com os
+   * padrões `onlyMissing` e `autoApply` ligados e todos os itens. Não cria job (e responde `started: false`) com a flag
+   * desligada, sem item no encarte ou com job ativo (a conferência final dele alcança os itens novos). A criação roda num
+   * savepoint: se falhar, só ela é desfeita e a gravação do encarte vale.
+   */
+  async requestAfterSave(
+    manager: EntityManager,
+    userId: string,
+    documentId: string,
+    steps: readonly string[],
+  ): Promise<EnrichmentOutcome> {
+    if (!this.config.enabled)
+      return { started: false, job: await this.activeView(manager, documentId) };
+    if (!(await hasItems(manager, documentId))) return { started: false, job: null };
+    const active = await this.activeView(manager, documentId);
+    if (active) return { started: false, job: active };
+    const created = await inSavepoint(manager, 'flyer_pro_enrich_job', () =>
+      this.createJob(manager, {
+        documentId,
+        userId,
+        steps,
+        itemIds: null,
+        onlyMissing: true,
+        autoApply: true,
+      }),
+    );
+    if (created.ok)
+      return { started: true, job: await this.viewOf(manager, created.value as FlyerProJob) };
+    if (isActiveJobConflict(created.error)) {
+      return { started: false, job: await this.activeView(manager, documentId) };
+    }
+    this.logger.warn(`Job não criado no salvar do encarte ${documentId}: ${String(created.error)}`);
+    return { started: false, job: null };
+  }
+
+  /** O reenvio do `PATCH` com `enrich`: nenhum job novo; o job que o encarte mostra (ativo, senão o mais recente). */
+  async replayAfterSave(manager: EntityManager, documentId: string): Promise<EnrichmentOutcome> {
+    return { started: false, job: await this.currentView(manager, documentId) };
   }
 
   /**
@@ -153,6 +203,14 @@ export class FlyerProJobsService {
       { manager, retryLimit: 0, expireInSeconds: this.config.batchExpireSeconds },
     );
     return job;
+  }
+
+  private async activeView(
+    manager: EntityManager,
+    documentId: string,
+  ): Promise<FlyerProJobView | null> {
+    const job = await findActiveJob(manager, documentId);
+    return job ? this.viewOf(manager, job) : null;
   }
 
   /** O job na forma de leitura, com o carimbo dos itens e o `stalled` do instante. */

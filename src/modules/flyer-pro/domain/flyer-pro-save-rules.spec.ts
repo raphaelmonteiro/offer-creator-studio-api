@@ -105,11 +105,19 @@ describe('isConferenceBody', () => {
     expect(isConferenceBody({ items: null })).toBe(false);
   });
 
-  it('setup, slices, items ou import presentes, mesmo vazios, fazem um PATCH normal', () => {
+  it('setup, slices, items, import ou enrich presentes, mesmo vazios, fazem um PATCH normal', () => {
     expect(isConferenceBody({ setup: {} })).toBe(false);
     expect(isConferenceBody({ slices: {} })).toBe(false);
     expect(isConferenceBody({ items: {} })).toBe(false);
     expect(isConferenceBody({ import: {} })).toBe(false);
+    expect(isConferenceBody({ enrich: {} })).toBe(false);
+  });
+
+  it('um corpo só com enrich nunca é regravação de conferência (o job não seria criado)', () => {
+    expect(
+      isConferenceBody({ enrich: { steps: ['image_match'] }, layoutDigest: 'x' } as object),
+    ).toBe(false);
+    expect(isConferenceBody({ enrich: null })).toBe(false);
   });
 
   it('um corpo só com import nunca é regravação de conferência (a importação não seria gravada)', () => {

@@ -4,6 +4,7 @@ import { itemRow, STATUS } from './flyer-pro-documents.service.testutil';
 import { IMPORT_ID, importEntry } from '../testing/flyer-pro-imports.fixture';
 import { makeImportsService } from './flyer-pro-imports.service.testutil';
 import { FlyerProItemsService } from './flyer-pro-items.service';
+import { FlyerProJobsService } from './flyer-pro-jobs.service';
 import { SAVED_AT, saveBody, STAMP, storedDocument } from './flyer-pro-save.service.testutil';
 import { FlyerProSaveService } from './flyer-pro-save.service';
 import type { FlyerProSetupService } from './flyer-pro-setup.service';
@@ -63,6 +64,7 @@ function makeStatefulSave(imports: Record<string, string> = {}, foreignItems: Fl
     { statusOf: jest.fn().mockResolvedValue(STATUS) } as unknown as FlyerProTemplateSnapshotService,
     new FlyerProItemsService(dataSource as unknown as DataSource),
     makeImportsService().service,
+    { requestAfterSave: jest.fn(), replayAfterSave: jest.fn() } as unknown as FlyerProJobsService,
   );
   return {
     service,

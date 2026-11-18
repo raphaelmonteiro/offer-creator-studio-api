@@ -1,7 +1,11 @@
 import type { EntityManager } from 'typeorm';
 
-/** O resultado de um passo que pode falhar sem derrubar a transação que o contém. */
-export type SavepointOutcome<T> = { ok: true; value: T } | { ok: false; error: unknown };
+/** O resultado de um passo que pode falhar sem derrubar a transação que o contém (`value` com `ok`, `error` sem). */
+export interface SavepointOutcome<T> {
+  ok: boolean;
+  value?: T;
+  error?: unknown;
+}
 
 /**
  * Roda `work` dentro de um savepoint da transação do `manager`: se falhar, só o que ele fez é desfeito (a transação

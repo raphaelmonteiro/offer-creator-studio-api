@@ -78,9 +78,14 @@ describe('StartEnrichmentDto (N14)', () => {
     });
 
     it('os três nulos juntos: os três campos recusados', async () => {
-      expect(
-        await errorsOf({ steps: null, onlyMissing: null, autoApply: null, itemIds: null }),
-      ).toEqual(['steps', 'onlyMissing', 'autoApply']);
+      const rejected = await errorsOf({
+        steps: null,
+        onlyMissing: null,
+        autoApply: null,
+        itemIds: null,
+      });
+
+      expect([...rejected].sort()).toEqual(['autoApply', 'onlyMissing', 'steps']);
     });
   });
 });

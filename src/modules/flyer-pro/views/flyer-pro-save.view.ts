@@ -7,11 +7,18 @@ import type {
 import type { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import type { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import { FlyerProItemView, toItemView } from './flyer-pro-document.view';
+import type { FlyerProJobView } from './flyer-pro-job.view';
 
 /** Falha ao registrar a escolha da foto na Galeria (change 27); a gravação do encarte não é desfeita. */
 export interface FlyerProLinkWarning {
   itemId: string;
   code: 'GALLERY_IMAGE_NOT_FOUND' | 'GALLERY_LINK_FAILED';
+}
+
+/** O que o `PATCH` com `enrich` responde: se este salvar criou o job e o job que o encarte mostra. */
+export interface FlyerProEnrichmentOutcome {
+  started: boolean;
+  job: FlyerProJobView | null;
 }
 
 /** A resposta 200 do `PATCH` (N4): os campos do template só quando o corpo trocou a arte ou o número de páginas. */
@@ -29,6 +36,8 @@ export interface FlyerProSaveView {
   items: FlyerProItemView[];
   deletedItemIds: string[];
   linkWarnings: FlyerProLinkWarning[];
+  /** Só quando o corpo trouxe `enrich`. */
+  enrichment?: FlyerProEnrichmentOutcome;
 }
 
 export interface SaveViewInput {
@@ -39,6 +48,8 @@ export interface SaveViewInput {
   items?: FlyerProItem[];
   deletedItemIds?: string[];
   fields: SaveResponseFields;
+  /** O resultado do passo do job; só quando o corpo trouxe `enrich`. */
+  enrichment?: FlyerProEnrichmentOutcome;
   /** O estado da cópia, calculado na hora; só quando `fields.template`. */
   templateStatus?: FlyerProTemplateStatus;
 }
@@ -67,5 +78,6 @@ export function toSaveView(input: SaveViewInput): FlyerProSaveView {
     items: items.map(toItemView),
     deletedItemIds,
     linkWarnings: [],
+    ...(input.enrichment ? { enrichment: input.enrichment } : {}),
   };
 }
