@@ -1,3 +1,4 @@
+import type { AiUsageCollector } from '../../ai/utils/ai-usage';
 import type { EnrichStep } from '../domain/flyer-pro-job.types';
 
 /**
@@ -21,11 +22,18 @@ export interface EnrichItemInput {
   imported: Record<string, unknown> | null;
 }
 
-/** O que o provedor sabe do encarte e do job: o nome do encarte é o que o simulado lê para os marcadores. */
+/**
+ * O que o provedor sabe do encarte e do job: o nome do encarte é o que o simulado lê para os marcadores. `usage` é o
+ * coletor de uso da chamada (change 01), criado pelo processador: o provedor o repassa aos serviços de IA e o processador
+ * o lê depois, com a chamada concluída ou não. `signal` é abortado quando o prazo do lote estoura: o provedor real o
+ * repassa ao SDK da OpenAI, e a chamada abandonada deixa de ser paga.
+ */
 export interface EnrichCallContext {
   jobId: string;
   documentName: string;
   clientId: string;
+  usage: AiUsageCollector;
+  signal: AbortSignal;
 }
 
 /**

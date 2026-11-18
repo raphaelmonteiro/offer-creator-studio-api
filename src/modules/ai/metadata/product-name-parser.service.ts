@@ -8,6 +8,7 @@ import {
 } from '../config/openai-product-features.config';
 import { classifyOpenAiErrorStrict } from '../../../shared/providers/openai-errors';
 import { callProductChat } from '../utils/ai-product-chat.util';
+import { AiAbortOptions } from '../utils/ai-abort';
 import { AiStrictOptions } from '../utils/ai-strict';
 import { AiUsageOptions } from '../utils/ai-usage';
 import { parseMetadataLenient, ProductMetadata } from './product-metadata.schema';
@@ -22,8 +23,8 @@ const CACHE_MAX_ENTRIES = 2000;
 // sem truncar o JSON no meio (o teto da família gpt-6 inclui o raciocínio).
 const BATCH_SIZE = 8;
 
-/** `usage` (change 01) e `strict` (change 28) no mesmo objeto de opções, os dois aditivos. */
-export type ParseNamesOptions = AiUsageOptions & AiStrictOptions;
+/** `usage` (change 01), `strict` (change 28) e `signal` (change 29) no mesmo objeto de opções, todos aditivos. */
+export type ParseNamesOptions = AiUsageOptions & AiStrictOptions & AiAbortOptions;
 
 interface ParseInput {
   name: string;
@@ -165,6 +166,7 @@ export class ProductNameParserService {
         openai: this.openai,
         logger: this.logger,
         usage: options.usage,
+        signal: options.signal,
         feature: 'product-name-parser.batch',
         spec: {
           model: this.feature.model,

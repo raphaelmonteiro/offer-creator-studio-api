@@ -5,6 +5,7 @@ import {
   TerminalProviderError,
   TransientProviderError,
 } from '../../../shared/providers/provider-errors';
+import { AiUsageCollector } from '../../ai/utils/ai-usage';
 import { FLYER_PRO_ENRICH_CONFIG, FlyerProEnrichConfig } from '../config/flyer-pro-enrich.config';
 import {
   batchSizeOf,
@@ -32,8 +33,16 @@ export class ProviderDeadlineError extends Error {
   }
 }
 
-/** Corre a chamada contra o prazo; o que chegar depois do prazo é descartado (e a rejeição tardia é engolida). */
-async function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T> {
+/**
+ * Corre a chamada contra o prazo; o que chegar depois do prazo é descartado (e a rejeição tardia é engolida). Falha ou
+ * prazo estourado abortam `controller`: o provedor real cancela as chamadas em andamento em vez de deixá-las correr
+ * pagas (o lote será repetido, ou o job termina).
+ */
+async function withDeadline<T>(
+  work: Promise<T>,
+  deadlineMs: number,
+  controller: AbortController,
+): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new ProviderDeadlineError(deadlineMs)), deadlineMs);
@@ -41,6 +50,9 @@ async function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T>
   work.catch(() => undefined);
   try {
     return await Promise.race([work, deadline]);
+  } catch (error) {
+    controller.abort();
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -155,9 +167,12 @@ export class FlyerProEnrichProcessor {
     if (!this.port.isAvailable(phase))
       return { ...base, skipped: true, skippedItems: await this.remaining(job, phase) };
     progress.providerStartedAt = Date.now();
+    const controller = new AbortController();
+    const context = this.contextOf(job, input.document, controller.signal);
     const work = await withDeadline(
-      this.callPort(phase, items, this.contextOf(job, input.document)),
+      this.callPort(phase, items, context),
       this.config.batchDeadlineMs,
+      controller,
     );
     return {
       ...base,
@@ -226,8 +241,18 @@ export class FlyerProEnrichProcessor {
     return rows[0] ?? null;
   }
 
-  private contextOf(job: FlyerProJob, document: DocumentFacts): EnrichCallContext {
-    return { jobId: job.id, documentName: document.name, clientId: document.clientId };
+  private contextOf(
+    job: FlyerProJob,
+    document: DocumentFacts,
+    signal: AbortSignal,
+  ): EnrichCallContext {
+    return {
+      jobId: job.id,
+      documentName: document.name,
+      clientId: document.clientId,
+      usage: new AiUsageCollector(),
+      signal,
+    };
   }
 
   /**

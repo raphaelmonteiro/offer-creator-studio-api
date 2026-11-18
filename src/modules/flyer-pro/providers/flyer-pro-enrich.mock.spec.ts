@@ -11,25 +11,10 @@ import {
   SLOW_MARKER_MS,
   stableHash,
 } from './flyer-pro-enrich.mock';
-import type { EnrichCallContext, EnrichItemInput } from './flyer-pro-enrich.port';
+import { callContext, itemInput } from './flyer-pro-enrich.testutil';
 
-const item = (name: string, over: Partial<EnrichItemInput> = {}): EnrichItemInput => ({
-  id: `id-${name}`,
-  name,
-  sourceName: null,
-  category: null,
-  categorySource: null,
-  unit: 'cada',
-  ean: null,
-  position: 0,
-  imported: null,
-  ...over,
-});
-const context = (documentName = 'Ofertas Piccin semana 47'): EnrichCallContext => ({
-  jobId: 'job-1',
-  documentName,
-  clientId: 'client-1',
-});
+const item = itemInput;
+const context = callContext;
 const photos = Array.from({ length: 40 }, (_, index) => ({
   id: `foto-${index}`,
   url: `http://localhost:3101/uploads/gallery/foto-${index}.jpg`,

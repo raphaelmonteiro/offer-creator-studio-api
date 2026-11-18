@@ -24,6 +24,8 @@ export interface ProductChatCall {
   correlationId?: string;
   /** Coletor do uso da invocação (D-12); a chamada que falha não entra. */
   usage?: AiUsageCollector;
+  /** Cancela a chamada em andamento (change 29); ausente, a chamada é a de hoje. */
+  signal?: AbortSignal;
 }
 
 export async function callProductChat(call: ProductChatCall): Promise<OpenAI.Chat.ChatCompletion> {
@@ -43,7 +45,11 @@ export async function callProductChat(call: ProductChatCall): Promise<OpenAI.Cha
       ...(call.correlationId ? { correlationId: call.correlationId } : {}),
       pricing: 'table',
     },
-    () => call.openai.chat.completions.create(request, options),
+    () =>
+      call.openai.chat.completions.create(
+        request,
+        call.signal ? { ...options, signal: call.signal } : options,
+      ),
   );
   call.usage?.record(call.spec.model, response.usage);
   warnIfEmptyOrTruncated(call, response);

@@ -21,7 +21,8 @@ import {
 } from './schemas/ai-response.schemas';
 import { PRODUCT_CATEGORIZATION_SYSTEM_PROMPT } from './prompts/product-categorization.prompts';
 import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
-import { AiUsageCollector, AiUsageOptions } from './utils/ai-usage';
+import { AiAbortOptions } from './utils/ai-abort';
+import { AiUsageOptions } from './utils/ai-usage';
 
 export const DEFAULT_PRODUCT_CATEGORIES = [
   'Hortifruti',
@@ -70,7 +71,7 @@ export class ProductCategorizationService {
 
   async categorizeProducts(
     dto: ProductCategorizationRequestDto,
-    options: AiUsageOptions = {},
+    options: AiUsageOptions & AiAbortOptions = {},
   ): Promise<ProductCategorizationResponseDto> {
     options.usage?.declareModel(this.feature.model);
     const allowedCategories = this.normalizeAllowedCategories(dto.allowedCategories);
@@ -117,7 +118,7 @@ export class ProductCategorizationService {
     );
 
     for (const batch of this.chunk(candidates, batchSize)) {
-      const result = await this.categorizeBatch(batch, allowedCategories, options.usage);
+      const result = await this.categorizeBatch(batch, allowedCategories, options);
       const resultByProductId = new Map(
         result.assignments.map((assignment) => [assignment.productId, assignment]),
       );
@@ -143,7 +144,7 @@ export class ProductCategorizationService {
   private async categorizeBatch(
     candidates: ProductCategoryCandidate[],
     allowedCategories: string[],
-    usage?: AiUsageCollector,
+    options: AiUsageOptions & AiAbortOptions,
   ): Promise<{ assignments: ProductCategoryAssignmentDto[] }> {
     const userPrompt = JSON.stringify(
       {
@@ -163,7 +164,8 @@ export class ProductCategorizationService {
     return createStructuredChatCompletion({
       openai: this.openai!,
       logger: this.logger,
-      usage,
+      usage: options.usage,
+      signal: options.signal,
       feature: 'product-categorization.batch',
       spec: {
         model: this.feature.model,
