@@ -1,5 +1,8 @@
 import { randomUUID } from 'crypto';
+import type { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
+import { User } from '../../auth/entities/user.entity';
+import { Client } from '../../clients/entities/client.entity';
 import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { FlyerProItem } from '../entities/flyer-pro-item.entity';
 
@@ -99,4 +102,53 @@ export async function purgeDocumentsOf(dataSource: DataSource, clientIds: string
   await dataSource.query(`DELETE FROM flyer_pro_documents WHERE "clientId" = ANY($1::uuid[])`, [
     clientIds,
   ]);
+}
+
+let counter = 0;
+
+/** Um cliente com nome e CNPJ únicos por execução, para o teste isolar a lista pelo `clientId`. Devolve o id. */
+export async function insertClient(
+  dataSource: DataSource,
+  name = 'Cliente do encarte',
+): Promise<string> {
+  counter += 1;
+  const suffix = `${process.pid}-${Date.now().toString(36)}-${counter}`;
+  const saved = await dataSource
+    .getRepository(Client)
+    .save({ name: `${name} ${suffix}`, cnpj: `flyer-pro-${suffix}` });
+  return saved.id;
+}
+
+export interface ExtraUser {
+  id: string;
+  name: string;
+  token: string;
+  /** Apaga o usuário (o encarte guarda só o id dele, sem FK). */
+  remove(): Promise<void>;
+}
+
+/** Um segundo usuário com token, como o harness assina o da semente, para provar que o escopo é global (PU-01). */
+export async function createExtraUser(
+  dataSource: DataSource,
+  jwt: JwtService,
+  name: string,
+): Promise<ExtraUser> {
+  counter += 1;
+  const users = dataSource.getRepository(User);
+  const user = await users.save(
+    users.create({
+      email: `flyer-pro-${process.pid}-${Date.now().toString(36)}-${counter}@example.com`,
+      password: 'Senha-de-teste-123', // o `@BeforeInsert` cifra
+      name,
+      emailVerified: true,
+    }),
+  );
+  return {
+    id: user.id,
+    name,
+    token: jwt.sign({ sub: user.id, email: user.email }),
+    remove: async () => {
+      await users.delete({ id: user.id });
+    },
+  };
 }

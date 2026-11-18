@@ -1,9 +1,9 @@
 import { randomUUID } from 'crypto';
 import { DataSource, QueryRunner } from 'typeorm';
 import { CreateFlyerProDocuments1767700000000 } from '../../../migrations/1767700000000-CreateFlyerProDocuments';
-import { Client } from '../../clients/entities/client.entity';
 import { describeIfE2eDb, openE2eDb } from '../../../shared/testing/e2e-test-db';
 import {
+  insertClient,
   insertDocument,
   insertDocumentWithItems,
   purgeDocumentsOf,
@@ -21,12 +21,9 @@ describeIfE2eDb('Entidades do encarte e integridade (banco montado pelas entidad
   const clientIds: string[] = [];
 
   const newClient = async (): Promise<string> => {
-    const suffix = `${process.pid}-${Date.now()}-${clientIds.length}`;
-    const saved = await dataSource
-      .getRepository(Client)
-      .save({ name: `Cliente schema ${suffix}`, cnpj: `schema-${suffix}` });
-    clientIds.push(saved.id);
-    return saved.id;
+    const id = await insertClient(dataSource, 'Cliente schema');
+    clientIds.push(id);
+    return id;
   };
   const deleteClient = (id: string) => dataSource.query(`DELETE FROM clients WHERE id = $1`, [id]);
   const count = async (sql: string, id: string): Promise<number> =>
