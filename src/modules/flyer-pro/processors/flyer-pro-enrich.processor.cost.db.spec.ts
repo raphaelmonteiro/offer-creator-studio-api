@@ -149,6 +149,28 @@ describeIfE2eDb(
         });
         expect(world.messages[0].options).toMatchObject({ startAfterSeconds: 15 });
       });
+
+      it('o prazo estoura com uma chamada paga em andamento depois de 3 concluídas: costUsd nulo e o job marcado como desconhecido (D-orq-1)', async () => {
+        const { documentId } = await newDocument(40);
+        const real = realPort({
+          spellCall: (call) => (call === 4 ? new Promise<void>(() => undefined) : undefined),
+        });
+        const world = makeEnrichWorld(db.dataSource, {
+          port: real.port,
+          config: { batchDeadlineMs: 300 },
+        });
+        const jobId = await start(world, documentId, { steps: ['spellcheck'] });
+
+        await world.deliverOne();
+
+        expect(real.spellCreate).toHaveBeenCalledTimes(4);
+        expect(await jobRowOf(db.dataSource, jobId)).toMatchObject({
+          status: 'running',
+          batchAttempts: 1,
+          costUsd: null,
+          cursor: { costUnknown: true },
+        });
+      });
     });
   },
 );
