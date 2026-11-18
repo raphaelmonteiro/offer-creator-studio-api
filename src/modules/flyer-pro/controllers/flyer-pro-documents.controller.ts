@@ -20,14 +20,40 @@ import { CurrentUser } from '../../../common/decorators/user.decorator';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { flyerProNotFound } from '../domain/flyer-pro.errors';
 import { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
+import { ListFlyerProImportsQueryDto } from '../dto/list-imports-query.dto';
 import { ListFlyerProItemsQueryDto } from '../dto/list-items-query.dto';
 import { QueryFlyerProDocumentsDto } from '../dto/query-flyer-pro-documents.dto';
 import { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
 import { UpdateFlyerProCursorDto } from '../dto/update-flyer-pro-cursor.dto';
 import { FlyerProCursorService } from '../services/flyer-pro-cursor.service';
 import { FlyerProDocumentsService } from '../services/flyer-pro-documents.service';
+import { FlyerProImportsService } from '../services/flyer-pro-imports.service';
 import { FlyerProItemsService } from '../services/flyer-pro-items.service';
 import { FlyerProSaveService } from '../services/flyer-pro-save.service';
+
+/** O exemplo do Swagger do N13 (`a2-api.html#n13`). */
+const IMPORTS_EXAMPLE = {
+  success: true,
+  data: [
+    {
+      id: '9a0c4e12-77b3-4c5d-8e21-0f3a6b9d2c44',
+      documentId: '2c1d7e9b-4f6a-4b1e-9a3d-7e5f0c8b6a21',
+      fileName: 'lista-piccin.csv',
+      fileKind: 'csv',
+      fileHash: '9f2c1a7b3d4e5f60',
+      detectedFormat: 'csv',
+      mode: 'append',
+      rowCount: 5,
+      acceptedCount: 4,
+      rejectedCount: 1,
+      rejected: [{ row: 7, reason: 'PRICE_MISSING', raw: 'FEIJAO CARIOCA' }],
+      createdByUserId: 'b02d5a10-3c4e-4f7a-9d21-6e8f0a1b2c3d',
+      createdByName: 'Ana',
+      createdAt: '2026-11-14T13:04:02.000Z',
+    },
+  ],
+  pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+};
 
 /** Id que não é UUID também é "encarte não encontrado" (sem revelar nada além disso). */
 export const DocumentIdPipe = new ParseUUIDPipe({ exceptionFactory: () => flyerProNotFound() });
@@ -42,6 +68,7 @@ export class FlyerProDocumentsController {
     private readonly saves: FlyerProSaveService,
     private readonly cursors: FlyerProCursorService,
     private readonly items: FlyerProItemsService,
+    private readonly imports: FlyerProImportsService,
   ) {}
 
   @Post()
@@ -116,11 +143,38 @@ export class FlyerProDocumentsController {
     return this.items.list(id, query.updatedAfter);
   }
 
+  @Get(':id/imports')
+  @ApiOperation({
+    summary:
+      'Histórico das importações do encarte, da mais recente para a mais antiga, paginado, com filtro por fileHash; não grava',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Importações com rejectedCount (rowCount - acceptedCount) e createdByName, com a paginação',
+    schema: { example: IMPORTS_EXAMPLE },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'BAD_REQUEST: consulta fora da forma (inclusive search)',
+  })
+  @ApiResponse({ status: 401, description: 'UNAUTHORIZED: sem token' })
+  @ApiResponse({
+    status: 404,
+    description: 'FLYER_PRO_NOT_FOUND: inexistente, excluído ou id inválido',
+  })
+  listImports(
+    @Param('id', DocumentIdPipe) id: string,
+    @Query() query: ListFlyerProImportsQueryDto,
+  ) {
+    return this.imports.list(id, query);
+  }
+
   @Patch(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Salva alterações (Setup, fatias, itens) com revisão; repetir o mesmo mutationId devolve a gravação já aceita',
+      'Salva alterações (Setup, fatias, itens, registro da importação) com revisão; repetir o mesmo mutationId devolve a gravação já aceita',
   })
   @ApiResponse({
     status: 200,
@@ -136,12 +190,13 @@ export class FlyerProDocumentsController {
   })
   @ApiResponse({
     status: 409,
-    description: 'REVISION_CONFLICT, FLYER_PRO_APP_OUTDATED ou FLYER_PRO_ITEM_ID_CONFLICT',
+    description:
+      'REVISION_CONFLICT, FLYER_PRO_APP_OUTDATED, FLYER_PRO_ITEM_ID_CONFLICT ou FLYER_PRO_IMPORT_ID_CONFLICT (details.importId)',
   })
   @ApiResponse({
     status: 422,
     description:
-      'FLYER_PRO_SLICE_TOO_LARGE, FLYER_PRO_ITEM_INVALID (issues), FLYER_PRO_ITEM_LIMIT, FLYER_PRO_FOLD_LOCKED, FLYER_PRO_PAGE_COUNT_INVALID, FLYER_PRO_TEMPLATE_UNSUPPORTED ou FLYER_PRO_TEMPLATE_INCOMPLETE',
+      'FLYER_PRO_SLICE_TOO_LARGE, FLYER_PRO_ITEM_INVALID (issues, inclusive IMPORT_UNKNOWN), FLYER_PRO_IMPORT_INVALID (issues: COUNT_MISMATCH, EMPTY), FLYER_PRO_ITEM_LIMIT, FLYER_PRO_FOLD_LOCKED, FLYER_PRO_PAGE_COUNT_INVALID, FLYER_PRO_TEMPLATE_UNSUPPORTED ou FLYER_PRO_TEMPLATE_INCOMPLETE',
   })
   save(
     @Param('id', DocumentIdPipe) id: string,

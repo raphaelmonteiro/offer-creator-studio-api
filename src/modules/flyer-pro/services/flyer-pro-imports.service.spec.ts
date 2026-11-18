@@ -1,14 +1,14 @@
-import { FlyerProImportsService } from './flyer-pro-imports.service';
 import {
   commandsOf,
   DOCUMENT,
   IMPORT_ID,
   importEntry,
   makeImportsManager,
+  makeImportsService,
   OTHER_DOCUMENT,
 } from './flyer-pro-imports.service.testutil';
 
-const service = new FlyerProImportsService();
+const { service } = makeImportsService();
 
 describe('FlyerProImportsService.apply: o registro da importação', () => {
   it('importação nova de "Acrescentar": grava a linha com o encarte da rota e o autor do token, sem marcar nada', async () => {

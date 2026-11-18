@@ -1,5 +1,6 @@
-import type { EntityManager } from 'typeorm';
+import type { DataSource, EntityManager } from 'typeorm';
 import type { FlyerProImportEntry } from '../domain/flyer-pro-import.types';
+import { FlyerProImportsService } from './flyer-pro-imports.service';
 
 /** Ajudantes dos unitários do passo da importação (só testes): o `manager` que registra os comandos e o registro do corpo. */
 
@@ -48,3 +49,15 @@ export function makeImportsManager({ existingOwner }: ImportsManagerOptions = {}
 /** Os comandos SQL enviados ao `manager`, na ordem. */
 export const commandsOf = (manager: ReturnType<typeof makeImportsManager>) =>
   manager.query.mock.calls.map(([sql, params]) => ({ sql, params: params ?? [] }));
+
+/** O serviço sobre um `DataSource` simulado que entrega o `manager` (a leitura roda numa transação `REPEATABLE READ`). */
+export function makeImportsService(manager: object = makeImportsManager()) {
+  const dataSource = {
+    transaction: jest.fn((levelOrWork: unknown, maybeWork?: (m: unknown) => unknown) =>
+      (typeof levelOrWork === 'string' ? maybeWork : (levelOrWork as (m: unknown) => unknown))(
+        manager,
+      ),
+    ),
+  };
+  return { service: new FlyerProImportsService(dataSource as unknown as DataSource), dataSource };
+}

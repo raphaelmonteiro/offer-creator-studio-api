@@ -1,8 +1,9 @@
 import type { EntityManager } from 'typeorm';
 import { flyerProImportIdConflict } from '../domain/flyer-pro.errors';
 import type { FlyerProImportEntry } from '../domain/flyer-pro-import.types';
+import type { FlyerProImportRow } from '../views/flyer-pro-import.view';
 
-/** Os comandos do campo `import` do `PATCH` (N4) sobre `flyer_pro_imports`: ler as conhecidas do encarte e gravar. */
+/** Os comandos sobre `flyer_pro_imports`: o campo `import` do `PATCH` (N4) e o histórico (N13). */
 
 /**
  * Dos ids dados, os que são de importação **deste encarte** (uma leitura só): é o conjunto que o validador dos itens
@@ -70,4 +71,50 @@ export async function assertImportOfDocument(
     [importId],
   );
   if (owner && owner.documentId !== documentId) throw flyerProImportIdConflict(importId);
+}
+
+/** O filtro do histórico: as importações do encarte e, com `fileHash`, só as desse arquivo (comparação exata). */
+function historyWhere(documentId: string, fileHash?: string) {
+  const params: unknown[] = [documentId];
+  let where = `i."documentId" = $1`;
+  if (fileHash) {
+    params.push(fileHash);
+    where += ` AND i."fileHash" = $2`;
+  }
+  return { where, params };
+}
+
+/** Quantas importações o filtro traz (o total da paginação). */
+export async function countImports(
+  manager: EntityManager,
+  documentId: string,
+  fileHash?: string,
+): Promise<number> {
+  const { where, params } = historyWhere(documentId, fileHash);
+  const [{ total }] = await manager.query(
+    `SELECT count(*)::int AS total FROM "flyer_pro_imports" i WHERE ${where}`,
+    params,
+  );
+  return total;
+}
+
+/**
+ * Uma página do histórico: da mais recente para a mais antiga, com `id` decrescente no empate para a página não trocar
+ * de lugar entre duas chamadas, e o nome de quem importou por `LEFT JOIN` (nulo se o usuário não existe mais).
+ */
+export function pageOfImports(
+  manager: EntityManager,
+  filter: { documentId: string; fileHash?: string },
+  page: { limit: number; offset: number },
+): Promise<FlyerProImportRow[]> {
+  const { where, params } = historyWhere(filter.documentId, filter.fileHash);
+  return manager.query(
+    `SELECT i.*, u."name" AS "createdByName"
+       FROM "flyer_pro_imports" i
+       LEFT JOIN "users" u ON u."id" = i."createdByUserId"
+      WHERE ${where}
+      ORDER BY i."createdAt" DESC, i."id" DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, page.limit, page.offset],
+  );
 }
