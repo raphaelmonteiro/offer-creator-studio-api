@@ -11,28 +11,30 @@ function buildService() {
   const parseNames = jest.fn().mockResolvedValue([null, null]);
   const parseSingle = jest.fn().mockResolvedValue(null);
   const embedText = jest.fn().mockResolvedValue(null);
+  const embedTexts = jest.fn(async (texts: string[], _options?: object) => texts.map(() => null));
   const service = new ProductImageMatchV2Service(
-    { embedText } as never,
+    { embedText, embedTexts } as never,
     { parseNames, parseSingle } as never,
     {} as never,
     { get: jest.fn().mockReturnValue('0') } as never,
   );
-  return { service, parseNames, parseSingle, embedText };
+  return { service, parseNames, parseSingle, embedText, embedTexts };
 }
 
 describe('ProductImageMatchV2Service, modo estrito (change 28)', () => {
-  it('com strict, repassa a opção ao leitor de nomes e ao embedding de cada produto', async () => {
-    const { service, parseNames, embedText } = buildService();
+  it('com strict, repassa a opção ao leitor de nomes e ao embedding em lote dos dois produtos', async () => {
+    const { service, parseNames, embedTexts } = buildService();
 
     await service.matchWithCandidates(PRODUCTS, null, { strict: true });
 
     expect(parseNames).toHaveBeenCalledWith(expect.any(Array), { strict: true });
-    expect(embedText).toHaveBeenCalledTimes(2);
-    for (const call of embedText.mock.calls) expect(call[1]).toEqual({ strict: true });
+    expect(embedTexts).toHaveBeenCalledTimes(1);
+    expect(embedTexts.mock.calls[0][0]).toHaveLength(2);
+    expect(embedTexts.mock.calls[0][1]).toEqual({ strict: true });
   });
 
   it('findBestMatches e findCandidates não passam a opção', async () => {
-    const { service, parseNames, parseSingle, embedText } = buildService();
+    const { service, parseNames, parseSingle, embedText, embedTexts } = buildService();
 
     await service.findBestMatches(PRODUCTS, null);
     await service.findCandidates(PRODUCTS[0], 3, null);
@@ -40,7 +42,11 @@ describe('ProductImageMatchV2Service, modo estrito (change 28)', () => {
     expect(parseSingle).toHaveBeenCalledTimes(1);
     expect(parseSingle.mock.calls[0][1]).toBeUndefined();
     for (const call of parseNames.mock.calls) expect(call[1]?.strict).toBeUndefined();
-    for (const call of embedText.mock.calls) expect(call[1]?.strict).toBeUndefined();
+    expect(embedTexts).toHaveBeenCalledTimes(1);
+    expect(embedText).toHaveBeenCalledTimes(1);
+    for (const call of [...embedText.mock.calls, ...embedTexts.mock.calls]) {
+      expect(call[1]?.strict).toBeUndefined();
+    }
   });
 
   it('429 na leitura de nomes com strict lança; sem a opção devolve o resultado vazio de hoje', async () => {

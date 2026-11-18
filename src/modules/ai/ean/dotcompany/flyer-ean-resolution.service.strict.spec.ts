@@ -137,7 +137,7 @@ describe('FlyerEanResolutionService.findImages, modo estrito (change 28)', () =>
       EAN_FLYER_RESOLVE_ENABLED: 'false',
       AI_NAME_PARSER_ENABLED: 'false',
     });
-    const embedText = jest.spyOn(embedding, 'embedText').mockResolvedValue(null);
+    const embedTexts = jest.spyOn(embedding, 'embedTexts').mockResolvedValue([null]);
 
     const strict = await service.findImages([CERVEJA], null, { strict: true });
     const lenient = await service.findImages([CERVEJA]);
@@ -145,6 +145,6 @@ describe('FlyerEanResolutionService.findImages, modo estrito (change 28)', () =>
     expect(strict.eanStatus).toEqual(lenient.eanStatus);
     expect(strict.eanStatus).toEqual([expect.objectContaining({ status: 'budget_blocked' })]);
     expect(lookups.resolve).not.toHaveBeenCalled();
-    expect(embedText).toHaveBeenCalledWith(expect.any(String), { strict: true });
+    expect(embedTexts).toHaveBeenCalledWith([expect.any(String)], { strict: true });
   });
 });

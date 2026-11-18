@@ -261,6 +261,7 @@ describe('contrato das rotas das cinco features (provedor simulado)', () => {
     it('match v2 e candidatas v2: falha no casamento vira o código da rota', async () => {
       ctx.fakes.parser.mockResolvedValue(chatResponse({ content: '{"results":[]}' }));
       ctx.embedding.embedText.mockRejectedValue(new Error('falha do embedding'));
+      ctx.embedding.embedTexts.mockRejectedValue(new Error('falha do embedding'));
       const match = await request(app.getHttpServer())
         .post('/v1/ai/product-image-match-v2')
         .set('Authorization', bearer())

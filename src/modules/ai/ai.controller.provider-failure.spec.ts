@@ -45,10 +45,10 @@ describe('rotas síncronas de fotos, categorias e ortografia com o provedor falh
 
   /** O embedding real devolve `null` na falha quando não está em modo estrito, e lança com a opção. */
   function embeddingDown(): void {
-    ctx.embedding.embedText.mockImplementation(
-      async (_text: string, options?: { strict?: boolean }) => {
+    ctx.embedding.embedTexts.mockImplementation(
+      async (texts: string[], options?: { strict?: boolean }) => {
         if (options?.strict) throw new TransientProviderError('HTTP 503');
-        return null;
+        return texts.map(() => null);
       },
     );
   }
@@ -81,7 +81,8 @@ describe('rotas síncronas de fotos, categorias e ortografia com o provedor falh
       },
     });
     for (const call of parseNames.mock.calls) expect(call[1]?.strict).toBeUndefined();
-    for (const call of ctx.embedding.embedText.mock.calls) expect(call[1]?.strict).toBeUndefined();
+    expect(ctx.embedding.embedTexts).toHaveBeenCalled();
+    for (const call of ctx.embedding.embedTexts.mock.calls) expect(call[1]?.strict).toBeUndefined();
   });
 
   it('o mesmo pedido de busca de fotos repetido na queda: as duas respostas são iguais', async () => {
