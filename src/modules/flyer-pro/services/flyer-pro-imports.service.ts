@@ -4,9 +4,8 @@ import { DataSource, EntityManager } from 'typeorm';
 import { paginate, PaginationResult } from '../../../common/utils/pagination.util';
 import { importIssues } from '../domain/flyer-pro-import-rules';
 import type { FlyerProImportEntry } from '../domain/flyer-pro-import.types';
-import { flyerProImportInvalid, flyerProNotFound } from '../domain/flyer-pro.errors';
+import { flyerProImportInvalid } from '../domain/flyer-pro.errors';
 import { FLYER_PRO_LIMITS } from '../domain/flyer-pro.limits';
-import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import { FlyerProImportView, toImportView } from '../views/flyer-pro-import.view';
 import type { DocumentColumns } from './flyer-pro-document-update';
 import {
@@ -15,7 +14,7 @@ import {
   insertImport,
   pageOfImports,
 } from './flyer-pro-import.statements';
-import { readWith } from './flyer-pro-read';
+import { assertLiveDocument, readWith } from './flyer-pro-read';
 
 /** A página e o filtro do histórico (N13), já validados. */
 export interface FlyerProImportsListInput {
@@ -46,11 +45,7 @@ export class FlyerProImportsService {
     const page = query.page ?? 1;
     const limit = query.limit ?? FLYER_PRO_LIMITS.listDefaultLimit;
     return readWith(this.dataSource, undefined, async (manager) => {
-      const document = await manager.findOne(FlyerProDocument, {
-        where: { id: documentId },
-        select: { id: true },
-      });
-      if (!document) throw flyerProNotFound();
+      await assertLiveDocument(manager, documentId);
       const total = await countImports(manager, documentId, query.fileHash);
       const rows =
         total === 0

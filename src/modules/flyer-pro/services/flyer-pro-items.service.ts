@@ -10,11 +10,9 @@ import {
   flyerProItemIdConflict,
   flyerProItemInvalid,
   flyerProItemLimit,
-  flyerProNotFound,
 } from '../domain/flyer-pro.errors';
 import { FLYER_PRO_LIMITS } from '../domain/flyer-pro.limits';
 import type { FlyerProItemsPatchDto } from '../dto/flyer-pro-items-patch.dto';
-import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import type { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import { FlyerProItemView, toItemView } from '../views/flyer-pro-document.view';
 import { findKnownImportIds } from './flyer-pro-import.statements';
@@ -27,7 +25,7 @@ import {
   ItemRow,
   updateItems,
 } from './flyer-pro-item.statements';
-import { readWith } from './flyer-pro-read';
+import { assertLiveDocument, readWith } from './flyer-pro-read';
 
 /** O carimbo da gravação (lido depois da trava do encarte) e o usuário do token. */
 export interface ItemsContext {
@@ -82,11 +80,7 @@ export class FlyerProItemsService {
   list(id: string, updatedAfter?: string): Promise<FlyerProItemsPage> {
     const after = updatedAfter ? utcInstantOf(updatedAfter) : null;
     return readWith(this.dataSource, undefined, async (manager) => {
-      const document = await manager.findOne(FlyerProDocument, {
-        where: { id },
-        select: { id: true },
-      });
-      if (!document) throw flyerProNotFound();
+      await assertLiveDocument(manager, id);
       const items: FlyerProItem[] = await manager.query(ITEMS_AFTER_SQL, [id, after]);
       const [{ cursor }] = await manager.query(ITEMS_CURSOR_SQL, [id, after]);
       return { items: items.map(toItemView), cursor };
