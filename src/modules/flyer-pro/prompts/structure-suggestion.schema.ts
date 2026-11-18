@@ -1,3 +1,5 @@
+import { STRUCTURE_HERO_SIZES } from '../domain/structure-suggestion.types';
+
 /** O nome do `json_schema` da saída (`text.format` de `/responses`). */
 export const STRUCTURE_SUGGESTION_SCHEMA_NAME = 'flyer_pro_structure_suggestion';
 
@@ -33,7 +35,7 @@ export const STRUCTURE_SUGGESTION_SCHEMA = {
         required: ['item', 'size', 'reason'],
         properties: {
           item: { type: 'string' },
-          size: { type: 'string', enum: ['2x1', '2x2'] },
+          size: { type: 'string', enum: [...STRUCTURE_HERO_SIZES] },
           reason: { type: 'string' },
         },
       },

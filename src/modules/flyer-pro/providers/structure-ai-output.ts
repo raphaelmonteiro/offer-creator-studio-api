@@ -1,4 +1,7 @@
-import type { RawStructureSuggestion } from '../domain/structure-suggestion.types';
+import {
+  STRUCTURE_HERO_SIZES,
+  type RawStructureSuggestion,
+} from '../domain/structure-suggestion.types';
 import { StructureAiFailure } from './flyer-pro-structure-ai.port';
 
 /**
@@ -29,7 +32,7 @@ const isHero = (value: unknown): value is RawStructureSuggestion['heroes'][numbe
   hasExactKeys(value, ['item', 'size', 'reason']) &&
   typeof value.item === 'string' &&
   typeof value.reason === 'string' &&
-  (value.size === '2x1' || value.size === '2x2');
+  (STRUCTURE_HERO_SIZES as readonly unknown[]).includes(value.size);
 
 function isSuggestion(value: unknown): value is RawStructureSuggestion {
   return (
