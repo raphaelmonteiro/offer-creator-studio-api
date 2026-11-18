@@ -105,7 +105,7 @@ export class ProductCategorizationService {
       return this.buildResponse(products, assignmentsByProductId);
     }
 
-    if (!this.isEnabled() || !this.openai) {
+    if (!this.isAvailable()) {
       this.addFallbackAssignments(remainingProducts, assignmentsByProductId, allowedCategories);
       return this.buildResponse(products, assignmentsByProductId);
     }
@@ -326,6 +326,11 @@ export class ProductCategorizationService {
     const raw = this.configService.get<string>(key, String(defaultValue));
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
+  }
+
+  /** Flag `AI_PRODUCT_CATEGORIZATION_ENABLED` diferente de `false` e chave da OpenAI presente; não chama o provedor. */
+  isAvailable(): boolean {
+    return this.isEnabled() && this.openai !== null;
   }
 
   private isEnabled(): boolean {

@@ -49,6 +49,11 @@ export class SpellCheckService {
     }
   }
 
+  /** Chave da OpenAI presente e `AI_SPELLCHECK_ENABLED` diferente de `false`; não chama o provedor. */
+  isAvailable(): boolean {
+    return this.openai !== null && this.enabled;
+  }
+
   async spellCheck(
     products: SpellCheckProductDto[],
     options: AiUsageOptions = {},
