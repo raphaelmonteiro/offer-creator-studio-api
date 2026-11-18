@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import type { PaginationResult } from '../../../common/utils/pagination.util';
 import { CREATE_REQUIRED_FIELDS, isCreationKeyConflict } from '../domain/flyer-pro-document-rules';
 import { missingFields } from '../domain/flyer-pro-presence';
@@ -16,7 +16,10 @@ import type {
 import { toDocumentView } from '../views/flyer-pro-document.view';
 import { assertClientExists } from './flyer-pro-client';
 import { FlyerProDocumentsListInput, listDocuments } from './flyer-pro-documents-list';
-import { readWith } from './flyer-pro-read';
+import { requestStopOfActiveJob } from './flyer-pro-job.statements';
+import { FlyerProJobsService } from './flyer-pro-jobs.service';
+import { ITEMS_CURSOR_SQL, readWith } from './flyer-pro-read';
+import { lockDocument } from './flyer-pro-save.statements';
 import { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
 
 /** O que `POST /v1/flyer-pro/documents` devolve: o encarte e se foi criado agora (201) ou já existia (200). */
@@ -24,13 +27,6 @@ export interface FlyerProCreateResult {
   document: FlyerProDocumentView & { replayed: boolean };
   created: boolean;
 }
-
-/** O maior `updatedAt` dos itens, ou o `createdAt` do encarte sem itens, em texto com microssegundos (o `Date` só tem ms). */
-const ITEMS_CURSOR_SQL = `SELECT to_char(
-    COALESCE(
-      (SELECT max("updatedAt") FROM flyer_pro_items WHERE "documentId" = $1),
-      (SELECT "createdAt" FROM flyer_pro_documents WHERE id = $1)
-    ) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor`;
 
 /**
  * O encarte do Encarte Pro: criar (N1, idempotente pela `creationKey`), listar (N2), abrir (N3) e excluir (N6). Quem
@@ -42,6 +38,7 @@ export class FlyerProDocumentsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(FlyerProDocument) private readonly documents: Repository<FlyerProDocument>,
     private readonly snapshots: FlyerProTemplateSnapshotService,
+    private readonly jobs: FlyerProJobsService,
   ) {}
 
   /** N3. Não grava nada: encarte, itens, cursor e `templateStatus` saem do mesmo instante do banco (A-12). */
@@ -56,15 +53,16 @@ export class FlyerProDocumentsService {
   }
 
   /**
-   * N6: só grava `deletedAt`, e só se ainda é nulo. Sem linha mudada (inexistente, já excluído, ou o outro de dois
-   * pedidos simultâneos), 404. Não mexe em `updatedAt`, autor, `revision` nem itens (A-8).
+   * N6: trava o encarte vivo (inexistente, já excluído, ou o outro de dois pedidos simultâneos: 404), grava só
+   * `deletedAt` e, na mesma transação, o pedido de parada do job ativo, se houver (A-8, A-23: o encarte antes do job).
+   * Não mexe em `updatedAt`, autor, `revision` nem itens. Se algo falhar, o pedido de parada também não fica gravado.
    */
   async remove(id: string): Promise<{ deleted: true }> {
-    const { affected } = await this.documents.update(
-      { id, deletedAt: IsNull() },
-      { deletedAt: () => 'now()' },
-    );
-    if (!affected) throw flyerProNotFound();
+    await this.dataSource.transaction(async (manager) => {
+      await lockDocument(manager, id);
+      await manager.update(FlyerProDocument, { id }, { deletedAt: () => 'now()' });
+      await requestStopOfActiveJob(manager, id);
+    });
     return { deleted: true };
   }
 
@@ -98,7 +96,8 @@ export class FlyerProDocumentsService {
       });
       const [{ cursor }] = await manager.query(ITEMS_CURSOR_SQL, [id]);
       const templateStatus = await this.snapshots.statusOf(document.templateSnapshot, manager);
-      return toDocumentView({ document, items, itemsCursor: cursor, templateStatus });
+      const enrichment = await this.jobs.currentView(manager, id);
+      return toDocumentView({ document, items, itemsCursor: cursor, templateStatus, enrichment });
     });
   }
 

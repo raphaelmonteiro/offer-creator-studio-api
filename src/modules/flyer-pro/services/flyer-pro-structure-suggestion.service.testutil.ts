@@ -12,6 +12,7 @@ import type { FlyerProStructureAiPort } from '../providers/flyer-pro-structure-a
 import { FlyerProStructureLimiter } from './flyer-pro-structure-limiter';
 import { FlyerProStructureSuggestionService } from './flyer-pro-structure-suggestion.service';
 import type { StructureDocumentRow } from './flyer-pro-structure-suggestion.statements';
+import { fakeDataSource } from '../testing/flyer-pro-fake-db.testutil';
 
 /** Ajudantes dos unitários da sugestão de estrutura (só testes): o serviço sobre um banco, um provedor e um relógio simulados. */
 
@@ -104,11 +105,7 @@ export function fakePort(
 
 export function makeSuggestionService(options: ServiceOptions = {}) {
   const { manager, mocks, writes } = makeManager(options);
-  const dataSource = {
-    transaction: jest.fn((level: unknown, work?: (m: EntityManager) => unknown) =>
-      (typeof level === 'string' ? work : (level as (m: EntityManager) => unknown))(manager),
-    ),
-  };
+  const dataSource = fakeDataSource(manager);
   const limiter = options.limiter ?? new FlyerProStructureLimiter();
   const port = options.port ?? new MockFlyerProStructureAi(() => Promise.resolve());
   const service = new FlyerProStructureSuggestionService(

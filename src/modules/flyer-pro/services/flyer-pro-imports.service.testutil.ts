@@ -1,6 +1,7 @@
 import type { DataSource, EntityManager } from 'typeorm';
 import { IMPORT_ID } from '../testing/flyer-pro-imports.fixture';
 import { FlyerProImportsService } from './flyer-pro-imports.service';
+import { fakeDataSource } from '../testing/flyer-pro-fake-db.testutil';
 
 /** Ajudantes dos unitários do passo da importação (só testes): o `manager` que registra os comandos e o serviço. */
 
@@ -36,12 +37,6 @@ export const commandsOf = (manager: ReturnType<typeof makeImportsManager>) =>
 
 /** O serviço sobre um `DataSource` simulado que entrega o `manager` (a leitura roda numa transação `REPEATABLE READ`). */
 export function makeImportsService(manager: object = makeImportsManager()) {
-  const dataSource = {
-    transaction: jest.fn((levelOrWork: unknown, maybeWork?: (m: unknown) => unknown) =>
-      (typeof levelOrWork === 'string' ? maybeWork : (levelOrWork as (m: unknown) => unknown))(
-        manager,
-      ),
-    ),
-  };
+  const dataSource = fakeDataSource(manager);
   return { service: new FlyerProImportsService(dataSource as unknown as DataSource), dataSource };
 }

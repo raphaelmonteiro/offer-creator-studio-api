@@ -12,6 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { FLYER_PRO_LIMITS } from '../domain/flyer-pro.limits';
+import { EnrichStepsDto } from './enrich-steps.dto';
 import { FlyerProImportDto } from './flyer-pro-import.dto';
 import { FlyerProItemsPatchDto } from './flyer-pro-items-patch.dto';
 import { FlyerProSetupPatchDto } from './flyer-pro-setup-patch.dto';
@@ -20,8 +21,7 @@ import { ValidateIfDefined } from './validate-if-defined.decorator';
 
 /**
  * N4: só a forma (400). Os quatro primeiros campos são obrigatórios, mas o pipe global pula o corpo `{}`: o serviço os
- * confere à mão. `enrich` não existe ainda (change 28): é campo desconhecido. Os tamanhos e as regras de valor são do
- * serviço (422).
+ * confere à mão. `enrich` é só `{ steps }`, com as regras do N14. Os tamanhos e as regras de valor são do serviço (422).
  */
 export class SaveFlyerProDocumentDto {
   @ApiProperty({ description: 'Um id por corpo; reenviar o mesmo corpo usa o mesmo id' })
@@ -92,4 +92,15 @@ export class SaveFlyerProDocumentDto {
   @ValidateNested()
   @Type(() => FlyerProImportDto)
   import?: FlyerProImportDto;
+
+  @ApiPropertyOptional({
+    type: EnrichStepsDto,
+    description:
+      'Pede o job de categorias, ortografia e fotos depois de gravar; só steps, com onlyMissing e autoApply ligados',
+  })
+  @ValidateIfDefined()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => EnrichStepsDto)
+  enrich?: EnrichStepsDto;
 }

@@ -6,8 +6,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DataSource } from 'typeorm';
 import { toSql } from 'pgvector/utils';
+import { classifyOpenAiErrorStrict } from '../../shared/providers/openai-errors';
 import { mergeEanBlock, MergeEanOptions } from './metadata/ean-block';
 import { buildEmbeddingText, ProductMetadata } from './metadata/product-metadata.schema';
+import { AiStrictOptions } from './utils/ai-strict';
 
 const EMBEDDING_DIMENSIONS = 1536;
 const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
@@ -188,13 +190,22 @@ export class GalleryEmbeddingService implements OnModuleInit {
       .trim();
   }
 
-  async embedText(text: string): Promise<number[] | null> {
-    const [result] = await this.embedTexts([text]);
+  /** Flag `AI_GALLERY_EMBEDDING_ENABLED` diferente de `false` e chave da OpenAI presente; não chama o provedor. */
+  isEnabled(): boolean {
+    return this.openai !== null && this.enabled;
+  }
+
+  async embedText(text: string, options: AiStrictOptions = {}): Promise<number[] | null> {
+    const [result] = await this.embedTexts([text], options);
     return result ?? null;
   }
 
-  async embedTexts(texts: string[]): Promise<(number[] | null)[]> {
-    if (!this.openai || !this.enabled) {
+  /**
+   * Com `strict` (change 28), a falha da chamada sobe classificada depois da linha de log; desligado ou sem chave
+   * devolve `null` por texto, sem lançar. Sem a opção, a falha vira `null` como sempre.
+   */
+  async embedTexts(texts: string[], options: AiStrictOptions = {}): Promise<(number[] | null)[]> {
+    if (!this.isEnabled()) {
       return texts.map(() => null);
     }
     if (texts.length === 0) {
@@ -216,6 +227,7 @@ export class GalleryEmbeddingService implements OnModuleInit {
         this.logger.error(
           `Falha ao gerar embeddings (batch ${i}-${i + slice.length}): ${(error as Error).message}`,
         );
+        if (options.strict) throw classifyOpenAiErrorStrict(error);
       }
     }
     return results;

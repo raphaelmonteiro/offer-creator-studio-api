@@ -51,11 +51,15 @@ describe('AnimationQueueService: cena de template', () => {
       expect(mockBoss.start).toHaveBeenCalledTimes(1);
     });
 
-    it('não sobe com as duas desligadas', async () => {
-      await serviceWith({ ANIMATIONS_ENABLED: 'false' }).onModuleInit();
+    it('não sobe com animações, cena e job desligados', async () => {
+      await serviceWith({
+        ANIMATIONS_ENABLED: 'false',
+        FLYER_PRO_ENRICH_ENABLED: 'false',
+      }).onModuleInit();
       await serviceWith({
         ANIMATIONS_ENABLED: 'false',
         TEMPLATE_SCENE_ENABLED: 'false',
+        FLYER_PRO_ENRICH_ENABLED: 'false',
       }).onModuleInit();
       expect(mockBoss.start).not.toHaveBeenCalled();
     });

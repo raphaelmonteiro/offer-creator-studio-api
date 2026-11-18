@@ -1,20 +1,39 @@
-import { Module } from '@nestjs/common';
+import { Inject, Module, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AnimationQueueService, QUEUES } from '../../shared/queue/animation-queue.service';
+import { SharedModule } from '../../shared/shared.module';
+import { AiModule } from '../ai/ai.module';
 import { FlyerProDocumentsController } from './controllers/flyer-pro-documents.controller';
+import { FlyerProEnrichmentController } from './controllers/flyer-pro-enrichment.controller';
 import { FlyerProExportsController } from './controllers/flyer-pro-exports.controller';
 import { FlyerProStructureSuggestionController } from './controllers/flyer-pro-structure-suggestion.controller';
 import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.controller';
+import {
+  FLYER_PRO_ENRICH_CONFIG,
+  FlyerProEnrichConfig,
+  readEnrichConfig,
+} from './config/flyer-pro-enrich.config';
 import { readStructureAiConfig, STRUCTURE_AI_CONFIG } from './config/structure-ai.config';
 import { FlyerProDocument } from './entities/flyer-pro-document.entity';
 import { FlyerProExport } from './entities/flyer-pro-export.entity';
 import { FlyerProImport } from './entities/flyer-pro-import.entity';
 import { FlyerProItem } from './entities/flyer-pro-item.entity';
+import { FlyerProJob } from './entities/flyer-pro-job.entity';
+import { FlyerProEnrichCommitter } from './processors/flyer-pro-enrich.committer';
+import { FlyerProEnrichProcessor } from './processors/flyer-pro-enrich.processor';
+import type { BatchMessage } from './processors/flyer-pro-enrich.types';
+import { createEnrichPort } from './providers/flyer-pro-enrich.factory';
+import { FLYER_PRO_ENRICH_PORT } from './providers/flyer-pro-enrich.port';
 import { createStructureAiPort } from './providers/flyer-pro-structure-ai.factory';
 import { FLYER_PRO_STRUCTURE_AI_PORT } from './providers/flyer-pro-structure-ai.port';
 import { FlyerProClientGuardService } from './services/flyer-pro-client-guard.service';
 import { FlyerProCursorService } from './services/flyer-pro-cursor.service';
 import { FlyerProDocumentsService } from './services/flyer-pro-documents.service';
+import { FlyerProGalleryPhotos } from './services/flyer-pro-gallery-photos';
+import { FlyerProImageSizeService } from './services/flyer-pro-image-size.service';
+import { FlyerProJobReconcilerService } from './services/flyer-pro-job-reconciler.service';
+import { FlyerProJobsService } from './services/flyer-pro-jobs.service';
 import { FlyerProExportsService } from './services/flyer-pro-exports.service';
 import { FlyerProSaveService } from './services/flyer-pro-save.service';
 import { FlyerProImportsService } from './services/flyer-pro-imports.service';
@@ -33,13 +52,23 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem, FlyerProImport, FlyerProExport]),
+    TypeOrmModule.forFeature([
+      FlyerProDocument,
+      FlyerProItem,
+      FlyerProImport,
+      FlyerProJob,
+      FlyerProExport,
+    ]),
+    // A fila (`AnimationQueueService`) do job e, para as fases reais da change 29, os três serviços de IA que o `AiModule` exporta.
+    SharedModule,
+    AiModule,
   ],
   controllers: [
     FlyerProTemplatesController,
     FlyerProDocumentsController,
     FlyerProExportsController,
     FlyerProStructureSuggestionController,
+    FlyerProEnrichmentController,
   ],
   providers: [
     FlyerProSceneReader,
@@ -54,8 +83,24 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProImportsService,
     FlyerProExportsService,
     FlyerProStructureSuggestionService,
+    FlyerProJobsService,
+    FlyerProEnrichCommitter,
+    FlyerProEnrichProcessor,
+    FlyerProJobReconcilerService,
+    FlyerProGalleryPhotos,
+    FlyerProImageSizeService,
     // Um limitador só por processo da API: a vaga em andamento e o teto por hora vivem na memória dele.
     { provide: FlyerProStructureLimiter, useFactory: () => new FlyerProStructureLimiter() },
+    {
+      provide: FLYER_PRO_ENRICH_CONFIG,
+      useFactory: (config: ConfigService) => readEnrichConfig(config),
+      inject: [ConfigService],
+    },
+    {
+      provide: FLYER_PRO_ENRICH_PORT,
+      useFactory: createEnrichPort,
+      inject: [FLYER_PRO_ENRICH_CONFIG, FlyerProGalleryPhotos, FlyerProImageSizeService],
+    },
     {
       provide: STRUCTURE_AI_CONFIG,
       useFactory: (config: ConfigService) => readStructureAiConfig(config),
@@ -69,4 +114,25 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
   ],
   exports: [FlyerProTemplateSnapshotService, FlyerProClientGuardService],
 })
-export class FlyerProModule {}
+export class FlyerProModule implements OnModuleInit {
+  constructor(
+    private readonly queue: AnimationQueueService,
+    private readonly processor: FlyerProEnrichProcessor,
+    private readonly reconciler: FlyerProJobReconcilerService,
+    @Inject(FLYER_PRO_ENRICH_CONFIG) private readonly enrich: FlyerProEnrichConfig,
+  ) {}
+
+  /**
+   * O consumidor dos lotes do job e o reconciliador só no worker (`WORKER_ONLY=true`) e com a flag do job ligada; a API
+   * só publica. Os outros consumidores (animações, cenas) são dos módulos deles.
+   */
+  async onModuleInit(): Promise<void> {
+    if (!this.enrich.enabled || process.env.WORKER_ONLY !== 'true') return;
+    await this.queue.subscribe(
+      QUEUES.FLYER_PRO_ENRICH,
+      this.enrich.concurrency,
+      (message: BatchMessage) => this.processor.handle(message),
+    );
+    this.reconciler.start();
+  }
+}

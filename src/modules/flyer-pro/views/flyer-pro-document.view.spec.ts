@@ -12,11 +12,17 @@ import {
   snapshotOf,
   STATUS,
 } from '../services/flyer-pro-documents.service.testutil';
+import { jobRow } from '../services/flyer-pro-jobs.service.testutil';
+import { FlyerProJobView, toJobView } from './flyer-pro-job.view';
 
 const SNAPSHOT = snapshotOf();
 const CREATION_KEY = '5b1e0c3a-8f0e-4d7a-9a51-2f4c1d7e9b10';
 
-const view = (over: Partial<FlyerProDocument> = {}, items: FlyerProItem[] = []) =>
+const view = (
+  over: Partial<FlyerProDocument> = {},
+  items: FlyerProItem[] = [],
+  enrichment: FlyerProJobView | null = null,
+) =>
   toDocumentView({
     document: documentRow({
       name: 'Ofertas',
@@ -27,6 +33,7 @@ const view = (over: Partial<FlyerProDocument> = {}, items: FlyerProItem[] = []) 
     items,
     itemsCursor: '2026-11-14T13:02:11.000000Z',
     templateStatus: STATUS,
+    enrichment,
   });
 
 describe('toDocumentView', () => {
@@ -101,9 +108,15 @@ describe('toDocumentView', () => {
     expect(gravado.templateSnapshot).toBe(SNAPSHOT);
   });
 
-  it('enrichment é nulo, o cursor vem como recebido e as datas saem em ISO UTC', () => {
+  it('enrichment é o job lido como veio, ou nulo se o encarte nunca teve job', () => {
+    const job = toJobView(jobRow({ status: 'done' }), '2026-11-14T13:09:55.731209Z', new Date());
+
+    expect(view({}, [], job).enrichment).toBe(job);
+    expect(view().enrichment).toBeNull();
+  });
+
+  it('o cursor vem como recebido e as datas saem em ISO UTC', () => {
     const result = view();
-    expect(result.enrichment).toBeNull();
     expect(result.itemsCursor).toBe('2026-11-14T13:02:11.000000Z');
     expect(result.createdAt).toBe('2026-11-14T13:02:11.000Z');
     expect(result.updatedAt).toBe('2026-11-14T13:02:11.000Z');

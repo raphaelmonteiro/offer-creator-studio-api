@@ -2,6 +2,7 @@ import type { DataSource, EntityManager } from 'typeorm';
 import type { CreateFlyerProExportDto } from '../dto/create-flyer-pro-export.dto';
 import type { FlyerProExportEntry } from '../domain/flyer-pro.types';
 import { ANA, DOCUMENT, exportEntry } from '../testing/flyer-pro-exports.fixture';
+import { fakeDataSource } from '../testing/flyer-pro-fake-db.testutil';
 import type { FlyerProExportRow } from '../views/flyer-pro-export.view';
 import { FlyerProExportsService } from './flyer-pro-exports.service';
 
@@ -83,15 +84,9 @@ export const commandsOf = (manager: ReturnType<typeof makeExportsManager>) =>
 export const insertOf = (manager: ReturnType<typeof makeExportsManager>) =>
   commandsOf(manager).find((command) => command.sql.startsWith('INSERT'));
 
-/** O serviço sobre um `DataSource` simulado que entrega o `manager` (com ou sem o nível de isolamento). */
+/** O serviço sobre o `fakeDataSource`, que entrega o `manager` (com ou sem o nível de isolamento). */
 export function makeExportsService(manager: object = makeExportsManager()) {
-  const dataSource = {
-    transaction: jest.fn((levelOrWork: unknown, maybeWork?: (m: unknown) => unknown) =>
-      (typeof levelOrWork === 'string' ? maybeWork : (levelOrWork as (m: unknown) => unknown))(
-        manager,
-      ),
-    ),
-  };
+  const dataSource = fakeDataSource(manager);
   return { service: new FlyerProExportsService(dataSource as unknown as DataSource), dataSource };
 }
 

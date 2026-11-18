@@ -35,6 +35,8 @@ export const QUEUES = {
   TEMPLATE_SCENE_DIRECTOR: 'template_scene.director',
   /** Cena de template (change add-template-scene-approve): mantém o registro de `templates` da cena (a projeção). */
   TEMPLATE_SCENE_TEMPLATE_SYNC: 'template_scene.template_sync',
+  /** Encarte Pro (change 28): um lote do job de fotos, categorias e ortografia, com ficha e batimento. */
+  FLYER_PRO_ENRICH: 'flyer_pro.enrich',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -122,10 +124,11 @@ export class AnimationQueueService implements QueuePort, OnModuleInit, OnModuleD
   constructor(private readonly config: ConfigService) {}
 
   async onModuleInit(): Promise<void> {
-    // A fila sobe se animações OU a cena de template estiverem ligadas (a cena não depende de animações).
+    // A fila sobe se animações, a cena de template OU o job do Encarte Pro estiverem ligados (nenhum depende do outro).
     const animationsOn = this.config.get('ANIMATIONS_ENABLED') !== 'false';
     const templateSceneOn = this.config.get('TEMPLATE_SCENE_ENABLED') === 'true';
-    if (!animationsOn && !templateSceneOn) return;
+    const flyerProEnrichOn = this.config.get('FLYER_PRO_ENRICH_ENABLED') !== 'false';
+    if (!animationsOn && !templateSceneOn && !flyerProEnrichOn) return;
     const host = this.config.get('DB_HOST', 'localhost');
     const port = this.config.get('DB_PORT', '5432');
     const user = this.config.get('DB_USERNAME', 'postgres');
