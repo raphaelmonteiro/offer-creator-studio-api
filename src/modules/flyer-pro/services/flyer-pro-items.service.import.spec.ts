@@ -1,7 +1,11 @@
 import { itemRow } from './flyer-pro-documents.service.testutil';
+import { IMPORT_ID } from '../testing/flyer-pro-imports.fixture';
 import {
+  ABACATE,
+  CERVEJA,
   DOCUMENT,
   makeItemsManager,
+  NEW_ABACATE,
   recordsOf,
   run,
   statementsOf,
@@ -9,17 +13,7 @@ import {
 } from './flyer-pro-items.service.testutil';
 import { STAMP } from './flyer-pro-save.service.testutil';
 
-const ABACATE = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c11';
-const CERVEJA = '91fe0c3d-2a4b-4c6d-8e0f-1a2b3c4d5e6f';
-const IMPORT_I = '0b6f3d52-8e1a-4c27-9f40-6d2a7b1c5e83';
 const IMPORT_J = 'c4a19e07-2d85-4b3f-8a6e-1f9b0d7c3a52';
-const NEW_ABACATE = {
-  id: ABACATE,
-  position: 0,
-  name: 'ABACATE',
-  price: { kind: 'simple', cents: 699 },
-  unit: 'kg',
-};
 
 /** Os comandos que leem as importações, na ordem. */
 const importReads = (manager: ReturnType<typeof makeItemsManager>) =>
@@ -27,21 +21,21 @@ const importReads = (manager: ReturnType<typeof makeItemsManager>) =>
 
 describe('FlyerProItemsService.apply: importId do item', () => {
   it('item novo ligado a uma importação do encarte: lê as importações uma vez e grava o importId no INSERT', async () => {
-    const manager = makeItemsManager({ imports: [IMPORT_I] });
+    const manager = makeItemsManager({ imports: [IMPORT_ID] });
 
     await run(manager, {
       upsert: [
-        { ...NEW_ABACATE, importId: IMPORT_I },
-        { ...NEW_ABACATE, id: CERVEJA, position: 1, importId: IMPORT_I },
+        { ...NEW_ABACATE, importId: IMPORT_ID },
+        { ...NEW_ABACATE, id: CERVEJA, position: 1, importId: IMPORT_ID },
       ],
     });
 
     expect(importReads(manager)).toEqual([
-      { sql: expect.stringContaining(`"documentId" = $1`), params: [DOCUMENT, [IMPORT_I]] },
+      { sql: expect.stringContaining(`"documentId" = $1`), params: [DOCUMENT, [IMPORT_ID]] },
     ]);
     const [insert] = statementsStartingWith(manager, 'INSERT');
     expect(insert.sql).toContain('"importId"');
-    expect(recordsOf(insert).map((record) => record.importId)).toEqual([IMPORT_I, IMPORT_I]);
+    expect(recordsOf(insert).map((record) => record.importId)).toEqual([IMPORT_ID, IMPORT_ID]);
   });
 
   it('item novo sem importId (ausente ou nulo) é item à mão: importId nulo e nenhuma leitura das importações', async () => {
@@ -71,10 +65,10 @@ describe('FlyerProItemsService.apply: importId do item', () => {
   });
 
   it('item existente: o UPDATE não leva importId, nem com o mesmo valor, e a leitura das importações não é feita', async () => {
-    const stored = itemRow({ id: ABACATE, importId: IMPORT_I });
+    const stored = itemRow({ id: ABACATE, importId: IMPORT_ID });
     const manager = makeItemsManager({ found: [[stored], [stored]] });
 
-    await run(manager, { upsert: [{ id: ABACATE, importId: IMPORT_I, name: 'ABACATE AVOCADO' }] });
+    await run(manager, { upsert: [{ id: ABACATE, importId: IMPORT_ID, name: 'ABACATE AVOCADO' }] });
 
     const [update] = statementsStartingWith(manager, 'UPDATE');
     expect(update.sql).not.toContain('importId');
@@ -83,7 +77,7 @@ describe('FlyerProItemsService.apply: importId do item', () => {
   });
 
   it('item existente com outra importação ou com nulo: 422 IMMUTABLE_FIELD, sem conferir se a importação existe', async () => {
-    const stored = itemRow({ id: ABACATE, importId: IMPORT_I });
+    const stored = itemRow({ id: ABACATE, importId: IMPORT_ID });
     const manager = makeItemsManager({ found: [[stored], [stored]] });
 
     await expect(
@@ -100,7 +94,7 @@ describe('FlyerProItemsService.apply: importId do item', () => {
   });
 
   it('replaceAll com o item completo e sem importId mantém o gravado (o UPDATE não o escreve)', async () => {
-    const stored = itemRow({ id: ABACATE, importId: IMPORT_I });
+    const stored = itemRow({ id: ABACATE, importId: IMPORT_ID });
     const manager = makeItemsManager({ found: [[stored], [stored]], deleted: [[]] });
 
     await run(manager, { replaceAll: true, upsert: [NEW_ABACATE] });
@@ -111,9 +105,9 @@ describe('FlyerProItemsService.apply: importId do item', () => {
   });
 
   it('o carimbo do INSERT continua o da gravação', async () => {
-    const manager = makeItemsManager({ imports: [IMPORT_I] });
+    const manager = makeItemsManager({ imports: [IMPORT_ID] });
 
-    await run(manager, { upsert: [{ ...NEW_ABACATE, importId: IMPORT_I }] });
+    await run(manager, { upsert: [{ ...NEW_ABACATE, importId: IMPORT_ID }] });
 
     expect(statementsStartingWith(manager, 'INSERT')[0].params[1]).toBe(STAMP);
   });

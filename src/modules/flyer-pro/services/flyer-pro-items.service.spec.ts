@@ -1,25 +1,18 @@
 import { HttpException } from '@nestjs/common';
 import { itemRow } from './flyer-pro-documents.service.testutil';
 import {
+  ABACATE,
+  CERVEJA,
   DOCUMENT,
   makeItemsManager,
   makeItemsService,
+  NEW_ABACATE,
   recordsOf,
   run,
   statementsOf,
   statementsStartingWith,
 } from './flyer-pro-items.service.testutil';
 import { STAMP } from './flyer-pro-save.service.testutil';
-
-const ABACATE = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c11';
-const CERVEJA = '91fe0c3d-2a4b-4c6d-8e0f-1a2b3c4d5e6f';
-const NEW_ABACATE = {
-  id: ABACATE,
-  position: 0,
-  name: 'ABACATE',
-  price: { kind: 'simple', cents: 699 },
-  unit: 'kg',
-};
 
 async function refusalOf(promise: Promise<unknown>) {
   const error = (await promise.then(

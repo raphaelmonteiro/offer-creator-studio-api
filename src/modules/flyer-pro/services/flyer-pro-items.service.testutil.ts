@@ -9,6 +9,17 @@ import { STAMP } from './flyer-pro-save.service.testutil';
 export const CONTEXT = { stamp: STAMP, userId: 'ana' };
 export const DOCUMENT = 'd1';
 
+/** Os ids e o item novo que os specs do ramo `items` repetem. */
+export const ABACATE = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c11';
+export const CERVEJA = '91fe0c3d-2a4b-4c6d-8e0f-1a2b3c4d5e6f';
+export const NEW_ABACATE = {
+  id: ABACATE,
+  position: 0,
+  name: 'ABACATE',
+  price: { kind: 'simple', cents: 699 },
+  unit: 'kg',
+};
+
 export interface ItemsManagerOptions {
   /** O que `find` devolve: primeiro a leitura dos itens citados, depois a releitura do fim. */
   found?: FlyerProItem[][];
