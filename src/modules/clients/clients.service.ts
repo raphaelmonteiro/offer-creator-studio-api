@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { QueryFailedError, Repository, Like } from 'typeorm';
 import { Client } from './entities/client.entity';
 import { ClientContact } from './entities/client-contact.entity';
 import { ClientStore } from './entities/client-store.entity';
@@ -8,6 +8,14 @@ import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { QueryClientDto } from './dto/query-client.dto';
 import { paginate, PaginationResult } from '../../common/utils/pagination.util';
+import { FlyerProClientGuardService } from '../flyer-pro/services/flyer-pro-client-guard.service';
+
+/** Código do Postgres para a recusa por chave estrangeira (`foreign_key_violation`). */
+const FOREIGN_KEY_VIOLATION = '23503';
+
+const isForeignKeyViolation = (error: unknown): boolean =>
+  error instanceof QueryFailedError &&
+  (error.driverError as { code?: string } | undefined)?.code === FOREIGN_KEY_VIOLATION;
 
 @Injectable()
 export class ClientsService {
@@ -18,6 +26,7 @@ export class ClientsService {
     private contactRepository: Repository<ClientContact>,
     @InjectRepository(ClientStore)
     private storeRepository: Repository<ClientStore>,
+    private readonly flyerProClientGuard: FlyerProClientGuardService,
   ) {}
 
   async create(createClientDto: CreateClientDto): Promise<Client> {
@@ -208,9 +217,27 @@ export class ClientsService {
     return this.findOne(id);
   }
 
+  /**
+   * Expurga os encartes Pro já excluídos do cliente e remove o cliente, na mesma transação. Se o banco recusa por chave
+   * estrangeira (encarte Pro vivo, documento do `/editor-v2` ou da Social Media, encarte antigo), a transação volta, o
+   * expurgo junto, e a resposta é 409 `CLIENT_IN_USE`. A contagem sai depois do rollback, por fora da transação
+   * abortada, que não aceita outra consulta. Qualquer outro erro segue como está.
+   */
   async remove(id: string): Promise<void> {
     const client = await this.findOne(id);
-    await this.clientRepository.remove(client);
+    try {
+      await this.clientRepository.manager.transaction(async (manager) => {
+        await this.flyerProClientGuard.purgeDeletedOfClient(manager, id);
+        await manager.remove(client);
+      });
+    } catch (error) {
+      if (!isForeignKeyViolation(error)) throw error;
+      throw new ConflictException({
+        code: 'CLIENT_IN_USE',
+        message: 'Este cliente tem encartes. Exclua os encartes antes de excluir o cliente.',
+        details: { flyerProDocuments: await this.flyerProClientGuard.countLiveOfClient(id) },
+      });
+    }
   }
 
   async updateLogo(id: string, logoUrl: string): Promise<Client> {

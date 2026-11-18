@@ -74,6 +74,12 @@ export class ClientsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Remove um cliente' })
   @ApiResponse({ status: 200, description: 'Cliente removido' })
+  @ApiResponse({ status: 404, description: 'CLIENT_NOT_FOUND: o id não é de nenhum cliente' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'CLIENT_IN_USE: o cliente tem encartes (Pro vivo, /editor-v2, Social Media ou encarte antigo); `details.flyerProDocuments` traz os encartes Pro vivos',
+  })
   remove(@Param('id') id: string) {
     return this.clientsService.remove(id).then(() => ({
       message: 'Cliente removido com sucesso',

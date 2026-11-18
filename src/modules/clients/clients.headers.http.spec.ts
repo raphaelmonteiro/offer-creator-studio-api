@@ -10,6 +10,7 @@ import { SmartValidationPipe } from '../../common/pipes/smart-validation.pipe';
 import { AuthService } from '../auth/auth.service';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { UploadsService } from '../uploads/uploads.service';
+import { FlyerProClientGuardService } from '../flyer-pro/services/flyer-pro-client-guard.service';
 import { ClientsController } from './clients.controller';
 import { ClientsService } from './clients.service';
 import { ClientContact } from './entities/client-contact.entity';
@@ -18,6 +19,7 @@ import { Client } from './entities/client.entity';
 import {
   FakeClientRepository,
   fakeChildRepository,
+  fakeClientGuard,
   footerItem,
   headerItem,
 } from './clients.testutil';
@@ -48,6 +50,7 @@ describe('Clients headers (HTTP)', () => {
         { provide: getRepositoryToken(ClientContact), useValue: fakeChildRepository() },
         { provide: getRepositoryToken(ClientStore), useValue: fakeChildRepository() },
         { provide: UploadsService, useValue: {} },
+        { provide: FlyerProClientGuardService, useValue: fakeClientGuard() },
         {
           provide: AuthService,
           useValue: {
