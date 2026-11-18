@@ -22,7 +22,8 @@ export function useBodyParsers(app: INestApplication): void {
 /**
  * A configuração HTTP de produção que o `main.ts` e o app de teste do e2e compartilham: leitores de corpo, prefixo
  * `/v1`, filtro global de erros e pipe global de validação. O `ResponseInterceptor` entra pelo `APP_INTERCEPTOR` do
- * módulo (o `AppModule` em produção). CORS, arquivos estáticos e Swagger ficam só no `main.ts`.
+ * módulo (o `AppModule` em produção). CORS e Swagger ficam só no `main.ts`; os arquivos estáticos de `/uploads/` vêm de
+ * `useUploadsStatic` (`uploads-static.config.ts`), que o `main.ts` sempre chama e o app de teste chama quando o spec pede.
  */
 export function configureHttpApp(app: INestApplication): void {
   useBodyParsers(app);
