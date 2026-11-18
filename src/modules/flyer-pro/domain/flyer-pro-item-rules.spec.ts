@@ -3,6 +3,7 @@ import { FlyerProItemEntry } from './flyer-pro-item.types';
 import { draftOf } from './flyer-pro-item-merge';
 import { validateItem, validateItems } from './flyer-pro-item-rules';
 
+const NO_IMPORTS: ReadonlySet<string> = new Set();
 const ID = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c11';
 const PHOTO = {
   galleryImageId: '141da073-e2ab-4c8e-bb79-28e24074f743',
@@ -21,9 +22,9 @@ const NEW_ITEM: FlyerProItemEntry = {
 
 /** Os problemas de um item novo (o que o `entry` traz sobre os campos obrigatórios) ou de um existente. */
 const issuesOfNew = (over: Partial<FlyerProItemEntry> = {}) =>
-  validateItem(draftOf({ ...NEW_ITEM, ...over }, null, false));
+  validateItem(draftOf({ ...NEW_ITEM, ...over }, null, false), NO_IMPORTS);
 const issuesOfExisting = (entry: Partial<FlyerProItemEntry>, stored = itemRow({ id: ID })) =>
-  validateItem(draftOf({ id: ID, ...entry }, stored, false));
+  validateItem(draftOf({ id: ID, ...entry }, stored, false), NO_IMPORTS);
 const codes = (issues: Array<{ code: string }>) => issues.map((issue) => issue.code);
 const issue = (field: string, code: string) => ({ itemId: ID, field, code });
 
@@ -52,7 +53,7 @@ describe('validateItem: campos obrigatórios', () => {
   it('com replaceAll toda entrada vem completa, mesmo de item existente', () => {
     const draft = draftOf({ id: ID, name: 'ABACATE' }, itemRow({ id: ID }), true);
 
-    expect(validateItem(draft)).toEqual([
+    expect(validateItem(draft, NO_IMPORTS)).toEqual([
       issue('position', 'REQUIRED_FIELD_MISSING'),
       issue('price', 'REQUIRED_FIELD_MISSING'),
       issue('unit', 'REQUIRED_FIELD_MISSING'),
@@ -60,7 +61,7 @@ describe('validateItem: campos obrigatórios', () => {
   });
 
   it('com replaceAll a entrada completa passa, e o opcional ausente não falta', () => {
-    expect(validateItem(draftOf(NEW_ITEM, itemRow({ id: ID }), true))).toEqual([]);
+    expect(validateItem(draftOf(NEW_ITEM, itemRow({ id: ID }), true), NO_IMPORTS)).toEqual([]);
   });
 });
 
@@ -279,7 +280,7 @@ describe('validateItems: todos os problemas de todos os itens', () => {
       draftOf({ ...NEW_ITEM, id: 'b', category: 'Açougue' }, null, false),
     ];
 
-    expect(validateItems(drafts)).toEqual([
+    expect(validateItems(drafts, NO_IMPORTS)).toEqual([
       { itemId: 'a', field: 'unit', code: 'UNIT_UNKNOWN' },
       { itemId: 'b', field: 'category', code: 'CATEGORY_UNKNOWN' },
     ]);
@@ -301,7 +302,7 @@ describe('validateItems: todos os problemas de todos os itens', () => {
       false,
     );
 
-    expect(codes(validateItem(draft))).toEqual([
+    expect(codes(validateItem(draft, NO_IMPORTS))).toEqual([
       'REQUIRED_FIELD_MISSING',
       'NAME_INVALID',
       'UNIT_UNKNOWN',
@@ -312,6 +313,6 @@ describe('validateItems: todos os problemas de todos os itens', () => {
   });
 
   it('lista vazia não tem problema', () => {
-    expect(validateItems([])).toEqual([]);
+    expect(validateItems([], NO_IMPORTS)).toEqual([]);
   });
 });

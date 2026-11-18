@@ -21,6 +21,8 @@ export interface FlyerProItemEntry {
   categoryDecisionReason?: string | null;
   imageDecision?: 'reject' | null;
   spellDecision?: 'accept' | 'reject' | null;
+  /** A importação que criou o item; só na criação, por isso fora de `ITEM_FIELD_KEYS`. */
+  importId?: string | null;
 }
 
 /** Os campos do item que o cliente escreve (o resto, o servidor deriva). */

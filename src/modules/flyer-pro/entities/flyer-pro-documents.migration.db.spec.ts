@@ -9,8 +9,15 @@ import {
   MIGRATION_TABLES,
   MINIMAL_CLIENTS_SQL,
 } from './flyer-pro-documents.catalog.testutil';
-
-const TABLES_OF_OTHERS = ['flyers', 'flyer_builder_v2_documents'];
+import {
+  createOtherTables,
+  Exec,
+  indexesIn,
+  insertDocumentRow,
+  othersOf,
+  TABLES_OF_OTHERS,
+  tablesIn,
+} from './flyer-pro-documents.migration.testutil';
 
 /**
  * A M1 roda num schema temporário do `chroma_x_e2e`, com uma `clients` mínima e `flyers` e `flyer_builder_v2_documents`
@@ -25,49 +32,12 @@ describeIfE2eDb('M1 do encarte (migration, schema temporário do banco de e2e)',
   const migration = new CreateFlyerProDocuments1767700000000();
   const clientId = randomUUID();
 
-  const exec = (sql: string, params: unknown[] = []) => runner.query(sql, params);
-  const names = async (sql: string) =>
-    (await exec(sql, [schema])).map((row: Record<string, string>) => Object.values(row)[0]).sort();
-  const tables = () =>
-    names(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY 1`);
-  const indexes = () => names(`SELECT indexname FROM pg_indexes WHERE schemaname = $1 ORDER BY 1`);
-  const insertDocument = async (id: string, extra: Record<string, unknown> = {}) => {
-    const columns = [
-      'id',
-      'name',
-      'clientId',
-      'sceneId',
-      'format',
-      'pageCount',
-      'templateSnapshot',
-      'engineVersion',
-    ];
-    const values: unknown[] = [id, 'Ofertas', clientId, randomUUID(), '27x40', 1, '{"v":1}', 1];
-    for (const [column, value] of Object.entries(extra)) {
-      columns.push(column);
-      values.push(value);
-    }
-    const marks = values.map((_, index) => `$${index + 1}`).join(', ');
-    await exec(
-      `INSERT INTO flyer_pro_documents (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${marks})`,
-      values,
-    );
-  };
-  const othersOf = async () => ({
-    catalog: await Promise.all(
-      TABLES_OF_OTHERS.map(async (table) => ({
-        columns: await exec(
-          `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY 1`,
-          [schema, table],
-        ),
-        indexes: await exec(
-          `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename = $2 ORDER BY 1`,
-          [schema, table],
-        ),
-        rows: await exec(`SELECT * FROM ${table}`),
-      })),
-    ),
-  });
+  const exec: Exec = (sql: string, params?: unknown[]) => runner.query(sql, params);
+  const tables = () => tablesIn(exec, schema);
+  const indexes = () => indexesIn(exec, schema);
+  const insertDocument = (id: string, extra: Record<string, unknown> = {}) =>
+    insertDocumentRow(exec, clientId, id, extra);
+  const othersNow = () => othersOf(exec, schema);
 
   beforeAll(async () => {
     dataSource = await openE2eDb();
@@ -77,13 +47,7 @@ describeIfE2eDb('M1 do encarte (migration, schema temporário do banco de e2e)',
     await exec(`SET search_path TO "${schema}"`);
     await exec(MINIMAL_CLIENTS_SQL);
     await exec(`INSERT INTO clients (id, name) VALUES ($1, 'Piccin')`, [clientId]);
-    await exec(`CREATE TABLE flyers (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text)`);
-    await exec(`CREATE INDEX "IDX_flyers_name" ON flyers (name)`);
-    await exec(`INSERT INTO flyers (name) VALUES ('antigo')`);
-    await exec(
-      `CREATE TABLE flyer_builder_v2_documents (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), title text)`,
-    );
-    await exec(`INSERT INTO flyer_builder_v2_documents (title) VALUES ('v2')`);
+    await createOtherTables(exec);
   });
 
   afterAll(async () => {
@@ -97,7 +61,7 @@ describeIfE2eDb('M1 do encarte (migration, schema temporário do banco de e2e)',
   let othersBefore: Awaited<ReturnType<typeof othersOf>>;
 
   it('sobe: duas tabelas com 28 e 23 colunas, quatro chaves e seis índices, sem nada das migrations seguintes', async () => {
-    othersBefore = await othersOf();
+    othersBefore = await othersNow();
     await migration.up(runner);
     firstUp = await catalogOf(runner, schema);
 
@@ -153,7 +117,7 @@ describeIfE2eDb('M1 do encarte (migration, schema temporário do banco de e2e)',
     }
     expect(firstUp.columns.filter((c) => /\.(importId|thumbnailUrl):/.test(c))).toEqual([]);
     expect(Object.values(firstUp.constraints).filter((d) => d.startsWith('CHECK'))).toEqual([]);
-    expect(await othersOf()).toEqual(othersBefore);
+    expect(await othersNow()).toEqual(othersBefore);
   });
 
   it('padrões das colunas: encarte e item inseridos só com o obrigatório', async () => {

@@ -9,6 +9,17 @@ import { STAMP } from './flyer-pro-save.service.testutil';
 export const CONTEXT = { stamp: STAMP, userId: 'ana' };
 export const DOCUMENT = 'd1';
 
+/** Os ids e o item novo que os specs do ramo `items` repetem. */
+export const ABACATE = '7d0c2a1e-5f3b-4c8e-9a10-2b4d6f8a0c11';
+export const CERVEJA = '91fe0c3d-2a4b-4c6d-8e0f-1a2b3c4d5e6f';
+export const NEW_ABACATE = {
+  id: ABACATE,
+  position: 0,
+  name: 'ABACATE',
+  price: { kind: 'simple', cents: 699 },
+  unit: 'kg',
+};
+
 export interface ItemsManagerOptions {
   /** O que `find` devolve: primeiro a leitura dos itens citados, depois a releitura do fim. */
   found?: FlyerProItem[][];
@@ -16,12 +27,15 @@ export interface ItemsManagerOptions {
   deleted?: string[][];
   /** A contagem de itens do encarte depois de gravar. */
   total?: number;
+  /** Os ids de importação deste encarte que a leitura das importações conhecidas devolve. */
+  imports?: string[];
 }
 
 export function makeItemsManager({
   found = [],
   deleted = [],
   total = 3,
+  imports = [],
 }: ItemsManagerOptions = {}) {
   const finds = [...found];
   const deletes = [...deleted];
@@ -33,6 +47,8 @@ export function makeItemsManager({
         return Promise.resolve([ids.map((id) => ({ id })), ids.length]);
       }
       if (sql.startsWith('SELECT count')) return Promise.resolve([{ total }]);
+      if (sql.includes('"flyer_pro_imports"'))
+        return Promise.resolve(imports.map((id) => ({ id })));
       return Promise.resolve([]);
     }),
   };

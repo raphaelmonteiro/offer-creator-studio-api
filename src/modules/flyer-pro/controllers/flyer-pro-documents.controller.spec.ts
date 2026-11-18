@@ -1,9 +1,16 @@
-import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { RequestMethod } from '@nestjs/common';
+import {
+  GUARDS_METADATA,
+  METHOD_METADATA,
+  PATH_METADATA,
+  ROUTE_ARGS_METADATA,
+} from '@nestjs/common/constants';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import type { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
 import type { UpdateFlyerProCursorDto } from '../dto/update-flyer-pro-cursor.dto';
 import type { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
+import type { FlyerProImportsService } from '../services/flyer-pro-imports.service';
 import type { FlyerProItemsService } from '../services/flyer-pro-items.service';
 import type { FlyerProCursorService } from '../services/flyer-pro-cursor.service';
 import type { FlyerProDocumentsService } from '../services/flyer-pro-documents.service';
@@ -22,12 +29,14 @@ function setup() {
   const saves = { save: jest.fn() };
   const cursors = { set: jest.fn() };
   const items = { list: jest.fn() };
+  const imports = { list: jest.fn() };
   const res = { status: jest.fn() };
   const controller = new FlyerProDocumentsController(
     documents as unknown as FlyerProDocumentsService,
     saves as unknown as FlyerProSaveService,
     cursors as unknown as FlyerProCursorService,
     items as unknown as FlyerProItemsService,
+    imports as unknown as FlyerProImportsService,
   );
   return {
     controller,
@@ -35,6 +44,7 @@ function setup() {
     saves,
     cursors,
     items,
+    imports,
     res: res as unknown as Response & typeof res,
   };
 }
@@ -119,6 +129,26 @@ describe('FlyerProDocumentsController', () => {
 
     expect(items.list).toHaveBeenNthCalledWith(1, 'd1', '2026-11-14T13:05:40.412377Z');
     expect(items.list).toHaveBeenNthCalledWith(2, 'd1', undefined);
+  });
+
+  it('o histórico das importações é GET :id/imports com o pipe do id, e passa o id e a consulta ao serviço', async () => {
+    const { controller, imports } = setup();
+    const page = { data: [], pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } };
+    imports.list.mockResolvedValue(page);
+    const handler = FlyerProDocumentsController.prototype.listImports;
+    const args = Reflect.getMetadata(
+      ROUTE_ARGS_METADATA,
+      FlyerProDocumentsController,
+      'listImports',
+    );
+
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(':id/imports');
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.GET);
+    expect(
+      Object.values<{ pipes: unknown[] }>(args).some((a) => a.pipes.includes(DocumentIdPipe)),
+    ).toBe(true);
+    await expect(controller.listImports('d1', { fileHash: 'h', page: 2 })).resolves.toBe(page);
+    expect(imports.list).toHaveBeenCalledWith('d1', { fileHash: 'h', page: 2 });
   });
 
   it('o pipe do id deixa passar um UUID e transforma o que não é UUID em 404 FLYER_PRO_NOT_FOUND', async () => {

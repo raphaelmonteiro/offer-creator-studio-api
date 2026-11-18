@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { nestedErrorsOf } from './dto-paths.testutil';
 import { SaveFlyerProDocumentDto } from './save-flyer-pro-document.dto';
 
 const VALID = {
@@ -52,10 +53,14 @@ describe('SaveFlyerProDocumentDto', () => {
     expect(await errorsOf({ expectedRevision: 0, schemaVersion: 2147483647 })).toEqual([]);
   });
 
-  it('campo desconhecido, inclusive `import` e `enrich`, é recusado', async () => {
+  it('campo desconhecido, inclusive `enrich` (que só chega na change 28), é recusado', async () => {
     expect(await errorsOf({ foo: 1 })).toEqual(['foo']);
-    expect(await errorsOf({ import: {} })).toEqual(['import']);
     expect(await errorsOf({ enrich: {} })).toEqual(['enrich']);
+  });
+
+  it('import é opcional; a forma dele está em flyer-pro-import.dto.spec.ts, e o objeto vazio é recusado', async () => {
+    expect(await errorsOf({ import: {} })).toEqual(['import']);
+    expect(await errorsOf({ import: null })).toEqual(['import']);
   });
 
   describe('slices', () => {
@@ -126,5 +131,55 @@ describe('SaveFlyerProDocumentDto', () => {
     it('campo desconhecido no setup é recusado', async () => {
       expect(await errorsOf({ setup: { format: '54x40' } })).toEqual(['setup']);
     });
+  });
+});
+
+describe('nulo dentro de setup e de items (DT-95): 400 de forma, nunca campo ausente', () => {
+  const paths = (body: Record<string, unknown>) =>
+    nestedErrorsOf(SaveFlyerProDocumentDto, { ...VALID, ...body });
+
+  it.each([
+    ['setup.name', { setup: { name: null } }],
+    ['setup.clientId', { setup: { clientId: null } }],
+    ['setup.sceneId', { setup: { sceneId: null } }],
+    ['setup.refreshTemplate', { setup: { refreshTemplate: null } }],
+    ['setup.pageCount', { setup: { pageCount: null } }],
+    ['items.upsert', { items: { upsert: null } }],
+    ['items.delete', { items: { delete: null } }],
+    ['items.replaceAll', { items: { replaceAll: null } }],
+  ])('%s nulo é recusado, com o erro na propriedade aninhada', async (path, body) => {
+    expect(await paths(body)).toEqual([path]);
+  });
+
+  it('um campo nulo junto de um válido recusa o corpo todo, e só aponta o nulo', async () => {
+    expect(await paths({ setup: { name: 'Ofertas Piccin semana 48', pageCount: null } })).toEqual([
+      'setup.pageCount',
+    ]);
+    expect(await paths({ items: { upsert: [], delete: null } })).toEqual(['items.delete']);
+  });
+
+  it('o corpo de um PATCH já aceito (o mesmo mutationId) com items.upsert nulo também é recusado, antes do reenvio', async () => {
+    const accepted = {
+      mutationId: VALID.mutationId,
+      expectedRevision: 37,
+      items: { upsert: null },
+    };
+    expect(await paths(accepted)).toEqual(['items.upsert']);
+  });
+
+  it('o campo ausente continua válido, e os ramos que chegam como lista seguem recusados', async () => {
+    expect(await paths({ setup: { name: 'Ofertas Piccin semana 48' } })).toEqual([]);
+    expect(await paths({ items: { upsert: [] } })).toEqual([]);
+    expect(await paths({ items: { upsert: [{ id: VALID.mutationId }] } })).toEqual([]);
+    expect(await paths({ setup: [], slices: [{}], items: [] })).toEqual([
+      'setup',
+      'slices',
+      'items',
+    ]);
+  });
+
+  it('o null dentro de um item de upsert continua valendo como valor (ean, price e importId nulos)', async () => {
+    const item = { id: VALID.mutationId, ean: null, price: null, importId: null };
+    expect(await paths({ items: { upsert: [item] } })).toEqual([]);
   });
 });

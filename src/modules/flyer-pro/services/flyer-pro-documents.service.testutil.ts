@@ -93,6 +93,7 @@ export function itemRow(over: Partial<FlyerProItem> = {}): FlyerProItem {
     imageReview: null,
     spellReview: null,
     imported: null,
+    importId: null,
     createdAt: new Date('2026-11-14T13:04:02.118Z'),
     updatedAt: new Date('2026-11-14T13:05:40.412Z'),
     ...over,

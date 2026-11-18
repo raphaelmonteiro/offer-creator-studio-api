@@ -3,7 +3,8 @@ import type { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 /**
  * O `UPDATE` do encarte montado à mão: só as colunas dadas, nenhuma outra (um `UPDATE` pelo `UpdateQueryBuilder`
  * acrescentaria `updatedAt` se a coluna fosse `@UpdateDateColumn`). Os nomes das colunas são só os do tipo, nunca texto
- * de pedido.
+ * de pedido. `pagesFrozen` só volta a `false` por aqui, quando uma importação "Substituir" é gravada; quem o liga é o
+ * SQL do cursor (`flyer-pro-cursor.service.ts`).
  */
 type PlainColumn =
   | 'name'
@@ -11,6 +12,7 @@ type PlainColumn =
   | 'sceneId'
   | 'format'
   | 'pageCount'
+  | 'pagesFrozen'
   | 'templateSnapshot'
   | 'frame'
   | 'structure'

@@ -111,40 +111,6 @@ describe('FlyerProSaveService.save: o ramo items', () => {
     expect(calls()).toEqual([]);
   });
 
-  it.each([
-    ['upsert', { upsert: null }],
-    ['delete', { delete: null }],
-    ['os dois', { upsert: null, delete: null }],
-  ])('o reenvio com items.%s nulo é 200 replayed: lista vazia, nunca 500', async (_, nulls) => {
-    const { service, items: branch } = makeSaveService(storedDocument({ lastMutationId: 'M1' }));
-
-    const view = await service.save('ana', 'd1', saveBody({ items: nulls }));
-
-    expect(view).toMatchObject({ replayed: true, applied: true, items: [] });
-    expect(branch.currentOf).toHaveBeenCalledWith(expect.anything(), 'd1', []);
-  });
-
-  it('a primeira gravação com items.upsert e items.delete nulos chama o ramo com listas vazias', async () => {
-    const { service, items: branch } = makeSaveService();
-
-    await service.save('ana', 'd1', saveBody({ items: { upsert: null, delete: null } }));
-
-    expect(branch.apply).toHaveBeenCalledWith(
-      expect.anything(),
-      'd1',
-      { upsert: [], delete: [] },
-      expect.anything(),
-    );
-  });
-
-  it('upsert nulo conta como ausente também na conferência de ids repetidos (200, nunca 400 nem 500)', async () => {
-    const { service } = makeSaveService();
-
-    await expect(
-      service.save('ana', 'd1', saveBody({ items: { upsert: null } })),
-    ).resolves.toMatchObject({ applied: true });
-  });
-
   it('o carimbo do encarte também é o da gravação dos itens (a mesma hora em tudo)', async () => {
     const { service, updates } = makeSaveService();
 

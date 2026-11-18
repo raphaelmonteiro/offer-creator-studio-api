@@ -3,20 +3,19 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { deriveItem } from '../domain/flyer-pro-item-derive';
 import { draftOf } from '../domain/flyer-pro-item-merge';
-import { validateItems } from '../domain/flyer-pro-item-rules';
+import { importIdsOfNewItems, validateItems } from '../domain/flyer-pro-item-rules';
 import { utcInstantOf } from '../domain/flyer-pro-instant';
 import { ItemDraft } from '../domain/flyer-pro-item.types';
 import {
   flyerProItemIdConflict,
   flyerProItemInvalid,
   flyerProItemLimit,
-  flyerProNotFound,
 } from '../domain/flyer-pro.errors';
 import { FLYER_PRO_LIMITS } from '../domain/flyer-pro.limits';
 import type { FlyerProItemsPatchDto } from '../dto/flyer-pro-items-patch.dto';
-import { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import type { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import { FlyerProItemView, toItemView } from '../views/flyer-pro-document.view';
+import { findKnownImportIds } from './flyer-pro-import.statements';
 import {
   countItems,
   deleteItems,
@@ -26,7 +25,7 @@ import {
   ItemRow,
   updateItems,
 } from './flyer-pro-item.statements';
-import { readWith } from './flyer-pro-read';
+import { assertLiveDocument, readWith } from './flyer-pro-read';
 
 /** O carimbo da gravação (lido depois da trava do encarte) e o usuário do token. */
 export interface ItemsContext {
@@ -64,7 +63,8 @@ const ITEMS_CURSOR_SQL = `SELECT to_char(
 
 /**
  * O ramo `items` do `PATCH` (N4), dentro da transação do salvar, na ordem do contrato: apagar `delete`; ler os itens
- * citados em `upsert` (id de outro encarte é 409); mesclar; validar todos (422, com todos os `issues`); derivar o que só o
+ * citados em `upsert` (id de outro encarte é 409); ler as importações do encarte a que os itens novos se ligam (a do
+ * corpo, gravada antes, entra pela mesma transação); mesclar; validar todos (422, com todos os `issues`); derivar o que só o
  * servidor escreve; gravar em lote com o carimbo; `replaceAll` apaga o resto; contar (422 acima de 500). Uma recusa em
  * qualquer passo desfaz a transação inteira.
  */
@@ -80,11 +80,7 @@ export class FlyerProItemsService {
   list(id: string, updatedAfter?: string): Promise<FlyerProItemsPage> {
     const after = updatedAfter ? utcInstantOf(updatedAfter) : null;
     return readWith(this.dataSource, undefined, async (manager) => {
-      const document = await manager.findOne(FlyerProDocument, {
-        where: { id },
-        select: { id: true },
-      });
-      if (!document) throw flyerProNotFound();
+      await assertLiveDocument(manager, id);
       const items: FlyerProItem[] = await manager.query(ITEMS_AFTER_SQL, [id, after]);
       const [{ cursor }] = await manager.query(ITEMS_CURSOR_SQL, [id, after]);
       return { items: items.map(toItemView), cursor };
@@ -101,7 +97,8 @@ export class FlyerProItemsService {
     const upsert = patch.upsert ?? [];
     const ids = upsert.map((entry) => entry.id);
     const drafts = await this.draftsOf(manager, documentId, patch);
-    const issues = validateItems(drafts);
+    const imports = await findKnownImportIds(manager, documentId, importIdsOfNewItems(drafts));
+    const issues = validateItems(drafts, imports);
     if (issues.length > 0) throw flyerProItemInvalid(issues);
     const rows = splitRows(documentId, drafts, context);
     await this.write(manager, documentId, rows, context.stamp);
@@ -167,7 +164,9 @@ function splitRows(documentId: string, drafts: ItemDraft[], context: ItemsContex
   for (const draft of drafts) {
     const derived = deriveItem(draft, { stamp: context.stamp, userId: context.userId });
     const row: ItemRow = { ...draft.merged, ...derived, id: draft.entry.id, documentId };
-    (draft.stored ? rows.known : rows.fresh).push(row);
+    // `importId` só entra na inserção: o `UPDATE` não o escreve (A-8).
+    if (draft.stored) rows.known.push(row);
+    else rows.fresh.push({ ...row, importId: draft.entry.importId ?? null });
   }
   return rows;
 }

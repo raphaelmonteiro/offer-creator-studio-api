@@ -29,4 +29,14 @@ export const FLYER_PRO_LIMITS = {
   priceMaxCents: 9_999_999,
   /** O motivo do bloqueio de uma sugestão de categoria. */
   decisionReasonMaxLength: 120,
+  /** Linhas recusadas que o registro de uma importação guarda (`flyer_pro_imports.rejected`). */
+  importRejectedMax: 200,
+  /** O trecho `raw` de uma linha recusada. */
+  importRawMaxLength: 200,
+  /** `flyer_pro_imports.fileName`. */
+  importFileNameMaxLength: 255,
+  /** `flyer_pro_imports.fileHash`. */
+  importFileHashMaxLength: 64,
+  /** `flyer_pro_imports.detectedFormat`. */
+  importDetectedFormatMaxLength: 16,
 } as const;

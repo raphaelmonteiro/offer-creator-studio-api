@@ -6,7 +6,6 @@ import {
   firstOversizedPart,
   isConferenceBody,
   SAVE_REQUIRED_FIELDS,
-  withoutNullItemLists,
 } from './flyer-pro-save-rules';
 
 const BASE = { mutationId: 'm', expectedRevision: 0, schemaVersion: 1, engineVersion: 1 };
@@ -106,10 +105,15 @@ describe('isConferenceBody', () => {
     expect(isConferenceBody({ items: null })).toBe(false);
   });
 
-  it('setup, slices ou items presentes, mesmo vazios, fazem um PATCH normal', () => {
+  it('setup, slices, items ou import presentes, mesmo vazios, fazem um PATCH normal', () => {
     expect(isConferenceBody({ setup: {} })).toBe(false);
     expect(isConferenceBody({ slices: {} })).toBe(false);
     expect(isConferenceBody({ items: {} })).toBe(false);
+    expect(isConferenceBody({ import: {} })).toBe(false);
+  });
+
+  it('um corpo só com import nunca é regravação de conferência (a importação não seria gravada)', () => {
+    expect(isConferenceBody({ import: { id: 'i' }, layoutDigest: 'x' } as object)).toBe(false);
   });
 });
 
@@ -171,27 +175,5 @@ describe('assertSaveBody', () => {
 
   it('corpo válido não lança', () => {
     expect(responseOf({ ...BASE, slices: { structure: objectOf(262_144) } })).toBeNull();
-  });
-});
-
-describe('withoutNullItemLists', () => {
-  it('upsert e delete nulos ou ausentes viram lista vazia; o resto do corpo e o replaceAll ficam', () => {
-    expect(
-      withoutNullItemLists({ a: 1, items: { upsert: null, delete: null, replaceAll: true } }),
-    ).toEqual({ a: 1, items: { upsert: [], delete: [], replaceAll: true } });
-    expect(withoutNullItemLists({ items: {} })).toEqual({ items: { upsert: [], delete: [] } });
-  });
-
-  it('listas enviadas passam como estão, e o corpo sem items volta o mesmo objeto', () => {
-    const items = { upsert: [{ id: 'a' }], delete: ['b'] };
-    expect(withoutNullItemLists({ items })).toEqual({ items });
-    const body = { mutationId: 'm', items: undefined };
-    expect(withoutNullItemLists(body)).toBe(body);
-  });
-
-  it('não altera o corpo recebido', () => {
-    const body = { items: { upsert: null } };
-    withoutNullItemLists(body);
-    expect(body).toEqual({ items: { upsert: null } });
   });
 });

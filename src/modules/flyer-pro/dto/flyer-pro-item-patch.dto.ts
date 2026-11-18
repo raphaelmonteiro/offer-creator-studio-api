@@ -104,6 +104,14 @@ export class FlyerProItemPatchDto implements FlyerProItemEntry {
   @IsObject()
   imported?: Record<string, unknown>;
 
+  @ApiPropertyOptional({
+    description:
+      'A importação que criou o item (a de `import` no mesmo corpo ou uma do encarte); só na criação',
+  })
+  @IsOptional()
+  @IsUUID()
+  importId?: string;
+
   @ApiPropertyOptional({ enum: ['accept', 'reject', 'blocked'] })
   @IsOptional()
   @IsIn(['accept', 'reject', 'blocked'])

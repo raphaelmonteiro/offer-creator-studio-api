@@ -63,6 +63,12 @@ export const newItemPayload = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** `count` itens novos ligados à importação, nas posições a partir de `first` (os itens do cenário "Importar a lista do Piccin"). */
+export const importedItemsPayload = (importId: string, count: number, first = 0) =>
+  Array.from({ length: count }, (_, index) =>
+    newItemPayload({ position: first + index, name: `PRODUTO ${first + index}`, importId }),
+  );
+
 export type Row = Record<string, unknown>;
 
 /** A linha do encarte como o banco a guarda (sem passar pela view). */

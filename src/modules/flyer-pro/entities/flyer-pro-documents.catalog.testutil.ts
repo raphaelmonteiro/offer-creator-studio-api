@@ -1,6 +1,14 @@
-/** O catálogo do Postgres das duas tabelas da M1, lido para os specs de banco (só testes). */
+/** O catálogo do Postgres das tabelas do encarte (M1 e M2), lido para os specs de banco (só testes). */
 
 export const MIGRATION_TABLES = ['flyer_pro_documents', 'flyer_pro_items'];
+
+/** A tabela e os dois índices que a M2 acrescenta; o spec da M1 continua contando só os seis dela. */
+export const M2_TABLES = ['flyer_pro_imports'];
+
+export const M2_INDEXES = ['IDX_flyer_pro_imports_document_hash', 'IDX_flyer_pro_items_import'];
+
+/** As três tabelas depois da M2, para os specs que comparam o banco inteiro do encarte. */
+export const ALL_TABLES = [...MIGRATION_TABLES, ...M2_TABLES];
 
 export const MIGRATION_INDEXES = [
   'IDX_flyer_pro_documents_list',
@@ -30,11 +38,15 @@ const withoutSchema = (definition: string, schema: string): string =>
   definition.split(`${schema}.`).join('');
 
 /**
- * As colunas, os índices e as restrições de `flyer_pro_documents` e `flyer_pro_items` num schema. O padrão de `id` do
- * encarte fica de fora: a migration usa `gen_random_uuid()` e o TypeORM `uuid_generate_v4()` (o mesmo caso das cenas),
- * e o `synchronize` não compara o padrão de chave gerada.
+ * As colunas, os índices e as restrições das tabelas dadas num schema (as duas da M1, por padrão; `ALL_TABLES` traz
+ * também a da M2). O padrão de `id` do encarte fica de fora: a migration usa `gen_random_uuid()` e o TypeORM
+ * `uuid_generate_v4()` (o mesmo caso das cenas), e o `synchronize` não compara o padrão de chave gerada.
  */
-export async function catalogOf(db: Query, schema: string): Promise<Catalog> {
+export async function catalogOf(
+  db: Query,
+  schema: string,
+  tables: string[] = MIGRATION_TABLES,
+): Promise<Catalog> {
   const columns = await db.query(
     `SELECT table_name || '.' || column_name || ': ' || data_type
             || coalesce('(' || character_maximum_length || ')', '')
@@ -44,11 +56,11 @@ export async function catalogOf(db: Query, schema: string): Promise<Catalog> {
        FROM information_schema.columns
       WHERE table_schema = $1 AND table_name = ANY($2)
       ORDER BY 1`,
-    [schema, MIGRATION_TABLES],
+    [schema, tables],
   );
   const indexes = await db.query(
     `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename = ANY($2)`,
-    [schema, MIGRATION_TABLES],
+    [schema, tables],
   );
   const constraints = await db.query(
     `SELECT c.conname, pg_get_constraintdef(c.oid) AS definition
@@ -56,7 +68,7 @@ export async function catalogOf(db: Query, schema: string): Promise<Catalog> {
        JOIN pg_class t ON t.oid = c.conrelid
        JOIN pg_namespace n ON n.oid = t.relnamespace
       WHERE n.nspname = $1 AND t.relname = ANY($2)`,
-    [schema, MIGRATION_TABLES],
+    [schema, tables],
   );
   const byName = (rows: Array<Record<string, string>>, name: string, value: string) =>
     Object.fromEntries(rows.map((row) => [row[name], withoutSchema(row[value], schema)]));

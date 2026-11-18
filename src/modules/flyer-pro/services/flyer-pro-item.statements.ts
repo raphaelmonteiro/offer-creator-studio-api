@@ -6,7 +6,8 @@ import { FlyerProItem } from '../entities/flyer-pro-item.entity';
 /** Os comandos do ramo `items` do `PATCH` sobre `flyer_pro_items`: ler, apagar, gravar em lote e contar. */
 
 /** A linha do item pronta para gravar: o que o cliente escreve (mesclado) e o que o servidor derivou. */
-export type ItemRow = ItemFields & DerivedItemFields & { id: string; documentId: string };
+export type ItemRow = ItemFields &
+  DerivedItemFields & { id: string; documentId: string; importId?: string | null };
 
 const DERIVED_KEYS = [
   'categorySource',
@@ -16,7 +17,7 @@ const DERIVED_KEYS = [
   'spellReview',
 ] as const;
 
-/** As colunas que um `PATCH` escreve em item existente; `id`, `documentId` e `createdAt` ficam como estão. */
+/** As colunas que um `PATCH` escreve em item existente; `id`, `documentId`, `importId` e `createdAt` ficam como estão. */
 const WRITE_COLUMNS: readonly string[] = [...ITEM_FIELD_KEYS, ...DERIVED_KEYS];
 
 const quoted = (names: readonly string[]): string => names.map((name) => `"${name}"`).join(', ');
@@ -70,10 +71,10 @@ export async function deleteItemsExcept(
   return rows.map((row: { id: string }) => row.id);
 }
 
-/** Insere os itens novos de uma vez; `createdAt` e `updatedAt` levam o carimbo da gravação. */
+/** Insere os itens novos de uma vez, com `importId`; `createdAt` e `updatedAt` levam o carimbo da gravação. */
 export async function insertItems(manager: EntityManager, rows: ItemRow[], stamp: string) {
   if (rows.length === 0) return;
-  const columns = ['id', 'documentId', ...WRITE_COLUMNS];
+  const columns = ['id', 'documentId', 'importId', ...WRITE_COLUMNS];
   await manager.query(
     `INSERT INTO "flyer_pro_items" (${quoted([...columns, 'createdAt', 'updatedAt'])})
      SELECT ${columns.map((name) => `r."${name}"`).join(', ')}, $2::timestamptz, $2::timestamptz ${FROM_RECORDS}`,
