@@ -1,6 +1,6 @@
 import type { LlmUsage } from '../../ai/openai-llm-pricing';
 import type { StructureAliases } from './structure-suggestion-aliases';
-import { LOOSE_SECTION_ID } from './structure-suggestion-rules';
+import { categoryOfSectionId } from './structure-suggestion-rules';
 import type { StructureExample } from './read-structure-example';
 import type {
   RawStructureSuggestion,
@@ -70,37 +70,16 @@ export interface StructureAiRequestInput {
   maxHeroes: number;
 }
 
-const categoryOf = (sectionId: string): string | null =>
-  sectionId === LOOSE_SECTION_ID ? null : sectionId.slice('cat:'.length);
-
-/** Os apelidos dos itens de cada seção na ordem do pedido, só dos que são do encarte e na primeira aparição. */
-function itemAliasesBySection(input: StructureAiRequestInput): Map<string, string[]> {
-  const claimed = new Set<string>();
-  const bySection = new Map<string, string[]>();
-  for (const section of input.request.sections) {
-    const aliases: string[] = [];
-    for (const itemId of section.itemIds) {
-      const alias = input.aliases.aliasByItem.get(itemId);
-      if (alias === undefined || claimed.has(itemId)) continue;
-      claimed.add(itemId);
-      aliases.push(alias);
-    }
-    bySection.set(section.id, aliases);
-  }
-  return bySection;
-}
-
 /** O pedido ao provedor: seções e itens por apelido, o nome do encarte e os exemplos do cliente. */
 export function buildStructureAiRequest(input: StructureAiRequestInput): StructureAiRequest {
   const { request, aliases } = input;
-  const bySection = itemAliasesBySection(input);
   const rows = new Map(input.items.map((item) => [item.id, item]));
   const heroOf = new Map(request.heroes.map((hero) => [hero.itemId, hero.size]));
   const sections = request.sections.map(
     (section): StructureAiSection => ({
       alias: aliases.aliasBySection.get(section.id),
-      category: categoryOf(section.id),
-      itemAliases: bySection.get(section.id) ?? [],
+      category: categoryOfSectionId(section.id),
+      itemAliases: aliases.itemAliasesBySection.get(section.id) ?? [],
       cells: section.cells,
       pages: section.pages,
       ...(section.pinnedPage !== undefined ? { pinnedPage: section.pinnedPage } : {}),

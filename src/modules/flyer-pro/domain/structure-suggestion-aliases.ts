@@ -9,6 +9,8 @@ export interface StructureAliases {
   aliasBySection: ReadonlyMap<string, string>;
   itemByAlias: ReadonlyMap<string, string>;
   aliasByItem: ReadonlyMap<string, string>;
+  /** Seção -> apelidos dos seus itens na ordem do pedido: só os do encarte, na seção da primeira aparição. */
+  itemAliasesBySection: ReadonlyMap<string, string[]>;
 }
 
 const itemAliasOf = (position: number) => `p${String(position).padStart(2, '0')}`;
@@ -25,17 +27,21 @@ export function buildAliases(
   const aliasBySection = new Map<string, string>();
   const itemByAlias = new Map<string, string>();
   const aliasByItem = new Map<string, string>();
+  const itemAliasesBySection = new Map<string, string[]>();
   sections.forEach((section, index) => {
     sectionByAlias.set(`s${index + 1}`, section.id);
     aliasBySection.set(section.id, `s${index + 1}`);
   });
   for (const section of sections) {
+    const own: string[] = [];
     for (const itemId of section.itemIds) {
       if (!realItemIds.has(itemId) || aliasByItem.has(itemId)) continue;
       const alias = itemAliasOf(aliasByItem.size + 1);
       aliasByItem.set(itemId, alias);
       itemByAlias.set(alias, itemId);
+      own.push(alias);
     }
+    itemAliasesBySection.set(section.id, own);
   }
-  return { sectionByAlias, aliasBySection, itemByAlias, aliasByItem };
+  return { sectionByAlias, aliasBySection, itemByAlias, aliasByItem, itemAliasesBySection };
 }

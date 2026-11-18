@@ -1,4 +1,5 @@
 import { FLYER_PRO_CATEGORIES } from './flyer-pro-categories';
+import { categoryOfSectionId } from './structure-suggestion-rules';
 
 /**
  * A única leitura de conteúdo de fatia que o servidor faz (A-8): a ordem que o cliente usou num encarte anterior, só para
@@ -32,7 +33,6 @@ export interface StructureExample {
 
 /** A maior versão da fatia que o leitor conhece. */
 const KNOWN_SCHEMA_VERSION = 1;
-const CATEGORY_PREFIX = 'cat:';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -76,14 +76,13 @@ export function readStructureExample(row: StructureExampleRow): StructureExample
   if (Number(row.schemaVersion) > KNOWN_SCHEMA_VERSION || !isRecord(row.structure)) return null;
   const ids = sectionIdsOf(row.structure);
   if (ids === null) return null;
-  const categoryIds = ids.filter(
-    (id) => id.startsWith(CATEGORY_PREFIX) && id.length > CATEGORY_PREFIX.length,
-  );
-  if (categoryIds.length === 0) return null;
-  const sections = categoryIds.map((id) => ({
-    category: id.slice(CATEGORY_PREFIX.length),
-    page: firstPageOf(row.structure['plan'], id),
-  }));
+  const sections = ids
+    .map((id) => ({
+      category: categoryOfSectionId(id),
+      page: firstPageOf(row.structure['plan'], id),
+    }))
+    .filter((section): section is StructureExampleSection => Boolean(section.category));
+  if (sections.length === 0) return null;
   const suggested = isRecord(row.structure['suggestion']);
   return {
     format: row.format,

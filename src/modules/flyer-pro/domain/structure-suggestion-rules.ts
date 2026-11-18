@@ -16,6 +16,10 @@ import type {
 export const LOOSE_SECTION_ID = 'loose';
 const CATEGORY_PREFIX = 'cat:';
 
+/** A categoria de um id de seção `cat:<categoria>` ("Carnes"); `null` no bloco de soltos e em id sem o prefixo. */
+export const categoryOfSectionId = (sectionId: string): string | null =>
+  sectionId.startsWith(CATEGORY_PREFIX) ? sectionId.slice(CATEGORY_PREFIX.length) : null;
+
 const REQUIRED_FIELDS = ['stateDigest', 'pageCount', 'level', 'pages', 'sections', 'heroes'];
 
 /** As seções de categoria do pedido (todas menos o bloco de soltos), na ordem recebida. */
@@ -90,8 +94,8 @@ function unknownSectionIssues(
   const issues: StructureIssue[] = [];
   sections.forEach((section, index) => {
     if (section.id === LOOSE_SECTION_ID) return;
-    const category = section.id.slice(CATEGORY_PREFIX.length);
-    if (!categories.includes(category)) {
+    const category = categoryOfSectionId(section.id);
+    if (category === null || !categories.includes(category)) {
       issues.push({ field: sectionField(index, 'id'), code: 'SECTION_UNKNOWN' });
     }
   });
