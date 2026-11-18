@@ -1,5 +1,6 @@
 import type { FlyerEanResolutionService } from '../../ai/ean/dotcompany/flyer-ean-resolution.service';
 import type { GalleryEmbeddingService } from '../../ai/gallery-embedding.service';
+import { runWithConcurrency } from '../../ai/utils/run-with-concurrency.util';
 import {
   ImageSearchAnswer,
   imageSearchRequest,
@@ -18,6 +19,9 @@ export type ImageSearchApi = Pick<FlyerEanResolutionService, 'findImages'>;
 /** A busca por nome depende do embedding: é ele que diz se ela está disponível. */
 export type NameSearchApi = Pick<GalleryEmbeddingService, 'isEnabled'>;
 export type PhotoSizeApi = Pick<FlyerProImageSizeService, 'measure'>;
+
+/** Quantas fotos o lote mede ao mesmo tempo (D-orq-2, PV-11). */
+export const PHOTO_MEASURE_CONCURRENCY = 4;
 
 /**
  * A fase de fotos do provedor real (U2.6): chama a busca de fotos do encarte (EAN, nome já escolhido e casamento por
@@ -45,18 +49,22 @@ export class EnrichImagePhase {
     return items.map((item) => imageVerdictOf(item, answer, { sizes, nameSearch }));
   }
 
-  /** A medida de cada foto de `matches`, em paralelo (só o cabeçalho do arquivo); `null` onde não deu para ler. */
+  /**
+   * A medida de cada foto de `matches`, com no máximo `PHOTO_MEASURE_CONCURRENCY` ao mesmo tempo (D-orq-2): a foto fora do
+   * `CDN_URL` é baixada, com teto de 50 MB, e 16 fotos juntas seriam até 800 MB em memória no worker; `null` onde não
+   * deu para ler.
+   */
   private async measureMatches(
     answer: ImageSearchAnswer,
     signal: AbortSignal,
   ): Promise<Map<string, PhotoSize | null>> {
-    const measured = await Promise.all(
-      answer.matches.map(
-        async (match): Promise<[string, PhotoSize | null]> => [
-          match.productId,
-          await this.sizes.measure(match.imageUrl, { signal }),
-        ],
-      ),
+    const measured = await runWithConcurrency(
+      answer.matches,
+      PHOTO_MEASURE_CONCURRENCY,
+      async (match): Promise<[string, PhotoSize | null]> => [
+        match.productId,
+        await this.sizes.measure(match.imageUrl, { signal }),
+      ],
     );
     return new Map(measured);
   }
