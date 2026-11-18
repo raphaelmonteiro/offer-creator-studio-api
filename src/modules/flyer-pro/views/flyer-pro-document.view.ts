@@ -37,8 +37,8 @@ export interface FlyerProItemView {
   imageReview: Record<string, unknown> | null;
   spellReview: Record<string, unknown> | null;
   imported: Record<string, unknown> | null;
-  /** Sempre `null` até a migration das importações (change 19). */
-  importId: null;
+  /** A importação que criou o item; `null` no item incluído à mão. */
+  importId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -136,7 +136,7 @@ export function toItemView(item: FlyerProItem): FlyerProItemView {
     imageStatus: item.imageStatus,
     spellReview: item.spellReview ?? null,
     imported: item.imported ?? null,
-    importId: null,
+    importId: item.importId ?? null,
     createdAt: iso(item.createdAt),
     updatedAt: iso(item.updatedAt),
   };

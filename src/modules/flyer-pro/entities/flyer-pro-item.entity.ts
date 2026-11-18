@@ -8,12 +8,13 @@ import {
   PrimaryColumn,
 } from 'typeorm';
 import { FlyerProDocument } from './flyer-pro-document.entity';
+import { FlyerProImport } from './flyer-pro-import.entity';
 
 /**
  * Item de oferta do encarte (M1). O `id` é gerado no front, por isso a chave não tem padrão. Os nomes de chave e de
  * índice são os da migration. `galleryImageId` é referência lógica (a foto pode ser excluída; o item guarda `imageUrl`).
  * `updatedAt` é o cursor da leitura incremental: toda escrita em item grava o carimbo por SQL, sem `@UpdateDateColumn`.
- * A coluna `importId` entra na migration das importações.
+ * `importId` (M2) é a importação que criou o item, gravada só na inserção; apagar a importação deixa o campo nulo.
  */
 @Entity('flyer_pro_items')
 @Index('IDX_flyer_pro_items_document_position', ['documentId', 'position'])
@@ -21,6 +22,7 @@ import { FlyerProDocument } from './flyer-pro-document.entity';
 @Index('IDX_flyer_pro_items_gallery_image', ['galleryImageId'], {
   where: '"galleryImageId" IS NOT NULL',
 })
+@Index('IDX_flyer_pro_items_import', ['importId'], { where: '"importId" IS NOT NULL' })
 export class FlyerProItem {
   @PrimaryColumn({ type: 'uuid', primaryKeyConstraintName: 'PK_flyer_pro_items' })
   id: string;
@@ -88,6 +90,13 @@ export class FlyerProItem {
 
   @Column({ type: 'jsonb', nullable: true })
   imported: Record<string, unknown> | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  importId: string | null;
+
+  @ManyToOne(() => FlyerProImport, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'importId', foreignKeyConstraintName: 'FK_flyer_pro_items_import' })
+  import?: FlyerProImport;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

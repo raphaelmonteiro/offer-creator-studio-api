@@ -137,7 +137,7 @@ describe('toDocumentView', () => {
 });
 
 describe('toItemView', () => {
-  it('traz as colunas do item, menos documentId, mais eanValid e importId nulo', () => {
+  it('traz as colunas do item, menos documentId, mais eanValid e importId', () => {
     const result = toItemView(itemRow());
     expect(Object.keys(result).sort()).toEqual(
       [
@@ -188,6 +188,13 @@ describe('toItemView', () => {
     const spellReview = { checkedName: 'ABACATE', suggestion: null };
     const result = toItemView(itemRow({ price, imported, imageReview, spellReview }));
     expect(result).toMatchObject({ price, imported, imageReview, spellReview });
+  });
+
+  it('importId é o gravado: o id da importação que criou o item, ou nulo no item incluído à mão', () => {
+    const importId = '7c1f0e52-3b6a-4d19-8e2a-5a9d3c4b7f10';
+    expect(toItemView(itemRow({ importId })).importId).toBe(importId);
+    expect(toItemView(itemRow({ importId: null })).importId).toBeNull();
+    expect(toItemView(itemRow({ importId: undefined })).importId).toBeNull();
   });
 
   it('trata campos ausentes como nulos e datas em ISO', () => {

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { FlyerProDocumentsController } from './controllers/flyer-pro-documents.controller';
 import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.controller';
 import { FlyerProDocument } from './entities/flyer-pro-document.entity';
+import { FlyerProImport } from './entities/flyer-pro-import.entity';
 import { FlyerProItem } from './entities/flyer-pro-item.entity';
 import { FlyerProClientGuardService } from './services/flyer-pro-client-guard.service';
 import { FlyerProCursorService } from './services/flyer-pro-cursor.service';
@@ -20,7 +21,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
  * o módulo de clientes chama ao excluir um cliente. Lê as tabelas das cenas sem passar pela flag `TEMPLATE_SCENE_ENABLED`.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem])],
+  imports: [TypeOrmModule.forFeature([FlyerProDocument, FlyerProItem, FlyerProImport])],
   controllers: [FlyerProTemplatesController, FlyerProDocumentsController],
   providers: [
     FlyerProSceneReader,

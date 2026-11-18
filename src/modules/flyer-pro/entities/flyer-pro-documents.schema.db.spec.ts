@@ -1,18 +1,21 @@
 import { randomUUID } from 'crypto';
 import { DataSource, QueryRunner } from 'typeorm';
 import { CreateFlyerProDocuments1767700000000 } from '../../../migrations/1767700000000-CreateFlyerProDocuments';
+import { CreateFlyerProImports1767800000000 } from '../../../migrations/1767800000000-CreateFlyerProImports';
 import { describeIfE2eDb, openE2eDb } from '../../../shared/testing/e2e-test-db';
 import {
   insertClient,
   insertDocument,
   insertDocumentWithItems,
+  insertItems,
   purgeDocumentsOf,
 } from '../testing/flyer-pro-documents.fixture';
-import { catalogOf, MINIMAL_CLIENTS_SQL } from './flyer-pro-documents.catalog.testutil';
+import { insertImport } from '../testing/flyer-pro-imports.fixture';
+import { ALL_TABLES, catalogOf, MINIMAL_CLIENTS_SQL } from './flyer-pro-documents.catalog.testutil';
 
 /**
- * O banco de e2e é montado pelo `synchronize` das entidades. Aqui as entidades são comparadas com o que a M1 cria
- * (catálogo do Postgres) e as garantias de integridade das tabelas são provadas nele. Limpa só o que criou, encartes
+ * O banco de e2e é montado pelo `synchronize` das entidades. Aqui as entidades são comparadas com o que a M1 e a M2
+ * criam (catálogo do Postgres) e as garantias de integridade das tabelas são provadas nele. Limpa só o que criou, encartes
  * antes dos clientes.
  */
 describeIfE2eDb('Entidades do encarte e integridade (banco montado pelas entidades)', () => {
@@ -41,7 +44,7 @@ describeIfE2eDb('Entidades do encarte e integridade (banco montado pelas entidad
     await dataSource.destroy();
   });
 
-  it('nomes, colunas, unicidade, filtros dos índices e regras ON DELETE iguais aos da M1', async () => {
+  it('nomes, colunas, unicidade, filtros dos índices e regras ON DELETE iguais aos da M1 e da M2', async () => {
     const schema = `mig_flyer_pro_schema_${process.pid}_${Date.now()}`;
     const runner: QueryRunner = dataSource.createQueryRunner();
     await runner.connect();
@@ -50,10 +53,11 @@ describeIfE2eDb('Entidades do encarte e integridade (banco montado pelas entidad
       await runner.query(`SET search_path TO "${schema}"`);
       await runner.query(MINIMAL_CLIENTS_SQL);
       await new CreateFlyerProDocuments1767700000000().up(runner);
-      const fromMigration = await catalogOf(runner, schema);
+      await new CreateFlyerProImports1767800000000().up(runner);
+      const fromMigrations = await catalogOf(runner, schema, ALL_TABLES);
       await runner.query(`SET search_path TO public`);
 
-      expect(await catalogOf(dataSource, 'public')).toEqual(fromMigration);
+      expect(await catalogOf(dataSource, 'public', ALL_TABLES)).toEqual(fromMigrations);
     } finally {
       await runner.query(`SET search_path TO public`);
       await runner.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
@@ -107,6 +111,60 @@ describeIfE2eDb('Entidades do encarte e integridade (banco montado pelas entidad
       await dataSource.query(`DELETE FROM flyer_pro_documents WHERE id = $1`, [id]);
 
       expect(await count(items, id)).toBe(0);
+    });
+  });
+
+  describe('importações presas ao encarte', () => {
+    const importsOf = (id: string) =>
+      count(`SELECT count(*)::int AS n FROM flyer_pro_imports WHERE "documentId" = $1`, id);
+    const itemsOf = (id: string) =>
+      count(`SELECT count(*)::int AS n FROM flyer_pro_items WHERE "documentId" = $1`, id);
+
+    it('importação de encarte que não existe: o banco recusa pela FK da importação', async () => {
+      await expect(insertImport(dataSource, randomUUID())).rejects.toThrow(
+        /FK_flyer_pro_imports_document/,
+      );
+    });
+
+    it('apagar fisicamente um encarte excluído logicamente leva as 2 importações e os 4 itens, sem erro de FK', async () => {
+      const clientId = await newClient();
+      const id = await insertDocument(dataSource, { clientId, deletedAt: new Date() });
+      const [first, second] = [
+        await insertImport(dataSource, id),
+        await insertImport(dataSource, id),
+      ];
+      await insertItems(dataSource, id, [
+        { importId: first },
+        { importId: first },
+        { importId: second },
+        { importId: second },
+      ]);
+      expect([await importsOf(id), await itemsOf(id)]).toEqual([2, 4]);
+
+      await dataSource.query(`DELETE FROM flyer_pro_documents WHERE id = $1`, [id]);
+
+      expect([await importsOf(id), await itemsOf(id)]).toEqual([0, 0]);
+    });
+
+    it('importação apagada direto: os 4 itens continuam, com importId nulo', async () => {
+      const clientId = await newClient();
+      const id = await insertDocument(dataSource, { clientId });
+      const importId = await insertImport(dataSource, id);
+      await insertItems(
+        dataSource,
+        id,
+        Array.from({ length: 4 }, () => ({ importId })),
+      );
+
+      await dataSource.query(`DELETE FROM flyer_pro_imports WHERE id = $1`, [importId]);
+
+      expect(await itemsOf(id)).toBe(4);
+      expect(
+        await count(
+          `SELECT count(*)::int AS n FROM flyer_pro_items WHERE "documentId" = $1 AND "importId" IS NULL`,
+          id,
+        ),
+      ).toBe(4);
     });
   });
 
