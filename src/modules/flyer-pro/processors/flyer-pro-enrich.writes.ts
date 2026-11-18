@@ -47,8 +47,7 @@ type Guard = (param: (value: unknown) => string) => string;
 /** `UPDATE` do item só nas colunas dadas, com o carimbo, condicionado ao estado lido (`guard`); devolve o `id` se mudou. */
 function itemWrite(
   ctx: WriteContext,
-  itemId: string,
-  count: ItemWrite['count'],
+  target: { itemId: string; count: ItemWrite['count'] },
   columns: Record<string, unknown>,
   guard: Guard,
 ): ItemWrite {
@@ -64,9 +63,9 @@ function itemWrite(
   });
   sets.push(`"updatedAt" = ${param(ctx.stamp)}::timestamptz`);
   const sql = `UPDATE "flyer_pro_items" SET ${sets.join(', ')}
-    WHERE "id" = ${param(itemId)} AND "documentId" = ${param(ctx.documentId)} AND ${guard(param)}
+    WHERE "id" = ${param(target.itemId)} AND "documentId" = ${param(ctx.documentId)} AND ${guard(param)}
     RETURNING "id"`;
-  return { sql, params, count };
+  return { sql, params, count: target.count };
 }
 
 const review = (ctx: WriteContext, extra: object) => ({
@@ -78,6 +77,38 @@ const review = (ctx: WriteContext, extra: object) => ({
 /** A categoria na grafia da lista fechada (sem acento e sem diferença de maiúsculas), ou `null` se não é uma das 11. */
 function canonicalCategory(name: string): string | null {
   return FLYER_PRO_CATEGORIES.find((category) => fold(category) === fold(name)) ?? null;
+}
+
+/** A categoria da planilha que a IA devolveu igual: nada a mudar, só a revisão sem sugestão. */
+const sameAsSheet = (item: EnrichItemRow, category: string): boolean =>
+  item.categorySource === 'import' && !!item.category && fold(item.category) === fold(category);
+
+/** Aplica a categoria (certeza, `autoApply` ligado, fora da planilha) ou a deixa como sugestão pendente. */
+function categoryWriteOf(
+  item: EnrichItemRow,
+  choice: { verdict: CategoryChoice; category: string },
+  ctx: WriteContext,
+  guard: Guard,
+): ItemWrite {
+  const { verdict, category } = choice;
+  const target = (count: ItemWrite['count']) => ({ itemId: item.id, count });
+  const suggestion = { category, confidence: verdict.confidence, why: verdict.why ?? null };
+  if (verdict.action === 'apply' && ctx.autoApply && item.categorySource !== 'import') {
+    const accepted = { ...suggestion, status: 'accepted', auto: true, decidedAt: ctx.stamp };
+    return itemWrite(
+      ctx,
+      target('applied'),
+      { category, categorySource: 'ai', categoryReview: review(ctx, { suggestion: accepted }) },
+      guard,
+    );
+  }
+  const pending = { ...suggestion, status: 'pending' };
+  return itemWrite(
+    ctx,
+    target('suggested'),
+    { categoryReview: review(ctx, { suggestion: pending }) },
+    guard,
+  );
 }
 
 function planCategory(
@@ -93,36 +124,15 @@ function planCategory(
   const nothing = () =>
     itemWrite(
       ctx,
-      item.id,
-      'unchanged',
+      { itemId: item.id, count: 'unchanged' },
       { categoryReview: review(ctx, { suggestion: null }) },
       guard,
     );
   if (verdict.action === 'none') return nothing();
-  const choice = verdict as CategoryChoice;
-  const category = canonicalCategory(choice.category);
+  const category = canonicalCategory((verdict as CategoryChoice).category);
   if (!category) return null;
-  const fromSheet = item.categorySource === 'import';
-  if (fromSheet && item.category && fold(item.category) === fold(category)) return nothing();
-  const suggestion = { category, confidence: choice.confidence, why: choice.why ?? null };
-  if (verdict.action === 'apply' && ctx.autoApply && !fromSheet) {
-    const accepted = { ...suggestion, status: 'accepted', auto: true, decidedAt: ctx.stamp };
-    return itemWrite(
-      ctx,
-      item.id,
-      'applied',
-      { category, categorySource: 'ai', categoryReview: review(ctx, { suggestion: accepted }) },
-      guard,
-    );
-  }
-  const pending = { ...suggestion, status: 'pending' };
-  return itemWrite(
-    ctx,
-    item.id,
-    'suggested',
-    { categoryReview: review(ctx, { suggestion: pending }) },
-    guard,
-  );
+  if (sameAsSheet(item, category)) return nothing();
+  return categoryWriteOf(item, { verdict: verdict as CategoryChoice, category }, ctx, guard);
 }
 
 function planSpelling(
@@ -137,7 +147,8 @@ function planSpelling(
     ? { value: (verdict as { value: string }).value, status: 'pending' }
     : null;
   const spellReview = review(ctx, { checkedName: item.name, suggestion });
-  return itemWrite(ctx, item.id, fixes ? 'suggested' : 'clean', { spellReview }, guard);
+  const target = { itemId: item.id, count: fixes ? ('suggested' as const) : ('clean' as const) };
+  return itemWrite(ctx, target, { spellReview }, guard);
 }
 
 const NO_PHOTO = {
@@ -160,6 +171,28 @@ function fitCandidates(candidates: ImageCandidateVerdict[]): ImageCandidateVerdi
   return picked.map((candidate) => ({ ...candidate, reasons: [] }));
 }
 
+/** A revisão de IA da foto: sem EAN nesta change, mais o que a decisão acrescenta. */
+const imageReviewOf = (ctx: WriteContext, extra: object) =>
+  review(ctx, { eanStatus: null, ...extra });
+
+/** As colunas de uma foto aplicada pelo job: a imagem da Galeria, a origem `match` e a revisão com o placar. */
+function appliedPhotoColumns(photo: ImageApply['photo'], ctx: WriteContext) {
+  const applied = {
+    score: photo.score,
+    reasons: photo.reasons,
+    isClientPreferred: photo.isClientPreferred,
+  };
+  return {
+    galleryImageId: photo.galleryImageId,
+    imageUrl: photo.url,
+    imageWidth: photo.width,
+    imageHeight: photo.height,
+    imageOrigin: 'match',
+    imageStatus: 'applied',
+    imageReview: imageReviewOf(ctx, { applied, suggestion: null }),
+  };
+}
+
 function planImage(
   item: EnrichItemRow,
   verdict: ImageVerdict,
@@ -167,48 +200,26 @@ function planImage(
 ): ItemWrite | null {
   if (verdict.action === 'unanswered') return null;
   const guard: Guard = () => imageWriteConditionSql(ctx.onlyMissing);
-  const eanStatus = null;
-  const withReview = (extra: object) => review(ctx, { eanStatus, ...extra });
+  const target = (count: ItemWrite['count']) => ({ itemId: item.id, count });
   if (verdict.action === 'not_found') {
-    const imageReview = withReview({ applied: null, suggestion: null });
+    const imageReview = imageReviewOf(ctx, { applied: null, suggestion: null });
     return itemWrite(
       ctx,
-      item.id,
-      'notFound',
+      target('notFound'),
       { ...NO_PHOTO, imageStatus: 'not_found', imageReview },
       guard,
     );
   }
   const photo = (verdict as ImageApply).photo;
-  const candidates = verdict.action === 'review' ? verdict.candidates : [photo];
   if (verdict.action === 'apply' && ctx.autoApply) {
-    const applied = {
-      score: photo.score,
-      reasons: photo.reasons,
-      isClientPreferred: photo.isClientPreferred,
-    };
-    return itemWrite(
-      ctx,
-      item.id,
-      'applied',
-      {
-        galleryImageId: photo.galleryImageId,
-        imageUrl: photo.url,
-        imageWidth: photo.width,
-        imageHeight: photo.height,
-        imageOrigin: 'match',
-        imageStatus: 'applied',
-        imageReview: withReview({ applied, suggestion: null }),
-      },
-      guard,
-    );
+    return itemWrite(ctx, target('applied'), appliedPhotoColumns(photo, ctx), guard);
   }
+  const candidates = verdict.action === 'review' ? verdict.candidates : [photo];
   const pending = { status: 'pending', candidates: fitCandidates(candidates) };
-  const imageReview = withReview({ applied: null, suggestion: pending });
+  const imageReview = imageReviewOf(ctx, { applied: null, suggestion: pending });
   return itemWrite(
     ctx,
-    item.id,
-    'review',
+    target('review'),
     { ...NO_PHOTO, imageStatus: 'review', imageReview },
     guard,
   );

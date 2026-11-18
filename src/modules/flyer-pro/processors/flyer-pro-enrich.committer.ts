@@ -10,10 +10,17 @@ import {
   failureDecision,
   finalFields,
   markSkipped,
+  PhaseCounts,
   retryDelaySeconds,
   withModel,
 } from '../domain/flyer-pro-enrich-rules';
-import type { EnrichErrorCode, EnrichPhase, EnrichStep } from '../domain/flyer-pro-job.types';
+import type {
+  EnrichCursor,
+  EnrichErrorCode,
+  EnrichPhase,
+  EnrichResult,
+  EnrichStep,
+} from '../domain/flyer-pro-job.types';
 import type { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import type { FlyerProJob } from '../entities/flyer-pro-job.entity';
 import { publishJobBatch } from '../services/flyer-pro-job.queue';
@@ -22,7 +29,13 @@ import { findLockedDocument, readStamp } from '../services/flyer-pro-save.statem
 import type { JobColumns } from './flyer-pro-enrich.statements';
 import { lockJob, updateJob } from './flyer-pro-enrich.statements';
 import type { UnitPlan } from './flyer-pro-enrich.types';
-import { doneColumns, failedColumns, FRESH_CURSOR, nextState } from './flyer-pro-enrich.next-state';
+import {
+  doneColumns,
+  failedColumns,
+  FRESH_CURSOR,
+  NextState,
+  nextState,
+} from './flyer-pro-enrich.next-state';
 import { applyWrites, planWrites, WriteContext } from './flyer-pro-enrich.writes';
 
 /** O resultado de uma gravação: feita, ou descartada porque a ficha não bate (lote zumbi) ou o job sumiu. */
@@ -40,6 +53,43 @@ interface Locked {
   document: FlyerProDocument;
   current: FlyerProJob;
   stopping: boolean;
+}
+
+/** O que o lote soma ao job: contagens, pulo, timing, `processed` e modelo; zera as tentativas e o batimento. */
+function progressOf(
+  current: FlyerProJob,
+  plan: UnitPlan,
+  counts: PhaseCounts | null,
+): JobColumns & { result: EnrichResult; processed: number } {
+  const visited = plan.work?.items.length ?? 0;
+  let result = counts
+    ? addCounts(current.result, plan.phase, { visited, ...counts })
+    : current.result;
+  if (plan.skipped) result = markSkipped(result, plan.phase);
+  result = addTiming(result, plan.phase, { items: visited, durationMs: plan.totalMs });
+  return {
+    processed: current.processed + (plan.skipped ? plan.skippedItems : visited),
+    result,
+    models: plan.model ? withModel(current.models, plan.phase, plan.model) : current.models,
+    batchAttempts: 0,
+    clearHeartbeat: true,
+  };
+}
+
+/** O estado depois do lote: o mesmo lote na mesma fase se ainda há itens, senão o fechamento da fase (`nextState`). */
+function nextOf(
+  { manager, current }: Locked,
+  plan: UnitPlan,
+  after: { result: EnrichResult; moved: EnrichCursor },
+): Promise<NextState> {
+  const closes = plan.skipped || (plan.work?.items.length ?? 0) < plan.batchSize;
+  if (closes) return nextState(manager, current, plan.phase, after.result);
+  return Promise.resolve({
+    phase: plan.phase as EnrichPhase | null,
+    cursor: after.moved,
+    total: current.total,
+    done: false,
+  });
 }
 
 /**
@@ -62,49 +112,26 @@ export class FlyerProEnrichCommitter {
     return this.locked(job, async (locked) => {
       const { manager, current } = locked;
       const cursor = current.cursor ?? FRESH_CURSOR;
-      const items = plan.work?.items ?? [];
       const ctx = await this.writeContext(locked, cursor.round);
       const counts = plan.work ? await applyWrites(manager, planWrites(plan.work, ctx)) : null;
-      let result = counts
-        ? addCounts(current.result, plan.phase, { visited: items.length, ...counts })
-        : current.result;
-      if (plan.skipped) result = markSkipped(result, plan.phase);
-      result = addTiming(result, plan.phase, { items: items.length, durationMs: plan.totalMs });
-      const last = items[items.length - 1];
-      const progress: JobColumns = {
-        processed: current.processed + (plan.skipped ? plan.skippedItems : items.length),
-        result,
-        models: plan.model ? withModel(current.models, plan.phase, plan.model) : current.models,
-        batchAttempts: 0,
-        clearHeartbeat: true,
-      };
-      const closes = plan.skipped || items.length < plan.batchSize;
+      const progress = progressOf(current, plan, counts);
+      const last = plan.work?.items.at(-1);
       const moved = last ? { ...cursor, position: last.position, id: last.id } : cursor;
       if (locked.stopping) {
         return this.stopped(locked, { ...progress, cursor: moved, phase: plan.phase });
       }
-      const next = closes
-        ? await nextState(manager, current, plan.phase, result)
-        : {
-            phase: plan.phase as EnrichPhase | null,
-            cursor: moved,
-            total: current.total,
-            done: false,
-          };
+      const next = await nextOf(locked, plan, { result: progress.result, moved });
+      // Item que chegou durante a rodada e entrou nela antes de a conferência o contar: `total` nunca fica abaixo de `processed`.
+      const total = Math.max(next.total, progress.processed as number);
       if (next.done) {
-        await updateJob(manager, current.id, {
-          ...progress,
-          total: Math.max(next.total, progress.processed as number),
-          ...doneColumns(next.cursor),
-        });
+        await updateJob(manager, current.id, { ...progress, total, ...doneColumns(next.cursor) });
         return 'committed';
       }
       await updateJob(manager, current.id, {
         ...progress,
         phase: next.phase,
         cursor: next.cursor,
-        // Item que chegou durante a rodada e entrou nela antes de a conferência o contar: `total` nunca fica abaixo de `processed`.
-        total: Math.max(next.total, progress.processed as number),
+        total,
       });
       await this.publishNext(locked, 0);
       return 'committed';
