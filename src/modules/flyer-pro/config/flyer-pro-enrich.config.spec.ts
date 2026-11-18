@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fakeConfig } from '../../ai/utils/openai-chat.testutil';
-import { isEnrichEnabled, readEnrichConfig } from './flyer-pro-enrich.config';
+import { readEnrichConfig } from './flyer-pro-enrich.config';
 
 const read = (env: Record<string, string> = {}) => {
   const warn = jest.fn();
@@ -95,12 +95,6 @@ describe('readEnrichConfig', () => {
         expect(read({ FLYER_PRO_ENRICH_ENABLED: value }).config.enabled).toBe(true);
       }
       expect(read().config.enabled).toBe(true);
-    });
-
-    it('isEnrichEnabled lê só a flag, com a mesma regra', () => {
-      expect(isEnrichEnabled(fakeConfig({ FLYER_PRO_ENRICH_ENABLED: 'false' }))).toBe(false);
-      expect(isEnrichEnabled(fakeConfig({ FLYER_PRO_ENRICH_ENABLED: '0' }))).toBe(true);
-      expect(isEnrichEnabled(fakeConfig({}))).toBe(true);
     });
   });
 

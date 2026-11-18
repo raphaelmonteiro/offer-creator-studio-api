@@ -56,7 +56,3 @@ export function readEnrichConfig(
     maxAttempts: integer('MAX_ATTEMPTS', 3),
   };
 }
-
-/** Só `false` desliga o job; qualquer outro valor, ou a variável ausente, o deixa ligado (lido sem a configuração inteira). */
-export const isEnrichEnabled = (config: ConfigService): boolean =>
-  rawEnv(config, PREFIX + 'ENABLED') !== 'false';
