@@ -44,6 +44,25 @@ export const createPayload = (
   ...over,
 });
 
+/** O corpo de um `PATCH` com os quatro obrigatórios, na revisão dada e com um `mutationId` novo; `over` troca ou acrescenta. */
+export const savePayload = (revision: number, over: Record<string, unknown> = {}) => ({
+  mutationId: randomUUID(),
+  expectedRevision: revision,
+  schemaVersion: 1,
+  engineVersion: 1,
+  ...over,
+});
+
+/** O item novo mínimo de um `upsert` (completo, com um `id` novo); `over` troca ou acrescenta. */
+export const newItemPayload = (over: Record<string, unknown> = {}) => ({
+  id: randomUUID(),
+  position: 0,
+  name: 'ABACATE',
+  price: { kind: 'simple', cents: 699 },
+  unit: 'kg',
+  ...over,
+});
+
 export type Row = Record<string, unknown>;
 
 /** A linha do encarte como o banco a guarda (sem passar pela view). */
@@ -124,6 +143,15 @@ export function useDocumentsE2e(options: { scenes: boolean }) {
     /** Os cabeçalhos do Bruno, para chamar uma rota como outro usuário. */
     asBruno: () => ({ Authorization: `Bearer ${bruno.token}` }),
     noToken: (path: string) => h.http().get(`/v1${path}`),
+    /** `PATCH` do N4 com o token da semente (a Ana); `PUT` do cursor; e o `PATCH` como outro usuário. */
+    patch: (id: string, body: object) => h.patch(`${url}/${id}`, body),
+    patchAs: (headers: Record<string, string>, id: string, body: object) =>
+      h.http().patch(`/v1${url}/${id}`).set(headers).send(body),
+    put: (path: string, body: object) => h.authed(h.http().put(`/v1${url}/${path}`)).send(body),
+    /** `POST` do N1 na cena dada (a de frente e verso da semente, por padrão); devolve o encarte criado. */
+    newDocument: async (sceneId = h.seed.scenes.frontBack.id) =>
+      envelope<DocumentBody>(await h.post(url, createPayload({ clientId: clientA(), sceneId })))
+        .data,
     /** Um cliente novo da suíte, apagado na limpeza. */
     newClient: async (name?: string) => {
       const id = await insertClient(h.dataSource, name);

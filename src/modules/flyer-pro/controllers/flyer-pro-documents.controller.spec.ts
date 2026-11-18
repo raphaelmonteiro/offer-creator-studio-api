@@ -2,7 +2,12 @@ import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import type { CreateFlyerProDocumentDto } from '../dto/create-flyer-pro-document.dto';
+import type { UpdateFlyerProCursorDto } from '../dto/update-flyer-pro-cursor.dto';
+import type { SaveFlyerProDocumentDto } from '../dto/save-flyer-pro-document.dto';
+import type { FlyerProItemsService } from '../services/flyer-pro-items.service';
+import type { FlyerProCursorService } from '../services/flyer-pro-cursor.service';
 import type { FlyerProDocumentsService } from '../services/flyer-pro-documents.service';
+import type { FlyerProSaveService } from '../services/flyer-pro-save.service';
 import { DocumentIdPipe, FlyerProDocumentsController } from './flyer-pro-documents.controller';
 
 const dto = { creationKey: 'k' } as CreateFlyerProDocumentDto;
@@ -14,11 +19,24 @@ function setup() {
     open: jest.fn(),
     remove: jest.fn(),
   };
+  const saves = { save: jest.fn() };
+  const cursors = { set: jest.fn() };
+  const items = { list: jest.fn() };
   const res = { status: jest.fn() };
   const controller = new FlyerProDocumentsController(
     documents as unknown as FlyerProDocumentsService,
+    saves as unknown as FlyerProSaveService,
+    cursors as unknown as FlyerProCursorService,
+    items as unknown as FlyerProItemsService,
   );
-  return { controller, documents, res: res as unknown as Response & typeof res };
+  return {
+    controller,
+    documents,
+    saves,
+    cursors,
+    items,
+    res: res as unknown as Response & typeof res,
+  };
 }
 
 describe('FlyerProDocumentsController', () => {
@@ -65,6 +83,42 @@ describe('FlyerProDocumentsController', () => {
     expect(documents.list).toHaveBeenCalledWith(query);
     expect(documents.open).toHaveBeenCalledWith('d1');
     expect(documents.remove).toHaveBeenCalledWith('d1');
+  });
+
+  it('salvar passa o id do usuário do token, o id do encarte e o corpo, e devolve a resposta do serviço', async () => {
+    const { controller, saves } = setup();
+    const body = { mutationId: 'm' } as SaveFlyerProDocumentDto;
+    saves.save.mockResolvedValue({ revision: 38 });
+
+    await expect(controller.save('d1', body, { id: 'u1' })).resolves.toEqual({ revision: 38 });
+
+    expect(saves.save).toHaveBeenCalledWith('u1', 'd1', body);
+  });
+
+  it('o cursor passa o id do encarte e o corpo ao serviço e devolve a etapa e o pagesFrozen', async () => {
+    const { controller, cursors } = setup();
+    const body = { step: 'assembly' } as UpdateFlyerProCursorDto;
+    cursors.set.mockResolvedValue({ step: 'assembly', pagesFrozen: true });
+
+    await expect(controller.setCursor('d1', body)).resolves.toEqual({
+      step: 'assembly',
+      pagesFrozen: true,
+    });
+
+    expect(cursors.set).toHaveBeenCalledWith('d1', body);
+  });
+
+  it('listar os itens passa o id e o updatedAfter ao serviço', async () => {
+    const { controller, items } = setup();
+    items.list.mockResolvedValue({ items: [], cursor: 'c' });
+
+    await expect(
+      controller.listItems('d1', { updatedAfter: '2026-11-14T13:05:40.412377Z' }),
+    ).resolves.toEqual({ items: [], cursor: 'c' });
+    await controller.listItems('d1', {});
+
+    expect(items.list).toHaveBeenNthCalledWith(1, 'd1', '2026-11-14T13:05:40.412377Z');
+    expect(items.list).toHaveBeenNthCalledWith(2, 'd1', undefined);
   });
 
   it('o pipe do id deixa passar um UUID e transforma o que não é UUID em 404 FLYER_PRO_NOT_FOUND', async () => {
