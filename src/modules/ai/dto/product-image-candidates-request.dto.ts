@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ProductImageCandidatesRequestDto {
@@ -35,4 +35,16 @@ export class ProductImageCandidatesRequestDto {
   @IsOptional()
   @IsString()
   clientId?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    maxLength: 32,
+    description:
+      'EAN do item (Encarte Pro). Presente (mesmo null, vazio ou com dígito errado): as fotos já escolhidas para o nome vêm fixadas no topo; com GTIN válido, as fotos com esse EAN vêm antes delas. Ausente: a resposta é a de sempre.',
+    example: '7896000000019',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  ean?: string | null;
 }

@@ -175,16 +175,21 @@ export class AiController {
   @ApiResponse({ status: 200, description: 'Lista de candidatas com reasons' })
   async productImageCandidatesV2(@Body() dto: ProductImageCandidatesRequestDto) {
     try {
-      const candidates = await this.productImageMatchV2.findCandidates(
-        {
-          id: 'inline',
-          name: dto.productName,
-          category: dto.category,
-          unit: dto.unit,
-        },
-        dto.limit ?? 12,
-        dto.clientId,
-      );
+      const product = {
+        id: 'inline',
+        name: dto.productName,
+        category: dto.category,
+        unit: dto.unit,
+      };
+      // O campo `ean` presente (mesmo null ou vazio) é o Encarte Pro: fotos do EAN e do nome escolhido no topo.
+      const candidates =
+        dto.ean === undefined
+          ? await this.productImageMatchV2.findCandidates(product, dto.limit ?? 12, dto.clientId)
+          : await this.flyerEanResolution.findCandidatesForProduct(
+              { ...product, ean: dto.ean?.trim() || null },
+              dto.limit ?? 12,
+              dto.clientId,
+            );
       return { candidates };
     } catch (error) {
       this.logger.error('Erro nos candidates V2', error);
