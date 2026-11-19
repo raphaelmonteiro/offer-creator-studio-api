@@ -1,3 +1,4 @@
+import { FLYER_PRO_CATEGORIES } from '../../modules/flyer-pro/domain/flyer-pro-categories';
 import { DEFAULT_CASE_ITEMS, parseCaseArgs } from './e2e-flyer-pro-case-args';
 
 const base = ['create', '--case', 'Estrutura', '--schema-version', '1', '--engine-version', '3'];
@@ -25,6 +26,28 @@ describe('parseCaseArgs (comando de teste dos encartes do e2e)', () => {
       input: { step: 'structure', items },
     });
     expect(parseCaseArgs(withItems([]))).toMatchObject({ input: { items: [] } });
+  });
+
+  it.each(FLYER_PRO_CATEGORIES)(
+    'item com a categoria %s (a grafia da chave) é aceito',
+    (category) => {
+      const items = [{ name: 'ABACATE', unit: 'kg', cents: 699, category }];
+      expect(parseCaseArgs(withItems(items))).toMatchObject({ input: { items } });
+    },
+  );
+
+  it('categoria ausente ou null vale como sem categoria: o item lido não tem a chave', () => {
+    const items = [
+      { name: 'A', unit: 'kg', cents: 1 },
+      { name: 'B', unit: 'kg', cents: 2, category: null },
+    ];
+    const read = parseCaseArgs(withItems(items));
+    if (read.action !== 'create') throw new Error('esperava create');
+    expect(read.input.items).toStrictEqual([
+      { name: 'A', unit: 'kg', cents: 1 },
+      { name: 'B', unit: 'kg', cents: 2 },
+    ]);
+    expect(DEFAULT_CASE_ITEMS.some((item) => 'category' in item)).toBe(false);
   });
 
   it('purge não recebe argumentos', () => {
@@ -78,9 +101,51 @@ describe('parseCaseArgs (comando de teste dos encartes do e2e)', () => {
     ['centavos null', '[{"name":"A","unit":"kg","cents":null}]', /items\[0\]\.cents/],
     ['centavos negativos', '[{"name":"A","unit":"kg","cents":-1}]', /items\[0\]\.cents/],
     ['centavos fracionados', '[{"name":"A","unit":"kg","cents":6.99}]', /items\[0\]\.cents/],
+    [
+      'categoria fora das 11',
+      '[{"name":"A","unit":"kg","cents":1,"category":"ADEGA"}]',
+      /items\[0\]\.category inválida \("ADEGA"\)/,
+    ],
+    [
+      'categoria com acento',
+      '[{"name":"A","unit":"kg","cents":1,"category":"Frios e Laticínios"}]',
+      /items\[0\]\.category inválida/,
+    ],
+    [
+      'categoria em minúsculas',
+      '[{"name":"A","unit":"kg","cents":1,"category":"hortifruti"}]',
+      /items\[0\]\.category inválida/,
+    ],
+    [
+      'categoria numérica',
+      '[{"name":"A","unit":"kg","cents":1,"category":7}]',
+      /items\[0\]\.category inválida \(7\)/,
+    ],
+    [
+      'categoria vazia',
+      '[{"name":"A","unit":"kg","cents":1,"category":""}]',
+      /items\[0\]\.category inválida \(""\)/,
+    ],
+    [
+      'categoria objeto',
+      '[{"name":"A","unit":"kg","cents":1,"category":{}}]',
+      /items\[0\]\.category inválida/,
+    ],
+    [
+      'categoria do segundo item',
+      '[{"name":"A","unit":"kg","cents":1},{"name":"B","unit":"kg","cents":1,"category":"Adega"}]',
+      /items\[1\]\.category inválida \("Adega"\)/,
+    ],
     ['segundo item ruim', '[{"name":"A","unit":"kg","cents":1},null]', /items\[1\] deve ser/],
   ])('itens: %s', (_label, raw, message) => {
     expect(() => parseCaseArgs([...base, '--items', raw])).toThrow(message);
+  });
+
+  it('a categoria recusada lista as 11 na mensagem', () => {
+    const raw = '[{"name":"A","unit":"kg","cents":1,"category":"ADEGA"}]';
+    expect(() => parseCaseArgs([...base, '--items', raw])).toThrow(
+      new RegExp(FLYER_PRO_CATEGORIES.join(', ')),
+    );
   });
 
   it('flag desconhecida, sem valor ou repetida não passa em silêncio', () => {
