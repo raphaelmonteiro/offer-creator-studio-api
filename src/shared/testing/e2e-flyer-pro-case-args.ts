@@ -87,22 +87,38 @@ function readStep(flags: Map<string, string>): Step {
   return step as Step;
 }
 
+function readItemName(value: unknown, where: string): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > NAME_LIMIT) {
+    throw new Error(`${where}.name deve ser um texto de 1 a ${NAME_LIMIT} caracteres.`);
+  }
+  return value;
+}
+
+function readItemUnit(value: unknown, where: string): Unit {
+  if (!(FLYER_PRO_UNITS as readonly unknown[]).includes(value)) {
+    throw new Error(`${where}.unit inválida: use uma de ${FLYER_PRO_UNITS.join(', ')}.`);
+  }
+  return value as Unit;
+}
+
+function readItemCents(value: unknown, where: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${where}.cents deve ser um inteiro de centavos, 0 ou mais.`);
+  }
+  return value;
+}
+
 function readItem(raw: unknown, index: number): CaseItem {
   const where = `items[${index}]`;
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(`${where} deve ser um objeto { name, unit, cents }.`);
   }
   const { name, unit, cents } = raw as Record<string, unknown>;
-  if (typeof name !== 'string' || !name.trim() || name.length > NAME_LIMIT) {
-    throw new Error(`${where}.name deve ser um texto de 1 a ${NAME_LIMIT} caracteres.`);
-  }
-  if (!(FLYER_PRO_UNITS as readonly unknown[]).includes(unit)) {
-    throw new Error(`${where}.unit inválida: use uma de ${FLYER_PRO_UNITS.join(', ')}.`);
-  }
-  if (typeof cents !== 'number' || !Number.isSafeInteger(cents) || cents < 0) {
-    throw new Error(`${where}.cents deve ser um inteiro de centavos, 0 ou mais.`);
-  }
-  return { name, unit: unit as Unit, cents };
+  return {
+    name: readItemName(name, where),
+    unit: readItemUnit(unit, where),
+    cents: readItemCents(cents, where),
+  };
 }
 
 function readItems(flags: Map<string, string>): CaseItem[] {
