@@ -135,6 +135,39 @@ describeIfE2eDb('Comando que cria e apaga os encartes dos casos do e2e de navega
     });
   });
 
+  it('itens com categoria: a pedida entra com a origem import; sem ela, categoria e origem nulas', async () => {
+    const items = JSON.stringify([
+      { name: 'ABACATE', unit: 'kg', cents: 699, category: 'Hortifruti' },
+      { name: 'QUEIJO MINAS', unit: 'kg', cents: 3990, category: 'Frios e Laticinios' },
+      { name: 'VINHO TINTO SECO 750ML', unit: 'cada', cents: 4990 },
+      { name: 'CERVEJA', unit: 'cada', cents: 449, category: null },
+    ]);
+    const created = await create('--case', 'categorias', ...VERSIONS, '--items', items);
+    const rows = await dataSource
+      .getRepository(FlyerProItem)
+      .find({ where: { documentId: created.id }, order: { position: 'ASC' } });
+    expect(rows.map((item) => [item.name, item.category, item.categorySource])).toEqual([
+      ['ABACATE', 'Hortifruti', 'import'],
+      ['QUEIJO MINAS', 'Frios e Laticinios', 'import'],
+      ['VINHO TINTO SECO 750ML', null, null],
+      ['CERVEJA', null, null],
+    ]);
+  });
+
+  it('categoria fora das 11: recusa antes de abrir conexão (host inalcançável), sem criar encarte', async () => {
+    const before = await count('flyer_pro_documents');
+    const unreachable = temp.url.replace(/@[^/]+\//, '@127.0.0.1:1/');
+    for (const category of ['ADEGA', 'Frios e Laticínios']) {
+      const items = JSON.stringify([{ name: 'A', unit: 'kg', cents: 1, category }]);
+      await expect(
+        runFlyerProCaseCommand(['create', '--case', 'x', ...VERSIONS, '--items', items], {
+          [E2E_DB_ENV]: unreachable,
+        }),
+      ).rejects.toThrow(/items\[0\]\.category inválida/);
+    }
+    expect(await count('flyer_pro_documents')).toBe(before);
+  });
+
   it('versão ausente: recusa citando engineVersion, sem gravar nada', async () => {
     const before = await count('flyer_pro_documents');
     await expect(create('--case', 'sem versão', '--schema-version', '1')).rejects.toThrow(

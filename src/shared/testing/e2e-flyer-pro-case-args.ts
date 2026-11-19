@@ -1,7 +1,11 @@
-import { FLYER_PRO_UNITS } from '../../modules/flyer-pro/domain/flyer-pro-categories';
+import {
+  FLYER_PRO_CATEGORIES,
+  FLYER_PRO_UNITS,
+} from '../../modules/flyer-pro/domain/flyer-pro-categories';
 import { FLYER_PRO_STEPS } from '../../modules/flyer-pro/domain/flyer-pro-steps';
 
 type Unit = (typeof FLYER_PRO_UNITS)[number];
+type Category = (typeof FLYER_PRO_CATEGORIES)[number];
 type Step = (typeof FLYER_PRO_STEPS)[number];
 
 export interface CaseItem {
@@ -9,6 +13,11 @@ export interface CaseItem {
   unit: Unit;
   /** O preço simples em centavos (`{ kind: 'simple', cents }` na linha do item). */
   cents: number;
+  /**
+   * Uma das 11 categorias, com a grafia da chave (D-11 da 21). Ausente é o item sem categoria: `null` na linha de comando
+   * vale como ausente e é normalizado em `readItem`, então a chave nunca chega aqui com `null`.
+   */
+  category?: Category;
 }
 
 export interface CreateCaseInput {
@@ -35,7 +44,8 @@ export const DEFAULT_CASE_ITEMS: CaseItem[] = [
 
 const USAGE =
   'Uso: e2e:flyer-pro-case create --case <texto> --schema-version <n> --engine-version <n> [--step <etapa>] ' +
-  "[--items '<JSON>'] | e2e:flyer-pro-case purge";
+  "[--items '<JSON>'] | e2e:flyer-pro-case purge. Item do --items: { name, unit, cents, category? }, com category numa das 11 de " +
+  `FLYER_PRO_CATEGORIES (${FLYER_PRO_CATEGORIES.join(', ')}); sem category (ou null), o item fica sem categoria.`;
 
 const CREATE_FLAGS = ['case', 'schema-version', 'engine-version', 'step', 'items'] as const;
 
@@ -108,17 +118,30 @@ function readItemCents(value: unknown, where: string): number {
   return value;
 }
 
+/** Ausente e `null` valem como sem categoria (L-24); texto fora das 11, com acento ou de outro tipo, é erro com o índice do item. */
+function readItemCategory(value: unknown, where: string): Category | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!(FLYER_PRO_CATEGORIES as readonly unknown[]).includes(value)) {
+    throw new Error(
+      `${where}.category inválida (${JSON.stringify(value)}): use uma de ${FLYER_PRO_CATEGORIES.join(', ')}, com a grafia da chave.`,
+    );
+  }
+  return value as Category;
+}
+
 function readItem(raw: unknown, index: number): CaseItem {
   const where = `items[${index}]`;
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(`${where} deve ser um objeto { name, unit, cents }.`);
   }
-  const { name, unit, cents } = raw as Record<string, unknown>;
-  return {
+  const { name, unit, cents, category } = raw as Record<string, unknown>;
+  const read = {
     name: readItemName(name, where),
     unit: readItemUnit(unit, where),
     cents: readItemCents(cents, where),
   };
+  const readCategory = readItemCategory(category, where);
+  return readCategory ? { ...read, category: readCategory } : read;
 }
 
 function readItems(flags: Map<string, string>): CaseItem[] {

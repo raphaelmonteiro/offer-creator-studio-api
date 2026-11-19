@@ -70,9 +70,11 @@ async function createCase(dataSource: DataSource, input: CreateCaseInput): Promi
   const { clientId, sceneId, userId } = await seedRows(dataSource);
   const snapshots = new FlyerProTemplateSnapshotService(dataSource, new FlyerProSceneReader());
   const name = `${CASE_NAME_PREFIX}${input.caseName}`;
-  const items = input.items.map(({ cents, ...item }) => ({
+  const items = input.items.map(({ cents, category, ...item }) => ({
     ...item,
     price: { kind: 'simple', cents },
+    // Com categoria, a origem é a de quem veio da planilha; sem ela, as duas colunas ficam nulas, como hoje.
+    ...(category ? { category, categorySource: 'import' } : {}),
   }));
   const { id } = await insertDocumentWithItems(
     dataSource,
