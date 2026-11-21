@@ -6,29 +6,18 @@ import {
   NEW_ABACATE,
   run,
 } from './flyer-pro-items.service.testutil';
-
-const PHOTO = '141da073-e2ab-4c8e-bb79-28e24074f743';
-const OTHER_PHOTO = '1798958c-04fc-4014-9921-a90755c9bdf3';
-const GROUP = {
-  galleryImageId: PHOTO,
-  imageUrl: 'http://localhost:3101/uploads/gallery/abacate.png',
-  imageWidth: 640,
-  imageHeight: 427,
-  imageOrigin: 'picker',
-};
-const NO_PHOTO = {
-  galleryImageId: null,
-  imageUrl: null,
-  imageWidth: null,
-  imageHeight: null,
-  imageOrigin: null,
-};
+import {
+  NO_PHOTO_GROUP,
+  OTHER_PHOTO,
+  PHOTO,
+  PHOTO_GROUP,
+} from '../testing/flyer-pro-photo-group.testutil';
 
 describe('FlyerProItemsService.apply: as fotos citadas no corpo (photoChoices)', () => {
   it('item novo com o grupo da foto: a foto nova e nenhuma foto antes', async () => {
     const manager = makeItemsManager({ found: [[], []] });
 
-    const { photoChoices } = await run(manager, { upsert: [{ ...NEW_ABACATE, ...GROUP }] });
+    const { photoChoices } = await run(manager, { upsert: [{ ...NEW_ABACATE, ...PHOTO_GROUP }] });
 
     expect(photoChoices).toEqual([
       {
@@ -44,7 +33,7 @@ describe('FlyerProItemsService.apply: as fotos citadas no corpo (photoChoices)',
     const stored = itemRow({ id: ABACATE, galleryImageId: OTHER_PHOTO, imageOrigin: 'match' });
     const manager = makeItemsManager({ found: [[stored], [stored]] });
 
-    const { photoChoices } = await run(manager, { upsert: [{ id: ABACATE, ...GROUP }] });
+    const { photoChoices } = await run(manager, { upsert: [{ id: ABACATE, ...PHOTO_GROUP }] });
 
     expect(photoChoices).toEqual([
       {
@@ -57,12 +46,12 @@ describe('FlyerProItemsService.apply: as fotos citadas no corpo (photoChoices)',
   });
 
   it('"Manter a desta tela": a mesma foto gravada volta como a antes, para o registro pular', async () => {
-    const stored = itemRow({ id: ABACATE, ...GROUP });
+    const stored = itemRow({ id: ABACATE, ...PHOTO_GROUP });
     const manager = makeItemsManager({ found: [[stored], [stored]] });
 
     const { photoChoices } = await run(manager, {
       replaceAll: true,
-      upsert: [{ ...NEW_ABACATE, ...GROUP }],
+      upsert: [{ ...NEW_ABACATE, ...PHOTO_GROUP }],
     });
 
     expect(photoChoices).toEqual([
@@ -71,10 +60,10 @@ describe('FlyerProItemsService.apply: as fotos citadas no corpo (photoChoices)',
   });
 
   it('tirar a foto: o grupo nulo e a foto que estava gravada', async () => {
-    const stored = itemRow({ id: ABACATE, ...GROUP });
+    const stored = itemRow({ id: ABACATE, ...PHOTO_GROUP });
     const manager = makeItemsManager({ found: [[stored], [stored]] });
 
-    const { photoChoices } = await run(manager, { upsert: [{ id: ABACATE, ...NO_PHOTO }] });
+    const { photoChoices } = await run(manager, { upsert: [{ id: ABACATE, ...NO_PHOTO_GROUP }] });
 
     expect(photoChoices).toEqual([
       { itemId: ABACATE, galleryImageId: null, previousGalleryImageId: PHOTO, imageOrigin: null },
@@ -98,7 +87,7 @@ describe('FlyerProItemsService.apply: as fotos citadas no corpo (photoChoices)',
 
     const { photoChoices } = await run(manager, {
       upsert: [
-        { ...NEW_ABACATE, ...GROUP },
+        { ...NEW_ABACATE, ...PHOTO_GROUP },
         { id: CERVEJA, price: { kind: 'simple', cents: 799 } },
       ],
     });

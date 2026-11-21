@@ -1,20 +1,16 @@
 import { itemRow } from '../services/flyer-pro-documents.service.testutil';
+import {
+  NO_PHOTO_GROUP,
+  OTHER_PHOTO,
+  PHOTO,
+  PHOTO_GROUP,
+} from '../testing/flyer-pro-photo-group.testutil';
 import { draftOf } from './flyer-pro-item-merge';
 import { photoChoiceOf } from './flyer-pro-photo-choice';
 
-const PHOTO = '141da073-e2ab-4c8e-bb79-28e24074f743';
-const OTHER_PHOTO = '1798958c-04fc-4014-9921-a90755c9bdf3';
-const GROUP = {
-  galleryImageId: PHOTO,
-  imageUrl: 'http://localhost:3101/uploads/gallery/abacate.png',
-  imageWidth: 640,
-  imageHeight: 427,
-  imageOrigin: 'picker',
-};
-
 describe('photoChoiceOf', () => {
   it('item novo com o grupo da foto: a foto nova, sem foto antes', () => {
-    const draft = draftOf({ id: 'i1', name: 'PÃO FRANCÊS KG', ...GROUP }, null, false);
+    const draft = draftOf({ id: 'i1', name: 'PÃO FRANCÊS KG', ...PHOTO_GROUP }, null, false);
     expect(photoChoiceOf(draft)).toEqual({
       itemId: 'i1',
       galleryImageId: PHOTO,
@@ -25,7 +21,7 @@ describe('photoChoiceOf', () => {
 
   it('item gravado com outra foto: devolve a foto antes e a nova', () => {
     const stored = itemRow({ galleryImageId: OTHER_PHOTO, imageOrigin: 'match' });
-    expect(photoChoiceOf(draftOf({ id: 'i1', ...GROUP }, stored, false))).toEqual({
+    expect(photoChoiceOf(draftOf({ id: 'i1', ...PHOTO_GROUP }, stored, false))).toEqual({
       itemId: 'i1',
       galleryImageId: PHOTO,
       previousGalleryImageId: OTHER_PHOTO,
@@ -35,14 +31,7 @@ describe('photoChoiceOf', () => {
 
   it('grupo todo nulo: foto nula e origem nula', () => {
     const stored = itemRow({ galleryImageId: PHOTO, imageOrigin: 'picker' });
-    const nulls = {
-      galleryImageId: null,
-      imageUrl: null,
-      imageWidth: null,
-      imageHeight: null,
-      imageOrigin: null,
-    };
-    expect(photoChoiceOf(draftOf({ id: 'i1', ...nulls }, stored, false))).toEqual({
+    expect(photoChoiceOf(draftOf({ id: 'i1', ...NO_PHOTO_GROUP }, stored, false))).toEqual({
       itemId: 'i1',
       galleryImageId: null,
       previousGalleryImageId: PHOTO,

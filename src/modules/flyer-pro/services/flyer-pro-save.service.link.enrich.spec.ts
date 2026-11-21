@@ -1,8 +1,8 @@
+import { PHOTO } from '../testing/flyer-pro-photo-group.testutil';
+import { ABACATE } from './flyer-pro-items.service.testutil';
 import {
-  ABACATE,
   makeSavingPhoto,
   PHOTO_CHOICE,
-  PHOTO,
   photoBody,
   recordSaveOrder,
   SAVED_ABACATE,

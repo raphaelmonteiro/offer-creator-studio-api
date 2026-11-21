@@ -1,10 +1,10 @@
 import { Logger } from '@nestjs/common';
 import type { GalleryProductLinkService } from '../../gallery/gallery-product-link.service';
 import { FlyerProImageLinkService } from './flyer-pro-image-link.service';
+import { PHOTO } from '../testing/flyer-pro-photo-group.testutil';
+import { ABACATE } from './flyer-pro-items.service.testutil';
 import {
-  ABACATE,
   makeSavingPhoto,
-  PHOTO,
   photoBody,
   PHOTO_CHOICE,
   recordSaveOrder,

@@ -3,11 +3,10 @@ import type { GalleryProductLinkService } from '../../gallery/gallery-product-li
 import type { PhotoChoice } from '../domain/flyer-pro-photo-choice';
 import type { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import { FlyerProImageLinkService } from './flyer-pro-image-link.service';
+import { OTHER_PHOTO, PHOTO } from '../testing/flyer-pro-photo-group.testutil';
 import { itemRow } from './flyer-pro-documents.service.testutil';
 
 const PICCIN = 'c2e28b36-5c8e-4fa0-9f37-7c3357ac8487';
-const PHOTO = '141da073-e2ab-4c8e-bb79-28e24074f743';
-const OTHER_PHOTO = '1798958c-04fc-4014-9921-a90755c9bdf3';
 
 const choiceOf = (over: Partial<PhotoChoice> = {}): PhotoChoice => ({
   itemId: 'i1',
