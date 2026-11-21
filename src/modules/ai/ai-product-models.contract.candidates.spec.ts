@@ -19,6 +19,7 @@ import {
   fakeGalleryQuery,
   PICCIN,
 } from './ean/dotcompany/flyer-ean-resolution.candidates.testutil';
+import { poolRow } from './gallery-embedding.testutil';
 import { chatResponse } from './utils/openai-chat.testutil';
 
 beforeAll(createUploadDir);
@@ -36,19 +37,6 @@ const GALLERY: FakePhoto[] = [
   },
   { id: BEER_PHOTO, ean: BEER_EAN },
 ];
-
-/** Uma linha da busca por embedding com vetor fixo: o que a Galeria devolve ao casamento por nome. */
-const poolRow = (id: string, distance: number) => ({
-  id,
-  filename: `${id}.png`,
-  url: `http://localhost:3101/uploads/gallery/${id}.png`,
-  thumbnailUrl: null,
-  folderId: null,
-  folderName: null,
-  distance,
-  isClientPreferred: false,
-  metadata: null,
-});
 
 const nameReading = () =>
   chatResponse({

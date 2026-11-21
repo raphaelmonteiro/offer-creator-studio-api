@@ -1,3 +1,4 @@
+import { poolRow } from '../gallery-embedding.testutil';
 import { ProductImageMatchV2Service } from './product-image-match-v2.service';
 
 /**
@@ -6,18 +7,6 @@ import { ProductImageMatchV2Service } from './product-image-match-v2.service';
  */
 describe('ProductImageMatchV2Service.findCandidates com fixadas', () => {
   const product = { id: 'inline', name: 'ABACATE', category: 'Hortifruti', unit: 'kg' };
-
-  const row = (id: string) => ({
-    id,
-    filename: `${id}.png`,
-    url: `http://localhost:3101/uploads/gallery/${id}.png`,
-    thumbnailUrl: null,
-    folderId: null,
-    folderName: null,
-    distance: 0.1,
-    isClientPreferred: false,
-    metadata: null,
-  });
 
   function makeService(scored: Array<{ imageId: string; score: number }>) {
     const embedding = {
@@ -31,7 +20,7 @@ describe('ProductImageMatchV2Service.findCandidates com fixadas', () => {
       { get: jest.fn().mockReturnValue('0') } as never,
     );
     const full = scored.map((candidate) => ({
-      ...row(candidate.imageId),
+      ...poolRow(candidate.imageId, 0.1),
       imageId: candidate.imageId,
       score: candidate.score,
       reasons: [],
