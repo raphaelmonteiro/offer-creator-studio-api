@@ -175,16 +175,21 @@ export class AiController {
   @ApiResponse({ status: 200, description: 'Lista de candidatas com reasons' })
   async productImageCandidatesV2(@Body() dto: ProductImageCandidatesRequestDto) {
     try {
-      const candidates = await this.productImageMatchV2.findCandidates(
-        {
-          id: 'inline',
-          name: dto.productName,
-          category: dto.category,
-          unit: dto.unit,
-        },
-        dto.limit ?? 12,
-        dto.clientId,
-      );
+      const product = {
+        id: 'inline',
+        name: dto.productName,
+        category: dto.category,
+        unit: dto.unit,
+      };
+      // O campo `ean` presente (mesmo null ou vazio) é o Encarte Pro: fotos do EAN e do nome escolhido no topo.
+      const candidates =
+        dto.ean === undefined
+          ? await this.productImageMatchV2.findCandidates(product, dto.limit ?? 12, dto.clientId)
+          : await this.flyerEanResolution.findCandidatesForProduct(
+              { ...product, ean: dto.ean?.trim() || null },
+              dto.limit ?? 12,
+              dto.clientId,
+            );
       return { candidates };
     } catch (error) {
       this.logger.error('Erro nos candidates V2', error);
@@ -571,11 +576,17 @@ export class AiController {
   @Post('image-download')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Baixa e salva uma imagem do Pixabay no bucket' })
-  @ApiResponse({ status: 200, description: 'URL CDN da imagem salva' })
+  @ApiResponse({
+    status: 200,
+    description: 'URL CDN da imagem salva (`imageUrl`) e id da linha criada na Galeria (`imageId`)',
+  })
   async imageDownload(@Body() dto: ImageDownloadRequestDto) {
     try {
-      const imageUrl = await this.aiService.downloadAndSaveImage(dto.imageUrl, dto.productName);
-      return { success: true, data: { imageUrl } };
+      const { url, imageId } = await this.aiService.downloadAndSaveImage(
+        dto.imageUrl,
+        dto.productName,
+      );
+      return { success: true, data: { imageUrl: url, imageId } };
     } catch (error) {
       this.logger.error('Erro ao baixar imagem', error);
       return {

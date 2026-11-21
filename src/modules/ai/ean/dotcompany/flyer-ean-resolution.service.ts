@@ -16,6 +16,7 @@ import { productAliasKey } from '../../../gallery/product-alias';
 import { AiAbortOptions } from '../../utils/ai-abort';
 import { AiStrictOptions } from '../../utils/ai-strict';
 import { AiUsageOptions } from '../../utils/ai-usage';
+import { mergeCandidates } from './flyer-candidates-merge';
 
 /** Mesmo patamar de revisão do match-v2: abaixo disso a "parecida" não vale mostrar. */
 const SIMILAR_MIN_SCORE = 0.5;
@@ -102,6 +103,45 @@ interface GalleryEanRow {
 function variants(ean: string): string[] {
   const set = new Set([ean, ean.replace(/^0+/, ''), ean.padStart(13, '0'), ean.padStart(14, '0')]);
   return [...set].filter(Boolean);
+}
+
+/**
+ * A foto já escolhida para o nome como candidata: com a nota e os motivos da busca por nome quando ela a achou
+ * (`ALIAS_REASON` na frente), e sem nota (0) quando não, por exemplo com o embedding desligado.
+ */
+function aliasCandidate(row: GalleryAliasRow, scored?: ScoredCandidateV2): ScoredCandidateV2 {
+  if (scored) return { ...scored, reasons: [ALIAS_REASON, ...scored.reasons] };
+  return {
+    imageId: row.id,
+    url: row.url,
+    thumbnailUrl: row.thumbnailUrl,
+    filename: row.filename,
+    folderName: null,
+    score: 0,
+    reasons: [ALIAS_REASON],
+    isClientPreferred: row.preferred,
+  };
+}
+
+/** A foto com o mesmo EAN como candidata: nota 1 e o motivo "EAN igual". */
+function eanCandidate(row: GalleryEanRow): ScoredCandidateV2 {
+  return {
+    imageId: row.id,
+    url: row.url,
+    thumbnailUrl: row.thumbnailUrl,
+    filename: row.filename,
+    folderName: null,
+    score: 1,
+    reasons: ['EAN igual'],
+    isClientPreferred: row.preferred,
+  };
+}
+
+/** A preferida do cliente antes e, entre as demais, a escolha mais recente antes. */
+function byPreferenceThenRecent(a: GalleryAliasRow, b: GalleryAliasRow): number {
+  return (
+    Number(b.preferred) - Number(a.preferred) || (b.chosenAt ?? '').localeCompare(a.chosenAt ?? '')
+  );
 }
 
 /** Preferida do cliente > foto de outra fonte > foto DotCompany. */
@@ -205,21 +245,7 @@ export class FlyerEanResolutionService {
       const chosenAt = new Map(rows.map((r) => [r.id, r.chosenAt ?? '']));
 
       const candidates: ScoredCandidateV2[] = rows
-        .map((r) => {
-          const scored = poolById.get(r.id);
-          return scored
-            ? { ...scored, reasons: [ALIAS_REASON, ...scored.reasons] }
-            : {
-                imageId: r.id,
-                url: r.url,
-                thumbnailUrl: r.thumbnailUrl,
-                filename: r.filename,
-                folderName: null,
-                score: 0,
-                reasons: [ALIAS_REASON],
-                isClientPreferred: r.preferred,
-              };
-        })
+        .map((r) => aliasCandidate(r, poolById.get(r.id)))
         .sort(
           (a, b) =>
             Number(b.isClientPreferred) - Number(a.isClientPreferred) ||
@@ -319,6 +345,49 @@ export class FlyerEanResolutionService {
       eanStatus,
       aliasStatus,
     };
+  }
+
+  /**
+   * As candidatas de um item do Encarte Pro (E2 com o campo `ean`): as fotos com o mesmo EAN (só se for GTIN válido),
+   * depois as já escolhidas antes para o nome, e por último a busca por nome de sempre, sem repetir foto e dentro do
+   * `limit`. Só lê a Galeria: nunca consulta a DotCompany, e a busca por nome faz as mesmas chamadas de IA de hoje.
+   */
+  async findCandidatesForProduct(
+    product: ProductMatchInputV2,
+    limit: number,
+    clientId?: string | null,
+  ): Promise<ScoredCandidateV2[]> {
+    const client = clientId ?? null;
+    const [eanRows, aliasByProduct] = await Promise.all([
+      this.galleryByValidEan(product.ean, client),
+      this.galleryByAlias([product], client),
+    ]);
+    const aliasRows = [...(aliasByProduct.get(product.id) ?? [])].sort(byPreferenceThenRecent);
+    const named = await this.matcher.findCandidates(
+      product,
+      limit,
+      client,
+      aliasRows.map((row) => row.id),
+    );
+    const scoredById = new Map(named.map((candidate) => [candidate.imageId, candidate]));
+    return mergeCandidates(
+      [
+        [...eanRows].sort((a, b) => rank(a) - rank(b)).map(eanCandidate),
+        aliasRows.map((row) => aliasCandidate(row, scoredById.get(row.id))),
+        named,
+      ],
+      limit,
+    );
+  }
+
+  /** As fotos da Galeria com o EAN do item, quando ele é um GTIN válido; `null`, vazio ou dígito errado: nenhuma. */
+  private async galleryByValidEan(
+    raw: string | null | undefined,
+    clientId: string | null,
+  ): Promise<GalleryEanRow[]> {
+    const classified = raw?.trim() ? classifyEan(raw) : null;
+    if (classified?.status !== 'valid') return [];
+    return (await this.galleryByEan([classified.ean], clientId)).get(classified.ean) ?? [];
   }
 
   /**

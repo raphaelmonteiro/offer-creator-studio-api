@@ -89,6 +89,11 @@ export interface MatchV2Result {
   matched: number;
 }
 
+/** O tamanho da lista de candidatas: de 1 a 24, qualquer que seja o `limit` pedido. */
+export function candidateLimit(limit: number): number {
+  return Math.min(Math.max(limit, 1), 24);
+}
+
 /**
  * `strict` (change 28): a falha da leitura do nome ou do embedding sobe como `TransientProviderError` ou
  * `TerminalProviderError` em vez de virar "sem candidatas"; repassado ao leitor de nomes e ao embedding. `signal`
@@ -218,18 +223,29 @@ export class ProductImageMatchV2Service {
     };
   }
 
+  /**
+   * As `limit` melhores candidatas (de 1 a 24). Com `pinnedImageIds` (fotos já escolhidas para o nome), o pool da
+   * busca as recebe e as que ela achou entram no resultado mesmo fora do top-N; as que a busca não achou (embedding
+   * desligado, por exemplo) quem as fixa é o chamador.
+   */
   async findCandidates(
     product: ProductMatchInputV2,
     limit: number,
     clientId?: string | null,
+    pinnedImageIds?: string[],
   ): Promise<ScoredCandidateV2[]> {
     const parsed = await this.nameParser.parseSingle({
       name: product.name,
       categoryHint: product.category,
     });
-    const sized = Math.min(Math.max(limit, 1), 24);
-    const all = await this.scoreCandidatesForProduct(product, parsed, clientId, {});
-    return all.slice(0, sized);
+    const sized = candidateLimit(limit);
+    const all = await this.scoreCandidatesForProduct(product, parsed, clientId, {
+      includeIds: pinnedImageIds,
+    });
+    const top = all.slice(0, sized);
+    if (!pinnedImageIds?.length) return top;
+    const pinned = new Set(pinnedImageIds);
+    return [...top, ...all.slice(sized).filter((candidate) => pinned.has(candidate.imageId))];
   }
 
   /** O texto que vai ao embedding: o da ficha lida do nome, ou nome, categoria e unidade quando a leitura falhou. */

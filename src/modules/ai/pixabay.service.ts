@@ -33,6 +33,12 @@ const UNITS = [
 const GENERIC_TERMS = ['tipo\\s+\\d+', 'especial', 'premium', 'tradicional'];
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
 
+/** A foto do Pixabay depois de salva: a URL do arquivo e o id da linha que a registrou em `gallery_images`. */
+export interface SavedPixabayImage {
+  url: string;
+  imageId: string;
+}
+
 interface PixabayHit {
   id: number;
   previewURL: string;
@@ -127,7 +133,8 @@ export class PixabayService {
     return { searchTerm: normalizedTerm, images };
   }
 
-  async downloadAndSaveImage(imageUrl: string, productName: string): Promise<string> {
+  /** Baixa a foto escolhida, grava o arquivo em `uploads/products/` e a registra na Galeria; devolve a URL e o id da linha criada. */
+  async downloadAndSaveImage(imageUrl: string, productName: string): Promise<SavedPixabayImage> {
     const response = await fetchWithTimeout(imageUrl);
     if (!response.ok) {
       throw new Error(`Falha ao baixar imagem: status ${response.status}`);
@@ -162,14 +169,14 @@ export class PixabayService {
 
     const result = await this.uploadsService.uploadFile(fakeFile, 'products');
 
-    await this.galleryService.registerImage({
+    const image = await this.galleryService.registerImage({
       filename,
       url: result.url,
       mimeType: contentType.split(';')[0].trim(),
       size: buffer.length,
     });
 
-    return result.url;
+    return { url: result.url, imageId: image.id };
   }
 
   private async translateToEnglish(term: string, usage?: AiUsageCollector): Promise<string> {

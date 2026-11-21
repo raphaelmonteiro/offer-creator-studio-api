@@ -52,6 +52,8 @@ export interface SaveViewInput {
   enrichment?: FlyerProEnrichmentOutcome;
   /** O estado da cópia, calculado na hora; só quando `fields.template`. */
   templateStatus?: FlyerProTemplateStatus;
+  /** Os itens cujo registro da foto na Galeria falhou; vazio sem falha e no reenvio. */
+  linkWarnings?: FlyerProLinkWarning[];
 }
 
 function templateFieldsOf({ document, fields, templateStatus }: SaveViewInput) {
@@ -63,9 +65,9 @@ function templateFieldsOf({ document, fields, templateStatus }: SaveViewInput) {
   };
 }
 
-/** `linkWarnings` é sempre `[]` até a change 27 registrar a escolha da foto na Galeria. */
 export function toSaveView(input: SaveViewInput): FlyerProSaveView {
-  const { document, replayed, applied, items = [], deletedItemIds = [], fields } = input;
+  const { document, replayed, applied, fields, linkWarnings = [] } = input;
+  const { items = [], deletedItemIds = [] } = input;
   return {
     id: document.id,
     revision: document.revision,
@@ -77,7 +79,7 @@ export function toSaveView(input: SaveViewInput): FlyerProSaveView {
     ...(fields.pageCount ? { pageCount: document.pageCount } : {}),
     items: items.map(toItemView),
     deletedItemIds,
-    linkWarnings: [],
+    linkWarnings,
     ...(input.enrichment ? { enrichment: input.enrichment } : {}),
   };
 }

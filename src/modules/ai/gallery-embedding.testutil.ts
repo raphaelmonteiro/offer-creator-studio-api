@@ -1,4 +1,4 @@
-import { GalleryEmbeddingService } from './gallery-embedding.service';
+import { GalleryEmbeddingService, MetadataEmbeddingMatch } from './gallery-embedding.service';
 import { fakeConfig, LoggerSpies, spyOnLogger } from './utils/openai-chat.testutil';
 
 export interface FakeEmbeddingOptions {
@@ -30,3 +30,16 @@ export function fakeEmbeddingService(options: FakeEmbeddingOptions = {}): {
   if (target.openai) target.openai = { embeddings: { create } };
   return { embedding, create, logs: spyOnLogger(embedding) };
 }
+
+/** Uma linha da busca por embedding com vetor fixo: o que a Galeria devolve ao casamento por nome. */
+export const poolRow = (id: string, distance: number): MetadataEmbeddingMatch => ({
+  id,
+  filename: `${id}.png`,
+  url: `http://localhost:3101/uploads/gallery/${id}.png`,
+  thumbnailUrl: null,
+  folderId: null,
+  folderName: null,
+  distance,
+  isClientPreferred: false,
+  metadata: null,
+});

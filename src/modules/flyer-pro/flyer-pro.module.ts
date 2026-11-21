@@ -8,6 +8,7 @@ import { FlyerEanResolutionService } from '../ai/ean/dotcompany/flyer-ean-resolu
 import { GalleryEmbeddingService } from '../ai/gallery-embedding.service';
 import { ProductCategorizationService } from '../ai/product-categorization.service';
 import { SpellCheckService } from '../ai/spell-check.service';
+import { GalleryModule } from '../gallery/gallery.module';
 import { FlyerProDocumentsController } from './controllers/flyer-pro-documents.controller';
 import { FlyerProEnrichmentController } from './controllers/flyer-pro-enrichment.controller';
 import { FlyerProExportsController } from './controllers/flyer-pro-exports.controller';
@@ -40,6 +41,7 @@ import { FlyerProJobReconcilerService } from './services/flyer-pro-job-reconcile
 import { FlyerProJobsService } from './services/flyer-pro-jobs.service';
 import { FlyerProExportsService } from './services/flyer-pro-exports.service';
 import { FlyerProSaveService } from './services/flyer-pro-save.service';
+import { FlyerProImageLinkService } from './services/flyer-pro-image-link.service';
 import { FlyerProImportsService } from './services/flyer-pro-imports.service';
 import { FlyerProItemsService } from './services/flyer-pro-items.service';
 import { FlyerProSetupService } from './services/flyer-pro-setup.service';
@@ -53,6 +55,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
  * Módulo do Encarte Pro (backend): a leitura dos templates das cenas do Templates v2 (N7), o montador da cópia congelada
  * do template, o encarte guardado no servidor (criar, listar, abrir e excluir: N1, N2, N3 e N6) e o serviço de guarda que
  * o módulo de clientes chama ao excluir um cliente, o registro e o histórico das exportações (N8 e N9) e a sugestão de estrutura por IA (N19, só leitura). Lê as tabelas das cenas sem passar pela flag `TEMPLATE_SCENE_ENABLED`.
+ * Importa a Galeria para registrar a escolha da foto depois do `PATCH` (change 27).
  */
 @Module({
   imports: [
@@ -66,6 +69,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     // A fila (`AnimationQueueService`) do job e, para as fases reais da change 29, os três serviços de IA que o `AiModule` exporta.
     SharedModule,
     AiModule,
+    GalleryModule,
   ],
   controllers: [
     FlyerProTemplatesController,
@@ -86,6 +90,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProClientGuardService,
     FlyerProImportsService,
     FlyerProExportsService,
+    FlyerProImageLinkService,
     FlyerProStructureSuggestionService,
     FlyerProJobsService,
     FlyerProEnrichCommitter,

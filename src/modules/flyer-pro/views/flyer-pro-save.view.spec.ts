@@ -42,6 +42,20 @@ describe('toSaveView', () => {
     expect(view.deletedItemIds).toEqual(['i9']);
   });
 
+  it('traz os linkWarnings que o registro da foto devolveu', () => {
+    const linkWarnings = [{ itemId: 'i1', code: 'GALLERY_IMAGE_NOT_FOUND' as const }];
+
+    const view = toSaveView({
+      document,
+      replayed: false,
+      applied: true,
+      fields: NO_FIELDS,
+      linkWarnings,
+    });
+
+    expect(view.linkWarnings).toEqual(linkWarnings);
+  });
+
   it('com a troca de arte traz format, pageCount, templateSnapshot e templateStatus', () => {
     const view = toSaveView({
       document,
