@@ -56,21 +56,23 @@ export function firstOversizedPart(body: SizedSaveBody): OversizedPart | null {
 }
 
 /**
- * Regravação de conferência: o corpo sem `setup`, `slices`, `items` nem `import` (`enrich` ainda não existe no DTO,
- * change 28). Chave presente, mesmo com objeto vazio, faz do corpo um `PATCH` normal (A-7); um corpo com `import` nunca é
- * conferência, senão a importação não seria gravada.
+ * Regravação de conferência: o corpo sem `setup`, `slices`, `items`, `import` nem `enrich`. Chave presente, mesmo com
+ * objeto vazio, faz do corpo um `PATCH` normal (A-7); um corpo com `import` ou `enrich` nunca é conferência, senão a
+ * importação não seria gravada nem o job criado.
  */
 export function isConferenceBody(body: {
   setup?: unknown;
   slices?: unknown;
   items?: unknown;
   import?: unknown;
+  enrich?: unknown;
 }) {
   return (
     body.setup === undefined &&
     body.slices === undefined &&
     body.items === undefined &&
-    body.import === undefined
+    body.import === undefined &&
+    body.enrich === undefined
   );
 }
 

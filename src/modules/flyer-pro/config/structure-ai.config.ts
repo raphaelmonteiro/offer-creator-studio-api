@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { ProductReasoningEffort } from '../../ai/config/openai-chat-params';
 import { readModelConfig } from '../../ai/config/openai-product-features.config';
 import { FLYER_PRO_LIMITS } from '../domain/flyer-pro.limits';
+import { rawEnv, readIntegerEnv, Warner } from './env-reader';
 
 /** Token de injeção da configuração da sugestão de estrutura, lida uma vez ao subir (mudar exige reiniciar). */
 export const STRUCTURE_AI_CONFIG = 'FLYER_PRO_STRUCTURE_AI_CONFIG';
@@ -22,32 +23,18 @@ export interface StructureAiConfig {
   examples: number;
 }
 
-type Warner = Pick<Logger, 'warn'>;
-
 const EFFORTS: readonly ProductReasoningEffort[] = ['none', 'low', 'medium'];
 const PREFIX = 'FLYER_PRO_STRUCTURE_AI_';
 
-const rawOf = (config: ConfigService, name: string): string | undefined => {
-  const raw = config.get<string>(PREFIX + name);
-  const text = typeof raw === 'string' ? raw.trim() : '';
-  return text === '' ? undefined : text;
-};
+const rawOf = (config: ConfigService, name: string): string | undefined =>
+  rawEnv(config, PREFIX + name);
 
-/** Inteiro de `min` a `max`; ausente vale o padrão em silêncio, valor inválido vale o padrão com aviso. */
-function readInteger(
+/** Inteiro de `min` a `max` de uma variável `FLYER_PRO_STRUCTURE_AI_*`; o aviso traz o nome inteiro e o valor recebido. */
+const readInteger = (
   config: ConfigService,
   logger: Warner,
   spec: { name: string; fallback: number; min: number; max?: number },
-): number {
-  const raw = rawOf(config, spec.name);
-  if (raw === undefined) return spec.fallback;
-  const parsed = Number(raw);
-  const inRange =
-    Number.isInteger(parsed) && parsed >= spec.min && parsed <= (spec.max ?? Infinity);
-  if (inRange) return parsed;
-  logger.warn(`${PREFIX}${spec.name}="${raw}" inválida; vale o padrão ${spec.fallback}`);
-  return spec.fallback;
-}
+): number => readIntegerEnv(config, logger, { ...spec, name: PREFIX + spec.name });
 
 function readEffort(config: ConfigService, logger: Warner): ProductReasoningEffort {
   const raw = rawOf(config, 'EFFORT');

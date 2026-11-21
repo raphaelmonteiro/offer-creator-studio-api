@@ -87,33 +87,73 @@ async function seedClients(dataSource: DataSource, identity: SeedIdentity) {
   return { clientWithLibrary, clientLegacyFooter };
 }
 
-/** Acha a foto pelo nome do arquivo e a põe com a URL e a pasta atuais, ou a cria. */
+/** Acha a foto pelo nome do arquivo e a põe com a URL e a pasta atuais (e o `metadata`, se veio), ou a cria. */
 async function upsertImage(
   dataSource: DataSource,
-  image: { filename: string; url: string; size: number; folderId: string },
+  image: {
+    filename: string;
+    url: string;
+    size: number;
+    folderId: string | null;
+    metadata: object | null;
+  },
 ): Promise<string> {
   const { filename, url, size, folderId } = image;
+  const metadata = image.metadata ? JSON.stringify(image.metadata) : null;
   const [found] = await dataSource.query(`SELECT id FROM gallery_images WHERE filename = $1`, [
     filename,
   ]);
   if (found) {
     await dataSource.query(
-      `UPDATE gallery_images SET url = $2, "thumbnailUrl" = $2, size = $3, "folderId" = $4 WHERE id = $1`,
-      [found.id, url, size, folderId],
+      `UPDATE gallery_images SET url = $2, "thumbnailUrl" = $2, size = $3, "folderId" = $4,
+         metadata = COALESCE($5::jsonb, metadata) WHERE id = $1`,
+      [found.id, url, size, folderId, metadata],
     );
     return found.id;
   }
   const [created] = await dataSource.query(
-    `INSERT INTO gallery_images (filename, url, "thumbnailUrl", "mimeType", size, "folderId", metadata_status)
-     VALUES ($1, $2, $2, 'image/png', $3, $4, 'ready') RETURNING id`,
-    [filename, url, size, folderId],
+    `INSERT INTO gallery_images (filename, url, "thumbnailUrl", "mimeType", size, "folderId", metadata, metadata_status)
+     VALUES ($1, $2, $2, 'image/png', $3, $4, $5::jsonb, 'ready') RETURNING id`,
+    [filename, url, size, folderId, metadata],
   );
   return created.id;
 }
 
-async function seedGallery(dataSource: DataSource, identity: SeedIdentity, target: SeedFileTarget) {
+export interface GalleryPhotoSeed {
+  filename: string;
+  width: number;
+  height: number;
+  color?: [number, number, number];
+  /** O que a foto guarda em `metadata` (o EAN, os nomes já escolhidos); sem ele, a linha não ganha `metadata`. */
+  metadata?: object;
+  folderId?: string;
+}
+
+/**
+ * Grava uma foto da Galeria do e2e: o PNG liso em `<uploads>/gallery`, a URL pelo `CDN_URL` do harness e a linha
+ * `gallery_images` pronta (`metadata_status = 'ready'`), achada pelo nome do arquivo se já existir.
+ */
+export async function insertGalleryPhoto(
+  dataSource: DataSource,
+  target: SeedFileTarget,
+  photo: GalleryPhotoSeed,
+): Promise<{ id: string; url: string }> {
   const dir = path.join(target.uploadsDir, 'gallery');
   await fs.mkdir(dir, { recursive: true });
+  const png = await solidPng(photo.width, photo.height, photo.color ?? [60, 120, 200]);
+  await fs.writeFile(path.join(dir, photo.filename), png);
+  const url = `${target.cdnUrl.replace(/\/+$/, '')}/gallery/${photo.filename}`;
+  const id = await upsertImage(dataSource, {
+    filename: photo.filename,
+    url,
+    size: png.length,
+    folderId: photo.folderId ?? null,
+    metadata: photo.metadata ?? null,
+  });
+  return { id, url };
+}
+
+async function seedGallery(dataSource: DataSource, identity: SeedIdentity, target: SeedFileTarget) {
   const [folder] = await dataSource.query(`SELECT id FROM gallery_folders WHERE name = $1`, [
     identity.folderName,
   ]);
@@ -126,10 +166,9 @@ async function seedGallery(dataSource: DataSource, identity: SeedIdentity, targe
     )[0].id;
   const images: SeededImage[] = [];
   for (const [index, filename] of identity.photoFiles.entries()) {
-    const png = await solidPng(240, 240, index === 0 ? [200, 60, 60] : [60, 120, 200]);
-    await fs.writeFile(path.join(dir, filename), png);
-    const url = `${target.cdnUrl.replace(/\/+$/, '')}/gallery/${filename}`;
-    const id = await upsertImage(dataSource, { filename, url, size: png.length, folderId });
+    const color: [number, number, number] = index === 0 ? [200, 60, 60] : [60, 120, 200];
+    const photo = { filename, width: 240, height: 240, color, folderId };
+    const { id, url } = await insertGalleryPhoto(dataSource, target, photo);
     images.push({ id, filename, url, folderId });
   }
   return { folder: { id: folderId, name: identity.folderName }, images };

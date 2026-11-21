@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { DataSource, QueryRunner } from 'typeorm';
 import { CreateFlyerProDocuments1767700000000 } from '../../../migrations/1767700000000-CreateFlyerProDocuments';
 import { CreateFlyerProImports1767800000000 } from '../../../migrations/1767800000000-CreateFlyerProImports';
+import { CreateFlyerProJobs1767900000000 } from '../../../migrations/1767900000000-CreateFlyerProJobs';
 import { describeIfE2eDb, openE2eDb } from '../../../shared/testing/e2e-test-db';
 import {
   insertClient,
@@ -11,10 +12,16 @@ import {
   purgeDocumentsOf,
 } from '../testing/flyer-pro-documents.fixture';
 import { insertImport } from '../testing/flyer-pro-imports.fixture';
-import { ALL_TABLES, catalogOf, MINIMAL_CLIENTS_SQL } from './flyer-pro-documents.catalog.testutil';
+import { insertJob } from '../testing/flyer-pro-jobs.fixture';
+import { FlyerProJob } from './flyer-pro-job.entity';
+import {
+  catalogOf,
+  MINIMAL_CLIENTS_SQL,
+  TABLES_AFTER_M3,
+} from './flyer-pro-documents.catalog.testutil';
 
 /**
- * O banco de e2e é montado pelo `synchronize` das entidades. Aqui as entidades são comparadas com o que a M1 e a M2
+ * O banco de e2e é montado pelo `synchronize` das entidades. Aqui as entidades são comparadas com o que a M1 a M3
  * criam (catálogo do Postgres) e as garantias de integridade das tabelas são provadas nele. Limpa só o que criou, encartes
  * antes dos clientes.
  */
@@ -44,7 +51,7 @@ describeIfE2eDb('Entidades do encarte e integridade (banco montado pelas entidad
     await dataSource.destroy();
   });
 
-  it('nomes, colunas, unicidade, filtros dos índices e regras ON DELETE iguais aos da M1 e da M2', async () => {
+  it('nomes, colunas, unicidade, filtros dos índices e regras ON DELETE iguais aos da M1 a M3', async () => {
     const schema = `mig_flyer_pro_schema_${process.pid}_${Date.now()}`;
     const runner: QueryRunner = dataSource.createQueryRunner();
     await runner.connect();
@@ -54,10 +61,11 @@ describeIfE2eDb('Entidades do encarte e integridade (banco montado pelas entidad
       await runner.query(MINIMAL_CLIENTS_SQL);
       await new CreateFlyerProDocuments1767700000000().up(runner);
       await new CreateFlyerProImports1767800000000().up(runner);
-      const fromMigrations = await catalogOf(runner, schema, ALL_TABLES);
+      await new CreateFlyerProJobs1767900000000().up(runner);
+      const fromMigrations = await catalogOf(runner, schema, TABLES_AFTER_M3);
       await runner.query(`SET search_path TO public`);
 
-      expect(await catalogOf(dataSource, 'public', ALL_TABLES)).toEqual(fromMigrations);
+      expect(await catalogOf(dataSource, 'public', TABLES_AFTER_M3)).toEqual(fromMigrations);
     } finally {
       await runner.query(`SET search_path TO public`);
       await runner.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
@@ -165,6 +173,32 @@ describeIfE2eDb('Entidades do encarte e integridade (banco montado pelas entidad
           id,
         ),
       ).toBe(4);
+    });
+  });
+
+  describe('job de enriquecimento', () => {
+    it('costUsd volta como número, e nulo volta null', async () => {
+      const clientId = await newClient();
+      const id = await insertDocument(dataSource, { clientId });
+      const priced = await insertJob(dataSource, id, { status: 'done', costUsd: 0.012345 });
+      const free = await insertJob(dataSource, id, { status: 'canceled' });
+      const repo = dataSource.getRepository(FlyerProJob);
+
+      expect((await repo.findOneByOrFail({ id: priced })).costUsd).toBe(0.012345);
+      expect((await repo.findOneByOrFail({ id: free })).costUsd).toBeNull();
+    });
+
+    it('apagar fisicamente o encarte leva os jobs, sem erro de FK', async () => {
+      const clientId = await newClient();
+      const id = await insertDocument(dataSource, { clientId, deletedAt: new Date() });
+      await insertJob(dataSource, id, { status: 'done' });
+      await insertJob(dataSource, id, { status: 'canceled' });
+      const jobs = `SELECT count(*)::int AS n FROM flyer_pro_jobs WHERE "documentId" = $1`;
+      expect(await count(jobs, id)).toBe(2);
+
+      await dataSource.query(`DELETE FROM flyer_pro_documents WHERE id = $1`, [id]);
+
+      expect(await count(jobs, id)).toBe(0);
     });
   });
 

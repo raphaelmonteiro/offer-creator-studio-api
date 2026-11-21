@@ -14,12 +14,25 @@ function pickDefined<T extends object>(values: T): Partial<T> {
   ) as Partial<T>;
 }
 
-/** Trava a linha viva do encarte até o fim da transação (`SELECT ... FOR UPDATE`); sem linha, 404. */
-export async function lockDocument(manager: EntityManager, id: string): Promise<FlyerProDocument> {
-  const document = await manager.findOne(FlyerProDocument, {
+/**
+ * Trava a linha do encarte até o fim da transação (`SELECT ... FOR UPDATE`) e a devolve, ou `null` se não existe. Com
+ * `withDeleted`, acha também o encarte excluído logicamente (o job fecha `canceled` em vez de dar 404).
+ */
+export function findLockedDocument(
+  manager: EntityManager,
+  id: string,
+  options: { withDeleted?: boolean } = {},
+): Promise<FlyerProDocument | null> {
+  return manager.findOne(FlyerProDocument, {
     where: { id },
     lock: { mode: 'pessimistic_write' },
+    ...(options.withDeleted ? { withDeleted: true } : {}),
   });
+}
+
+/** Trava a linha viva do encarte até o fim da transação; sem linha (ou excluída), 404. */
+export async function lockDocument(manager: EntityManager, id: string): Promise<FlyerProDocument> {
+  const document = await findLockedDocument(manager, id);
   if (!document) throw flyerProNotFound();
   return document;
 }

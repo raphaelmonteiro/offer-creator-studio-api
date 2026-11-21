@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GalleryEmbeddingService, MetadataEmbeddingMatch } from '../gallery-embedding.service';
+import { AiAbortOptions } from '../utils/ai-abort';
+import { AiStrictOptions } from '../utils/ai-strict';
+import { AiUsageOptions } from '../utils/ai-usage';
 import { ProductNameParserService } from './product-name-parser.service';
 import { Alternative, buildEmbeddingText, ProductMetadata } from './product-metadata.schema';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
@@ -91,7 +94,13 @@ export function candidateLimit(limit: number): number {
   return Math.min(Math.max(limit, 1), 24);
 }
 
-export interface MatchV2Options {
+/**
+ * `strict` (change 28): a falha da leitura do nome ou do embedding sobe como `TransientProviderError` ou
+ * `TerminalProviderError` em vez de virar "sem candidatas"; repassado ao leitor de nomes e ao embedding. `signal`
+ * (change 29): cancela as chamadas à OpenAI em andamento. `usage` (change 29): coletor do uso da leitura do nome, a
+ * única chamada paga em tokens da busca (o embedding não tem preço na tabela).
+ */
+export interface MatchV2Options extends AiStrictOptions, AiAbortOptions, AiUsageOptions {
   /**
    * Por produto, imagens que entram no pool de candidatas mesmo fora do top-N
    * por similaridade (ex.: fotos já escolhidas antes para aquele nome), para
@@ -142,7 +151,9 @@ export class ProductImageMatchV2Service {
 
     const parsed = await this.nameParser.parseNames(
       products.map((p) => ({ name: p.name, categoryHint: p.category })),
+      { strict: options.strict, signal: options.signal, usage: options.usage },
     );
+    const queryEmbeddings = await this.embedQueries(products, parsed, options);
 
     const matches: ProductMatchHitV2[] = [];
     const reviewCandidates: ProductReviewCandidatesV2[] = [];
@@ -151,12 +162,11 @@ export class ProductImageMatchV2Service {
       const product = products[i];
       const metadata = parsed[i];
 
-      const candidates = await this.scoreCandidatesForProduct(
-        product,
-        metadata,
-        clientId,
-        options.pinnedImageIds?.get(product.id),
-      );
+      const candidates = await this.scoreCandidatesForProduct(product, metadata, clientId, {
+        includeIds: options.pinnedImageIds?.get(product.id),
+        strict: options.strict,
+        queryEmbedding: queryEmbeddings[i],
+      });
       byProduct.set(product.id, candidates);
 
       if (this.debugEnabled) {
@@ -229,36 +239,70 @@ export class ProductImageMatchV2Service {
       categoryHint: product.category,
     });
     const sized = candidateLimit(limit);
-    const all = await this.scoreCandidatesForProduct(product, parsed, clientId, pinnedImageIds);
+    const all = await this.scoreCandidatesForProduct(product, parsed, clientId, {
+      includeIds: pinnedImageIds,
+    });
     const top = all.slice(0, sized);
     if (!pinnedImageIds?.length) return top;
     const pinned = new Set(pinnedImageIds);
     return [...top, ...all.slice(sized).filter((candidate) => pinned.has(candidate.imageId))];
   }
 
-  private async scoreCandidatesForProduct(
-    product: ProductMatchInputV2,
-    metadata: ProductMetadata | null,
-    clientId?: string | null,
-    includeIds?: string[],
-  ): Promise<ScoredCandidateV2[]> {
-    const queryText = metadata
+  /** O texto que vai ao embedding: o da ficha lida do nome, ou nome, categoria e unidade quando a leitura falhou. */
+  private queryTextOf(product: ProductMatchInputV2, metadata: ProductMetadata | null): string {
+    return metadata
       ? buildEmbeddingText(metadata)
       : [product.name, product.category, product.unit]
           .filter((v): v is string => !!v && v.trim().length > 0)
           .join(' ');
+  }
+
+  /**
+   * Os embeddings dos textos de busca de todos os produtos numa chamada (o serviço divide a cada 96 textos), em vez de
+   * uma por produto. Produto sem texto fica fora do pedido e sem vetor; a falha de uma chamada do serviço deixa sem
+   * vetor só os produtos dela (e, com `strict`, sobe classificada).
+   */
+  private async embedQueries(
+    products: ProductMatchInputV2[],
+    parsed: (ProductMetadata | null)[],
+    options: MatchV2Options,
+  ): Promise<(number[] | null)[]> {
+    const texts = products.map((product, index) => this.queryTextOf(product, parsed[index]));
+    const asked = texts.flatMap((text, index) => (text ? [index] : []));
+    const vectors = await this.embedding.embedTexts(
+      asked.map((index) => texts[index]),
+      { strict: options.strict, signal: options.signal },
+    );
+    const byProduct: (number[] | null)[] = new Array(products.length).fill(null);
+    asked.forEach((productIndex, position) => {
+      byProduct[productIndex] = vectors[position] ?? null;
+    });
+    return byProduct;
+  }
+
+  private async scoreCandidatesForProduct(
+    product: ProductMatchInputV2,
+    metadata: ProductMetadata | null,
+    clientId: string | null | undefined,
+    pool: { includeIds?: string[]; strict?: boolean; queryEmbedding?: number[] | null },
+  ): Promise<ScoredCandidateV2[]> {
+    const queryText = this.queryTextOf(product, metadata);
 
     if (!queryText) return [];
 
-    const queryEmbedding = await this.embedding.embedText(queryText);
+    // Com o vetor já pedido em lote, não há nova chamada; sem ele (um produto só), pede aqui.
+    const queryEmbedding =
+      pool.queryEmbedding !== undefined
+        ? pool.queryEmbedding
+        : await this.embedding.embedText(queryText, { strict: pool.strict });
     if (!queryEmbedding) return [];
 
-    const pool = await this.embedding.searchByMetadataEmbedding(queryEmbedding, CANDIDATE_POOL, {
+    const rows = await this.embedding.searchByMetadataEmbedding(queryEmbedding, CANDIDATE_POOL, {
       clientId,
-      includeIds,
+      includeIds: pool.includeIds,
     });
 
-    const scored = pool.map((row) => this.scoreCandidate(metadata, row));
+    const scored = rows.map((row) => this.scoreCandidate(metadata, row));
 
     scored.sort((a, b) => b.score - a.score);
     return scored;

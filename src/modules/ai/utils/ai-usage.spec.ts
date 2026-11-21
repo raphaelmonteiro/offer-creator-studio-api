@@ -85,4 +85,58 @@ describe('AiUsageCollector', () => {
     collector.snapshot().models.push('outro');
     expect(collector.snapshot().models).toEqual(['gpt-6-luna']);
   });
+
+  describe('track: chamada abortada ou em andamento (D-orq-1)', () => {
+    const USAGE = { prompt_tokens: 1000, completion_tokens: 200 };
+
+    it('resposta com usage: entra como as de record e o custo segue conhecido', async () => {
+      const collector = new AiUsageCollector();
+
+      await collector.track('gpt-6-luna', async () => ({ usage: USAGE }));
+
+      expect(collector.snapshot()).toMatchObject({ calls: 1, inputTokens: 1000, costUsd: 0.0002 });
+    });
+
+    it('chamada ainda em andamento: o custo é nulo, mesmo com outra concluída, e volta a valer quando ela termina', async () => {
+      const collector = new AiUsageCollector();
+      await collector.track('gpt-6-luna', async () => ({ usage: USAGE }));
+      let finish: (value: { usage: typeof USAGE }) => void = () => undefined;
+      const pending = collector.track(
+        'gpt-6-luna',
+        () => new Promise<{ usage: typeof USAGE }>((resolve) => (finish = resolve)),
+      );
+
+      expect(collector.snapshot()).toMatchObject({ calls: 1, costUsd: null });
+
+      finish({ usage: USAGE });
+      await pending;
+      expect(collector.snapshot()).toMatchObject({ calls: 2, costUsd: 0.0004 });
+    });
+
+    it('chamada abortada no meio: entra como chamada sem uso e o custo fica nulo, nunca a soma das que terminaram', async () => {
+      const collector = new AiUsageCollector();
+      await collector.track('gpt-6-luna', async () => ({ usage: USAGE }));
+
+      await expect(
+        collector.track(
+          'gpt-6-luna',
+          () => Promise.reject(new Error('aborted')),
+          () => true,
+        ),
+      ).rejects.toThrow('aborted');
+
+      expect(collector.snapshot()).toMatchObject({ calls: 2, inputTokens: 1000, costUsd: null });
+    });
+
+    it('erro de resposta do provedor (não abortada): não entra e o custo das concluídas segue conhecido', async () => {
+      const collector = new AiUsageCollector();
+      await collector.track('gpt-6-luna', async () => ({ usage: USAGE }));
+
+      await expect(
+        collector.track('gpt-6-luna', () => Promise.reject(new Error('503'))),
+      ).rejects.toThrow('503');
+
+      expect(collector.snapshot()).toMatchObject({ calls: 1, costUsd: 0.0002 });
+    });
+  });
 });

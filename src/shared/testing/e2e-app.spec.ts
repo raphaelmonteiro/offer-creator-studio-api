@@ -59,6 +59,18 @@ describe('App de teste do e2e: nenhuma chamada paga', () => {
     expect(watched.map((key) => process.env[key])).toEqual(before);
   });
 
+  it('por padrão nenhuma fila sobe: as três flags da fila desligadas e nenhum consumidor do worker', async () => {
+    const { config } = await boot();
+    for (const flag of [
+      'ANIMATIONS_ENABLED',
+      'TEMPLATE_SCENE_ENABLED',
+      'FLYER_PRO_ENRICH_ENABLED',
+    ]) {
+      expect(config.get(flag)).toBe('false');
+    }
+    expect(config.get('WORKER_ONLY')).toBeUndefined();
+  });
+
   it('chave no backend/.env: o ConfigService não devolve o valor do arquivo', async () => {
     const cwd = process.cwd();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-app-dotenv-'));

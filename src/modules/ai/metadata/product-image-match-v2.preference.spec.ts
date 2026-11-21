@@ -19,7 +19,7 @@ describe('ProductImageMatchV2Service — preferência do cliente', () => {
     candidates: Array<{ imageId: string; score: number; isClientPreferred: boolean }>,
   ) {
     const service = new ProductImageMatchV2Service(
-      {} as never,
+      { embedTexts: jest.fn(async (texts: string[]) => texts.map(() => null)) } as never,
       { parseNames: jest.fn().mockResolvedValue([null]) } as never,
       {} as never,
       { get: jest.fn().mockReturnValue('0') } as never,

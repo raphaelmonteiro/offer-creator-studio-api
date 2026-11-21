@@ -26,8 +26,10 @@ const MICRO = 1_000_000;
 
 /**
  * Coletor entregue pelo chamador. Soma as chamadas bem-sucedidas da invocação: lotes, nova tentativa por JSON
- * inválido, item a item e segunda passada da foto. Chamada que falhou antes de devolver `usage` não entra
- * (o log registra a falha). Um mesmo coletor pode somar várias invocações.
+ * inválido, item a item e segunda passada da foto. Chamada que falhou com resposta de erro do provedor não entra (o log
+ * registra a falha). Chamada abortada no meio (sinal do chamador ou prazo da própria chamada) ou ainda em andamento
+ * quando se lê o uso pode ter sido cobrada sem devolver `usage`: entra como chamada sem uso, e o custo fica nulo
+ * (desconhecido), nunca a soma das que terminaram (D-orq-1). Um mesmo coletor pode somar várias invocações.
  */
 export class AiUsageCollector {
   private readonly seenModels: string[] = [];
@@ -36,6 +38,7 @@ export class AiUsageCollector {
   private outputTokens = 0;
   private costUsd = 0;
   private costKnown = true;
+  private inFlight = 0;
 
   /** Registra o modelo da feature antes de qualquer chamada, para a invocação sem chamada também o trazer. */
   declareModel(model: string): void {
@@ -54,6 +57,31 @@ export class AiUsageCollector {
     this.outputTokens += usage.completion_tokens ?? usage.output_tokens ?? 0;
   }
 
+  /**
+   * Corre uma chamada paga e a registra: resposta com `usage` entra com ele; erro de `wasAborted` (a chamada foi
+   * abortada no meio) entra como chamada sem uso; qualquer outro erro não entra. Enquanto a chamada não termina, o custo
+   * do `snapshot` já é desconhecido: quem lê o uso com ela em andamento (lote que falhou ou passou do prazo e a
+   * abandonou) não sabe o que ela vai custar.
+   */
+  async track<R extends { usage?: LlmUsage | null }>(
+    model: string,
+    run: () => Promise<R>,
+    wasAborted: (error: unknown) => boolean = () => false,
+  ): Promise<R> {
+    this.noteModel(model);
+    this.inFlight += 1;
+    try {
+      const response = await run();
+      this.record(model, response.usage);
+      return response;
+    } catch (error) {
+      if (wasAborted(error)) this.record(model, null);
+      throw error;
+    } finally {
+      this.inFlight -= 1;
+    }
+  }
+
   snapshot(): AiInvocationUsage {
     return {
       model: this.seenModels[0] ?? null,
@@ -61,7 +89,8 @@ export class AiUsageCollector {
       calls: this.calls,
       inputTokens: this.inputTokens,
       outputTokens: this.outputTokens,
-      costUsd: this.costKnown ? Math.round(this.costUsd * MICRO) / MICRO : null,
+      costUsd:
+        this.costKnown && this.inFlight === 0 ? Math.round(this.costUsd * MICRO) / MICRO : null,
     };
   }
 

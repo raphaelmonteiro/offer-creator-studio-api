@@ -4,6 +4,7 @@ import { itemRow, STATUS } from './flyer-pro-documents.service.testutil';
 import { IMPORT_ID, importEntry } from '../testing/flyer-pro-imports.fixture';
 import { makeImportsService } from './flyer-pro-imports.service.testutil';
 import { FlyerProItemsService } from './flyer-pro-items.service';
+import { FlyerProJobsService } from './flyer-pro-jobs.service';
 import {
   makeLinkService,
   SAVED_AT,
@@ -14,6 +15,7 @@ import {
 import { FlyerProSaveService } from './flyer-pro-save.service';
 import type { FlyerProSetupService } from './flyer-pro-setup.service';
 import type { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
+import { fakeDataSource } from '../testing/flyer-pro-fake-db.testutil';
 
 const OTHER_DOCUMENT = 'd2';
 const newItem = (n: number, over: Record<string, unknown> = {}) => ({
@@ -62,13 +64,14 @@ function makeStatefulSave(imports: Record<string, string> = {}, foreignItems: Fl
       return Promise.resolve([]);
     }),
   };
-  const dataSource = { transaction: jest.fn((work: (m: unknown) => unknown) => work(manager)) };
+  const dataSource = fakeDataSource(manager);
   const service = new FlyerProSaveService(
     dataSource as unknown as DataSource,
     { apply: jest.fn().mockResolvedValue({}) } as unknown as FlyerProSetupService,
     { statusOf: jest.fn().mockResolvedValue(STATUS) } as unknown as FlyerProTemplateSnapshotService,
     new FlyerProItemsService(dataSource as unknown as DataSource),
     makeImportsService().service,
+    { requestAfterSave: jest.fn(), replayAfterSave: jest.fn() } as unknown as FlyerProJobsService,
     makeLinkService().service,
   );
   return {

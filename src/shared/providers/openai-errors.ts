@@ -1,5 +1,6 @@
 import { APIConnectionError } from 'openai';
 import {
+  PROVIDER_AUTH_CODE,
   PROVIDER_RETRY_AFTER_MAX_S,
   TerminalProviderError,
   TransientProviderError,
@@ -113,6 +114,28 @@ export function classifyOpenAiError(err: unknown): unknown {
     return new TransientProviderError(`HTTP ${status}`, openAiRetryAfterSeconds(err) ?? undefined);
   }
   return err;
+}
+
+/**
+ * Classificação do modo estrito (change 28): devolve SEMPRE um erro classificado. Passa por `classifyOpenAiError`
+ * (sem crédito é terminal `quota`; 429 de taxa, 5xx, rede e prazo são transitórios; erro já classificado passa como
+ * veio); o que sobrar com status 4xx (400, 401, 403, 404...) é terminal; erro sem status (nem código de rede) é
+ * transitório, para o job repetir em vez de desistir de um item que nunca foi conferido.
+ */
+export function classifyOpenAiErrorStrict(
+  err: unknown,
+): TransientProviderError | TerminalProviderError {
+  const classified = classifyOpenAiError(err);
+  if (classified instanceof TerminalProviderError || classified instanceof TransientProviderError) {
+    return classified;
+  }
+  const message = (classified as Error | null)?.message ?? 'erro desconhecido';
+  const status = (classified as OpenAiErrorShape | null)?.status;
+  if (typeof status === 'number' && status >= 400 && status < 500) {
+    const code = status === 401 || status === 403 ? PROVIDER_AUTH_CODE : undefined;
+    return new TerminalProviderError(`OpenAI recusou o pedido (HTTP ${status}): ${message}`, code);
+  }
+  return new TransientProviderError(message);
 }
 
 /**

@@ -119,11 +119,17 @@ export interface FlyerProItemIssue {
   code: string;
 }
 
-/** O problema de um campo do registro de uma importação. */
-export interface FlyerProImportIssue {
+/**
+ * O problema de um campo de um registro ou de um retrato: `field` é o caminho e `code` o motivo. É a forma de `issues`
+ * do registro da importação, do retrato da Estrutura e do registro da exportação.
+ */
+export interface FlyerProFieldIssue {
   field: string;
   code: string;
 }
+
+/** O problema de um campo do registro de uma importação. */
+export type FlyerProImportIssue = FlyerProFieldIssue;
 
 /** O 422 com a lista de problemas em `issues`, fora de `details`: o mesmo envelope dos itens e das importações. */
 const flyerProIssues = (code: string, message: string, issues: Array<object>) =>
@@ -135,6 +141,10 @@ export const flyerProItemInvalid = (issues: FlyerProItemIssue[]) =>
 /** O registro da importação com contagens incoerentes (`COUNT_MISMATCH`, `EMPTY`). */
 export const flyerProImportInvalid = (issues: FlyerProImportIssue[]) =>
   flyerProIssues('FLYER_PRO_IMPORT_INVALID', 'O registro da importação está incoerente.', issues);
+
+/** O registro da exportação incoerente (`PRESET_MISMATCH`, `FILE_NAME_EXTENSION`, `REVISION_AHEAD`): todos de uma vez. */
+export const flyerProExportInvalid = (issues: FlyerProFieldIssue[]) =>
+  flyerProIssues('FLYER_PRO_EXPORT_INVALID', 'O registro da exportação está incoerente.', issues);
 
 export const flyerProItemLimit = (details: { max: number; total: number }) =>
   flyerProError(
@@ -162,11 +172,17 @@ export const flyerProImportIdConflict = (importId: string) =>
     { importId },
   );
 
+/** O `id` do registro já é de uma exportação de outro encarte, vivo ou excluído. */
+export const flyerProExportIdConflict = (exportId: string) =>
+  flyerProError(
+    HttpStatus.CONFLICT,
+    'FLYER_PRO_EXPORT_ID_CONFLICT',
+    'A exportação pertence a outro encarte.',
+    { exportId },
+  );
+
 /** O problema de uma conferência do retrato da Estrutura (N19). */
-export interface FlyerProStructureIssue {
-  field: string;
-  code: string;
-}
+export type FlyerProStructureIssue = FlyerProFieldIssue;
 
 /** O retrato da Estrutura incoerente: todos os problemas de uma vez em `issues`, fora de `details`. */
 export const flyerProStructureStateInvalid = (issues: FlyerProStructureIssue[]) =>
@@ -227,4 +243,21 @@ export const flyerProNoItems = () =>
     'FLYER_PRO_NO_ITEMS',
     'Não há itens do encarte neste pedido.',
     {},
+  );
+
+/** Já há um job `queued` ou `running` neste encarte; `details.jobId` é o que a tela passa a acompanhar. */
+export const flyerProEnrichmentRunning = (jobId: string) =>
+  flyerProError(
+    HttpStatus.CONFLICT,
+    'FLYER_PRO_ENRICHMENT_RUNNING',
+    'Já há uma busca em andamento neste encarte.',
+    { jobId },
+  );
+
+/** `FLYER_PRO_ENRICH_ENABLED=false`: o job está desligado neste ambiente. */
+export const flyerProEnrichmentDisabled = () =>
+  flyerProError(
+    HttpStatus.UNPROCESSABLE_ENTITY,
+    'FLYER_PRO_ENRICHMENT_DISABLED',
+    'A busca automática está desligada neste ambiente.',
   );

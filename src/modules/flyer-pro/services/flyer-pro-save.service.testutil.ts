@@ -6,8 +6,10 @@ import { FlyerProSaveService } from './flyer-pro-save.service';
 import type { FlyerProImageLinkService } from './flyer-pro-image-link.service';
 import type { FlyerProImportsService } from './flyer-pro-imports.service';
 import type { FlyerProItemsService } from './flyer-pro-items.service';
+import type { FlyerProJobsService } from './flyer-pro-jobs.service';
 import type { FlyerProSetupService } from './flyer-pro-setup.service';
 import type { FlyerProTemplateSnapshotService } from './flyer-pro-template-snapshot.service';
+import { fakeDataSource } from '../testing/flyer-pro-fake-db.testutil';
 
 /** Ajudantes dos unitários do salvar (só testes): o `manager` que registra os comandos e o corpo de um `PATCH`. */
 
@@ -55,7 +57,7 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
       return Promise.resolve([[], 0]);
     }),
   };
-  const dataSource = { transaction: jest.fn((work: (m: unknown) => unknown) => work(manager)) };
+  const dataSource = fakeDataSource(manager);
   const setup = { apply: jest.fn().mockResolvedValue({}) };
   const snapshots = { statusOf: jest.fn().mockResolvedValue(STATUS) };
   const items = {
@@ -63,6 +65,10 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
     currentOf: jest.fn().mockResolvedValue([]),
   };
   const imports = { apply: jest.fn().mockResolvedValue({}) };
+  const jobs = {
+    requestAfterSave: jest.fn().mockResolvedValue({ started: false, job: null }),
+    replayAfterSave: jest.fn().mockResolvedValue({ started: false, job: null }),
+  };
   const link = makeLinkService();
   const service = new FlyerProSaveService(
     dataSource as unknown as DataSource,
@@ -70,6 +76,7 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
     snapshots as unknown as FlyerProTemplateSnapshotService,
     items as unknown as FlyerProItemsService,
     imports as unknown as FlyerProImportsService,
+    jobs as unknown as FlyerProJobsService,
     link.service,
   );
   /** Os comandos SQL enviados ao `manager`, na ordem. */
@@ -83,6 +90,7 @@ export function makeSaveService(stored: FlyerProDocument = storedDocument()) {
     snapshots,
     items,
     imports,
+    jobs,
     links: link.links,
     calls,
     updates: () => calls().filter((call) => call.sql.startsWith('UPDATE')),

@@ -13,7 +13,8 @@ import { SPELLCHECK_CEILING } from './config/openai-product-ceilings';
 import { AI_RESPONSE_FORMATS, parseSpellCheckResponse } from './schemas/ai-response.schemas';
 import { SPELLCHECK_SYSTEM_PROMPT } from './prompts/spellcheck.prompts';
 import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
-import { AiUsageCollector, AiUsageOptions } from './utils/ai-usage';
+import { AiAbortOptions } from './utils/ai-abort';
+import { AiUsageOptions } from './utils/ai-usage';
 import { runWithConcurrency } from './utils/run-with-concurrency.util';
 
 const BATCH_SIZE = 10;
@@ -49,9 +50,14 @@ export class SpellCheckService {
     }
   }
 
+  /** Chave da OpenAI presente e `AI_SPELLCHECK_ENABLED` diferente de `false`; não chama o provedor. */
+  isAvailable(): boolean {
+    return this.openai !== null && this.enabled;
+  }
+
   async spellCheck(
     products: SpellCheckProductDto[],
-    options: AiUsageOptions = {},
+    options: AiUsageOptions & AiAbortOptions = {},
   ): Promise<SpellCheckResponseDto> {
     options.usage?.declareModel(this.feature.model);
     if (!this.enabled) {
@@ -81,7 +87,7 @@ export class SpellCheckService {
     }
 
     const batchResults = await runWithConcurrency(batches, this.concurrency, (batch) =>
-      this.checkBatch(batch, options.usage),
+      this.checkBatch(batch, options),
     );
     const corrections = batchResults.flat();
 
@@ -90,7 +96,7 @@ export class SpellCheckService {
 
   private async checkBatch(
     items: SpellCheckItem[],
-    usage?: AiUsageCollector,
+    options: AiUsageOptions & AiAbortOptions,
   ): Promise<CorrectionDto[]> {
     const userPrompt =
       'Analise os seguintes itens e retorne apenas os que possuem erros ortográficos:\n\n' +
@@ -99,7 +105,8 @@ export class SpellCheckService {
     return createStructuredChatCompletion({
       openai: this.openai!,
       logger: this.logger,
-      usage,
+      usage: options.usage,
+      signal: options.signal,
       feature: 'spell-check.batch',
       spec: {
         model: this.feature.model,

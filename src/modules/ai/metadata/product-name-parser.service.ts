@@ -6,8 +6,11 @@ import {
   getProductAiConfig,
   ProductAiFeatureConfig,
 } from '../config/openai-product-features.config';
+import { classifyOpenAiErrorStrict } from '../../../shared/providers/openai-errors';
 import { callProductChat } from '../utils/ai-product-chat.util';
-import { AiUsageCollector, AiUsageOptions } from '../utils/ai-usage';
+import { AiAbortOptions } from '../utils/ai-abort';
+import { AiStrictOptions } from '../utils/ai-strict';
+import { AiUsageOptions } from '../utils/ai-usage';
 import { parseMetadataLenient, ProductMetadata } from './product-metadata.schema';
 import { TaxonomyService } from './taxonomy/taxonomy.service';
 
@@ -19,6 +22,9 @@ const CACHE_MAX_ENTRIES = 2000;
 // ricos). Com BATCH_SIZE=8 e o teto de saída de NAME_PARSER_CEILING, mantemos margem confortável
 // sem truncar o JSON no meio (o teto da família gpt-6 inclui o raciocínio).
 const BATCH_SIZE = 8;
+
+/** `usage` (change 01), `strict` (change 28) e `signal` (change 29) no mesmo objeto de opções, todos aditivos. */
+export type ParseNamesOptions = AiUsageOptions & AiStrictOptions & AiAbortOptions;
 
 interface ParseInput {
   name: string;
@@ -60,7 +66,7 @@ export class ProductNameParserService {
 
   async parseNames(
     inputs: ParseInput[],
-    options: AiUsageOptions = {},
+    options: ParseNamesOptions = {},
   ): Promise<(ProductMetadata | null)[]> {
     options.usage?.declareModel(this.feature.model);
     if (!this.isEnabled() || inputs.length === 0) {
@@ -85,7 +91,7 @@ export class ProductNameParserService {
       const slice = toFetch.slice(i, i + BATCH_SIZE);
       let parsedBatch = await this.callLlm(
         slice.map((s) => s.payload),
-        options.usage,
+        options,
       );
 
       // Fallback: if every item in the batch came back null (almost always
@@ -96,7 +102,7 @@ export class ProductNameParserService {
         this.logger.warn(`Batch de ${slice.length} retornou tudo null; tentando item a item.`);
         parsedBatch = [];
         for (const item of slice) {
-          const [single] = await this.callLlm([item.payload], options.usage);
+          const [single] = await this.callLlm([item.payload], options);
           parsedBatch.push(single ?? null);
         }
       }
@@ -115,7 +121,7 @@ export class ProductNameParserService {
 
   async parseSingle(
     input: ParseInput,
-    options: AiUsageOptions = {},
+    options: ParseNamesOptions = {},
   ): Promise<ProductMetadata | null> {
     const [result] = await this.parseNames([input], options);
     return result ?? null;
@@ -148,7 +154,7 @@ export class ProductNameParserService {
 
   private async callLlm(
     inputs: ParseInput[],
-    usage?: AiUsageCollector,
+    options: ParseNamesOptions,
   ): Promise<(ProductMetadata | null)[]> {
     if (!this.openai) return inputs.map(() => null);
 
@@ -159,7 +165,8 @@ export class ProductNameParserService {
       const response = await callProductChat({
         openai: this.openai,
         logger: this.logger,
-        usage,
+        usage: options.usage,
+        signal: options.signal,
         feature: 'product-name-parser.batch',
         spec: {
           model: this.feature.model,
@@ -202,6 +209,7 @@ export class ProductNameParserService {
       return out;
     } catch (error) {
       this.logger.warn(`Falha ao chamar parser de nomes: ${(error as Error).message}`);
+      if (options.strict) throw classifyOpenAiErrorStrict(error);
       return inputs.map(() => null);
     }
   }
