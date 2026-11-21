@@ -7,23 +7,16 @@ import {
   PHOTO,
   photoBody,
   PHOTO_CHOICE,
+  recordSaveOrder,
   SAVED_ABACATE,
 } from './flyer-pro-save.service.link.testutil';
 import { saveBody, storedDocument } from './flyer-pro-save.service.testutil';
 
 describe('FlyerProSaveService.save: o registro da foto depois do commit', () => {
   it('registra uma vez, depois que a transação confirma, com as escolhas e os itens como ficaram', async () => {
-    const { service, dataSource, manager, links } = makeSavingPhoto();
-    const order: string[] = [];
-    dataSource.transaction.mockImplementation(async (work: (m: unknown) => unknown) => {
-      const result = await work(manager);
-      order.push('commit');
-      return result;
-    });
-    links.register.mockImplementation(() => {
-      order.push('register');
-      return Promise.resolve([]);
-    });
+    const made = makeSavingPhoto();
+    const { service, links } = made;
+    const order = recordSaveOrder(made);
 
     await service.save('ana', 'd1', photoBody());
 

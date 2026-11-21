@@ -4,6 +4,7 @@ import {
   PHOTO_CHOICE,
   PHOTO,
   photoBody,
+  recordSaveOrder,
   SAVED_ABACATE,
 } from './flyer-pro-save.service.link.testutil';
 import { storedDocument } from './flyer-pro-save.service.testutil';
@@ -18,20 +19,12 @@ const replayed = { started: false, job: { id: 'job-1', status: 'running', total:
 
 describe('FlyerProSaveService.save: foto e enrich no mesmo PATCH', () => {
   it('pede o job dentro da transação, registra depois dela e responde com enrichment e linkWarnings', async () => {
-    const { service, dataSource, manager, jobs, links } = makeSavingPhoto();
-    const order: string[] = [];
-    dataSource.transaction.mockImplementation(async (work: (m: unknown) => unknown) => {
-      const result = await work(manager);
-      order.push('commit');
-      return result;
-    });
+    const made = makeSavingPhoto();
+    const { service, manager, jobs, links } = made;
+    const order = recordSaveOrder(made);
     jobs.requestAfterSave.mockImplementation(async () => {
       order.push('job');
       return started;
-    });
-    links.register.mockImplementation(() => {
-      order.push('register');
-      return Promise.resolve([]);
     });
 
     const view = await service.save('ana', 'd1', photoBody({ enrich: ENRICH }));

@@ -26,6 +26,28 @@ export const PHOTO_CHOICE: PhotoChoice = {
 };
 export const SAVED_ABACATE = itemRow({ id: ABACATE, ...PHOTO_GROUP, imageStatus: 'applied' });
 
+/**
+ * Registra a ordem em que o salvar chama a transação e o registro da foto: `'commit'` quando a transação do
+ * `fakeDataSource` termina e `'register'` quando o registro é chamado. Devolve o `order` que o teste lê (e que o
+ * teste do job enche com `'job'`).
+ */
+export function recordSaveOrder(made: ReturnType<typeof makeSavingPhoto>): string[] {
+  const order: string[] = [];
+  const transaction = made.dataSource.transaction.getMockImplementation() as (
+    ...args: unknown[]
+  ) => Promise<unknown>;
+  made.dataSource.transaction.mockImplementation(async (...args: unknown[]) => {
+    const result = await transaction(...args);
+    order.push('commit');
+    return result;
+  });
+  made.links.register.mockImplementation(() => {
+    order.push('register');
+    return Promise.resolve([]);
+  });
+  return order;
+}
+
 /** O serviço com o ramo `items` devolvendo a foto do ABACATE gravada e a escolha lida contra o gravado antes. */
 export function makeSavingPhoto(stored = storedDocument()) {
   const made = makeSaveService(stored);
