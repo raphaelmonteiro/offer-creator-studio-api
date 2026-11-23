@@ -1,6 +1,6 @@
-import { binaryBody } from '../../shared/testing/binary-body.testutil';
 import { useE2eHarness } from '../../shared/testing/e2e-harness';
 import { describeIfE2eDb } from '../../shared/testing/e2e-test-db';
+import { fetchUploadsFile } from '../../shared/testing/uploads-static.testutil';
 import { FontsController } from './fonts.controller';
 import { FontsService } from './fonts.service';
 
@@ -35,12 +35,7 @@ describeIfE2eDb('Fontes enviadas (e2e)', () => {
 
   /** `GET /uploads/fonts/<arquivo>` como o navegador do front: outra origem e nenhum token. */
   const fetchFile = (fileUrl: string) =>
-    h
-      .http()
-      .get(new URL(fileUrl).pathname)
-      .set('Origin', 'http://localhost:3110')
-      .buffer(true)
-      .parse(binaryBody);
+    fetchUploadsFile(h.app.app.getHttpServer(), new URL(fileUrl).pathname);
 
   const listedIds = async (): Promise<string[]> => {
     const response = await h.get('/fonts');

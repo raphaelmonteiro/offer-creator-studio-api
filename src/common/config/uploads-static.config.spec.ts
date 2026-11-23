@@ -4,7 +4,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as request from 'supertest';
-import { binaryBody } from '../../shared/testing/binary-body.testutil';
+import {
+  expectUploadsStaticResponse,
+  fetchUploadsFile,
+} from '../../shared/testing/uploads-static.testutil';
 import { useUploadsStatic } from './uploads-static.config';
 
 /** O estático de `/uploads/` que o `main.ts` e o app de teste do e2e compartilham. */
@@ -29,15 +32,10 @@ describe('useUploadsStatic', () => {
   const get = (url: string) => request(app.getHttpServer()).get(url);
 
   it('serve o arquivo sem token, com os mesmos bytes e os três cabeçalhos de CORS', async () => {
-    const response = await get('/uploads/fonts/teste.ttf')
-      .set('Origin', 'http://localhost:3110')
-      .buffer(true)
-      .parse(binaryBody);
-    expect(response.status).toBe(200);
-    expect(Buffer.compare(response.body as Buffer, bytes)).toBe(0);
-    expect(response.headers['access-control-allow-origin']).toBe('*');
-    expect(response.headers['access-control-allow-methods']).toBe('GET, HEAD, OPTIONS');
-    expect(response.headers['cross-origin-resource-policy']).toBe('cross-origin');
+    expectUploadsStaticResponse(
+      await fetchUploadsFile(app.getHttpServer(), '/uploads/fonts/teste.ttf'),
+      bytes,
+    );
   });
 
   it('só serve sob o prefixo /uploads/', async () => {

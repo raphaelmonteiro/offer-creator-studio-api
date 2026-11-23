@@ -1,9 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import * as request from 'supertest';
 import { DataSource } from 'typeorm';
-import { binaryBody } from './binary-body.testutil';
 import {
   BOOT_FLAGS,
   createE2eApp,
@@ -12,6 +10,7 @@ import {
   overrideEnv,
   PAID_KEYS,
 } from './e2e-app';
+import { expectUploadsStaticResponse, fetchUploadsFile } from './uploads-static.testutil';
 
 /** Sem banco: o DataSource é um dublê que só entrega repositórios vazios (nenhuma rota é chamada aqui). */
 const fakeDataSource = { getRepository: () => ({}) } as unknown as DataSource;
@@ -116,20 +115,12 @@ describe('App de teste do e2e: estático de uploads', () => {
 
   const bootAndGetFont = async (serveUploads?: boolean) => {
     running = await createE2eApp({ dataSource: fakeDataSource, uploadsDir: dir, serveUploads });
-    return request(running.app.getHttpServer())
-      .get('/uploads/fonts/teste.ttf')
-      .set('Origin', 'http://localhost:3110')
-      .buffer(true)
-      .parse(binaryBody);
+    return fetchUploadsFile(running.app.getHttpServer(), '/uploads/fonts/teste.ttf');
   };
 
   it('com o estático pedido: 200, os bytes do arquivo e os três cabeçalhos, sem token', async () => {
     const response = await bootAndGetFont(true);
-    expect(response.status).toBe(200);
-    expect(Buffer.compare(response.body as Buffer, bytes)).toBe(0);
-    expect(response.headers['access-control-allow-origin']).toBe('*');
-    expect(response.headers['access-control-allow-methods']).toBe('GET, HEAD, OPTIONS');
-    expect(response.headers['cross-origin-resource-policy']).toBe('cross-origin');
+    expectUploadsStaticResponse(response, bytes);
   });
 
   it('sem o estático pedido: 404, e o arquivo não é servido (negativo)', async () => {
