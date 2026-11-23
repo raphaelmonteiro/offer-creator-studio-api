@@ -63,7 +63,9 @@ describeIfE2eDb('Montagem do banco de e2e (banco _e2e temporário)', () => {
     for (const entity of E2E_TEST_ENTITIES) {
       expect(tables).toContain(sources[0].getMetadata(entity).tableName);
     }
-    expect(tables).toEqual(expect.arrayContaining(['gallery_folders', 'client_preferred_images']));
+    expect(tables).toEqual(
+      expect.arrayContaining(['gallery_folders', 'client_preferred_images', 'fonts']),
+    );
     const columns = await sources[0].query(
       `SELECT column_name FROM information_schema.columns WHERE table_name = 'gallery_images'`,
     );

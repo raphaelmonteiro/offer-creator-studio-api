@@ -5,6 +5,7 @@ import { Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { configureHttpApp } from './common/config/http-app.config';
 import { pinUploadsDirEnv, resolveUploadsDir } from './common/config/uploads-dir';
+import { useUploadsStatic } from './common/config/uploads-static.config';
 
 async function bootstrap() {
   new Logger('Bootstrap').log(`Uploads em ${pinUploadsDirEnv()}`);
@@ -19,23 +20,8 @@ async function bootstrap() {
   // CORS
   app.enableCors();
 
-  // Serve static files.
-  //
-  // CORS note: `app.enableCors()` above only registers a CORS middleware in
-  // front of NestJS routes — it doesn't apply to static assets served by
-  // express.static. Without these headers the browser still loads images for
-  // <img> tags, but `fetch(url)` and `<canvas>` reading them are blocked.
-  // The social media flow rasterizes uploaded assets into a final art via
-  // html-to-image (which uses canvas internally), so CORS on /uploads/* is
-  // mandatory there.
-  app.useStaticAssets(resolveUploadsDir(process.env.UPLOAD_DEST), {
-    prefix: '/uploads/',
-    setHeaders: (res) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    },
-  });
+  // Arquivos estáticos de /uploads/ com CORS (compartilhado com o app de teste do e2e).
+  useUploadsStatic(app, resolveUploadsDir(process.env.UPLOAD_DEST));
 
   // Swagger documentation
   const config = new DocumentBuilder()

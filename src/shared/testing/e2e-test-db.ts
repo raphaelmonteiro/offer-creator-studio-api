@@ -3,6 +3,7 @@ import { FlyerBuilderV2Document } from '../../modules/flyer-builder-v2/entities/
 import { Client } from '../../modules/clients/entities/client.entity';
 import { ClientContact } from '../../modules/clients/entities/client-contact.entity';
 import { ClientStore } from '../../modules/clients/entities/client-store.entity';
+import { Font } from '../../modules/fonts/entities/font.entity';
 import { FlyerProDocument } from '../../modules/flyer-pro/entities/flyer-pro-document.entity';
 import { FlyerProExport } from '../../modules/flyer-pro/entities/flyer-pro-export.entity';
 import { FlyerProImport } from '../../modules/flyer-pro/entities/flyer-pro-import.entity';
@@ -89,6 +90,7 @@ export const E2E_TEST_ENTITIES = [
   FlyerProJob,
   FlyerProExport,
   FlyerBuilderV2Document,
+  Font,
 ];
 
 /** A mesma trava do harness das cenas (A-5): os dois nunca montam o banco ao mesmo tempo. */

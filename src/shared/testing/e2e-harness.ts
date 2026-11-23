@@ -17,7 +17,7 @@ const BOOT_TIMEOUT_MS = 240_000;
 
 type E2eHarnessOptions = Pick<
   E2eAppOptions,
-  'imports' | 'controllers' | 'providers' | 'jobQueue' | 'enrichProvider'
+  'imports' | 'controllers' | 'providers' | 'jobQueue' | 'enrichProvider' | 'serveUploads'
 >;
 
 export interface E2eHarnessState {

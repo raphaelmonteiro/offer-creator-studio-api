@@ -3,10 +3,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { configureHttpApp } from '../../common/config/http-app.config';
+import { useUploadsStatic } from '../../common/config/uploads-static.config';
 import { ResponseInterceptor } from '../../common/interceptors/response.interceptor';
 import { AiModule } from '../../modules/ai/ai.module';
 import { FlyerProJobReconcilerService } from '../../modules/flyer-pro/services/flyer-pro-job-reconciler.service';
@@ -82,6 +84,8 @@ export interface E2eAppOptions {
   imports?: ModuleMetadata['imports'];
   controllers?: Type<unknown>[];
   providers?: Provider[];
+  /** Monta o estático `/uploads/` do `main.ts` (mesma função, mesmos cabeçalhos) sobre `uploadsDir`; sem isto, não serve. */
+  serveUploads?: boolean;
 }
 
 export interface E2eApp {
@@ -136,7 +140,7 @@ function fixedConfig(
 /**
  * App Nest do e2e em processo, com a configuração HTTP de produção (`configureHttpApp`: prefixo `/v1`, JSON até
  * 100 MB, filtro e pipe globais), o `ResponseInterceptor` e o guard JWT real (`JwtStrategy` e `AuthService` sobre o
- * `users` do banco de e2e). Não lê o `backend/.env`, só assina fila com `jobQueue` (A-14, A-21) e não faz chamada paga (A-7). Cada
+ * `users` do banco de e2e); com `serveUploads`, o estático `/uploads/` também. Não lê o `backend/.env`, só assina fila com `jobQueue` (A-14, A-21) e não faz chamada paga (A-7). Cada
  * entidade de `E2E_TEST_ENTITIES` ganha o repositório; o que mais o spec precisar vem em `providers`.
  */
 export async function createE2eApp(options: E2eAppOptions): Promise<E2eApp> {
@@ -180,8 +184,9 @@ export async function createE2eApp(options: E2eAppOptions): Promise<E2eApp> {
       .useValue({ start: () => undefined, onModuleDestroy: () => undefined })
       .compile();
     // `bodyParser: false`: como o `main.ts`, quem lê o corpo é a configuração compartilhada.
-    const app = moduleRef.createNestApplication({ bodyParser: false });
+    const app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
     configureHttpApp(app);
+    if (options.serveUploads) useUploadsStatic(app, options.uploadsDir);
     await app.init();
     return {
       app,

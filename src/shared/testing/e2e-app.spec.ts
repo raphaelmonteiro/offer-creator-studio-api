@@ -10,6 +10,7 @@ import {
   overrideEnv,
   PAID_KEYS,
 } from './e2e-app';
+import { expectUploadsStaticResponse, fetchUploadsFile } from './uploads-static.testutil';
 
 /** Sem banco: o DataSource é um dublê que só entrega repositórios vazios (nenhuma rota é chamada aqui). */
 const fakeDataSource = { getRepository: () => ({}) } as unknown as DataSource;
@@ -88,5 +89,43 @@ describe('App de teste do e2e: nenhuma chamada paga', () => {
       process.chdir(cwd);
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/** O estático de `/uploads/` do `main.ts` no app de teste (change 34, D-1 (a)): só quando o spec pede. */
+describe('App de teste do e2e: estático de uploads', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-app-static-'));
+  const bytes = Buffer.from([0, 1, 0, 0, 4, 5, 6]);
+  let running: E2eApp | undefined;
+
+  beforeAll(() => {
+    // O filtro de erros escreve `console.error` fora de produção; o 404 do caso negativo é esperado.
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    fs.mkdirSync(path.join(dir, 'fonts'));
+    fs.writeFileSync(path.join(dir, 'fonts', 'teste.ttf'), bytes);
+  });
+  afterEach(async () => {
+    await running?.close();
+    running = undefined;
+  });
+  afterAll(() => {
+    jest.restoreAllMocks();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const bootAndGetFont = async (serveUploads?: boolean) => {
+    running = await createE2eApp({ dataSource: fakeDataSource, uploadsDir: dir, serveUploads });
+    return fetchUploadsFile(running.app.getHttpServer(), '/uploads/fonts/teste.ttf');
+  };
+
+  it('com o estático pedido: 200, os bytes do arquivo e os três cabeçalhos, sem token', async () => {
+    const response = await bootAndGetFont(true);
+    expectUploadsStaticResponse(response, bytes);
+  });
+
+  it('sem o estático pedido: 404, e o arquivo não é servido (negativo)', async () => {
+    const response = await bootAndGetFont();
+    expect(response.status).toBe(404);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 });
