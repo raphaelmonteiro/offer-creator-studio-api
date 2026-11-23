@@ -1,0 +1,71 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`schema estrito da saída do modelo tem o nome flyer_pro_structure_suggestion e confere com o snapshot 1`] = `
+{
+  "additionalProperties": false,
+  "properties": {
+    "heroes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "type": "string",
+          },
+          "reason": {
+            "type": "string",
+          },
+          "size": {
+            "enum": [
+              "2x1",
+              "2x2",
+            ],
+            "type": "string",
+          },
+        },
+        "required": [
+          "item",
+          "size",
+          "reason",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "sections": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+          },
+          "page": {
+            "type": [
+              "integer",
+              "null",
+            ],
+          },
+          "reason": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "id",
+          "page",
+          "reason",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "summary": {
+      "type": "string",
+    },
+  },
+  "required": [
+    "summary",
+    "sections",
+    "heroes",
+  ],
+  "type": "object",
+}
+`;

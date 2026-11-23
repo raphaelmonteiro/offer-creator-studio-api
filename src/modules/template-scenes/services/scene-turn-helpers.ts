@@ -1,4 +1,5 @@
-import { EntityManager, QueryFailedError } from 'typeorm';
+import { EntityManager } from 'typeorm';
+import { pgErrorOf } from '../../../shared/db/pg-error';
 import { FaceKey } from '../domain/scene-faces';
 import { SceneStep } from '../domain/scene.types';
 import { SendMessageDto } from '../dto/send-message.dto';
@@ -39,7 +40,6 @@ export interface TurnInput {
 
 /** O índice parcial `UQ_tsv_scene_busy` é a rede de segurança de D-3: a violação também é SCENE_BUSY. */
 export function isBusyIndexViolation(error: unknown): boolean {
-  if (!(error instanceof QueryFailedError)) return false;
-  const driver = error.driverError as { code?: string; constraint?: string } | undefined;
-  return driver?.code === '23505' && driver.constraint === BUSY_INDEX;
+  const driver = pgErrorOf(error);
+  return driver?.code === '23505' && driver?.constraint === BUSY_INDEX;
 }

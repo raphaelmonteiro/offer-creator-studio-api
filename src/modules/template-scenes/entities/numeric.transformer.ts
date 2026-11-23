@@ -1,8 +1,2 @@
-import { ValueTransformer } from 'typeorm';
-
-/** `numeric` do Postgres volta como string: converte para número na leitura. */
-export const numericTransformer: ValueTransformer = {
-  to: (value: number | null | undefined) => value,
-  from: (value: string | number | null) =>
-    value === null || value === undefined ? null : Number(value),
-};
+/** O transformer mora em `shared/` (o job do Encarte Pro também o usa); este arquivo só reexporta para as cenas. */
+export { numericTransformer } from '../../../shared/numeric.transformer';

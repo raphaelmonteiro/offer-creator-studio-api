@@ -1,4 +1,4 @@
-/** O catálogo do Postgres das tabelas do encarte (M1 e M2), lido para os specs de banco (só testes). */
+/** O catálogo do Postgres das tabelas do encarte (M1 a M4), lido para os specs de banco (só testes). */
 
 export const MIGRATION_TABLES = ['flyer_pro_documents', 'flyer_pro_items'];
 
@@ -9,6 +9,22 @@ export const M2_INDEXES = ['IDX_flyer_pro_imports_document_hash', 'IDX_flyer_pro
 
 /** As três tabelas depois da M2, para os specs que comparam o banco inteiro do encarte. */
 export const ALL_TABLES = [...MIGRATION_TABLES, ...M2_TABLES];
+
+/** A tabela e os dois índices que a M3 (job de enriquecimento) acrescenta. */
+export const M3_TABLES = ['flyer_pro_jobs'];
+
+export const M3_INDEXES = [
+  'UQ_flyer_pro_jobs_document_active',
+  'IDX_flyer_pro_jobs_document_created',
+];
+
+/** As quatro tabelas depois da M3, para o spec de schema que compara as entidades com M1 a M3. */
+export const TABLES_AFTER_M3 = [...ALL_TABLES, ...M3_TABLES];
+
+/** A tabela e o índice que a M4 acrescenta (as exportações). A M4 só depende da M1, por isso não entra em `ALL_TABLES`. */
+export const M4_TABLES = ['flyer_pro_exports'];
+
+export const M4_INDEXES = ['IDX_flyer_pro_exports_document_created'];
 
 export const MIGRATION_INDEXES = [
   'IDX_flyer_pro_documents_list',
@@ -39,8 +55,9 @@ const withoutSchema = (definition: string, schema: string): string =>
 
 /**
  * As colunas, os índices e as restrições das tabelas dadas num schema (as duas da M1, por padrão; `ALL_TABLES` traz
- * também a da M2). O padrão de `id` do encarte fica de fora: a migration usa `gen_random_uuid()` e o TypeORM
- * `uuid_generate_v4()` (o mesmo caso das cenas), e o `synchronize` não compara o padrão de chave gerada.
+ * também a da M2). O padrão de `id` do encarte e do job fica de fora: a migration usa `gen_random_uuid()` e o TypeORM
+ * `uuid_generate_v4()` (o mesmo caso das cenas), e o `synchronize` não compara o padrão de chave gerada. O padrão `smallint`
+ * `0` aparece como `'0'::smallint` no banco que o TypeORM monta e como `0` no da migration: o catálogo os trata como um.
  */
 export async function catalogOf(
   db: Query,
@@ -51,8 +68,10 @@ export async function catalogOf(
     `SELECT table_name || '.' || column_name || ': ' || data_type
             || coalesce('(' || character_maximum_length || ')', '')
             || CASE WHEN is_nullable = 'YES' THEN ' null' ELSE ' not null' END
-            || CASE WHEN column_default IS NOT NULL AND NOT (table_name = 'flyer_pro_documents' AND column_name = 'id')
-                    THEN ' default ' || column_default ELSE '' END AS definition
+            || CASE WHEN column_default IS NOT NULL
+                         AND NOT (table_name IN ('flyer_pro_documents', 'flyer_pro_jobs') AND column_name = 'id')
+                    THEN ' default ' || regexp_replace(column_default, '^''(\\d+)''::smallint$', '\\1')
+                    ELSE '' END AS definition
        FROM information_schema.columns
       WHERE table_schema = $1 AND table_name = ANY($2)
       ORDER BY 1`,

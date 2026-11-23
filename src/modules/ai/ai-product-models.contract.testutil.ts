@@ -107,6 +107,9 @@ function buildFeatures(config: ConfigService, uploads: Uploads, gallery: { regis
 function buildStorage() {
   const embedding = {
     embedText: jest.fn().mockResolvedValue([0.1, 0.2]),
+    embedTexts: jest.fn(async (texts: string[], _options?: { strict?: boolean }) =>
+      texts.map(() => [0.1, 0.2]),
+    ),
     searchByMetadataEmbedding: jest.fn().mockResolvedValue([]),
     setMetadataStatus: jest.fn().mockResolvedValue(undefined),
     saveImageMetadata: jest.fn().mockImplementation(async (_id, metadata) => metadata),

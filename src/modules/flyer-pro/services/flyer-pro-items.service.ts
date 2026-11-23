@@ -5,6 +5,7 @@ import { deriveItem } from '../domain/flyer-pro-item-derive';
 import { draftOf } from '../domain/flyer-pro-item-merge';
 import { importIdsOfNewItems, validateItems } from '../domain/flyer-pro-item-rules';
 import { utcInstantOf } from '../domain/flyer-pro-instant';
+import { PhotoChoice, photoChoiceOf } from '../domain/flyer-pro-photo-choice';
 import { ItemDraft } from '../domain/flyer-pro-item.types';
 import {
   flyerProItemIdConflict,
@@ -33,10 +34,14 @@ export interface ItemsContext {
   userId: string;
 }
 
-/** O que o ramo `items` devolve ao `PATCH`: os itens de `upsert` como ficaram, na ordem dele, e os ids apagados. */
+/**
+ * O que o ramo `items` devolve ao `PATCH`: os itens de `upsert` como ficaram, na ordem dele, os ids apagados e as
+ * fotos citadas no corpo (lidas contra o gravado antes, dentro da transação) para o registro na Galeria depois do commit.
+ */
 export interface ItemsOutcome {
   items: FlyerProItem[];
   deletedItemIds: string[];
+  photoChoices: PhotoChoice[];
 }
 
 /** A leitura incremental (N12): `{ items, cursor }`. */
@@ -106,7 +111,8 @@ export class FlyerProItemsService {
       deletedItemIds.push(...(await deleteItemsExcept(manager, documentId, ids)));
     }
     await this.assertWithinLimit(manager, documentId);
-    return { items: await findItems(manager, ids, documentId), deletedItemIds };
+    const photoChoices = drafts.map(photoChoiceOf).filter((choice) => choice !== null);
+    return { items: await findItems(manager, ids, documentId), deletedItemIds, photoChoices };
   }
 
   /** O estado atual dos itens citados em `upsert` que existem no encarte, na ordem de `upsert` (o reenvio os devolve). */

@@ -18,6 +18,6 @@ import { UploadsModule } from '../uploads/uploads.module';
     GalleryImageEanService,
     GalleryProductLinkService,
   ],
-  exports: [GalleryService],
+  exports: [GalleryService, GalleryProductLinkService],
 })
 export class GalleryModule {}

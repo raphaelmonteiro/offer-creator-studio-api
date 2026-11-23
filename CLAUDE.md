@@ -126,6 +126,29 @@ TEMPLATE_SCENE_VISION_MODEL / TEMPLATE_SCENE_VISION_TIMEOUT_MS
 TEMPLATE_SCENE_EDIT_QUALITY   # qualidade do redesenho da imagem inteira (padrão high)
 OPENAI_TIMEOUT_MS             # timeout por requisição do modo sceneCall (padrão 180000); NÃO é global
 TEMPLATE_SCENE_E2E_DB_URL     # só testes: banco descartável chroma_x_e2e (nunca o flyer_db); sem ela os specs de banco ficam skipped
+
+# Encarte Pro: sugestão de estrutura por IA (módulo flyer-pro, rota N19) — bloco completo em .env.example; lidas uma vez, ao subir a API
+FLYER_PRO_STRUCTURE_AI_ENABLED  # só false desliga a rota (422 FLYER_PRO_STRUCTURE_AI_DISABLED)
+FLYER_PRO_STRUCTURE_AI_PROVIDER # real (OpenAI, gasta crédito; padrão do código) | mock (sem rede e sem custo; padrão do compose local; valor desconhecido cai em mock)
+FLYER_PRO_STRUCTURE_AI_MODEL    # gpt-6-luna; precisa ter preço em openai-llm-pricing.ts, senão 422 MODEL_PRICE_UNKNOWN
+FLYER_PRO_STRUCTURE_AI_EFFORT   # esforço de raciocínio: none | low | medium (padrão low; outro valor vira low)
+FLYER_PRO_STRUCTURE_AI_TIMEOUT_MS
+                                # prazo da chamada ao provedor, vale para o mock também (padrão 25000); estourou, 503 TIMEOUT
+FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR
+                                # sugestões atendidas por encarte em 60 minutos (padrão 20); acima, 429 HOURLY_LIMIT
+FLYER_PRO_STRUCTURE_AI_MAX_HEROES
+                                # destaques novos por sugestão (padrão 12; os últimos são cortados)
+FLYER_PRO_STRUCTURE_AI_EXAMPLES # encartes anteriores do cliente usados como exemplo, de 0 a 10 (padrão 3; 0 desliga a leitura)
+# Encarte Pro: job de fotos, categorias e ortografia (módulo flyer-pro, rotas N14 a N16) — bloco completo em .env.example; lidas uma vez, ao subir o processo (API e worker)
+FLYER_PRO_ENRICH_ENABLED        # só false desliga o job (N14 responde 422 FLYER_PRO_ENRICHMENT_DISABLED; o worker não consome nem varre)
+FLYER_PRO_ENRICH_PROVIDER       # real (padrão do código; antes da change 29 só pula as três fases) | mock (padrão do compose local; valor desconhecido cai em mock)
+FLYER_PRO_ENRICH_CONCURRENCY    # lotes simultâneos no worker (padrão 2)
+FLYER_PRO_ENRICH_IMAGE_BATCH / _CATEGORY_BATCH / _SPELL_BATCH
+                                # itens por lote: fotos 16 (sempre múltiplo de 8), categorias 40, ortografia 40; valor inválido vale o padrão com aviso no log
+FLYER_PRO_ENRICH_BATCH_EXPIRE_SECONDS / _BATCH_DEADLINE_MS
+                                # prazo do lote na fila (300 s) e da chamada ao provedor dentro dele (240000 ms; mantenha abaixo do da fila)
+FLYER_PRO_ENRICH_STALE_SECONDS / _MAX_ATTEMPTS
+                                # lote sem batimento por tanto tempo é dado por morto (60 s); tentativas seguidas sem avanço antes de o job falhar (3)
 FAL_API_KEY / ELEVENLABS_API_KEY / GEMINI_API_KEY
                               # pipeline real (vídeo, TTS, imagens)
 FFMPEG_PATH / FFPROBE_PATH    # binários do ffmpeg (worker); o preflight do worker reporta no /v1/health

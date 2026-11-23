@@ -7,11 +7,18 @@ import type {
 import type { FlyerProDocument } from '../entities/flyer-pro-document.entity';
 import type { FlyerProItem } from '../entities/flyer-pro-item.entity';
 import { FlyerProItemView, toItemView } from './flyer-pro-document.view';
+import type { FlyerProJobView } from './flyer-pro-job.view';
 
 /** Falha ao registrar a escolha da foto na Galeria (change 27); a gravação do encarte não é desfeita. */
 export interface FlyerProLinkWarning {
   itemId: string;
   code: 'GALLERY_IMAGE_NOT_FOUND' | 'GALLERY_LINK_FAILED';
+}
+
+/** O que o `PATCH` com `enrich` responde: se este salvar criou o job e o job que o encarte mostra. */
+export interface FlyerProEnrichmentOutcome {
+  started: boolean;
+  job: FlyerProJobView | null;
 }
 
 /** A resposta 200 do `PATCH` (N4): os campos do template só quando o corpo trocou a arte ou o número de páginas. */
@@ -29,6 +36,8 @@ export interface FlyerProSaveView {
   items: FlyerProItemView[];
   deletedItemIds: string[];
   linkWarnings: FlyerProLinkWarning[];
+  /** Só quando o corpo trouxe `enrich`. */
+  enrichment?: FlyerProEnrichmentOutcome;
 }
 
 export interface SaveViewInput {
@@ -39,8 +48,12 @@ export interface SaveViewInput {
   items?: FlyerProItem[];
   deletedItemIds?: string[];
   fields: SaveResponseFields;
+  /** O resultado do passo do job; só quando o corpo trouxe `enrich`. */
+  enrichment?: FlyerProEnrichmentOutcome;
   /** O estado da cópia, calculado na hora; só quando `fields.template`. */
   templateStatus?: FlyerProTemplateStatus;
+  /** Os itens cujo registro da foto na Galeria falhou; vazio sem falha e no reenvio. */
+  linkWarnings?: FlyerProLinkWarning[];
 }
 
 function templateFieldsOf({ document, fields, templateStatus }: SaveViewInput) {
@@ -52,9 +65,9 @@ function templateFieldsOf({ document, fields, templateStatus }: SaveViewInput) {
   };
 }
 
-/** `linkWarnings` é sempre `[]` até a change 27 registrar a escolha da foto na Galeria. */
 export function toSaveView(input: SaveViewInput): FlyerProSaveView {
-  const { document, replayed, applied, items = [], deletedItemIds = [], fields } = input;
+  const { document, replayed, applied, fields, linkWarnings = [] } = input;
+  const { items = [], deletedItemIds = [] } = input;
   return {
     id: document.id,
     revision: document.revision,
@@ -66,6 +79,7 @@ export function toSaveView(input: SaveViewInput): FlyerProSaveView {
     ...(fields.pageCount ? { pageCount: document.pageCount } : {}),
     items: items.map(toItemView),
     deletedItemIds,
-    linkWarnings: [],
+    linkWarnings,
+    ...(input.enrichment ? { enrichment: input.enrichment } : {}),
   };
 }

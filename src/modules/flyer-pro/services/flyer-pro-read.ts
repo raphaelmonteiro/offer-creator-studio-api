@@ -15,8 +15,33 @@ export function readWith<T>(
   return manager ? work(manager) : dataSource.transaction('REPEATABLE READ', work);
 }
 
-/** Confere que o encarte existe e está vivo (excluído conta como inexistente): 404 `FLYER_PRO_NOT_FOUND`. Só lê. */
-export async function assertLiveDocument(manager: EntityManager, id: string): Promise<void> {
-  const document = await manager.findOne(FlyerProDocument, { where: { id }, select: { id: true } });
+/**
+ * A regra única de "encarte vivo" (excluído conta como inexistente): 404 `FLYER_PRO_NOT_FOUND`. Só lê as colunas pedidas;
+ * a leitura do ORM já ignora a linha com `deletedAt`.
+ */
+async function findLiveDocument(
+  manager: EntityManager,
+  id: string,
+  select: { id: true; revision?: true },
+): Promise<FlyerProDocument> {
+  const document = await manager.findOne(FlyerProDocument, { where: { id }, select });
   if (!document) throw flyerProNotFound();
+  return document;
 }
+
+/** Confere que o encarte existe e está vivo: 404 `FLYER_PRO_NOT_FOUND`. Só lê. */
+export async function assertLiveDocument(manager: EntityManager, id: string): Promise<void> {
+  await findLiveDocument(manager, id, { id: true });
+}
+
+/** Como `assertLiveDocument`, e devolve a revisão atual do encarte (o N8 compara `documentRevision` com ela). Só lê. */
+export async function readLiveRevision(manager: EntityManager, id: string): Promise<number> {
+  return (await findLiveDocument(manager, id, { id: true, revision: true })).revision;
+}
+
+/** O maior `updatedAt` dos itens, ou o `createdAt` do encarte sem itens, em texto com microssegundos (o `Date` só tem ms). */
+export const ITEMS_CURSOR_SQL = `SELECT to_char(
+    COALESCE(
+      (SELECT max("updatedAt") FROM flyer_pro_items WHERE "documentId" = $1),
+      (SELECT "createdAt" FROM flyer_pro_documents WHERE id = $1)
+    ) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor`;

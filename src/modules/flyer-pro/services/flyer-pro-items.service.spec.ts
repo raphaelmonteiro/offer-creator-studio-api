@@ -129,7 +129,7 @@ describe('FlyerProItemsService.apply: incluir, alterar e excluir', () => {
 
     const outcome = await run(manager, {});
 
-    expect(outcome).toEqual({ items: [], deletedItemIds: [] });
+    expect(outcome).toEqual({ items: [], deletedItemIds: [], photoChoices: [] });
     expect(statementsStartingWith(manager, 'INSERT')).toHaveLength(0);
     expect(statementsStartingWith(manager, 'DELETE')).toHaveLength(0);
   });

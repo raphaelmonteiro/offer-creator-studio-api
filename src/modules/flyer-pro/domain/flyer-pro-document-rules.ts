@@ -1,4 +1,4 @@
-import { QueryFailedError } from 'typeorm';
+import { pgErrorOf } from '../../../shared/db/pg-error';
 
 /** O nome da chave única da `creationKey` na migration M1. */
 export const CREATION_KEY_INDEX = 'UQ_flyer_pro_documents_creation_key';
@@ -15,7 +15,6 @@ export const CREATE_REQUIRED_FIELDS = [
 
 /** `23505` da chave única da `creationKey`: outra criação com a mesma chave passou na frente. */
 export function isCreationKeyConflict(error: unknown): boolean {
-  if (!(error instanceof QueryFailedError)) return false;
-  const driver = error.driverError as { code?: string; constraint?: string } | undefined;
-  return driver?.code === '23505' && driver?.constraint === CREATION_KEY_INDEX;
+  const driver = pgErrorOf(error);
+  return driver?.code === '23505' && driver.constraint === CREATION_KEY_INDEX;
 }

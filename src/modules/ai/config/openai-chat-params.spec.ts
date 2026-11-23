@@ -1,4 +1,10 @@
-import { buildChatCompletionParams, ChatCallSpec, isGpt6Family } from './openai-chat-params';
+import {
+  buildChatCompletionParams,
+  buildResponsesParams,
+  ChatCallSpec,
+  isGpt6Family,
+  ResponsesCallSpec,
+} from './openai-chat-params';
 import {
   categorizationCeiling,
   GALLERY_VISION_CEILING,
@@ -161,5 +167,69 @@ describe('tetos de saída da família gpt-6 (D-7)', () => {
   it('categorização: o teto de hoje continua min(4096, 300 + 90n)', () => {
     expect(categorizationCeiling(1).legacyMaxTokens).toBe(390);
     expect(categorizationCeiling(500).legacyMaxTokens).toBe(4096);
+  });
+});
+
+describe('buildResponsesParams, a forma de /responses', () => {
+  const responses = (overrides: Partial<ResponsesCallSpec> = {}): ResponsesCallSpec => ({
+    model: 'gpt-6-luna',
+    effort: 'low',
+    temperature: 0.2,
+    timeoutMs: 25_000,
+    maxOutputTokens: 4000,
+    ...overrides,
+  });
+
+  it('sugestão de estrutura no padrão: max_output_tokens e reasoning low, sem temperature, max_tokens nem max_completion_tokens', () => {
+    const { body, options } = buildResponsesParams(responses());
+    expect(body).toStrictEqual({
+      model: 'gpt-6-luna',
+      max_output_tokens: 4000,
+      reasoning: { effort: 'low' },
+    });
+    expect(options).toStrictEqual({ maxRetries: 0, timeout: 25_000 });
+  });
+
+  it('família gpt-6 com esforço none: reasoning none e temperature 0.2', () => {
+    const { body } = buildResponsesParams(responses({ effort: 'none' }));
+    expect(body).toStrictEqual({
+      model: 'gpt-6-luna',
+      max_output_tokens: 4000,
+      reasoning: { effort: 'none' },
+      temperature: 0.2,
+    });
+  });
+
+  it('família gpt-6 com esforço medium: reasoning medium e nenhuma temperature', () => {
+    const { body } = buildResponsesParams(responses({ effort: 'medium' }));
+    expect(body.reasoning).toStrictEqual({ effort: 'medium' });
+    expect(body).not.toHaveProperty('temperature');
+  });
+
+  it('esforço low com temperatura informada pelo chamador: a temperature não vai no corpo', () => {
+    const { body } = buildResponsesParams(responses({ effort: 'low', temperature: 0.7 }));
+    expect(body).not.toHaveProperty('temperature');
+    expect(body).not.toHaveProperty('max_tokens');
+    expect(body).not.toHaveProperty('max_completion_tokens');
+  });
+
+  it.each(['low', 'none', 'medium'] as const)(
+    'modelo fora da família gpt-6 (gpt-4o-mini), esforço %s: max_output_tokens e temperature, sem reasoning',
+    (effort) => {
+      const { body } = buildResponsesParams(responses({ model: 'gpt-4o-mini', effort }));
+      expect(body).toStrictEqual({
+        model: 'gpt-4o-mini',
+        max_output_tokens: 4000,
+        temperature: 0.2,
+      });
+    },
+  );
+
+  it('o Terra recebe a mesma forma da família, e o prazo da feature vale em qualquer modelo', () => {
+    const terra = buildResponsesParams(responses({ model: 'gpt-6.1-terra', timeoutMs: 10_000 }));
+    expect(terra.body.reasoning).toStrictEqual({ effort: 'low' });
+    expect(terra.options).toStrictEqual({ maxRetries: 0, timeout: 10_000 });
+    const legacy = buildResponsesParams(responses({ model: 'gpt-4o', timeoutMs: 7_000 }));
+    expect(legacy.options).toStrictEqual({ maxRetries: 0, timeout: 7_000 });
   });
 });
