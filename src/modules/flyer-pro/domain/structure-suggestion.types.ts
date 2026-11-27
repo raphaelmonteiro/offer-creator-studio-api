@@ -29,6 +29,11 @@ export interface StructureHeroInput {
   size: StructureHeroSize;
 }
 
+/** Um card que a folha mostra como destaque sugerido pelo motor (não escolhido pelo usuário), com a página dele. */
+export interface StructureSuggestedHeroInput extends StructureHeroInput {
+  page: number;
+}
+
 /** O corpo do pedido, já na forma validada pelo DTO. */
 export interface StructureRequest {
   stateDigest: string;
@@ -38,6 +43,8 @@ export interface StructureRequest {
   pages: StructurePageInput[];
   sections: StructureSectionInput[];
   heroes: StructureHeroInput[];
+  /** Os sugeridos do motor (a IA pode desfazê-los); ausente vale `[]`, para o front de antes. */
+  suggestedHeroes?: StructureSuggestedHeroInput[];
 }
 
 export type StructureIssueCode =

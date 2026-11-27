@@ -57,6 +57,20 @@ function pageIssues(request: StructureRequest): StructureIssue[] {
   return issues;
 }
 
+/** Sugerido do motor em página acima de `pageCount`: um problema só, em `suggestedHeroes`. */
+function suggestedPageIssues(request: StructureRequest): StructureIssue[] {
+  const beyond = (request.suggestedHeroes ?? []).some((hero) => hero.page > request.pageCount);
+  return beyond ? [{ field: 'suggestedHeroes', code: 'PAGES_MISMATCH' }] : [];
+}
+
+/** O mesmo sugerido do motor duas vezes: um problema só, em `suggestedHeroes`. */
+function duplicatedSuggestedIssues(request: StructureRequest): StructureIssue[] {
+  const ids = (request.suggestedHeroes ?? []).map((hero) => hero.itemId);
+  return new Set(ids).size < ids.length
+    ? [{ field: 'suggestedHeroes', code: 'ITEM_DUPLICATED' }]
+    : [];
+}
+
 /** Menos de 2 seções de categoria (o bloco de soltos não conta). */
 function tooFewIssues(sections: readonly StructureSectionInput[]): StructureIssue[] {
   return categorySections(sections).length < 2
@@ -119,7 +133,8 @@ function duplicatedItemIssues(sections: readonly StructureSectionInput[]): Struc
 
 /**
  * Coerência do retrato: todos os problemas de uma vez, na ordem dos códigos do contrato (páginas, poucas seções, soltos,
- * seção repetida, seção desconhecida, item repetido). Lista vazia: o retrato é coerente. Só o corpo, sem banco.
+ * seção repetida, seção desconhecida, item repetido; `suggestedHeroes` entra com as páginas, na frente, e com o item repetido,
+ * no fim). Lista vazia: o retrato é coerente. Só o corpo, sem banco.
  */
 export function validateStructureState(
   request: StructureRequest,
@@ -128,11 +143,13 @@ export function validateStructureState(
   const { sections } = request;
   return [
     ...pageIssues(request),
+    ...suggestedPageIssues(request),
     ...tooFewIssues(sections),
     ...looseIssues(sections),
     ...duplicatedSectionIssues(sections),
     ...unknownSectionIssues(sections, categories),
     ...duplicatedItemIssues(sections),
+    ...duplicatedSuggestedIssues(request),
   ];
 }
 
