@@ -1,6 +1,6 @@
 import type { LlmUsage } from '../../ai/openai-llm-pricing';
 import type { StructureAliases } from './structure-suggestion-aliases';
-import { categoryOfSectionId } from './structure-suggestion-rules';
+import { categoryOfSectionId, suggestedHeroesOf } from './structure-suggestion-rules';
 import type { StructureExample } from './read-structure-example';
 import type {
   RawStructureSuggestion,
@@ -82,7 +82,7 @@ const SUGGESTED_EXTRA_CELLS: Record<StructureHeroSize, number> = { '2x1': 1, '2x
 
 /** Os sugeridos do motor que são itens do encarte: o resto do campo `suggestedHeroes` é ignorado. */
 const realSuggested = (request: StructureRequest, aliases: StructureAliases) =>
-  (request.suggestedHeroes ?? []).filter((hero) => aliases.aliasByItem.has(hero.itemId));
+  suggestedHeroesOf(request).filter((hero) => aliases.aliasByItem.has(hero.itemId));
 
 /** As páginas do retrato, cada uma com as células em sugeridos do motor. */
 function pagesWithSuggested(

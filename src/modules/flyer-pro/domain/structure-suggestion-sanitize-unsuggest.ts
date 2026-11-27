@@ -1,5 +1,6 @@
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
 import { clipText, dropEntries, type Staged } from './structure-suggestion-discard';
+import { suggestedHeroesOf } from './structure-suggestion-rules';
 import type { SanitizeContext } from './structure-suggestion-sanitize';
 import type {
   RawStructureSuggestion,
@@ -38,7 +39,7 @@ export function sanitizeUnsuggest(
       .filter((entry) => entry.itemId === undefined)
       .map(() => ({ kind: 'unsuggest' as const, code: 'UNKNOWN_ITEM' as const })),
   };
-  const suggested = new Set((context.request.suggestedHeroes ?? []).map((hero) => hero.itemId));
+  const suggested = new Set(suggestedHeroesOf(context.request).map((hero) => hero.itemId));
   const heroed = new Set(keptHeroes.map((hero) => hero.itemId));
   stage = dropEntries(
     stage,

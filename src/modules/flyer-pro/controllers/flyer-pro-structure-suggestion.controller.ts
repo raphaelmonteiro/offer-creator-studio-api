@@ -21,7 +21,7 @@ export class FlyerProStructureSuggestionController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Sugere a estrutura do encarte (ordem das seções, página de algumas e destaques) a partir do retrato da Estrutura; não grava nada e cada pedido gera outra sugestão',
+      'Sugere a estrutura do encarte (ordem das seções, página de algumas, ordem dos produtos de cada seção, destaques, sugeridos do motor a desfazer e a campanha lida no nome) a partir do retrato da Estrutura; não grava nada e cada pedido gera outra sugestão',
   })
   @ApiResponse({ status: 200, type: StructureSuggestionResponseDto })
   @ApiResponse({

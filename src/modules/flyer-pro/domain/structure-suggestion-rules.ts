@@ -22,6 +22,9 @@ export const categoryOfSectionId = (sectionId: string): string | null =>
 
 const REQUIRED_FIELDS = ['stateDigest', 'pageCount', 'level', 'pages', 'sections', 'heroes'];
 
+/** Os sugeridos do motor do pedido (`[]` quando o campo veio ausente, como no front de antes). */
+export const suggestedHeroesOf = (request: StructureRequest) => request.suggestedHeroes ?? [];
+
 /** As seções de categoria do pedido (todas menos o bloco de soltos), na ordem recebida. */
 export const categorySections = (sections: readonly StructureSectionInput[]) =>
   sections.filter((section) => section.id !== LOOSE_SECTION_ID);
@@ -59,13 +62,13 @@ function pageIssues(request: StructureRequest): StructureIssue[] {
 
 /** Sugerido do motor em página acima de `pageCount`: um problema só, em `suggestedHeroes`. */
 function suggestedPageIssues(request: StructureRequest): StructureIssue[] {
-  const beyond = (request.suggestedHeroes ?? []).some((hero) => hero.page > request.pageCount);
+  const beyond = suggestedHeroesOf(request).some((hero) => hero.page > request.pageCount);
   return beyond ? [{ field: 'suggestedHeroes', code: 'PAGES_MISMATCH' }] : [];
 }
 
 /** O mesmo sugerido do motor duas vezes: um problema só, em `suggestedHeroes`. */
 function duplicatedSuggestedIssues(request: StructureRequest): StructureIssue[] {
-  const ids = (request.suggestedHeroes ?? []).map((hero) => hero.itemId);
+  const ids = suggestedHeroesOf(request).map((hero) => hero.itemId);
   return new Set(ids).size < ids.length
     ? [{ field: 'suggestedHeroes', code: 'ITEM_DUPLICATED' }]
     : [];
