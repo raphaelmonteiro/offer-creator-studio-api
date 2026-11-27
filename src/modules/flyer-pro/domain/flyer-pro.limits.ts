@@ -54,6 +54,8 @@ export const FLYER_PRO_LIMITS = {
   /** O `summary` e cada `reason` da resposta, cortados sem reticências. */
   structureSummaryMaxLength: 300,
   structureReasonMaxLength: 160,
+  /** O rótulo da campanha lida no nome do encarte, cortado sem reticências. */
+  structureCampaignLabelMaxLength: 60,
   /** Encartes anteriores lidos do cliente para escolher os exemplos. */
   structureExamplesReadMax: 10,
   /** Padrões das variáveis `FLYER_PRO_STRUCTURE_AI_*`. */

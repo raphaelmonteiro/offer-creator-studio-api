@@ -126,9 +126,16 @@ export interface SuggestedUnsuggest {
   reason: string;
 }
 
+/** A campanha lida no nome do encarte, com o rótulo cortado em 60 caracteres. */
+export interface SuggestedCampaign {
+  kind: Exclude<StructureCampaignKind, 'none'>;
+  label: string;
+}
+
 /** A proposta depois do saneamento, com ids reais. */
 export interface SanitizedSuggestion {
   summary: string;
+  campaign: SuggestedCampaign | null;
   sections: SuggestedSection[];
   heroes: SuggestedHero[];
   unsuggest: SuggestedUnsuggest[];

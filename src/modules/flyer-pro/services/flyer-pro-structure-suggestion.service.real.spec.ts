@@ -15,6 +15,9 @@ import {
   REAL_CONFIG,
 } from './flyer-pro-structure-suggestion.service.testutil';
 
+/** As três seções do exemplo na ordem do pedido, sem página, para a resposta que não muda nada. */
+const orderOfExample = () => [rawSection('s1'), rawSection('s2'), rawSection('s3')];
+
 describe('FlyerProStructureSuggestionService com o provedor real (cliente simulado)', () => {
   it('200 com source ai, o modelo configurado e a versão 1 do prompt, sem tokens nem custo na resposta', async () => {
     const { service, create } = makeRealSuggestionService();
@@ -69,6 +72,35 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
       { kind: 'hero', code: 'UNKNOWN_ITEM' },
     ]);
     expect(view.heroes).toEqual([]);
+  });
+
+  it.each([
+    ['Campanha de desconto', { kind: 'discount', label: 'Black Friday' }, 'Black Friday'],
+    ['Campanha de categoria', { kind: 'category', label: 'Churrasco' }, 'Churrasco'],
+  ])(
+    '%s: a campanha lida chega na resposta, sem mudar o noChange',
+    async (_name, campaign, label) => {
+      const output = { ...EMPTY_RAW_SUGGESTION, campaign, sections: orderOfExample() };
+      const { service } = makeRealSuggestionService(responsesResult(JSON.stringify(output)));
+
+      const view = await service.suggest(DOCUMENT_ID, bodyOf());
+
+      expect(view.campaign).toEqual({ kind: campaign.kind, label });
+      expect(view.noChange).toBe(true);
+    },
+  );
+
+  it.each([
+    ['kind none', { kind: 'none', label: '' }],
+    ['rótulo só de espaços', { kind: 'discount', label: '   ' }],
+  ])('Sem campanha: %s vira campaign null, sem entrada em discarded', async (_name, campaign) => {
+    const output = { ...EMPTY_RAW_SUGGESTION, campaign, sections: orderOfExample() };
+    const { service } = makeRealSuggestionService(responsesResult(JSON.stringify(output)));
+
+    const view = await service.suggest(DOCUMENT_ID, bodyOf());
+
+    expect(view.campaign).toBeNull();
+    expect(view.discarded).toEqual([]);
   });
 
   it('sem chave: 422 DISABLED com NO_API_KEY, o cliente não é chamado e o pedido não conta no teto', async () => {
