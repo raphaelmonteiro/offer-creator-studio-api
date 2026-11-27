@@ -25,6 +25,7 @@ import { EanMatchJobService } from './ean/ean-match-job.service';
 import { OffResolutionService } from './ean/off-resolution.service';
 import { SpreadsheetEanMatchService } from './ean/spreadsheet-ean-match.service';
 import { FilenameMetadataRecoveryService } from './metadata/filename-metadata-recovery.service';
+import { FlyerAssemblyPlanService } from './flyer-assembly-plan.service';
 import { MascotScriptService } from './mascot-script.service';
 import { SocialSectionLayoutService } from './social-section-layout.service';
 import { AiController } from './ai.controller';
@@ -37,6 +38,12 @@ import { ProductNameParserService } from './metadata/product-name-parser.service
 import { PixabayService } from './pixabay.service';
 import { ProductCategorizationService } from './product-categorization.service';
 import { SpellCheckService } from './spell-check.service';
+import {
+  buildTemplateElementWithImages,
+  buildTemplateGenerateWithImages,
+  buildTemplateImage,
+  buildTemplateLayers,
+} from './template-text-services.testutil';
 import { fakeConfig, installFakeOpenAi, spyOnLogger } from './utils/openai-chat.testutil';
 
 export const SECRET = 'segredo-de-teste';
@@ -175,10 +182,39 @@ function buildGallery(features: Features, storage: Storage, uploads: Uploads) {
   return gallery;
 }
 
-/** Controllers reais, guard e interceptor reais; só as dependências de fora das cinco features são vazias. */
+/**
+ * Os sete serviços das rotas de template, layout social, plano de montagem e roteiro do mascote, cada um com o
+ * cliente da OpenAI (e, nos de template, o provedor de imagem e o disco) simulado: `fakes` guarda o `create` do
+ * chat de cada um e `logs` o log capturado do plano de montagem (o único que um teste de contrato lê).
+ */
+function buildRouteServices(config: ConfigService, env: Record<string, string>, storage: Storage) {
+  const vars = { OPENAI_API_KEY: 'sk-teste', ...env };
+  const generate = buildTemplateGenerateWithImages(vars);
+  const element = buildTemplateElementWithImages(vars);
+  const image = buildTemplateImage(vars);
+  const layers = buildTemplateLayers(vars);
+  const social = new SocialSectionLayoutService(config);
+  const assembly = new FlyerAssemblyPlanService(config);
+  const mascot = new MascotScriptService(config, storage.dataSource as never);
+  const assemblyLogs = spyOnLogger(assembly);
+  [social, mascot].forEach((service) => spyOnLogger(service));
+  return {
+    services: { generate, element, image, layers, social, assembly, mascot },
+    fakes: {
+      generate: generate.create,
+      element: element.create,
+      image: image.create,
+      layers: layers.create,
+      social: installFakeOpenAi(social),
+      assembly: installFakeOpenAi(assembly),
+      mascot: installFakeOpenAi(mascot),
+    },
+    logs: { assembly: assemblyLogs },
+  };
+}
+
+/** Controllers reais, guard e interceptor reais; só as dependências de fora das rotas de IA são vazias. */
 const UNUSED_PROVIDERS = [
-  SocialSectionLayoutService,
-  MascotScriptService,
   BackgroundRemovalService,
   FilenameMetadataRecoveryService,
   OffResolutionService,
@@ -218,15 +254,17 @@ export async function buildApp(env: Record<string, string> = {}) {
   const gallery = (slot.gallery = buildGallery(features, storage, uploads));
   const { matcher, eanResolution } = buildPhotoMatching(config, features, storage);
   const none = {} as never;
+  const routes = buildRouteServices(config, env, storage);
+  const { generate, element, image, layers, social, assembly, mascot } = routes.services;
   const aiService = new AiService(
     features.pixabay,
     features.spell,
-    none,
-    none,
-    none,
-    none,
+    generate.service,
+    element.service,
+    image.service,
+    layers.service,
     features.categorization,
-    none,
+    assembly,
   );
 
   const moduleFixture = await Test.createTestingModule({
@@ -241,6 +279,8 @@ export async function buildApp(env: Record<string, string> = {}) {
       { provide: ImageMetadataService, useValue: features.vision },
       { provide: ProductImageMatchV2Service, useValue: matcher },
       { provide: FlyerEanResolutionService, useValue: eanResolution },
+      { provide: SocialSectionLayoutService, useValue: social },
+      { provide: MascotScriptService, useValue: mascot },
       { provide: GalleryEmbeddingService, useValue: storage.embedding },
       { provide: GalleryService, useValue: gallery },
       {
@@ -254,7 +294,8 @@ export async function buildApp(env: Record<string, string> = {}) {
   const app = await startApp(moduleFixture);
   return {
     app,
-    fakes: features.fakes,
+    fakes: { ...features.fakes, ...routes.fakes },
+    logs: routes.logs,
     embedding: storage.embedding,
     dataSource: storage.dataSource,
     uploads,

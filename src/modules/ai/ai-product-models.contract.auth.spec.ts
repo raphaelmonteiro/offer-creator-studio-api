@@ -10,13 +10,14 @@ import {
   PRODUCT_ID,
   removeUploadDir,
 } from './ai-product-models.contract.testutil';
+import { FORMAT, USER_MESSAGES } from './template-text-services.testutil';
 
 beforeAll(createUploadDir);
 afterAll(removeUploadDir);
 
 const body = (res: request.Response) => res.body as Record<string, unknown>;
 
-describe('contrato das rotas das cinco features: autenticação', () => {
+describe('contrato das rotas de IA: autenticação', () => {
   let app: INestApplication;
   let ctx: Awaited<ReturnType<typeof buildApp>>;
 
@@ -54,6 +55,61 @@ describe('contrato das rotas das cinco features: autenticação', () => {
       'post',
       '/v1/ai/product-image-candidates-v2',
       { productName: 'Arroz' },
+    ],
+    [
+      'template-generate',
+      'post',
+      '/v1/ai/template-generate',
+      { format: FORMAT, messages: USER_MESSAGES },
+    ],
+    [
+      'template-element',
+      'post',
+      '/v1/ai/template-element',
+      { format: FORMAT, activeSection: 'header', messages: USER_MESSAGES },
+    ],
+    [
+      'template-image-generate',
+      'post',
+      '/v1/ai/template-image-generate',
+      { format: { type: 'f', printWidthCm: 20, printHeightCm: 27 }, messages: USER_MESSAGES },
+    ],
+    [
+      'template-layers-generate',
+      'post',
+      '/v1/ai/template-layers-generate',
+      {
+        format: {
+          type: 'f',
+          printWidthCm: 20,
+          printHeightCm: 27,
+          headerHeightCm: 6,
+          footerHeightCm: 4,
+        },
+        messages: USER_MESSAGES,
+      },
+    ],
+    [
+      'social-section-layout',
+      'post',
+      '/v1/ai/social-section-layout',
+      {
+        section: { widthCm: 20, heightCm: 5, widthPreviewPx: 756, heightPreviewPx: 189 },
+        elements: [],
+        instruction: 'Centralize',
+      },
+    ],
+    [
+      'flyer-assembly-plan',
+      'post',
+      '/v1/ai/flyer-assembly-plan',
+      { template: { id: 't', name: 'T' }, document: { name: 'D' }, products: [] },
+    ],
+    [
+      'mascot-script',
+      'post',
+      '/v1/ai/mascot-script',
+      { flyerId: PRODUCT_ID, tone: 'animado', maxSeconds: 30 },
     ],
     ['image-search', 'get', '/v1/ai/image-search?rawName=salsinha', undefined],
     ['gallery/upload', 'post', '/v1/gallery/upload', undefined],
