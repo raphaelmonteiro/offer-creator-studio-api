@@ -69,8 +69,8 @@ FRONTEND_URL=http://localhost:8080
 SMTP_HOST=smtp.mailtrap.io
 SMTP_PORT=587
 SMTP_SECURE=false
-SMTP_USER=ef642424243806
-SMTP_PASS=bda716512b15ae
+SMTP_USER=   # pegar no painel do provedor SMTP (Mailtrap: Email Testing > Inboxes > SMTP Settings); nunca versionar
+SMTP_PASS=   # idem: pegar no painel do provedor; nunca versionar
 MAIL_FROM="Encartes" <no-reply@encartes.local>
 
 # IA / OpenAI
