@@ -20,6 +20,42 @@ export const TEMPLATE_CONFIGURATION_CALL: TextCallPoint = {
   timeoutMs: 120_000,
 };
 
+/** Leitura das referências do template por imagem: até 3 imagens em `detail: high`, texto livre. */
+export const TEMPLATE_IMAGE_REFERENCE_CALL: TextCallPoint = {
+  effort: 'low',
+  temperature: 0.1,
+  legacyMaxTokens: 700,
+  maxCompletionTokens: 4096,
+  timeoutMs: 60_000,
+};
+
+/** Prompt em inglês do template por imagem: tradução e enriquecimento, texto livre, sem raciocínio. */
+export const TEMPLATE_IMAGE_PROMPT_CALL: TextCallPoint = {
+  effort: 'none',
+  temperature: 0.2,
+  legacyMaxTokens: 500,
+  maxCompletionTokens: 2000,
+  timeoutMs: 30_000,
+};
+
+/** Resposta curta em português ao usuário do template por imagem, sem raciocínio. */
+export const TEMPLATE_IMAGE_REPLY_CALL: TextCallPoint = {
+  effort: 'none',
+  temperature: 0.7,
+  legacyMaxTokens: 150,
+  maxCompletionTokens: 600,
+  timeoutMs: 20_000,
+};
+
+/** Intenção da imagem (template por imagem e em camadas): classificação curta em JSON estrito, sem raciocínio. */
+export const IMAGE_INTENT_CALL: TextCallPoint = {
+  effort: 'none',
+  temperature: 0,
+  legacyMaxTokens: 300,
+  maxCompletionTokens: 1024,
+  timeoutMs: 20_000,
+};
+
 /** Ações do assistente de elemento: JSON estrito, com imagens possíveis. */
 export const TEMPLATE_ELEMENT_CALL: TextCallPoint = {
   effort: 'low',

@@ -1,5 +1,6 @@
 import { TemplateElementAssistantService } from './template-element-assistant.service';
 import { TemplateGenerateService } from './template-generate.service';
+import { TemplateImageGeneratorService } from './template-image-generator.service';
 import {
   chatResponse,
   fakeConfig,
@@ -29,6 +30,30 @@ export function buildTemplateElement(env: Record<string, string> = {}) {
     env,
   );
 }
+
+/** Template por imagem: o provedor de imagem e o envio ao disco também simulados (sem chamada real). */
+export function buildTemplateImage(env: Record<string, string> = {}) {
+  const images = {
+    editImage: jest.fn().mockResolvedValue(GENERATED_IMAGE),
+    generateImage: jest.fn().mockResolvedValue(GENERATED_IMAGE),
+  };
+  const uploads = { uploadFile: jest.fn().mockResolvedValue({ url: '/uploads/templates/x.png' }) };
+  const built = withFakes(
+    (vars) =>
+      new TemplateImageGeneratorService(fakeConfig(vars), uploads as never, images as never),
+    env,
+  );
+  return { ...built, images, uploads };
+}
+
+const GENERATED_IMAGE = {
+  image: { buffer: Buffer.from('png'), mimeType: 'image/png', extension: '.png' },
+};
+
+/** Intenção que o provedor devolve: imagem nova inteira, com confiança alta. */
+export const INTENT_ANSWER = chatResponse({
+  content: JSON.stringify({ category: 'new_full_image', confidence: 0.9, reason: 'pedido novo' }),
+});
 
 export const FORMAT = {
   type: 'folheto-20x27',

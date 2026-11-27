@@ -3,13 +3,20 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
 import {
+  IMAGE_INTENT_CALL,
+  TEMPLATE_IMAGE_PROMPT_CALL,
+  TEMPLATE_IMAGE_REFERENCE_CALL,
+  TEMPLATE_IMAGE_REPLY_CALL,
+} from './config/openai-text-calls';
+import {
   MaterializedImage,
   materializeGeneratedImage,
   selectImageSizeByAspectRatio,
   uploadGeneratedAsset,
 } from './utils/ai-image.util';
 import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
-import { withAiLogging } from './utils/ai-telemetry.util';
+import { callProductChat } from './utils/ai-product-chat.util';
+import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
 import { UploadsService } from '../uploads/uploads.service';
 import { OpenAiImageInput, OpenAiImageService } from './openai-image.service';
 import {
@@ -111,7 +118,7 @@ export class TemplateImageGeneratorService {
     }
 
     // ── Step 1: Vision analysis of reference images ──────────────────────────
-    // When reference images are provided, use GPT-4o Vision to extract a
+    // When reference images are provided, use the vision model to extract a
     // precise technical description BEFORE crafting the generation prompt.
     // This is far more reliable than passing the images as vague "context".
     let referenceStyleDescription = '';
@@ -131,21 +138,13 @@ export class TemplateImageGeneratorService {
         })),
       ];
 
-      const visionResponse = (await withAiLogging(
-        this.logger,
-        {
-          feature: 'template-image.reference-vision',
-          endpoint: 'chat.completions',
-          model: this.models.textModel,
-        },
-        () =>
-          this.openai!.chat.completions.create({
-            model: this.models.textModel,
-            max_tokens: 700,
-            temperature: 0.1,
-            messages: [{ role: 'user', content: visionContent }],
-          } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming),
-      )) as OpenAI.Chat.ChatCompletion;
+      const visionResponse = await callProductChat({
+        openai: this.openai,
+        logger: this.logger,
+        feature: 'template-image.reference-vision',
+        spec: { model: this.models.textModel, ...TEMPLATE_IMAGE_REFERENCE_CALL },
+        messages: [{ role: 'user', content: visionContent }],
+      });
 
       referenceStyleDescription = visionResponse.choices[0]?.message?.content?.trim() ?? '';
       this.logger.log(`Reference analysis extracted (${referenceStyleDescription.length} chars)`);
@@ -155,7 +154,7 @@ export class TemplateImageGeneratorService {
     // When reference images were analyzed, inject the analysis directly into
     // the system prompt so the output prompt is grounded in exact visual facts.
     // When reference images are present, send them directly to the Image API edit
-    // endpoint and keep GPT-4o Vision analysis only as prompt context.
+    // endpoint and keep the vision analysis only as prompt context.
     const useEditEndpoint =
       imageIntent.shouldEditExistingImage && isRefinement && userReferenceImages.length === 0;
 
@@ -171,24 +170,16 @@ export class TemplateImageGeneratorService {
       referenceStyleDescription,
     });
 
-    const translationResponse = (await withAiLogging(
-      this.logger,
-      {
-        feature: 'template-image.prompt',
-        endpoint: 'chat.completions',
-        model: this.models.textModel,
-      },
-      () =>
-        this.openai!.chat.completions.create({
-          model: this.models.textModel,
-          max_tokens: 500,
-          temperature: 0.2,
-          messages: [
-            { role: 'system', content: translationSystemPrompt },
-            { role: 'user', content: lastUserMessage.content },
-          ],
-        } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming),
-    )) as OpenAI.Chat.ChatCompletion;
+    const translationResponse = await callProductChat({
+      openai: this.openai,
+      logger: this.logger,
+      feature: 'template-image.prompt',
+      spec: { model: this.models.textModel, ...TEMPLATE_IMAGE_PROMPT_CALL },
+      messages: [
+        { role: 'system', content: translationSystemPrompt },
+        { role: 'user', content: lastUserMessage.content },
+      ],
+    });
 
     const enrichedPrompt = translationResponse.choices[0]?.message?.content?.trim();
     if (!enrichedPrompt) throw new Error('Falha ao traduzir prompt');
@@ -281,32 +272,24 @@ export class TemplateImageGeneratorService {
     });
 
     // Step 5: generate a friendly PT response message
-    const replyResponse = await withAiLogging(
-      this.logger,
-      {
-        feature: 'template-image.reply',
-        endpoint: 'chat.completions',
-        model: this.models.textModel,
-      },
-      () =>
-        this.openai!.chat.completions.create({
-          model: this.models.textModel,
-          max_tokens: 150,
-          temperature: 0.7,
-          messages: [
-            {
-              role: 'system',
-              content: TEMPLATE_IMAGE_REPLY_SYSTEM_PROMPT,
-            },
-            {
-              role: 'user',
-              content: isRefinement
-                ? `O usuário pediu: "${lastUserMessage.content}". A imagem foi editada conforme solicitado.`
-                : `O usuário pediu: "${lastUserMessage.content}". Um template foi gerado com o tema solicitado.`,
-            },
-          ],
-        }),
-    );
+    const replyResponse = await callProductChat({
+      openai: this.openai,
+      logger: this.logger,
+      feature: 'template-image.reply',
+      spec: { model: this.models.textModel, ...TEMPLATE_IMAGE_REPLY_CALL },
+      messages: [
+        {
+          role: 'system',
+          content: TEMPLATE_IMAGE_REPLY_SYSTEM_PROMPT,
+        },
+        {
+          role: 'user',
+          content: isRefinement
+            ? `O usuário pediu: "${lastUserMessage.content}". A imagem foi editada conforme solicitado.`
+            : `O usuário pediu: "${lastUserMessage.content}". Um template foi gerado com o tema solicitado.`,
+        },
+      ],
+    });
 
     const assistantMessage =
       replyResponse.choices[0]?.message?.content?.trim() ||
@@ -317,75 +300,6 @@ export class TemplateImageGeneratorService {
       assistantMessage,
       promptUsed: enrichedPrompt,
     };
-  }
-
-  private async createStructuredChatCompletion<T>(options: {
-    feature: string;
-    model: string;
-    request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
-    parse: (raw: string) => T;
-    emptyResponseMessage: string;
-  }): Promise<T> {
-    const maxAttempts = this.models.structuredResponseRetryAttempts + 1;
-    const messages = [...options.request.messages];
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const response = await withAiLogging(
-        this.logger,
-        {
-          feature: options.feature,
-          endpoint: 'chat.completions',
-          model: options.model,
-        },
-        () =>
-          this.openai!.chat.completions.create({
-            ...options.request,
-            messages,
-          }),
-      );
-
-      const raw = response.choices[0]?.message?.content;
-      try {
-        if (!raw) throw new Error(options.emptyResponseMessage);
-        return options.parse(raw);
-      } catch (error) {
-        lastError = error;
-        if (attempt >= maxAttempts) {
-          throw error;
-        }
-
-        const reason = this.getStructuredResponseRetryReason(error);
-        this.logger.warn(
-          `Structured response retry ${JSON.stringify({
-            feature: options.feature,
-            attempt,
-            nextAttempt: attempt + 1,
-            maxAttempts,
-            reason,
-            model: options.model,
-          })}`,
-        );
-
-        messages.push({
-          role: 'user',
-          content:
-            'The previous response was invalid for the expected JSON schema. ' +
-            `Validation error: ${reason}. ` +
-            'Return only valid JSON for the expected schema, without markdown or explanations.',
-        });
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('Resposta estruturada inválida da IA');
-  }
-
-  private getStructuredResponseRetryReason(error: unknown): string {
-    if (error instanceof Error && error.message) {
-      return error.message.slice(0, 180);
-    }
-
-    return 'structured-response-validation-failed';
   }
 
   private async materializeReferenceImageInputs(
@@ -426,32 +340,30 @@ export class TemplateImageGeneratorService {
     if (!this.openai) return fallback;
 
     try {
-      const parsed = await this.createStructuredChatCompletion({
+      const parsed = await createStructuredChatCompletion({
+        openai: this.openai,
+        logger: this.logger,
         feature: context.feature,
-        model: this.models.fastTextModel,
-        emptyResponseMessage: 'Resposta vazia da classificação de intenção',
+        spec: { model: this.models.fastTextModel, ...IMAGE_INTENT_CALL },
+        messages: [
+          {
+            role: 'system',
+            content: IMAGE_INTENT_CLASSIFICATION_SYSTEM_PROMPT,
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              message: context.userMessage,
+              hasExistingImage: context.hasExistingImage,
+              hasReferenceImages: context.hasReferenceImages,
+              hasCurrentLayers: !!context.hasCurrentLayers,
+            }),
+          },
+        ],
+        responseFormat: AI_RESPONSE_FORMATS.imageIntentClassification,
         parse: parseImageIntentClassification,
-        request: {
-          model: this.models.fastTextModel,
-          response_format: AI_RESPONSE_FORMATS.imageIntentClassification,
-          max_tokens: 300,
-          temperature: 0,
-          messages: [
-            {
-              role: 'system',
-              content: IMAGE_INTENT_CLASSIFICATION_SYSTEM_PROMPT,
-            },
-            {
-              role: 'user',
-              content: JSON.stringify({
-                message: context.userMessage,
-                hasExistingImage: context.hasExistingImage,
-                hasReferenceImages: context.hasReferenceImages,
-                hasCurrentLayers: !!context.hasCurrentLayers,
-              }),
-            },
-          ],
-        },
+        emptyResponseMessage: 'Resposta vazia da classificação de intenção',
+        retryAttempts: this.models.structuredResponseRetryAttempts,
       });
       const confidence = parsed.confidence;
 

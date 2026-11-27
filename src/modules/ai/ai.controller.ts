@@ -641,7 +641,7 @@ export class AiController {
 
   @Post('template-image-generate')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Gera imagem de fundo para template via GPT-4o Image (Feature 5)' })
+  @ApiOperation({ summary: 'Gera imagem de fundo para template via GPT Image (Feature 5)' })
   @ApiResponse({ status: 200, description: 'Imagem gerada com sucesso' })
   async templateImageGenerate(@Body() dto: TemplateImageGenerateRequestDto) {
     try {
