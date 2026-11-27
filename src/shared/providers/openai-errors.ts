@@ -141,17 +141,22 @@ export function classifyOpenAiErrorStrict(
 /**
  * Chamada OpenAI com o `withRetry` do repositório como ÚNICA camada de
  * re-tentativa: a função deve passar `OPENAI_NO_SDK_RETRY` ao SDK. Quota é
- * terminal na primeira resposta; taxa/5xx/rede re-tentam com backoff.
+ * terminal na primeira resposta; taxa/5xx/rede re-tentam com backoff
+ * (`retryConnectionErrors: false` tira rede e prazo estourado da lista).
  */
 export function withOpenAiRetry<T>(
   fn: () => Promise<T>,
-  options?: { attempts?: number; baseDelayMs?: number },
+  options?: { attempts?: number; baseDelayMs?: number; retryConnectionErrors?: boolean },
 ): Promise<T> {
+  const { retryConnectionErrors = true, ...retry } = options ?? {};
   return withRetry(async () => {
     try {
       return await fn();
     } catch (err) {
+      // Falha de rede e prazo estourado (`APIConnectionError`, `APIConnectionTimeoutError`) passam como vieram, sem
+      // repetição, quando quem chama pede só 429 de taxa e 5xx (change 42, D-5): repetir um prazo é esperar duas vezes.
+      if (!retryConnectionErrors && err instanceof APIConnectionError) throw err;
       throw classifyOpenAiError(err);
     }
-  }, options);
+  }, retry);
 }

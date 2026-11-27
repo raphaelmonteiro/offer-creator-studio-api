@@ -20,7 +20,7 @@ export interface DirectorChatRequest {
 /**
  * Chamada do diretor, a mesma nos quatro formatos (change 42, A-3): cliente do SDK sem repetição própria, prazo e
  * parâmetros pela família do modelo (`callProductChat`), e `withOpenAiRetry` como a única camada de repetição, que
- * repete só 429 de taxa e 5xx (conta sem crédito para na primeira resposta). Devolve o JSON do roteiro já lido; cada
+ * repete só 429 de taxa e 5xx (conta sem crédito, rede e prazo estourado param na primeira resposta). Devolve o JSON do roteiro já lido; cada
  * formato monta o seu `McScript`. As mensagens de falha são as de sempre (`script_failed: ...`).
  */
 export async function requestDirectorJson<T>(request: DirectorChatRequest): Promise<T> {
@@ -37,14 +37,17 @@ export async function requestDirectorJson<T>(request: DirectorChatRequest): Prom
 async function sendWithRetry(request: DirectorChatRequest): Promise<OpenAI.Chat.ChatCompletion> {
   let providerError: unknown;
   try {
-    return await withOpenAiRetry(async () => {
-      try {
-        return await callDirector(request);
-      } catch (err) {
-        providerError = err;
-        throw err;
-      }
-    });
+    return await withOpenAiRetry(
+      async () => {
+        try {
+          return await callDirector(request);
+        } catch (err) {
+          providerError = err;
+          throw err;
+        }
+      },
+      { retryConnectionErrors: false },
+    );
   } catch (err) {
     throw new Error(directorFailureMessage(providerError ?? err));
   }

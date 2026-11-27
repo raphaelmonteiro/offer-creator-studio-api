@@ -1,4 +1,4 @@
-import { APIConnectionTimeoutError } from 'openai';
+import { APIConnectionError, APIConnectionTimeoutError } from 'openai';
 import {
   chatResponse,
   installFakeOpenAi,
@@ -260,19 +260,16 @@ describe('McScriptProcessor — chamada do diretor (42, 1.10)', () => {
     expect(failed).not.toContain('estimatedCostUsd');
   });
 
-  it('prazo estourado: o SDK sinaliza o prazo, o erro transitório é repetido e a falha traz a mensagem dele', async () => {
-    jest.useFakeTimers();
-    try {
-      const timeout = new APIConnectionTimeoutError();
-      setUp('v2', timeout, timeout, timeout);
-      const running = processor.process({ stepId: SCRIPT_STEP_ID });
-      await jest.runAllTimersAsync();
-      await running;
-    } finally {
-      jest.useRealTimers();
-    }
-    expect(create).toHaveBeenCalledTimes(3);
+  it('prazo estourado (ou rede caída): uma única chamada, sem repetir, e a falha traz a mensagem do SDK', async () => {
+    setUp('v2', new APIConnectionTimeoutError());
+    await processor.process({ stepId: SCRIPT_STEP_ID });
+    expect(create).toHaveBeenCalledTimes(1);
     expect(stepFailure()).toBe('script_failed: Request timed out.');
+
+    setUp('v2', new APIConnectionError({}));
+    await processor.process({ stepId: SCRIPT_STEP_ID });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(stepFailure()).toBe('script_failed: Connection error.');
   });
 
   it('Diretor em Terra: o log de fim traz o custo pela tabela; em gpt-4o o custo é nulo, nunca zero', async () => {
