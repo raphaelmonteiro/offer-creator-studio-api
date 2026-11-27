@@ -22,6 +22,9 @@ export const categoryOfSectionId = (sectionId: string): string | null =>
 
 const REQUIRED_FIELDS = ['stateDigest', 'pageCount', 'level', 'pages', 'sections', 'heroes'];
 
+/** Os sugeridos do motor do pedido (`[]` quando o campo veio ausente, como no front de antes). */
+export const suggestedHeroesOf = (request: StructureRequest) => request.suggestedHeroes ?? [];
+
 /** As seções de categoria do pedido (todas menos o bloco de soltos), na ordem recebida. */
 export const categorySections = (sections: readonly StructureSectionInput[]) =>
   sections.filter((section) => section.id !== LOOSE_SECTION_ID);
@@ -55,6 +58,20 @@ function pageIssues(request: StructureRequest): StructureIssue[] {
     }
   });
   return issues;
+}
+
+/** Sugerido do motor em página acima de `pageCount`: um problema só, em `suggestedHeroes`. */
+function suggestedPageIssues(request: StructureRequest): StructureIssue[] {
+  const beyond = suggestedHeroesOf(request).some((hero) => hero.page > request.pageCount);
+  return beyond ? [{ field: 'suggestedHeroes', code: 'PAGES_MISMATCH' }] : [];
+}
+
+/** O mesmo sugerido do motor duas vezes: um problema só, em `suggestedHeroes`. */
+function duplicatedSuggestedIssues(request: StructureRequest): StructureIssue[] {
+  const ids = suggestedHeroesOf(request).map((hero) => hero.itemId);
+  return new Set(ids).size < ids.length
+    ? [{ field: 'suggestedHeroes', code: 'ITEM_DUPLICATED' }]
+    : [];
 }
 
 /** Menos de 2 seções de categoria (o bloco de soltos não conta). */
@@ -119,7 +136,8 @@ function duplicatedItemIssues(sections: readonly StructureSectionInput[]): Struc
 
 /**
  * Coerência do retrato: todos os problemas de uma vez, na ordem dos códigos do contrato (páginas, poucas seções, soltos,
- * seção repetida, seção desconhecida, item repetido). Lista vazia: o retrato é coerente. Só o corpo, sem banco.
+ * seção repetida, seção desconhecida, item repetido; `suggestedHeroes` entra com as páginas, na frente, e com o item repetido,
+ * no fim). Lista vazia: o retrato é coerente. Só o corpo, sem banco.
  */
 export function validateStructureState(
   request: StructureRequest,
@@ -128,11 +146,13 @@ export function validateStructureState(
   const { sections } = request;
   return [
     ...pageIssues(request),
+    ...suggestedPageIssues(request),
     ...tooFewIssues(sections),
     ...looseIssues(sections),
     ...duplicatedSectionIssues(sections),
     ...unknownSectionIssues(sections, categories),
     ...duplicatedItemIssues(sections),
+    ...duplicatedSuggestedIssues(request),
   ];
 }
 

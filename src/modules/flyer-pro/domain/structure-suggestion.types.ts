@@ -29,6 +29,11 @@ export interface StructureHeroInput {
   size: StructureHeroSize;
 }
 
+/** Um card que a folha mostra como destaque sugerido pelo motor (não escolhido pelo usuário), com a página dele. */
+export interface StructureSuggestedHeroInput extends StructureHeroInput {
+  page: number;
+}
+
 /** O corpo do pedido, já na forma validada pelo DTO. */
 export interface StructureRequest {
   stateDigest: string;
@@ -38,6 +43,8 @@ export interface StructureRequest {
   pages: StructurePageInput[];
   sections: StructureSectionInput[];
   heroes: StructureHeroInput[];
+  /** Os sugeridos do motor (a IA pode desfazê-los); ausente vale `[]`, para o front de antes. */
+  suggestedHeroes?: StructureSuggestedHeroInput[];
 }
 
 export type StructureIssueCode =
@@ -53,7 +60,7 @@ export interface StructureIssue {
   code: StructureIssueCode;
 }
 
-export type DiscardedKind = 'section' | 'page' | 'hero';
+export type DiscardedKind = 'section' | 'page' | 'itemOrder' | 'hero' | 'unsuggest';
 
 export type DiscardedCode =
   | 'UNKNOWN_SECTION'
@@ -62,8 +69,12 @@ export type DiscardedCode =
   | 'USER_PINNED'
   | 'UNKNOWN_ITEM'
   | 'HERO_WITHOUT_PHOTO'
+  | 'ITEMS_MISMATCH'
   | 'HERO_ALREADY_SET'
-  | 'HERO_LIMIT';
+  | 'HERO_USER_SET'
+  | 'HERO_LIMIT'
+  | 'NOT_SUGGESTED'
+  | 'CONFLICTS_WITH_HERO';
 
 /** O que o saneamento tirou: uma entrada por coisa tirada, só com o tipo e o código. */
 export interface DiscardedEntry {
@@ -71,11 +82,25 @@ export interface DiscardedEntry {
   code: DiscardedCode;
 }
 
+export const STRUCTURE_CAMPAIGN_KINDS = ['category', 'discount', 'none'] as const;
+export type StructureCampaignKind = (typeof STRUCTURE_CAMPAIGN_KINDS)[number];
+
+/** Uma seção da resposta do provedor: a página, o motivo e a ordem dos produtos (`items`, apelidos; `null` mantém). */
+export interface RawStructureSection {
+  id: string;
+  page: number | null;
+  reason: string;
+  items: string[] | null;
+  itemsReason: string;
+}
+
 /** A resposta do provedor, com apelidos (`s1`, `p01`): nada dela vale antes do saneamento. */
 export interface RawStructureSuggestion {
   summary: string;
-  sections: Array<{ id: string; page: number | null; reason: string }>;
+  campaign: { kind: StructureCampaignKind; label: string };
+  sections: RawStructureSection[];
   heroes: Array<{ item: string; size: StructureHeroSize; reason: string }>;
+  unsuggest: Array<{ item: string; reason: string }>;
 }
 
 export interface SuggestedSection {
@@ -83,6 +108,10 @@ export interface SuggestedSection {
   id: string;
   page: number | null;
   reason: string;
+  /** Os itens da seção que são do encarte, na ordem proposta (ids reais), ou `null` para manter a ordem de hoje. */
+  itemIds: string[] | null;
+  /** Até 160 caracteres; `''` quando não há ordem. */
+  itemsReason: string;
 }
 
 export interface SuggestedHero {
@@ -91,11 +120,25 @@ export interface SuggestedHero {
   reason: string;
 }
 
+/** Um sugerido do motor (de `suggestedHeroes`) que a IA propõe desfazer. */
+export interface SuggestedUnsuggest {
+  itemId: string;
+  reason: string;
+}
+
+/** A campanha lida no nome do encarte, com o rótulo cortado em 60 caracteres. */
+export interface SuggestedCampaign {
+  kind: Exclude<StructureCampaignKind, 'none'>;
+  label: string;
+}
+
 /** A proposta depois do saneamento, com ids reais. */
 export interface SanitizedSuggestion {
   summary: string;
+  campaign: SuggestedCampaign | null;
   sections: SuggestedSection[];
   heroes: SuggestedHero[];
+  unsuggest: SuggestedUnsuggest[];
   discarded: DiscardedEntry[];
   noChange: boolean;
 }

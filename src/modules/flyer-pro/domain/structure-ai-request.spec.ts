@@ -51,6 +51,7 @@ describe('buildStructureAiRequest: o pedido ao provedor, com apelidos', () => {
       unit: 'kg',
       hasPhoto: true,
       hero: null,
+      suggestedHero: null,
     });
     expect(items.filter((item) => !item.hasPhoto).map((item) => item.name)).toEqual(['TOMATE']);
   });

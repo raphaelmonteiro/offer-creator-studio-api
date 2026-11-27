@@ -1,10 +1,14 @@
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
 import { categorySections, LOOSE_SECTION_ID } from './structure-suggestion-rules';
+import { clipText } from './structure-suggestion-clip-text';
+import { discardedEntry, dropEntries, type Staged } from './structure-suggestion-discard';
+import { sanitizeCampaign } from './structure-suggestion-sanitize-campaign';
+import { sanitizeUnsuggest } from './structure-suggestion-sanitize-unsuggest';
+import { sanitizeItemOrders, type SectionItemOrder } from './structure-suggestion-sanitize-items';
 import type { StructureAliases } from './structure-suggestion-aliases';
 import type {
-  DiscardedCode,
   DiscardedEntry,
-  DiscardedKind,
+  RawStructureSection,
   RawStructureSuggestion,
   SanitizedSuggestion,
   StructureHeroInput,
@@ -12,6 +16,7 @@ import type {
   StructureSectionInput,
   SuggestedHero,
   SuggestedSection,
+  SuggestedUnsuggest,
 } from './structure-suggestion.types';
 
 /** O que o saneamento precisa saber, além da resposta do provedor. */
@@ -24,24 +29,13 @@ export interface SanitizeContext {
   maxHeroes: number;
 }
 
-interface Staged<T> {
-  kept: T[];
-  discarded: DiscardedEntry[];
-}
-
-const entry = (kind: DiscardedKind, code: DiscardedCode): DiscardedEntry => ({ kind, code });
-
-/** Aparado e cortado em `max` caracteres (pontos de código), sem reticências; vazio ou ausente vale `''`. */
-export function clipText(text: string | null | undefined, max: number): string {
-  return Array.from((text ?? '').trim())
-    .slice(0, max)
-    .join('');
-}
-
+/** Uma seção que a resposta manteve: a página e o motivo brutos, e a ordem dos produtos que ela propôs (ainda por conferir). */
 interface KeptSection {
   id: string;
   rawPage: number | null;
   reason: string;
+  items: RawStructureSection['items'];
+  itemsReason: string;
 }
 
 /**
@@ -60,16 +54,24 @@ function sanitizeSections(
     const id = sectionByAlias.get(section.id);
     if (id === LOOSE_SECTION_ID) continue;
     if (id === undefined) {
-      discarded.push(entry('section', 'UNKNOWN_SECTION'));
+      discarded.push(discardedEntry('section', 'UNKNOWN_SECTION'));
     } else if (seen.has(id)) {
-      discarded.push(entry('section', 'DUPLICATED'));
+      discarded.push(discardedEntry('section', 'DUPLICATED'));
     } else {
       seen.add(id);
-      kept.push({ id, rawPage: section.page, reason: section.reason });
+      kept.push({
+        id,
+        rawPage: section.page,
+        reason: section.reason,
+        items: section.items,
+        itemsReason: section.itemsReason,
+      });
     }
   }
   for (const section of categorySections(context.request.sections)) {
-    if (!seen.has(section.id)) kept.push({ id: section.id, rawPage: null, reason: '' });
+    if (!seen.has(section.id)) {
+      kept.push({ id: section.id, rawPage: null, reason: '', items: null, itemsReason: '' });
+    }
   }
   return { kept, discarded };
 }
@@ -92,16 +94,17 @@ function resolvePage(
   const discarded: DiscardedEntry[] = [];
   let page = rawPage ?? null;
   if (page !== null && !isPageInRange(page, pageCount)) {
-    discarded.push(entry('page', 'PAGE_OUT_OF_RANGE'));
+    discarded.push(discardedEntry('page', 'PAGE_OUT_OF_RANGE'));
     page = null;
   }
   if (pinned === undefined) return { page, discarded };
-  if (page !== null && page !== pinned) discarded.push(entry('page', 'USER_PINNED'));
+  if (page !== null && page !== pinned) discarded.push(discardedEntry('page', 'USER_PINNED'));
   return { page: pinned, discarded };
 }
 
 function sanitizePages(
   kept: readonly KeptSection[],
+  orders: ReadonlyMap<string, SectionItemOrder>,
   context: SanitizeContext,
 ): Staged<SuggestedSection> {
   const sections: SuggestedSection[] = [];
@@ -114,24 +117,10 @@ function sanitizePages(
       id: section.id,
       page: resolved.page,
       reason: clipText(section.reason, FLYER_PRO_LIMITS.structureReasonMaxLength),
+      ...orders.get(section.id),
     });
   }
   return { kept: sections, discarded };
-}
-
-/** Tira da etapa o destaque que `isRejected` recusa e registra uma entrada `hero` com o código, uma por destaque tirado. */
-function dropHeroes(
-  stage: Staged<SuggestedHero>,
-  code: DiscardedCode,
-  isRejected: (hero: SuggestedHero, index: number, all: SuggestedHero[]) => boolean,
-): Staged<SuggestedHero> {
-  const kept: SuggestedHero[] = [];
-  const discarded = [...stage.discarded];
-  stage.kept.forEach((hero, index, all) => {
-    if (isRejected(hero, index, all)) discarded.push(entry('hero', code));
-    else kept.push(hero);
-  });
-  return { kept, discarded };
 }
 
 const isSameHero = (a: Pick<StructureHeroInput, 'itemId' | 'size'>, b: StructureHeroInput) =>
@@ -139,8 +128,9 @@ const isSameHero = (a: Pick<StructureHeroInput, 'itemId' | 'size'>, b: Structure
 
 /**
  * S8 a S12, nesta ordem: item que não é do pedido (`UNKNOWN_ITEM`), repetido (`DUPLICATED`), sem foto
- * (`HERO_WITHOUT_PHOTO`), que o usuário já tem no mesmo tamanho (`HERO_ALREADY_SET`) e, dos que sobram, os que passam do
- * teto (`HERO_LIMIT`, um por cortado).
+ * (`HERO_WITHOUT_PHOTO`), que o usuário já tem no mesmo tamanho (`HERO_ALREADY_SET`) ou em outro (`HERO_USER_SET`: o
+ * destaque do usuário não muda) e, dos que sobram, os que passam do teto (`HERO_LIMIT`, um por cortado). O destaque que o
+ * motor já mostra (`suggestedHeroes`) não tem barreira: no mesmo tamanho ou em outro, passa.
  */
 function sanitizeHeroes(
   raw: RawStructureSuggestion['heroes'],
@@ -160,22 +150,29 @@ function sanitizeHeroes(
   const unknown = known.filter((hero) => hero === null).length;
   let stage: Staged<SuggestedHero> = {
     kept: known.filter((hero): hero is SuggestedHero => hero !== null),
-    discarded: Array.from({ length: unknown }, () => entry('hero', 'UNKNOWN_ITEM')),
+    discarded: Array.from({ length: unknown }, () => discardedEntry('hero', 'UNKNOWN_ITEM')),
   };
-  stage = dropHeroes(
+  stage = dropEntries(
     stage,
-    'DUPLICATED',
+    { kind: 'hero', code: 'DUPLICATED' },
     (hero, index, all) => all.findIndex((other) => other.itemId === hero.itemId) !== index,
   );
-  stage = dropHeroes(
+  stage = dropEntries(
     stage,
-    'HERO_WITHOUT_PHOTO',
+    { kind: 'hero', code: 'HERO_WITHOUT_PHOTO' },
     (hero) => !context.itemsWithPhoto.has(hero.itemId),
   );
-  stage = dropHeroes(stage, 'HERO_ALREADY_SET', (hero) =>
+  stage = dropEntries(stage, { kind: 'hero', code: 'HERO_ALREADY_SET' }, (hero) =>
     context.request.heroes.some((current) => isSameHero(hero, current)),
   );
-  return dropHeroes(stage, 'HERO_LIMIT', (_hero, index) => index >= context.maxHeroes);
+  stage = dropEntries(stage, { kind: 'hero', code: 'HERO_USER_SET' }, (hero) =>
+    context.request.heroes.some((current) => current.itemId === hero.itemId),
+  );
+  return dropEntries(
+    stage,
+    { kind: 'hero', code: 'HERO_LIMIT' },
+    (_hero, index) => index >= context.maxHeroes,
+  );
 }
 
 /** A página que a seção já tem sozinha: a fixada ou, não fixada, a única em que está. */
@@ -185,16 +182,18 @@ function currentPageOf(input: StructureSectionInput): number | undefined {
 }
 
 /**
- * S14: sem mudança quando a ordem das seções de categoria é a do pedido, nenhum destaque sobrou e toda seção vem com
- * página nula ou com a página em que já está.
+ * S14: sem mudança quando a ordem das seções de categoria é a do pedido, nenhum destaque, ordem de produtos nem sugerido
+ * a desfazer sobrou e toda seção vem com página nula ou com a página em que já está. A campanha lida não conta.
  */
 function isUnchanged(
   sections: readonly SuggestedSection[],
   heroes: readonly SuggestedHero[],
+  unsuggest: readonly SuggestedUnsuggest[],
   request: StructureRequest,
 ): boolean {
   const asked = categorySections(request.sections);
-  if (sections.length !== asked.length || heroes.length > 0) return false;
+  if (sections.length !== asked.length || heroes.length > 0 || unsuggest.length > 0) return false;
+  if (sections.some((section) => section.itemIds !== null)) return false;
   if (sections.some((section, index) => section.id !== asked[index].id)) return false;
   return sections.every(
     (section, index) => section.page === null || section.page === currentPageOf(asked[index]),
@@ -207,13 +206,23 @@ export function sanitizeSuggestion(
   context: SanitizeContext,
 ): SanitizedSuggestion {
   const sections = sanitizeSections(raw.sections, context);
-  const pages = sanitizePages(sections.kept, context);
+  const orders = sanitizeItemOrders(sections.kept, context.aliases);
+  const pages = sanitizePages(sections.kept, orders.byId, context);
   const heroes = sanitizeHeroes(raw.heroes, context);
+  const unsuggest = sanitizeUnsuggest(raw.unsuggest, heroes.kept, context);
   return {
     summary: clipText(raw.summary, FLYER_PRO_LIMITS.structureSummaryMaxLength),
+    campaign: sanitizeCampaign(raw.campaign),
     sections: pages.kept,
     heroes: heroes.kept,
-    discarded: [...sections.discarded, ...pages.discarded, ...heroes.discarded],
-    noChange: isUnchanged(pages.kept, heroes.kept, context.request),
+    unsuggest: unsuggest.kept,
+    discarded: [
+      ...sections.discarded,
+      ...pages.discarded,
+      ...orders.discarded,
+      ...heroes.discarded,
+      ...unsuggest.discarded,
+    ],
+    noChange: isUnchanged(pages.kept, heroes.kept, unsuggest.kept, context.request),
   };
 }

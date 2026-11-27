@@ -53,6 +53,33 @@ describeIfE2eDb('POST /v1/flyer-pro/documents/:id/structure-suggestion (e2e)', (
     ),
   });
 
+  it('Resposta com os campos novos: Carnes com a ordem de ids reais, o desfazer da LINGUICA e a campanha, pela app montada', async () => {
+    const { id, itemIds, body } = await seedDocument({
+      name: 'Teste #ia-sem-sugeridos #ia-desconto',
+    });
+    const [, , , picanha, coxa, linguica] = itemIds;
+    body.sections[1].itemIds = [coxa, linguica, picanha];
+    body.suggestedHeroes = [{ itemId: linguica, size: '2x1', page: 1 }];
+
+    const response = await ask(id, body);
+
+    expect(response.status).toBe(200);
+    const view = dataOf(response);
+    const carnes = view.sections.find((section) => section.id === 'cat:Carnes');
+    expect(carnes).toMatchObject({
+      itemIds: [picanha, coxa, linguica],
+      itemsReason: expect.stringMatching(/^\[simulado\] /),
+    });
+    expect(view.sections.filter((section) => section !== carnes).map((s) => s.itemIds)).toEqual([
+      null,
+      null,
+    ]);
+    expect(view.unsuggest).toEqual([
+      { itemId: linguica, reason: expect.stringMatching(/^\[simulado\] /) },
+    ]);
+    expect(view.campaign).toEqual({ kind: 'discount', label: '[simulado] desconto' });
+  });
+
   it('o exemplo do simulado: Carnes, Hortifruti, Bebidas, com os ids reais, e um UUID solto e um item de outro encarte no pedido são ignorados', async () => {
     const { id, itemIds, body } = await seedDocument();
     const other = await seedDocument();
@@ -65,7 +92,7 @@ describeIfE2eDb('POST /v1/flyer-pro/documents/:id/structure-suggestion (e2e)', (
     expect(view).toMatchObject({
       source: 'mock',
       model: 'mock',
-      promptVersion: 1,
+      promptVersion: 2,
       stateDigest: body.stateDigest,
       noChange: false,
       discarded: [],
@@ -122,13 +149,15 @@ describeIfE2eDb('POST /v1/flyer-pro/documents/:id/structure-suggestion (e2e)', (
     expect(envelope<unknown>(anonymous).error?.code).toBe('UNAUTHORIZED');
   });
 
-  it('um campo a mais no corpo é 400 BAD_REQUEST (pipe global com forbidNonWhitelisted)', async () => {
+  it('um campo a mais no corpo, ou suggestedHeroes nulo, é 400 BAD_REQUEST (pipe global com forbidNonWhitelisted)', async () => {
     const { id, body } = await seedDocument();
 
-    const response = await ask(id, { ...body, names: ['PICANHA'] });
+    const extra = await ask(id, { ...body, names: ['PICANHA'] });
+    const nulled = await ask(id, { ...body, suggestedHeroes: null });
 
-    expect(response.status).toBe(400);
-    expect(envelope<unknown>(response).error?.code).toBe('BAD_REQUEST');
+    expect([extra.status, nulled.status]).toEqual([400, 400]);
+    expect(envelope<unknown>(extra).error?.code).toBe('BAD_REQUEST');
+    expect(envelope<unknown>(nulled).error?.code).toBe('BAD_REQUEST');
   });
 
   it('encarte excluído é 404 FLYER_PRO_NOT_FOUND; pedido só com ids de fora é 422 FLYER_PRO_NO_ITEMS', async () => {
@@ -169,7 +198,7 @@ describeIfE2eDb('POST /v1/flyer-pro/documents/:id/structure-suggestion (e2e)', (
     });
     const { retryAfterSeconds } = refusal?.details as { retryAfterSeconds: number };
     expect(retryAfterSeconds).toBeGreaterThanOrEqual(1);
-    expect(retryAfterSeconds).toBeLessThanOrEqual(25);
+    expect(retryAfterSeconds).toBeLessThanOrEqual(60);
     expect(free.status).toBe(200);
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(2900);
   });

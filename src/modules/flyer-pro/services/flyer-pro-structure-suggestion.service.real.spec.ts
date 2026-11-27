@@ -1,7 +1,12 @@
 import { openAiError } from '../../ai/utils/openai-chat.testutil';
-import { PICANHA_ID } from '../domain/structure-suggestion.testutil';
+import { rawSection } from '../domain/structure-suggestion-sanitize.testutil';
+import { EMPTY_RAW_SUGGESTION, PICANHA_ID } from '../domain/structure-suggestion.testutil';
 import { RealFlyerProStructureAi } from '../providers/flyer-pro-structure-ai.real';
-import { responsesResult, validResult } from '../providers/flyer-pro-structure-ai.testutil';
+import {
+  outputWith,
+  responsesResult,
+  validResult,
+} from '../providers/flyer-pro-structure-ai.testutil';
 import {
   bodyOf,
   DOCUMENT_ID,
@@ -10,8 +15,11 @@ import {
   REAL_CONFIG,
 } from './flyer-pro-structure-suggestion.service.testutil';
 
+/** As três seções do exemplo na ordem do pedido, sem página, para a resposta que não muda nada. */
+const orderOfExample = () => [rawSection('s1'), rawSection('s2'), rawSection('s3')];
+
 describe('FlyerProStructureSuggestionService com o provedor real (cliente simulado)', () => {
-  it('200 com source ai, o modelo configurado e a versão 1 do prompt, sem tokens nem custo na resposta', async () => {
+  it('200 com source ai, o modelo configurado e a versão 2 do prompt, sem tokens nem custo na resposta', async () => {
     const { service, create } = makeRealSuggestionService();
 
     const view = await service.suggest(DOCUMENT_ID, bodyOf());
@@ -19,7 +27,7 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
     expect(view).toMatchObject({
       source: 'ai',
       model: 'gpt-6-luna',
-      promptVersion: 1,
+      promptVersion: 2,
       noChange: false,
     });
     expect(JSON.stringify(view)).not.toMatch(/usage|tokens|costUsd|estimatedCostUsd/);
@@ -39,25 +47,20 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
     expect(create.mock.calls[0][0]).toMatchObject({
       model: 'gpt-6-luna',
       store: false,
-      reasoning: { effort: 'low' },
-      max_output_tokens: 4000,
+      reasoning: { effort: 'medium' },
+      max_output_tokens: 16_000,
       text: {
         format: { type: 'json_schema', name: 'flyer_pro_structure_suggestion', strict: true },
       },
     });
     expect(create.mock.calls[0][0]).not.toHaveProperty('previous_response_id');
-    expect(create.mock.calls[0][1]).toEqual({ timeout: 25_000, maxRetries: 0 });
+    expect(create.mock.calls[0][1]).toEqual({ timeout: 60_000, maxRetries: 0 });
   });
 
   it('id inventado pelo modelo (seção s7 e destaque p42) sai no saneamento, com UNKNOWN_SECTION e UNKNOWN_ITEM', async () => {
     const output = {
-      summary: '',
-      sections: [
-        { id: 's7', page: null, reason: '' },
-        { id: 's2', page: 1, reason: 'abre' },
-        { id: 's1', page: null, reason: '' },
-        { id: 's3', page: null, reason: '' },
-      ],
+      ...EMPTY_RAW_SUGGESTION,
+      sections: [rawSection('s7'), rawSection('s2', 1, 'abre'), rawSection('s1'), rawSection('s3')],
       heroes: [{ item: 'p42', size: '2x1', reason: '' }],
     };
     const { service } = makeRealSuggestionService(responsesResult(JSON.stringify(output)));
@@ -69,6 +72,35 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
       { kind: 'hero', code: 'UNKNOWN_ITEM' },
     ]);
     expect(view.heroes).toEqual([]);
+  });
+
+  it.each([
+    ['Campanha de desconto', { kind: 'discount', label: 'Black Friday' }, 'Black Friday'],
+    ['Campanha de categoria', { kind: 'category', label: 'Churrasco' }, 'Churrasco'],
+  ])(
+    '%s: a campanha lida chega na resposta, sem mudar o noChange',
+    async (_name, campaign, label) => {
+      const output = { ...EMPTY_RAW_SUGGESTION, campaign, sections: orderOfExample() };
+      const { service } = makeRealSuggestionService(responsesResult(JSON.stringify(output)));
+
+      const view = await service.suggest(DOCUMENT_ID, bodyOf());
+
+      expect(view.campaign).toEqual({ kind: campaign.kind, label });
+      expect(view.noChange).toBe(true);
+    },
+  );
+
+  it.each([
+    ['kind none', { kind: 'none', label: '' }],
+    ['rótulo só de espaços', { kind: 'discount', label: '   ' }],
+  ])('Sem campanha: %s vira campaign null, sem entrada em discarded', async (_name, campaign) => {
+    const output = { ...EMPTY_RAW_SUGGESTION, campaign, sections: orderOfExample() };
+    const { service } = makeRealSuggestionService(responsesResult(JSON.stringify(output)));
+
+    const view = await service.suggest(DOCUMENT_ID, bodyOf());
+
+    expect(view.campaign).toBeNull();
+    expect(view.discarded).toEqual([]);
   });
 
   it('sem chave: 422 DISABLED com NO_API_KEY, o cliente não é chamado e o pedido não conta no teto', async () => {
@@ -105,8 +137,28 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
 
   it.each([
     [
-      'saída fora do schema',
-      responsesResult('{"summary":"","sections":[],"heroes":[],"pages":3}'),
+      'saída fora do schema (campo a mais "pages")',
+      responsesResult(outputWith({ pages: 3 })),
+      'INVALID_OUTPUT',
+    ],
+    [
+      'saída no formato da versão 1',
+      responsesResult('{"summary":"","sections":[],"heroes":[]}'),
+      'INVALID_OUTPUT',
+    ],
+    [
+      'página a mais na saída (pageCount na raiz)',
+      responsesResult(outputWith({ pageCount: 3 })),
+      'INVALID_OUTPUT',
+    ],
+    [
+      'divisão de seção na saída (split na seção s2)',
+      responsesResult(outputWith({ sections: [{ ...rawSection('s2'), split: 2 }] })),
+      'INVALID_OUTPUT',
+    ],
+    [
+      'tipo de campanha fora da lista',
+      responsesResult(outputWith({ campaign: { kind: 'natal', label: 'Natal' } })),
       'INVALID_OUTPUT',
     ],
     ['status incomplete', responsesResult('{}', { status: 'incomplete' }), 'INVALID_OUTPUT'],

@@ -7,7 +7,13 @@ import {
   rawSuggestion,
   sanitizeContext,
 } from './structure-suggestion-sanitize.testutil';
-import { CERVEJA_ID, exampleRequest, PICANHA_ID } from './structure-suggestion.testutil';
+import {
+  ABACATE_ID,
+  CERVEJA_ID,
+  COXA_ID,
+  exampleRequest,
+  PICANHA_ID,
+} from './structure-suggestion.testutil';
 import type { RawStructureSuggestion, StructureRequest } from './structure-suggestion.types';
 
 describe('sanitizeSuggestion: destaques (S8 a S12)', () => {
@@ -45,11 +51,55 @@ describe('sanitizeSuggestion: destaques (S8 a S12)', () => {
     expect(result.discarded).toEqual([{ kind: 'hero', code: 'HERO_ALREADY_SET' }]);
   });
 
-  it('S11: outro tamanho é mudança, fica, e não gera entrada', () => {
+  it('Outro tamanho num destaque do usuário: a PICANHA em 2x2 sai com HERO_USER_SET (o destaque do usuário não muda)', () => {
     const request = exampleRequest({ heroes: [{ itemId: PICANHA_ID, size: '2x1' }] });
     const result = withRaw([rawHero('p04', '2x2')], request);
-    expect(result.heroes).toEqual([{ itemId: PICANHA_ID, size: '2x2', reason: '' }]);
-    expect(result.discarded).toEqual([]);
+    expect(result.heroes).toEqual([]);
+    expect(result.discarded).toEqual([{ kind: 'hero', code: 'HERO_USER_SET' }]);
+  });
+
+  it('o mesmo tamanho do usuário é HERO_ALREADY_SET e outro tamanho é HERO_USER_SET, nesta ordem, uma entrada por destaque', () => {
+    const request = exampleRequest({
+      heroes: [
+        { itemId: PICANHA_ID, size: '2x1' },
+        { itemId: CERVEJA_ID, size: '2x1' },
+      ],
+    });
+    const result = withRaw(
+      [rawHero('p07', '2x2'), rawHero('p04', '2x1'), rawHero('p05', '2x1')],
+      request,
+    );
+    expect(result.heroes.map((h) => h.itemId)).toEqual([COXA_ID]);
+    expect(discardedCodes(result)).toEqual(['hero:HERO_ALREADY_SET', 'hero:HERO_USER_SET']);
+  });
+
+  it('o destaque do usuário que sai por HERO_USER_SET não ocupa vaga do teto', () => {
+    const request = exampleRequest({ heroes: [{ itemId: PICANHA_ID, size: '2x1' }] });
+    const raw = rawSuggestion({ heroes: [rawHero('p04', '2x2'), rawHero('p01'), rawHero('p02')] });
+    const result = sanitizeSuggestion(raw, sanitizeContext(request, { maxHeroes: 2 }));
+    expect(result.heroes).toHaveLength(2);
+    expect(discardedCodes(result)).toEqual(['hero:HERO_USER_SET']);
+  });
+
+  describe('os sugeridos do motor (suggestedHeroes)', () => {
+    const coxaSuggested = exampleRequest({
+      suggestedHeroes: [{ itemId: COXA_ID, size: '2x1', page: 1 }],
+    });
+
+    it('Destaque que o motor já mostra: a COXA em 2x1 e o ABACATE em 2x1 ficam, sem entrada em discarded', () => {
+      const result = withRaw([rawHero('p05', '2x1'), rawHero('p01', '2x1')], coxaSuggested);
+      expect(result.heroes.map((h) => [h.itemId, h.size])).toEqual([
+        [COXA_ID, '2x1'],
+        [ABACATE_ID, '2x1'],
+      ]);
+      expect(result.discarded).toEqual([]);
+    });
+
+    it('Outro tamanho é mudança: a COXA sugerida em 2x1 e proposta em 2x2 fica, sem entrada em discarded', () => {
+      const result = withRaw([rawHero('p05', '2x2')], coxaSuggested);
+      expect(result.heroes).toEqual([{ itemId: COXA_ID, size: '2x2', reason: '' }]);
+      expect(result.discarded).toEqual([]);
+    });
   });
 
   describe('S12: o teto', () => {

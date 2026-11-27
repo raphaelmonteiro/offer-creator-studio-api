@@ -1,4 +1,6 @@
 import { openAiError, spyOnLogger } from '../../ai/utils/openai-chat.testutil';
+import { rawSection } from '../domain/structure-suggestion-sanitize.testutil';
+import { EMPTY_RAW_SUGGESTION } from '../domain/structure-suggestion.testutil';
 import { responsesResult, USAGE, validResult } from '../providers/flyer-pro-structure-ai.testutil';
 import {
   bodyOf,
@@ -25,13 +27,8 @@ function lineOf(lines: string[], phase: 'started' | 'finished' | 'failed') {
 /** Uma saída válida com a seção `s7` e o destaque `p42` inventados: o saneamento tira 2 coisas. */
 const inventedOutput = responsesResult(
   JSON.stringify({
-    summary: '',
-    sections: [
-      { id: 's7', page: null, reason: '' },
-      { id: 's2', page: 1, reason: '' },
-      { id: 's1', page: null, reason: '' },
-      { id: 's3', page: null, reason: '' },
-    ],
+    ...EMPTY_RAW_SUGGESTION,
+    sections: [rawSection('s7'), rawSection('s2', 1), rawSection('s1'), rawSection('s3')],
     heroes: [{ item: 'p42', size: '2x1', reason: '' }],
   }),
   { usage: USAGE },

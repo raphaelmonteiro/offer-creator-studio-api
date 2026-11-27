@@ -1,4 +1,5 @@
-import { clipText, sanitizeSuggestion } from './structure-suggestion-sanitize';
+import { clipText } from './structure-suggestion-clip-text';
+import { sanitizeSuggestion } from './structure-suggestion-sanitize';
 import {
   discardedCodes,
   rawHero,
@@ -10,15 +11,20 @@ import {
 import { exampleRequest } from './structure-suggestion.testutil';
 
 describe('sanitizeSuggestion: textos e proposta sem mudança (S13 e S14)', () => {
-  it('S13: summary de 420 caracteres sai com 300 e reason de 200 com 160, sem reticências', () => {
+  it('Textos longos: summary de 420 caracteres sai com 300, reason e itemsReason de 200 saem com 160, sem reticências', () => {
     const raw = rawSuggestion({
       summary: 'a'.repeat(420),
-      sections: [rawSection('s1', null, 'b'.repeat(200)), rawSection('s2'), rawSection('s3')],
+      sections: [
+        rawSection('s1', null, 'b'.repeat(200)),
+        rawSection('s2', null, '', { items: ['p06', 'p04', 'p05'], itemsReason: 'd'.repeat(200) }),
+        rawSection('s3'),
+      ],
       heroes: [rawHero('p04', '2x1', 'c'.repeat(200))],
     });
     const result = sanitizeSuggestion(raw, sanitizeContext());
     expect(result.summary).toBe('a'.repeat(300));
     expect(result.sections[0].reason).toBe('b'.repeat(160));
+    expect(result.sections[1].itemsReason).toBe('d'.repeat(160));
     expect(result.heroes[0].reason).toBe('c'.repeat(160));
   });
 
@@ -30,6 +36,15 @@ describe('sanitizeSuggestion: textos e proposta sem mudança (S13 e S14)', () =>
     const result = sanitizeSuggestion(raw, sanitizeContext());
     expect(result.summary).toBe('');
     expect(result.sections[0].reason).toBe('ok');
+  });
+
+  it('Só a campanha lida: a ordem do pedido, nada mais a mudar e a campanha de desconto é noChange true, com a campanha', () => {
+    const result = sanitizeSuggestion(
+      rawSuggestion({ campaign: { kind: 'discount', label: 'Black Friday' } }),
+      sanitizeContext(),
+    );
+    expect(result.noChange).toBe(true);
+    expect(result.campaign).toEqual({ kind: 'discount', label: 'Black Friday' });
   });
 
   it('clipText corta por pontos de código, sem partir um emoji ao meio', () => {

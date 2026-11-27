@@ -1,10 +1,15 @@
 import { fold } from '../../../shared/text/fold';
 import type {
+  StructureAiItem,
   StructureAiRequest,
   StructureAiResult,
   StructureAiSection,
 } from '../domain/structure-ai-request';
-import type { RawStructureSuggestion } from '../domain/structure-suggestion.types';
+import type {
+  RawStructureSection,
+  RawStructureSuggestion,
+} from '../domain/structure-suggestion.types';
+import { sameSequence } from '../domain/structure-suggestion-sanitize-items';
 import {
   FlyerProStructureAiPort,
   StructureAiCallOptions,
@@ -36,6 +41,9 @@ interface Markers {
   lenta: boolean;
   igual: boolean;
   naoCabe: boolean;
+  semSugeridos: boolean;
+  desconto: boolean;
+  categoria: boolean;
 }
 
 /** Os marcadores do nome do encarte, sem diferença de maiúsculas nem de acento. */
@@ -46,6 +54,9 @@ function markersOf(documentName: string): Markers {
     lenta: name.includes('#ia-lenta'),
     igual: name.includes('#ia-igual'),
     naoCabe: name.includes('#ia-nao-cabe'),
+    semSugeridos: name.includes('#ia-sem-sugeridos'),
+    desconto: name.includes('#ia-desconto'),
+    categoria: name.includes('#ia-categoria'),
   };
 }
 
@@ -61,28 +72,70 @@ const categorySections = (request: StructureAiRequest) =>
 const tableOrder = (request: StructureAiRequest): StructureAiSection[] =>
   [...categorySections(request)].sort((a, b) => rankOf(a) - rankOf(b));
 
-/** A ordem atual, sem página e sem destaque (`#ia-igual`). */
+const NO_CAMPAIGN: RawStructureSuggestion['campaign'] = { kind: 'none', label: '' };
+
+/** A ordem atual, sem página, destaque, ordem de produtos, sugerido a desfazer nem campanha (`#ia-igual`). */
 function sameOrder(request: StructureAiRequest): RawStructureSuggestion {
   return {
     summary: '[simulado] A estrutura atual já segue as recomendações.',
+    campaign: NO_CAMPAIGN,
     sections: categorySections(request).map((section) => ({
       id: section.alias,
       page: null,
       reason: `[simulado] ${section.category} fica onde está.`,
+      items: null,
+      itemsReason: '',
     })),
     heroes: [],
+    unsuggest: [],
   };
 }
 
-/** O primeiro item com foto da seção, na ordem do pedido. */
-const firstPhotoItem = (request: StructureAiRequest, section: StructureAiSection) =>
-  request.items.find((item) => item.sectionAlias === section.alias && item.hasPhoto);
+/** O primeiro item com foto da seção, na ordem do pedido, fora os que `skip` tira (os que o simulado desfaz). */
+const firstPhotoItem = (
+  request: StructureAiRequest,
+  section: StructureAiSection,
+  skip: ReadonlySet<string>,
+) =>
+  request.items.find(
+    (item) => item.sectionAlias === section.alias && item.hasPhoto && !skip.has(item.alias),
+  );
+
+const isFromTo = (item: StructureAiItem) => item.price.kind === 'from_to';
+
+/**
+ * A ordem dos produtos de uma seção (A-10): os de/por primeiro e depois os outros, cada grupo na ordem do pedido. Sem
+ * mudança, `items` é nulo e o motivo vazio; com mudança, o motivo diz "[simulado]".
+ */
+function orderOfItems(
+  request: StructureAiRequest,
+  section: StructureAiSection,
+): Pick<RawStructureSection, 'items' | 'itemsReason'> {
+  const own = request.items.filter((item) => item.sectionAlias === section.alias);
+  const sorted = [...own.filter(isFromTo), ...own.filter((item) => !isFromTo(item))];
+  const aliases = sorted.map((item) => item.alias);
+  if (sameSequence(aliases, section.itemAliases)) return { items: null, itemsReason: '' };
+  return { items: aliases, itemsReason: '[simulado] De/por primeiro.' };
+}
+
+/** Os sugeridos do motor do pedido, na ordem do pedido (`#ia-sem-sugeridos` desfaz todos). */
+const suggestedAliases = (request: StructureAiRequest): string[] =>
+  request.items.filter((item) => item.suggestedHero !== null).map((item) => item.alias);
+
+/** A campanha simulada: `#ia-desconto` vence `#ia-categoria`; sem nenhum dos dois, nenhuma. */
+function campaignOf(markers: Markers): RawStructureSuggestion['campaign'] {
+  if (markers.desconto) return { kind: 'discount', label: '[simulado] desconto' };
+  if (markers.categoria) return { kind: 'category', label: '[simulado] categoria' };
+  return NO_CAMPAIGN;
+}
 
 /** A resposta normal: a ordem fixa, a primeira seção na página 1 e 2x1 no primeiro item com foto das duas primeiras. */
-function tableSuggestion(request: StructureAiRequest): RawStructureSuggestion {
+function tableSuggestion(request: StructureAiRequest, markers: Markers): RawStructureSuggestion {
   const ordered = tableOrder(request);
+  // `#ia-sem-sugeridos` desfaz os sugeridos; o simulado não os propõe como destaque ao mesmo tempo (seria CONFLICTS_WITH_HERO).
+  const undone = new Set(markers.semSugeridos ? suggestedAliases(request) : []);
   const heroes = ordered.slice(0, HEROES_FROM_SECTIONS).flatMap((section) => {
-    const item = firstPhotoItem(request, section);
+    const item = firstPhotoItem(request, section, undone);
     return item
       ? [
           {
@@ -95,12 +148,18 @@ function tableSuggestion(request: StructureAiRequest): RawStructureSuggestion {
   });
   return {
     summary: '[simulado] Ordem fixa do simulado: Carnes e Hortifruti abrem o encarte.',
+    campaign: campaignOf(markers),
     sections: ordered.map((section, index) => ({
       id: section.alias,
       page: index === 0 ? 1 : null,
       reason: `[simulado] ${section.category} na posição ${index + 1}.`,
+      ...orderOfItems(request, section),
     })),
     heroes,
+    unsuggest: [...undone].map((item) => ({
+      item,
+      reason: '[simulado] Sugerido do motor desfeito.',
+    })),
   };
 }
 
@@ -142,8 +201,10 @@ const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * O provedor simulado: sem rede e sem custo, a mesma resposta para o mesmo pedido. Marcadores no nome do encarte mudam a
- * resposta (`#ia-falha` vence `#ia-igual`, que vence `#ia-nao-cabe`; `#ia-lenta` soma a espera a qualquer um).
+ * O provedor simulado na versão 2: sem rede e sem custo, a mesma resposta para o mesmo pedido. Marcadores no nome do encarte
+ * mudam a resposta (`#ia-falha` vence `#ia-igual`, que vence os demais; `#ia-lenta` soma a espera a qualquer um;
+ * `#ia-nao-cabe`, `#ia-sem-sugeridos`, `#ia-desconto` e `#ia-categoria`, com `#ia-desconto` vencendo `#ia-categoria`, mudam
+ * a resposta normal).
  */
 export class MockFlyerProStructureAi implements FlyerProStructureAiPort {
   readonly source = 'mock' as const;
@@ -162,7 +223,7 @@ export class MockFlyerProStructureAi implements FlyerProStructureAiPort {
     if (markers.lenta) await this.sleep(MOCK_SLOW_MS);
     if (markers.falha) throw new StructureAiFailure('PROVIDER_ERROR', 'Falha simulada (#ia-falha)');
     if (markers.igual) return { suggestion: sameOrder(request), model: 'mock', usage: null };
-    const table = tableSuggestion(request);
+    const table = tableSuggestion(request, markers);
     const suggestion = markers.naoCabe ? applyDoesNotFit(request, table) : table;
     return { suggestion, model: 'mock', usage: null };
   }

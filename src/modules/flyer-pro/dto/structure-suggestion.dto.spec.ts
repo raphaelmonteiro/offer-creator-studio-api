@@ -1,5 +1,10 @@
 import { randomUUID } from 'crypto';
-import { CERVEJA_ID, exampleRequest, PICANHA_ID } from '../domain/structure-suggestion.testutil';
+import {
+  CERVEJA_ID,
+  COXA_ID,
+  exampleRequest,
+  PICANHA_ID,
+} from '../domain/structure-suggestion.testutil';
 import { nestedErrorsOf } from './dto-paths.testutil';
 import { StructureSuggestionDto } from './structure-suggestion.dto';
 
@@ -125,6 +130,56 @@ describe('StructureSuggestionDto: a forma do pedido da sugestão (N19)', () => {
       'heroes.0.itemId',
     ]);
     expect((await errorsOf(heroes([null]))).length).toBeGreaterThan(0);
+  });
+});
+
+describe('StructureSuggestionDto: suggestedHeroes, os sugeridos do motor (Sugeridos do motor no pedido da sugestão)', () => {
+  const suggested = (value: unknown) => ({ ...exampleRequest(), suggestedHeroes: value });
+
+  it('Pedido sem o campo: o retrato de antes passa, e com os dois tamanhos e as páginas 1 a 4 também', async () => {
+    expect(await errorsOf(exampleRequest())).toEqual([]);
+    expect(await errorsOf(suggested([]))).toEqual([]);
+    expect(
+      await errorsOf(
+        suggested([
+          { itemId: COXA_ID, size: '2x1', page: 1 },
+          { itemId: CERVEJA_ID, size: '2x2', page: 4 },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it('Nulo ou forma errada: null é 400 (não vale como ausente)', async () => {
+    expect(await errorsOf(suggested(null))).toEqual(['suggestedHeroes']);
+    expect(await errorsOf(suggested('COXA'))).toEqual(['suggestedHeroes']);
+  });
+
+  it.each([
+    ['size 3x3', { itemId: COXA_ID, size: '3x3', page: 1 }, 'suggestedHeroes.0.size'],
+    ['page 0', { itemId: COXA_ID, size: '2x1', page: 0 }, 'suggestedHeroes.0.page'],
+    ['page 5', { itemId: COXA_ID, size: '2x1', page: 5 }, 'suggestedHeroes.0.page'],
+    [
+      'page que não é inteiro',
+      { itemId: COXA_ID, size: '2x1', page: 1.5 },
+      'suggestedHeroes.0.page',
+    ],
+    ['sem page', { itemId: COXA_ID, size: '2x1' }, 'suggestedHeroes.0.page'],
+    ['itemId que não é UUID', { itemId: 'coxa', size: '2x1', page: 1 }, 'suggestedHeroes.0.itemId'],
+    [
+      'o campo a mais "name"',
+      { itemId: COXA_ID, size: '2x1', page: 1, name: 'COXA' },
+      'suggestedHeroes.0.name',
+    ],
+  ])('Nulo ou forma errada: recusa a entrada com %s', async (_name, entry, path) => {
+    expect(await errorsOf(suggested([entry]))).toEqual([path]);
+  });
+
+  it('Nulo ou forma errada: entrada que não é objeto é recusada, e 501 entradas também (500 passa)', async () => {
+    expect((await errorsOf(suggested([null]))).length).toBeGreaterThan(0);
+    const entries = (count: number) =>
+      Array.from({ length: count }, () => ({ itemId: randomUUID(), size: '2x1', page: 1 }));
+    expect(await errorsOf(suggested(entries(500)))).toEqual([]);
+    expect(await errorsOf(suggested(entries(501)))).toEqual(['suggestedHeroes']);
   });
 });
 

@@ -23,6 +23,7 @@ import {
   type StructurePageInput,
   type StructureRequest,
   type StructureSectionInput,
+  type StructureSuggestedHeroInput,
 } from '../domain/structure-suggestion.types';
 import { ValidateIfDefined } from './validate-if-defined.decorator';
 
@@ -113,9 +114,26 @@ export class StructureHeroDto implements StructureHeroInput {
   size: StructureHeroSize;
 }
 
+export class StructureSuggestedHeroDto implements StructureSuggestedHeroInput {
+  @ApiProperty()
+  @IsUUID()
+  itemId: string;
+
+  @ApiProperty({ enum: STRUCTURE_HERO_SIZES })
+  @IsIn([...STRUCTURE_HERO_SIZES])
+  size: StructureHeroSize;
+
+  @ApiProperty({ minimum: 1, maximum: LIMITS.structurePageMax, description: 'Página do card' })
+  @IsInt()
+  @Min(1)
+  @Max(LIMITS.structurePageMax)
+  page: number;
+}
+
 /**
  * O retrato da Estrutura que a tela envia para pedir a sugestão (N19). Só a forma (400): a coerência é do serviço (422) e
- * o corpo `{}`, que o pipe global pula, também. `unplaced`, `pinnedPage` e `quota` ausentes valem o padrão; `null` é 400.
+ * o corpo `{}`, que o pipe global pula, também. `unplaced`, `pinnedPage`, `quota` e `suggestedHeroes` ausentes valem o padrão;
+ * `null` é 400.
  */
 export class StructureSuggestionDto implements StructureRequest {
   @ApiProperty({ description: 'Opaco para o servidor; volta igual na resposta' })
@@ -165,4 +183,17 @@ export class StructureSuggestionDto implements StructureRequest {
   @ValidateNested({ each: true })
   @Type(() => StructureHeroDto)
   heroes: StructureHeroDto[];
+
+  @ApiPropertyOptional({
+    type: [StructureSuggestedHeroDto],
+    default: [],
+    description:
+      'Os cards que a folha mostra como destaque sugerido pelo motor; a IA pode propor desfazê-los (padrão: nenhum)',
+  })
+  @ValidateIfDefined()
+  @IsArray()
+  @ArrayMaxSize(LIMITS.itemMax)
+  @ValidateNested({ each: true })
+  @Type(() => StructureSuggestedHeroDto)
+  suggestedHeroes?: StructureSuggestedHeroDto[];
 }

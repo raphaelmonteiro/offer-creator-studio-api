@@ -1,4 +1,8 @@
-import type { StructureItemRow, StructureRequest } from './structure-suggestion.types';
+import type {
+  RawStructureSuggestion,
+  StructureItemRow,
+  StructureRequest,
+} from './structure-suggestion.types';
 
 /**
  * O encarte "Ofertas da semana 47" da spec `flyer-pro-structure-suggestion` (só testes): os oito itens e o retrato que a
@@ -83,6 +87,15 @@ export const EXAMPLE_ITEMS: StructureItemRow[] = [
     imageUrl: PHOTO('refri'),
   },
 ];
+
+/** A saída do provedor sem nenhuma proposta: nenhuma seção, destaque ou sugerido a desfazer, e nenhuma campanha. */
+export const EMPTY_RAW_SUGGESTION: RawStructureSuggestion = {
+  summary: '',
+  campaign: { kind: 'none', label: '' },
+  sections: [],
+  heroes: [],
+  unsuggest: [],
+};
 
 /** O retrato de exemplo (sem `unplaced` e sem destaques); `over` troca ou acrescenta campos de primeiro nível. */
 export function exampleRequest(over: Partial<StructureRequest> = {}): StructureRequest {

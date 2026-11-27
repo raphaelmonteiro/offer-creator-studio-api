@@ -54,14 +54,16 @@ export const FLYER_PRO_LIMITS = {
   /** O `summary` e cada `reason` da resposta, cortados sem reticências. */
   structureSummaryMaxLength: 300,
   structureReasonMaxLength: 160,
+  /** O rótulo da campanha lida no nome do encarte, cortado sem reticências. */
+  structureCampaignLabelMaxLength: 60,
   /** Encartes anteriores lidos do cliente para escolher os exemplos. */
   structureExamplesReadMax: 10,
   /** Padrões das variáveis `FLYER_PRO_STRUCTURE_AI_*`. */
   structureMaxPerHourDefault: 20,
   structureMaxHeroesDefault: 12,
   structureExamplesDefault: 3,
-  structureTimeoutMsDefault: 25_000,
+  structureTimeoutMsDefault: 60_000,
   /** O provedor real: teto de saída de `/responses` (o raciocínio conta) e a temperatura da família que a usa (A-13). */
-  structureMaxOutputTokens: 4_000,
+  structureMaxOutputTokens: 16_000,
   structureTemperature: 0.2,
 } as const;

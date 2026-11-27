@@ -1,6 +1,11 @@
 import type { StructureExample } from '../domain/read-structure-example';
 import { exampleAiRequest } from '../domain/structure-ai-request.testutil';
-import { EXAMPLE_ITEMS, exampleRequest, PICANHA_ID } from '../domain/structure-suggestion.testutil';
+import {
+  COXA_ID,
+  EXAMPLE_ITEMS,
+  exampleRequest,
+  PICANHA_ID,
+} from '../domain/structure-suggestion.testutil';
 import { STRUCTURE_SUGGESTION_INSTRUCTIONS } from './structure-suggestion.prompt';
 import { buildStructureDataMessage } from './structure-suggestion.data-message';
 
@@ -20,8 +25,12 @@ const previous: StructureExample = {
   ],
 };
 
-describe('buildStructureDataMessage: o encarte de 8 itens, sem encartes anteriores', () => {
-  const message = buildStructureDataMessage(exampleAiRequest());
+/** O retrato de exemplo com a COXA E SOBRECOXA DE FRANGO sugerida pelo motor em 2x1, página 1. */
+const coxaSuggested = () =>
+  exampleRequest({ suggestedHeroes: [{ itemId: COXA_ID, size: '2x1', page: 1 }] });
+
+describe('buildStructureDataMessage: o encarte de 8 itens com um sugerido do motor, sem encartes anteriores', () => {
+  const message = buildStructureDataMessage(exampleAiRequest({ request: coxaSuggested() }));
 
   it('confere com o snapshot', () => {
     expect(message).toMatchSnapshot();
@@ -36,8 +45,11 @@ describe('buildStructureDataMessage: o encarte de 8 itens, sem encartes anterior
     ]);
   });
 
-  it('páginas com a observação de capa, última, cabeçalho e rodapé', () => {
-    expect(message).toContain('1 | 8 | 6 | capa, com cabeçalho\n2 | 8 | 2 | última, com rodapé');
+  it('Encarte de 8 itens com um sugerido: a página 1 com 1 célula em sugeridos do motor, a 2 com 0, e a observação de capa, última, cabeçalho e rodapé', () => {
+    expect(message).toContain(
+      'PÁGINAS (página | capacidade em células | ocupadas | dessas, em sugeridos do motor | observação)\n' +
+        '1 | 8 | 6 | 1 | capa, com cabeçalho\n2 | 8 | 2 | 0 | última, com rodapé',
+    );
   });
 
   it('seções s1 (Hortifruti), s2 (Carnes) e s3 (Bebidas, fixada), com células e página atual', () => {
@@ -46,11 +58,16 @@ describe('buildStructureDataMessage: o encarte de 8 itens, sem encartes anterior
     );
   });
 
-  it('produtos p01 a p08: a PICANHA como "69,90 kg (de 89,90)" de/por, o TOMATE sem foto', () => {
+  it('produtos p01 a p08: a PICANHA como "69,90 kg (de 89,90, -22%)" de/por, a COXA "sugerido 2x1", o TOMATE sem foto', () => {
     expect(productLines(message)).toHaveLength(8);
     expect(productLines(message)[0]).toBe('p01 | s1 | ABACATE | 6,99 kg | simples | sim | -');
     expect(message).toContain('p03 | s1 | TOMATE | 7,99 kg | simples | não | -');
-    expect(message).toContain('p04 | s2 | PICANHA BOVINA | 69,90 kg (de 89,90) | de/por | sim | -');
+    expect(message).toContain(
+      'p04 | s2 | PICANHA BOVINA | 69,90 kg (de 89,90, -22%) | de/por | sim | -',
+    );
+    expect(message).toContain(
+      'p05 | s2 | COXA E SOBRECOXA DE FRANGO | 11,99 kg | simples | sim | sugerido 2x1',
+    );
     expect(message).toContain('p07 | s3 | CERVEJA LATA 350ML | 3,49 cada | simples | sim | -');
   });
 
@@ -108,10 +125,31 @@ describe('buildStructureDataMessage: os detalhes do texto', () => {
     expect(message).toContain('s4 | Produtos soltos (sempre o último) | 0 | 1 | 2 | não');
   });
 
-  it('o destaque que o usuário já tem aparece na coluna "destaque atual"', () => {
-    const request = exampleRequest({ heroes: [{ itemId: PICANHA_ID, size: '2x2' }] });
-    expect(productLines(buildStructureDataMessage(exampleAiRequest({ request })))[3]).toBe(
-      'p04 | s2 | PICANHA BOVINA | 69,90 kg (de 89,90) | de/por | sim | 2x2',
+  it('Destaque do usuário e sugerido na mesma mensagem: a PICANHA traz "2x2", a COXA "sugerido 2x1", e nenhuma linha traz UUID', () => {
+    const request = {
+      ...coxaSuggested(),
+      heroes: [{ itemId: PICANHA_ID, size: '2x2' as const }],
+    };
+    const lines = productLines(buildStructureDataMessage(exampleAiRequest({ request })));
+    expect(lines[3]).toBe(
+      'p04 | s2 | PICANHA BOVINA | 69,90 kg (de 89,90, -22%) | de/por | sim | 2x2',
+    );
+    expect(lines[4]).toBe(
+      'p05 | s2 | COXA E SOBRECOXA DE FRANGO | 11,99 kg | simples | sim | sugerido 2x1',
+    );
+    expect(lines.join('\n')).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i);
+  });
+
+  it('o 2x2 sugerido vale 3 células a mais na página dele, e dois sugeridos na mesma página somam', () => {
+    const request = exampleRequest({
+      suggestedHeroes: [
+        { itemId: COXA_ID, size: '2x2', page: 2 },
+        { itemId: PICANHA_ID, size: '2x1', page: 2 },
+      ],
+    });
+    const message = buildStructureDataMessage(exampleAiRequest({ request }));
+    expect(message).toContain(
+      '1 | 8 | 6 | 0 | capa, com cabeçalho\n2 | 8 | 2 | 4 | última, com rodapé',
     );
   });
 
@@ -126,6 +164,7 @@ describe('buildStructureDataMessage: os detalhes do texto', () => {
         page,
         capacityCells: 8,
         usedCells: 0,
+        suggestedCells: 0,
         header: false,
         footer: page === 4,
       })),
@@ -134,7 +173,7 @@ describe('buildStructureDataMessage: os detalhes do texto', () => {
     expect(message).toContain('folha dupla 54x40 | 4 páginas');
     expect(message).toContain('PRODUTOS SEM LUGAR HOJE: 3\nTETO DE DESTAQUES NOVOS: 5');
     expect(message).toContain(
-      '2 | 8 | 0 | -\n3 | 8 | 0 | -\n4 | 8 | 0 | última, face externa, junto da capa, com rodapé',
+      '2 | 8 | 0 | 0 | -\n3 | 8 | 0 | 0 | -\n4 | 8 | 0 | 0 | última, face externa, junto da capa, com rodapé',
     );
     expect(
       buildStructureDataMessage({ ...wide, pageCount: 1, pages: [wide.pages[3]] }),
@@ -143,7 +182,11 @@ describe('buildStructureDataMessage: os detalhes do texto', () => {
 
   it.each([
     ['simple', { kind: 'simple', cents: 699 }, '6,99 kg | simples'],
-    ['from_to', { kind: 'from_to', cents: 6990, fromCents: 8990 }, '69,90 kg (de 89,90) | de/por'],
+    [
+      'from_to',
+      { kind: 'from_to', cents: 6990, fromCents: 8990 },
+      '69,90 kg (de 89,90, -22%) | de/por',
+    ],
     [
       'second_price',
       { kind: 'second_price', cents: 799, secondCents: 699, secondLabel: 'No cartão' },
@@ -165,6 +208,33 @@ describe('buildStructureDataMessage: os detalhes do texto', () => {
     );
     const message = buildStructureDataMessage(exampleAiRequest({ items }));
     expect(message).toContain(`p01 | s1 | ABACATE | ${expected} | sim | -`);
+  });
+});
+
+describe('buildStructureDataMessage: o desconto do de/por em % inteiro (A-9)', () => {
+  const lineWith = (price: Record<string, unknown>) => {
+    const items = EXAMPLE_ITEMS.map((item) =>
+      item.name === 'ABACATE' ? { ...item, price } : item,
+    );
+    return productLines(buildStructureDataMessage(exampleAiRequest({ items })))[0];
+  };
+
+  it.each([
+    ['arredonda para cima (33,3% fica 33 e 66,7% fica 67)', 1000, 667, 'de 10,00, -33%'],
+    ['arredonda 66,7% para 67', 1000, 333, 'de 10,00, -67%'],
+    ['metade do preço é -50%', 1000, 500, 'de 10,00, -50%'],
+    ['desconto que arredonda para 0% não mostra a porcentagem', 1000, 999, 'de 10,00)'],
+    ['de igual ao por não mostra a porcentagem', 1000, 1000, 'de 10,00)'],
+    ['de menor que o por não mostra a porcentagem', 800, 1000, 'de 8,00)'],
+  ])('%s', (_name, fromCents, cents, expected) => {
+    expect(lineWith({ kind: 'from_to', cents, fromCents })).toContain(expected);
+  });
+
+  it('só o de/por leva a porcentagem: o segundo preço e o leve e pague não', () => {
+    expect(
+      lineWith({ kind: 'second_price', cents: 799, secondCents: 699, secondLabel: 'No cartão' }),
+    ).not.toContain('%');
+    expect(lineWith({ kind: 'multi_buy', cents: 500, buy: 3, pay: 2 })).not.toContain('%');
   });
 });
 
