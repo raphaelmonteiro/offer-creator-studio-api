@@ -60,7 +60,7 @@ export interface StructureIssue {
   code: StructureIssueCode;
 }
 
-export type DiscardedKind = 'section' | 'page' | 'hero';
+export type DiscardedKind = 'section' | 'page' | 'itemOrder' | 'hero';
 
 export type DiscardedCode =
   | 'UNKNOWN_SECTION'
@@ -69,6 +69,7 @@ export type DiscardedCode =
   | 'USER_PINNED'
   | 'UNKNOWN_ITEM'
   | 'HERO_WITHOUT_PHOTO'
+  | 'ITEMS_MISMATCH'
   | 'HERO_ALREADY_SET'
   | 'HERO_LIMIT';
 
@@ -104,6 +105,10 @@ export interface SuggestedSection {
   id: string;
   page: number | null;
   reason: string;
+  /** Os itens da seção que são do encarte, na ordem proposta (ids reais), ou `null` para manter a ordem de hoje. */
+  itemIds: string[] | null;
+  /** Até 160 caracteres; `''` quando não há ordem. */
+  itemsReason: string;
 }
 
 export interface SuggestedHero {

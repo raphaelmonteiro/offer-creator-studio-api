@@ -125,7 +125,13 @@ describe('FlyerProStructureSuggestionService: o pedido de exemplo com o provedor
       { kind: 'hero', code: 'UNKNOWN_ITEM' },
     ]);
     expect(view.summary).toHaveLength(300);
-    expect(view.sections[0]).toEqual({ id: 'cat:Carnes', page: 1, reason: 'abre' });
+    expect(view.sections[0]).toEqual({
+      id: 'cat:Carnes',
+      page: 1,
+      reason: 'abre',
+      itemIds: null,
+      itemsReason: '',
+    });
   });
 });
 

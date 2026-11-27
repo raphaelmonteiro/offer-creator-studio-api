@@ -1,4 +1,5 @@
-import { clipText, sanitizeSuggestion } from './structure-suggestion-sanitize';
+import { clipText } from './structure-suggestion-discard';
+import { sanitizeSuggestion } from './structure-suggestion-sanitize';
 import {
   discardedCodes,
   rawHero,

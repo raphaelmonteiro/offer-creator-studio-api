@@ -1,10 +1,12 @@
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
 import { categorySections, LOOSE_SECTION_ID } from './structure-suggestion-rules';
+import { clipText, discardedEntry, type Staged } from './structure-suggestion-discard';
+import { sanitizeItemOrders, type SectionItemOrder } from './structure-suggestion-sanitize-items';
 import type { StructureAliases } from './structure-suggestion-aliases';
 import type {
   DiscardedCode,
   DiscardedEntry,
-  DiscardedKind,
+  RawStructureSection,
   RawStructureSuggestion,
   SanitizedSuggestion,
   StructureHeroInput,
@@ -24,24 +26,15 @@ export interface SanitizeContext {
   maxHeroes: number;
 }
 
-interface Staged<T> {
-  kept: T[];
-  discarded: DiscardedEntry[];
-}
+const entry = discardedEntry;
 
-const entry = (kind: DiscardedKind, code: DiscardedCode): DiscardedEntry => ({ kind, code });
-
-/** Aparado e cortado em `max` caracteres (pontos de código), sem reticências; vazio ou ausente vale `''`. */
-export function clipText(text: string | null | undefined, max: number): string {
-  return Array.from((text ?? '').trim())
-    .slice(0, max)
-    .join('');
-}
-
+/** Uma seção que a resposta manteve: a página e o motivo brutos, e a ordem dos produtos que ela propôs (ainda por conferir). */
 interface KeptSection {
   id: string;
   rawPage: number | null;
   reason: string;
+  items: RawStructureSection['items'];
+  itemsReason: string;
 }
 
 /**
@@ -65,11 +58,19 @@ function sanitizeSections(
       discarded.push(entry('section', 'DUPLICATED'));
     } else {
       seen.add(id);
-      kept.push({ id, rawPage: section.page, reason: section.reason });
+      kept.push({
+        id,
+        rawPage: section.page,
+        reason: section.reason,
+        items: section.items,
+        itemsReason: section.itemsReason,
+      });
     }
   }
   for (const section of categorySections(context.request.sections)) {
-    if (!seen.has(section.id)) kept.push({ id: section.id, rawPage: null, reason: '' });
+    if (!seen.has(section.id)) {
+      kept.push({ id: section.id, rawPage: null, reason: '', items: null, itemsReason: '' });
+    }
   }
   return { kept, discarded };
 }
@@ -102,6 +103,7 @@ function resolvePage(
 
 function sanitizePages(
   kept: readonly KeptSection[],
+  orders: ReadonlyMap<string, SectionItemOrder>,
   context: SanitizeContext,
 ): Staged<SuggestedSection> {
   const sections: SuggestedSection[] = [];
@@ -114,6 +116,7 @@ function sanitizePages(
       id: section.id,
       page: resolved.page,
       reason: clipText(section.reason, FLYER_PRO_LIMITS.structureReasonMaxLength),
+      ...orders.get(section.id),
     });
   }
   return { kept: sections, discarded };
@@ -185,8 +188,8 @@ function currentPageOf(input: StructureSectionInput): number | undefined {
 }
 
 /**
- * S14: sem mudança quando a ordem das seções de categoria é a do pedido, nenhum destaque sobrou e toda seção vem com
- * página nula ou com a página em que já está.
+ * S14: sem mudança quando a ordem das seções de categoria é a do pedido, nenhum destaque nem ordem de produtos sobrou e
+ * toda seção vem com página nula ou com a página em que já está.
  */
 function isUnchanged(
   sections: readonly SuggestedSection[],
@@ -195,6 +198,7 @@ function isUnchanged(
 ): boolean {
   const asked = categorySections(request.sections);
   if (sections.length !== asked.length || heroes.length > 0) return false;
+  if (sections.some((section) => section.itemIds !== null)) return false;
   if (sections.some((section, index) => section.id !== asked[index].id)) return false;
   return sections.every(
     (section, index) => section.page === null || section.page === currentPageOf(asked[index]),
@@ -207,13 +211,19 @@ export function sanitizeSuggestion(
   context: SanitizeContext,
 ): SanitizedSuggestion {
   const sections = sanitizeSections(raw.sections, context);
-  const pages = sanitizePages(sections.kept, context);
+  const orders = sanitizeItemOrders(sections.kept, context.aliases);
+  const pages = sanitizePages(sections.kept, orders.byId, context);
   const heroes = sanitizeHeroes(raw.heroes, context);
   return {
     summary: clipText(raw.summary, FLYER_PRO_LIMITS.structureSummaryMaxLength),
     sections: pages.kept,
     heroes: heroes.kept,
-    discarded: [...sections.discarded, ...pages.discarded, ...heroes.discarded],
+    discarded: [
+      ...sections.discarded,
+      ...pages.discarded,
+      ...orders.discarded,
+      ...heroes.discarded,
+    ],
     noChange: isUnchanged(pages.kept, heroes.kept, context.request),
   };
 }

@@ -44,10 +44,12 @@ describe('MockFlyerProStructureAi: tabela fixa', () => {
 
   it('o exemplo: Carnes, Hortifruti, Bebidas; Carnes na página 1; Bebidas na 2; dois destaques 2x1', async () => {
     const result = await suggestionFor('Ofertas da semana 47');
+    const simulated = expect.stringMatching(/^\[simulado\] .+/);
+    const kept = { itemIds: null, itemsReason: '' };
     expect(result.sections).toEqual([
-      { id: 'cat:Carnes', page: 1, reason: expect.stringMatching(/^\[simulado\] .+/) },
-      { id: 'cat:Hortifruti', page: null, reason: expect.stringMatching(/^\[simulado\] .+/) },
-      { id: 'cat:Bebidas', page: 2, reason: expect.stringMatching(/^\[simulado\] .+/) },
+      { id: 'cat:Carnes', page: 1, reason: simulated, ...kept },
+      { id: 'cat:Hortifruti', page: null, reason: simulated, ...kept },
+      { id: 'cat:Bebidas', page: 2, reason: simulated, ...kept },
     ]);
     expect(result.heroes.map((hero) => [hero.itemId, hero.size])).toEqual([
       [PICANHA_ID, '2x1'],

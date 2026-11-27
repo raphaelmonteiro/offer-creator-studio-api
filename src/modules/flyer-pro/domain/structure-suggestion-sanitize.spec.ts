@@ -17,9 +17,9 @@ describe('sanitizeSuggestion: seções (S1 a S4)', () => {
     });
     const result = sanitizeSuggestion(raw, sanitizeContext());
     expect(result.sections).toEqual([
-      { id: 'cat:Carnes', page: 1, reason: 'abre a capa' },
-      { id: 'cat:Hortifruti', page: null, reason: '' },
-      { id: 'cat:Bebidas', page: 2, reason: '' },
+      { id: 'cat:Carnes', page: 1, reason: 'abre a capa', itemIds: null, itemsReason: '' },
+      { id: 'cat:Hortifruti', page: null, reason: '', itemIds: null, itemsReason: '' },
+      { id: 'cat:Bebidas', page: 2, reason: '', itemIds: null, itemsReason: '' },
     ]);
     expect(result.heroes).toEqual([{ itemId: PICANHA_ID, size: '2x1', reason: 'de/por com foto' }]);
     expect(result.discarded).toEqual([]);
@@ -43,7 +43,13 @@ describe('sanitizeSuggestion: seções (S1 a S4)', () => {
     });
     const result = sanitizeSuggestion(raw, sanitizeContext());
     expect(sectionIds(result)).toEqual(['cat:Hortifruti', 'cat:Bebidas', 'cat:Carnes']);
-    expect(result.sections[2]).toEqual({ id: 'cat:Carnes', page: null, reason: '' });
+    expect(result.sections[2]).toEqual({
+      id: 'cat:Carnes',
+      page: null,
+      reason: '',
+      itemIds: null,
+      itemsReason: '',
+    });
     expect(discardedCodes(result)).toEqual(['section:UNKNOWN_SECTION']);
   });
 
@@ -53,9 +59,9 @@ describe('sanitizeSuggestion: seções (S1 a S4)', () => {
       sanitizeContext(),
     );
     expect(result.sections).toEqual([
-      { id: 'cat:Bebidas', page: 2, reason: '' },
-      { id: 'cat:Carnes', page: null, reason: '' },
-      { id: 'cat:Hortifruti', page: null, reason: '' },
+      { id: 'cat:Bebidas', page: 2, reason: '', itemIds: null, itemsReason: '' },
+      { id: 'cat:Carnes', page: null, reason: '', itemIds: null, itemsReason: '' },
+      { id: 'cat:Hortifruti', page: null, reason: '', itemIds: null, itemsReason: '' },
     ]);
     expect(result.discarded).toEqual([]);
   });
@@ -161,7 +167,13 @@ describe('sanitizeSuggestion: páginas (S5 a S7)', () => {
       rawSuggestion({ sections: [rawSection('s2'), rawSection('s1')] }),
       sanitizeContext(),
     );
-    expect(result.sections[2]).toEqual({ id: 'cat:Bebidas', page: 2, reason: '' });
+    expect(result.sections[2]).toEqual({
+      id: 'cat:Bebidas',
+      page: 2,
+      reason: '',
+      itemIds: null,
+      itemsReason: '',
+    });
   });
 
   it('página de seção que saiu (desconhecida ou repetida) não é conferida', () => {
