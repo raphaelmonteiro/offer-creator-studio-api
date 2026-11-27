@@ -10,7 +10,8 @@ import { OPENAI_NO_SDK_RETRY } from '../../../shared/providers/openai-errors';
  * - Família `gpt-6*`: `max_completion_tokens` (o raciocínio conta no teto), `reasoning_effort` explícito,
  *   `temperature` só com esforço `none`, nunca `max_tokens`.
  * - Qualquer outro nome: o corpo de hoje (`max_tokens` e `temperature`), sem `reasoning_effort` nem
- *   `max_completion_tokens`. Voltar ao modelo antigo pela variável restaura a chamada de hoje.
+ *   `max_completion_tokens`. Voltar ao modelo antigo pela variável restaura a chamada de hoje. O ponto que hoje não
+ *   envia teto ou temperatura (change 42, `ChatCallSpec` sem `legacyMaxTokens` ou sem `temperature`) continua sem eles.
  * - Opções de requisição: o prazo da feature e `maxRetries: 0` (o SDK não repete sozinho), em qualquer família.
  * - `/responses`: família `gpt-6*` com `max_output_tokens` (o raciocínio conta no teto) e `reasoning: { effort }`, e
  *   `temperature` só com esforço `none`; outro nome com `max_output_tokens` e `temperature`, sem `reasoning`.
@@ -27,10 +28,18 @@ export interface ModelCallSpec {
   timeoutMs: number;
 }
 
-export interface ChatCallSpec extends ModelCallSpec {
-  /** Teto de saída de hoje (`max_tokens`, família de hoje). */
-  legacyMaxTokens: number;
-  /** Teto de saída da família `gpt-6` (`max_completion_tokens`), com folga para o raciocínio. */
+export interface ChatCallSpec extends Omit<ModelCallSpec, 'temperature'> {
+  /**
+   * Temperatura de hoje do ponto. Ausente quando o ponto não a envia hoje (change 42: configuração do template,
+   * leitura de referência em camadas, descrição e traduções do kit): nenhuma família a leva.
+   */
+  temperature?: number;
+  /**
+   * Teto de saída de hoje (`max_tokens`, família de hoje). Ausente quando o ponto não tem teto hoje (change 42:
+   * layout social, diretor, derivação de cena): a família de hoje sai sem `max_tokens`.
+   */
+  legacyMaxTokens?: number;
+  /** Teto de saída da família `gpt-6` (`max_completion_tokens`), com folga para o raciocínio. Sempre vai. */
   maxCompletionTokens: number;
 }
 
@@ -53,20 +62,26 @@ export function isGpt6Family(model: string): boolean {
 
 export function buildChatCompletionParams(spec: ChatCallSpec): ChatCallParams {
   const options = { ...OPENAI_NO_SDK_RETRY, timeout: spec.timeoutMs };
-  if (!isGpt6Family(spec.model)) {
-    return {
-      body: { model: spec.model, max_tokens: spec.legacyMaxTokens, temperature: spec.temperature },
-      options,
-    };
-  }
+  return { body: isGpt6Family(spec.model) ? gpt6ChatBody(spec) : legacyChatBody(spec), options };
+}
+
+/** O corpo de hoje: `max_tokens` e `temperature` só onde o ponto os envia hoje. */
+function legacyChatBody(spec: ChatCallSpec): ChatCallParams['body'] {
   return {
-    body: {
-      model: spec.model,
-      max_completion_tokens: spec.maxCompletionTokens,
-      reasoning_effort: spec.effort,
-      ...(spec.effort === 'none' ? { temperature: spec.temperature } : {}),
-    },
-    options,
+    model: spec.model,
+    ...(spec.legacyMaxTokens === undefined ? {} : { max_tokens: spec.legacyMaxTokens }),
+    ...(spec.temperature === undefined ? {} : { temperature: spec.temperature }),
+  };
+}
+
+/** Família `gpt-6`: teto e esforço sempre; `temperature` só com esforço `none` e só se o ponto a tem. */
+function gpt6ChatBody(spec: ChatCallSpec): ChatCallParams['body'] {
+  const withTemperature = spec.effort === 'none' && spec.temperature !== undefined;
+  return {
+    model: spec.model,
+    max_completion_tokens: spec.maxCompletionTokens,
+    reasoning_effort: spec.effort,
+    ...(withTemperature ? { temperature: spec.temperature } : {}),
   };
 }
 

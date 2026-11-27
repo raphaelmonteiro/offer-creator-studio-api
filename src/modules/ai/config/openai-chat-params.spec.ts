@@ -101,6 +101,75 @@ describe('buildChatCompletionParams, família de hoje', () => {
   });
 });
 
+describe('buildChatCompletionParams, ponto sem teto ou sem temperatura hoje (change 42)', () => {
+  const semTeto = (overrides: Partial<ChatCallSpec> = {}) =>
+    spec({ legacyMaxTokens: undefined, ...overrides });
+  const semTemperatura = (overrides: Partial<ChatCallSpec> = {}) =>
+    spec({ temperature: undefined, ...overrides });
+
+  it('família de hoje sem teto (layout social, diretor, derivação): leva temperature e não leva max_tokens', () => {
+    const { body } = buildChatCompletionParams(semTeto({ model: 'gpt-4o', temperature: 0.3 }));
+    expect(body).toStrictEqual({ model: 'gpt-4o', temperature: 0.3 });
+  });
+
+  it('família de hoje sem temperature (configuração do template): leva max_tokens e não leva temperature', () => {
+    const { body } = buildChatCompletionParams(
+      semTemperatura({ model: 'gpt-4o', legacyMaxTokens: 4000 }),
+    );
+    expect(body).toStrictEqual({ model: 'gpt-4o', max_tokens: 4000 });
+  });
+
+  it('família de hoje sem teto e sem temperature: só o modelo', () => {
+    const { body } = buildChatCompletionParams(
+      semTeto({ model: 'gpt-4o', temperature: undefined }),
+    );
+    expect(body).toStrictEqual({ model: 'gpt-4o' });
+  });
+
+  it('família gpt-6 sempre leva max_completion_tokens, mesmo sem o teto de hoje', () => {
+    const { body } = buildChatCompletionParams(
+      semTeto({ effort: 'low', maxCompletionTokens: 9000 }),
+    );
+    expect(body).toStrictEqual({
+      model: 'gpt-6-luna',
+      max_completion_tokens: 9000,
+      reasoning_effort: 'low',
+    });
+  });
+
+  it('família gpt-6 com esforço none e sem temperature (traduções do kit): não leva temperature', () => {
+    const { body } = buildChatCompletionParams(semTemperatura({ effort: 'none' }));
+    expect(body).toStrictEqual({
+      model: 'gpt-6-luna',
+      max_completion_tokens: 8192,
+      reasoning_effort: 'none',
+    });
+    expect(body).not.toHaveProperty('temperature');
+  });
+
+  it('família gpt-6 com esforço none e temperature 0 (derivação de cena): leva temperature 0', () => {
+    const { body } = buildChatCompletionParams(spec({ effort: 'none', temperature: 0 }));
+    expect(body.temperature).toBe(0);
+  });
+
+  it('família gpt-6 com esforço low e temperature do ponto: não leva temperature', () => {
+    const { body } = buildChatCompletionParams(spec({ effort: 'low', temperature: 0.4 }));
+    expect(body).not.toHaveProperty('temperature');
+  });
+
+  it('o prazo e a ausência de repetição valem sem teto e sem temperatura', () => {
+    const { options } = buildChatCompletionParams(
+      spec({
+        model: 'gpt-4o',
+        legacyMaxTokens: undefined,
+        temperature: undefined,
+        timeoutMs: 45_000,
+      }),
+    );
+    expect(options).toStrictEqual({ maxRetries: 0, timeout: 45_000 });
+  });
+});
+
 describe('buildChatCompletionParams, opções de requisição', () => {
   it.each(['gpt-6-luna', 'gpt-4o-mini'])('%s: prazo da feature e sem repetição do SDK', (model) => {
     const { options } = buildChatCompletionParams(spec({ model, timeoutMs: 10_000 }));
