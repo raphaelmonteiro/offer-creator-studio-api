@@ -2,7 +2,8 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
-import { withAiLogging } from './utils/ai-telemetry.util';
+import { SOCIAL_LAYOUT_CALL } from './config/openai-text-calls';
+import { callProductChat } from './utils/ai-product-chat.util';
 import {
   SOCIAL_SECTION_LAYOUT_SYSTEM_PROMPT,
   buildSocialSectionLayoutUserPrompt,
@@ -100,27 +101,20 @@ export class SocialSectionLayoutService {
 
     const userPrompt = buildSocialSectionLayoutUserPrompt(request);
 
-    const response = await withAiLogging(
-      this.logger,
-      {
-        endpoint: 'chat.completions',
-        model: this.models.textModel,
-        feature: 'social-section-layout',
-      },
-      () =>
-        this.openai!.chat.completions.create({
-          model: this.models.textModel,
-          temperature: 0.3,
-          messages: [
-            { role: 'system', content: SOCIAL_SECTION_LAYOUT_SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
-          ],
-          // We use json_object (not strict schema) because the `patch`
-          // payload has dynamic fields — strict schemas would require us
-          // to enumerate every possible property at every level.
-          response_format: { type: 'json_object' },
-        }),
-    );
+    const response = await callProductChat({
+      openai: this.openai,
+      logger: this.logger,
+      feature: 'social-section-layout',
+      spec: { model: this.models.textModel, ...SOCIAL_LAYOUT_CALL },
+      messages: [
+        { role: 'system', content: SOCIAL_SECTION_LAYOUT_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+      // We use json_object (not strict schema) because the `patch`
+      // payload has dynamic fields — strict schemas would require us
+      // to enumerate every possible property at every level.
+      responseFormat: { type: 'json_object' },
+    });
 
     const raw = response.choices[0]?.message?.content;
     if (!raw) {

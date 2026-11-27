@@ -20,7 +20,8 @@ import {
   parseFlyerAssemblyPlanResponse,
 } from './schemas/ai-response.schemas';
 import { FLYER_ASSEMBLY_SYSTEM_PROMPT } from './prompts/flyer-assembly.prompts';
-import { withAiLogging } from './utils/ai-telemetry.util';
+import { flyerAssemblyPlanCall } from './config/openai-text-calls';
+import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
 
 const DEFAULT_MAX_PRODUCTS = 300;
 const DEFAULT_MAX_PRODUCTS_PER_PAGE = 36;
@@ -40,14 +41,6 @@ const COMMERCIAL_CATEGORY_ORDER = [
   'Bazar',
   DEFAULT_CATEGORY,
 ];
-
-interface StructuredChatCompletionOptions<T> {
-  feature: string;
-  model: string;
-  request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
-  parse: (raw: string) => T;
-  emptyResponseMessage: string;
-}
 
 @Injectable()
 export class FlyerAssemblyPlanService {
@@ -149,23 +142,19 @@ export class FlyerAssemblyPlanService {
     };
 
     const userPrompt = JSON.stringify(payload, null, 2);
-    const maxTokens = Math.min(12000, 900 + products.length * 65);
-
-    return this.createStructuredChatCompletion({
+    return createStructuredChatCompletion({
+      openai: this.openai!,
+      logger: this.logger,
       feature: 'flyer-assembly.plan',
-      model: this.models.fastTextModel,
-      emptyResponseMessage: 'Resposta vazia da IA',
+      spec: { model: this.models.fastTextModel, ...flyerAssemblyPlanCall(products.length) },
+      messages: [
+        { role: 'system', content: FLYER_ASSEMBLY_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+      responseFormat: AI_RESPONSE_FORMATS.flyerAssemblyPlan,
       parse: parseFlyerAssemblyPlanResponse,
-      request: {
-        model: this.models.fastTextModel,
-        response_format: AI_RESPONSE_FORMATS.flyerAssemblyPlan,
-        max_tokens: maxTokens,
-        temperature: 0.2,
-        messages: [
-          { role: 'system', content: FLYER_ASSEMBLY_SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-      },
+      emptyResponseMessage: 'Resposta vazia da IA',
+      retryAttempts: this.models.structuredResponseRetryAttempts,
     });
   }
 
@@ -486,62 +475,5 @@ export class FlyerAssemblyPlanService {
     const raw = this.configService.get<string>(key);
     const parsed = Number(raw);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-  }
-
-  private async createStructuredChatCompletion<T>(
-    options: StructuredChatCompletionOptions<T>,
-  ): Promise<T> {
-    const maxAttempts = this.models.structuredResponseRetryAttempts + 1;
-    const messages = [...options.request.messages];
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const response = await withAiLogging(
-        this.logger,
-        {
-          feature: options.feature,
-          endpoint: 'chat.completions',
-          model: options.model,
-        },
-        () =>
-          this.openai!.chat.completions.create({
-            ...options.request,
-            messages,
-          }),
-      );
-
-      const raw = response.choices[0]?.message?.content;
-      try {
-        if (!raw) throw new Error(options.emptyResponseMessage);
-        return options.parse(raw);
-      } catch (error) {
-        lastError = error;
-        if (attempt >= maxAttempts) {
-          throw error;
-        }
-
-        const reason = error instanceof Error ? error.message : String(error);
-        this.logger.warn(
-          `Structured response retry ${JSON.stringify({
-            feature: options.feature,
-            attempt,
-            nextAttempt: attempt + 1,
-            maxAttempts,
-            reason,
-            model: options.model,
-          })}`,
-        );
-
-        messages.push({
-          role: 'user',
-          content:
-            'The previous response was invalid for the expected JSON schema. ' +
-            `Validation error: ${reason}. ` +
-            'Return only valid JSON for the expected schema, without markdown or explanations.',
-        });
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('Resposta estruturada inválida da IA');
   }
 }

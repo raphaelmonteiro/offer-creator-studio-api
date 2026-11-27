@@ -80,3 +80,36 @@ export const TEMPLATE_ELEMENT_CALL: TextCallPoint = {
   maxCompletionTokens: 8000,
   timeoutMs: 90_000,
 };
+
+/** Layout da seção social: JSON livre (`json_object`); hoje sem teto, que só a família nova ganha. */
+export const SOCIAL_LAYOUT_CALL: TextCallPoint = {
+  effort: 'low',
+  temperature: 0.3,
+  maxCompletionTokens: 8000,
+  timeoutMs: 60_000,
+};
+
+/**
+ * Plano de montagem do encarte: o JSON cresce com o número de produtos. Hoje `min(12000, 900 + 65n)`; na família nova
+ * `min(32000, 4000 + 130n)` (sempre maior: 14.140 para 78 produtos contra 5.970).
+ */
+export function flyerAssemblyPlanCall(productCount: number): TextCallPoint {
+  return {
+    effort: 'low',
+    temperature: 0.2,
+    legacyMaxTokens: Math.min(12_000, 900 + productCount * 65),
+    maxCompletionTokens: Math.min(32_000, 4000 + productCount * 130),
+    timeoutMs: 90_000,
+  };
+}
+
+/** Roteiro do mascote: texto curto em JSON estrito; o tom `animado` é mais criativo (0,7) que os outros (0,4). */
+export function mascotScriptCall(animated: boolean): TextCallPoint {
+  return {
+    effort: 'none',
+    temperature: animated ? 0.7 : 0.4,
+    legacyMaxTokens: 600,
+    maxCompletionTokens: 2400,
+    timeoutMs: 30_000,
+  };
+}
