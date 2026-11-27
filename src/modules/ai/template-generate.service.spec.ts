@@ -1,8 +1,10 @@
 import { AI_RESPONSE_FORMATS } from './schemas/ai-response.schemas';
 import {
   buildTemplateGenerate,
+  buildTemplateGenerateWithImages,
   CONFIGURATION_ANSWER,
   FORMAT,
+  PLACEHOLDER_ANSWER,
   USER_MESSAGES,
 } from './template-text-services.testutil';
 import { logged } from './utils/ai-product-chat.testutil';
@@ -42,6 +44,27 @@ describe('TemplateGenerateService (chat da configuração do template)', () => {
       messages: expect.any(Array),
     });
     expect(options).toEqual({ timeout: 120_000, maxRetries: 0 });
+  });
+
+  it('Placeholder do Gerar template no 2.6: uma chamada de imagem com o modelo novo, 1024x1024, jpeg e fundo opaco', async () => {
+    const { service, create, images } = buildTemplateGenerateWithImages();
+    create.mockResolvedValueOnce(PLACEHOLDER_ANSWER);
+
+    const result = await service.generateTemplate(FORMAT, USER_MESSAGES);
+
+    expect(result.imagesGenerated).toBe(true);
+    expect(images.generateImage).toHaveBeenCalledTimes(1);
+    expect(images.generateImage.mock.calls[0][0]).toEqual({
+      feature: 'template-generate.placeholder-image',
+      prompt: 'maçã vermelha',
+      size: '1024x1024',
+      assetKind: 'template',
+      mode: 'final',
+      model: 'gpt-image-2.6-sunburst',
+      outputFormat: 'jpeg',
+      outputCompression: 85,
+      background: 'opaque',
+    });
   });
 
   it('Limite de taxa no Gerar template: uma única chamada ao provedor e o erro sobe', async () => {

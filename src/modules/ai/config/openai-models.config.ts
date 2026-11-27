@@ -7,6 +7,13 @@ import { readModelConfig } from './openai-product-features.config';
  */
 export const DEFAULT_TEXT_MODEL = 'gpt-6-luna';
 
+/**
+ * Padrões da imagem geral (change 42, D-3): `OPENAI_IMAGE_MODEL` e `OPENAI_IMAGE_PREVIEW_MODEL` ausentes, vazias ou só
+ * com espaços valem estes. A cena do Template Pro tem variável própria (`TEMPLATE_SCENE_IMAGE_MODEL`) e não muda.
+ */
+export const DEFAULT_IMAGE_MODEL = 'gpt-image-2.6-sunburst';
+export const DEFAULT_IMAGE_PREVIEW_MODEL = 'gpt-image-2.6-flare';
+
 export interface OpenAiModelConfig {
   textModel: string;
   fastTextModel: string;
@@ -24,10 +31,11 @@ export function getOpenAiModelConfig(configService: ConfigService): OpenAiModelC
   return {
     textModel: readModelConfig(configService, 'OPENAI_TEXT_MODEL', DEFAULT_TEXT_MODEL),
     fastTextModel: readModelConfig(configService, 'OPENAI_FAST_TEXT_MODEL', DEFAULT_TEXT_MODEL),
-    imageModel: configService.get<string>('OPENAI_IMAGE_MODEL', 'gpt-image-2.5-sunburst'),
-    imagePreviewModel: configService.get<string>(
+    imageModel: readModelConfig(configService, 'OPENAI_IMAGE_MODEL', DEFAULT_IMAGE_MODEL),
+    imagePreviewModel: readModelConfig(
+      configService,
       'OPENAI_IMAGE_PREVIEW_MODEL',
-      'gpt-image-2.5-flare',
+      DEFAULT_IMAGE_PREVIEW_MODEL,
     ),
     imagePreviewQuality: configService.get<'low' | 'medium' | 'high' | 'auto'>(
       'OPENAI_IMAGE_PREVIEW_QUALITY',

@@ -50,6 +50,16 @@ function withImageFakes<T extends object>(
   return { ...built, images, uploads };
 }
 
+/** Gerar template com o provedor de imagem e o disco simulados (o placeholder `GENERATE:` chega a `generateImage`). */
+export function buildTemplateGenerateWithImages(env: Record<string, string> = {}) {
+  return withImageFakes(TemplateGenerateService, env);
+}
+
+/** Assistente de elemento com o provedor de imagem e o disco simulados. */
+export function buildTemplateElementWithImages(env: Record<string, string> = {}) {
+  return withImageFakes(TemplateElementAssistantService, env);
+}
+
 export function buildTemplateImage(env: Record<string, string> = {}) {
   return withImageFakes(TemplateImageGeneratorService, env);
 }
@@ -91,6 +101,20 @@ export const CONFIGURATION_ANSWER = chatResponse({
   content: JSON.stringify({
     assistantMessage: 'Pronto',
     configuration: { header: section('header'), footer: section('footer') },
+  }),
+});
+
+/** Configuração cujo fundo do cabeçalho é um placeholder `GENERATE:`, que o serviço troca por uma imagem gerada. */
+export const PLACEHOLDER_ANSWER = chatResponse({
+  content: JSON.stringify({
+    assistantMessage: 'Pronto',
+    configuration: {
+      header: {
+        ...section('header'),
+        background: { type: 'image', url: 'GENERATE: maçã vermelha' },
+      },
+      footer: section('footer'),
+    },
   }),
 });
 
