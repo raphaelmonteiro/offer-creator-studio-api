@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
 import {
-  IMAGE_INTENT_CALL,
   TEMPLATE_IMAGE_PROMPT_CALL,
   TEMPLATE_IMAGE_REFERENCE_CALL,
   TEMPLATE_IMAGE_REPLY_CALL,
@@ -16,15 +15,9 @@ import {
 } from './utils/ai-image.util';
 import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
 import { callProductChat } from './utils/ai-product-chat.util';
-import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
+import { ImageIntentClassification, classifyImageIntent } from './utils/image-intent';
 import { UploadsService } from '../uploads/uploads.service';
 import { OpenAiImageInput, OpenAiImageService } from './openai-image.service';
-import {
-  AI_RESPONSE_FORMATS,
-  ImageIntentCategory,
-  parseImageIntentClassification,
-} from './schemas/ai-response.schemas';
-import { IMAGE_INTENT_CLASSIFICATION_SYSTEM_PROMPT } from './prompts/image-intent.prompts';
 import {
   TEMPLATE_IMAGE_REFERENCE_VISION_PROMPT,
   TEMPLATE_IMAGE_REPLY_SYSTEM_PROMPT,
@@ -48,24 +41,6 @@ interface TemplateImageResponse {
   imageUrl: string;
   assistantMessage: string;
   promptUsed: string;
-}
-
-interface ImageIntentClassification {
-  category: ImageIntentCategory;
-  confidence: number;
-  shouldGenerateImage: boolean;
-  shouldEditExistingImage: boolean;
-  shouldUseLayerFlow: boolean;
-  shouldPreserveExistingImage: boolean;
-  reason?: string;
-}
-
-interface ImageIntentContext {
-  feature: string;
-  userMessage: string;
-  hasExistingImage: boolean;
-  hasReferenceImages: boolean;
-  hasCurrentLayers?: boolean;
 }
 
 @Injectable()
@@ -102,12 +77,15 @@ export class TemplateImageGeneratorService {
     // Reference images attached by the user in the last message
     const userReferenceImages = lastUserMessage.images ?? [];
     const isRefinement = !!lastAssistantWithImage;
-    const imageIntent = await this.classifyImageIntent({
-      feature: 'template-image.intent',
-      userMessage: lastUserMessage.content,
-      hasExistingImage: isRefinement,
-      hasReferenceImages: userReferenceImages.length > 0,
-    });
+    const imageIntent = await classifyImageIntent(
+      { openai: this.openai, logger: this.logger, models: this.models },
+      {
+        feature: 'template-image.intent',
+        userMessage: lastUserMessage.content,
+        hasExistingImage: isRefinement,
+        hasReferenceImages: userReferenceImages.length > 0,
+      },
+    );
 
     if (imageIntent.shouldPreserveExistingImage && lastAssistantWithImage?.imageUrl) {
       return {
@@ -331,162 +309,6 @@ export class TemplateImageGeneratorService {
     );
 
     return inputs;
-  }
-
-  private async classifyImageIntent(
-    context: ImageIntentContext,
-  ): Promise<ImageIntentClassification> {
-    const fallback = this.getFallbackImageIntent(context);
-    if (!this.openai) return fallback;
-
-    try {
-      const parsed = await createStructuredChatCompletion({
-        openai: this.openai,
-        logger: this.logger,
-        feature: context.feature,
-        spec: { model: this.models.fastTextModel, ...IMAGE_INTENT_CALL },
-        messages: [
-          {
-            role: 'system',
-            content: IMAGE_INTENT_CLASSIFICATION_SYSTEM_PROMPT,
-          },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              message: context.userMessage,
-              hasExistingImage: context.hasExistingImage,
-              hasReferenceImages: context.hasReferenceImages,
-              hasCurrentLayers: !!context.hasCurrentLayers,
-            }),
-          },
-        ],
-        responseFormat: AI_RESPONSE_FORMATS.imageIntentClassification,
-        parse: parseImageIntentClassification,
-        emptyResponseMessage: 'Resposta vazia da classificação de intenção',
-        retryAttempts: this.models.structuredResponseRetryAttempts,
-      });
-      const confidence = parsed.confidence;
-
-      if (confidence < 0.55) {
-        this.logImageIntentClassification(context, fallback, 'low-confidence-fallback');
-        return fallback;
-      }
-
-      const classified = this.buildImageIntentClassification(
-        parsed.category,
-        confidence,
-        context,
-        parsed.reason,
-      );
-      this.logImageIntentClassification(context, classified, 'classified');
-      return classified;
-    } catch (error) {
-      this.logger.warn(
-        `Image intent classification failed ${JSON.stringify({
-          feature: context.feature,
-          error: (error as Error).message,
-        })}`,
-      );
-      return fallback;
-    }
-  }
-
-  private getFallbackImageIntent(context: ImageIntentContext): ImageIntentClassification {
-    const category: ImageIntentCategory = context.hasExistingImage
-      ? 'targeted_edit'
-      : context.hasReferenceImages
-        ? 'style_variation'
-        : 'new_full_image';
-
-    return this.buildImageIntentClassification(category, 0, context, 'fallback');
-  }
-
-  private buildImageIntentClassification(
-    category: ImageIntentCategory,
-    confidence: number,
-    context: ImageIntentContext,
-    reason?: string,
-  ): ImageIntentClassification {
-    const canPreserve = context.hasExistingImage || !!context.hasCurrentLayers;
-    const hasImageInput = context.hasExistingImage || context.hasReferenceImages;
-
-    switch (category) {
-      case 'text_change':
-      case 'layout_change':
-        return {
-          category,
-          confidence,
-          shouldGenerateImage: !canPreserve,
-          shouldEditExistingImage: false,
-          shouldUseLayerFlow: false,
-          shouldPreserveExistingImage: canPreserve,
-          reason,
-        };
-      case 'add_layer_element':
-      case 'replace_layer_element':
-        return {
-          category,
-          confidence,
-          shouldGenerateImage: true,
-          shouldEditExistingImage: hasImageInput,
-          shouldUseLayerFlow: true,
-          shouldPreserveExistingImage: false,
-          reason,
-        };
-      case 'targeted_edit':
-        return {
-          category,
-          confidence,
-          shouldGenerateImage: !context.hasExistingImage,
-          shouldEditExistingImage: context.hasExistingImage,
-          shouldUseLayerFlow: false,
-          shouldPreserveExistingImage: false,
-          reason,
-        };
-      case 'style_variation':
-        return {
-          category,
-          confidence,
-          shouldGenerateImage: !hasImageInput,
-          shouldEditExistingImage: hasImageInput,
-          shouldUseLayerFlow: false,
-          shouldPreserveExistingImage: false,
-          reason,
-        };
-      case 'new_full_image':
-      default:
-        return {
-          category: 'new_full_image',
-          confidence,
-          shouldGenerateImage: true,
-          shouldEditExistingImage: false,
-          shouldUseLayerFlow: false,
-          shouldPreserveExistingImage: false,
-          reason,
-        };
-    }
-  }
-
-  private logImageIntentClassification(
-    context: ImageIntentContext,
-    intent: ImageIntentClassification,
-    status: string,
-  ): void {
-    this.logger.log(
-      `Image intent ${JSON.stringify({
-        feature: context.feature,
-        status,
-        category: intent.category,
-        confidence: intent.confidence,
-        hasExistingImage: context.hasExistingImage,
-        hasReferenceImages: context.hasReferenceImages,
-        hasCurrentLayers: !!context.hasCurrentLayers,
-        shouldGenerateImage: intent.shouldGenerateImage,
-        shouldEditExistingImage: intent.shouldEditExistingImage,
-        shouldUseLayerFlow: intent.shouldUseLayerFlow,
-        shouldPreserveExistingImage: intent.shouldPreserveExistingImage,
-      })}`,
-    );
   }
 
   private getPreservedImageMessage(intent: ImageIntentClassification): string {
