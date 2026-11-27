@@ -1,4 +1,10 @@
-import { PICANHA_ID, ABACATE_ID, exampleRequest } from '../domain/structure-suggestion.testutil';
+import {
+  ABACATE_ID,
+  EMPTY_RAW_SUGGESTION,
+  exampleRequest,
+  PICANHA_ID,
+} from '../domain/structure-suggestion.testutil';
+import { rawSection } from '../domain/structure-suggestion-sanitize.testutil';
 import type { StructureSuggestionDto } from '../dto/structure-suggestion.dto';
 import { StructureAiFailure } from '../providers/flyer-pro-structure-ai.port';
 import {
@@ -42,7 +48,7 @@ describe('FlyerProStructureSuggestionService: o pedido de exemplo com o provedor
 
   it('a resposta não traz tokens nem custo, e o provedor recebeu o prazo e o mesmo suggestionId', async () => {
     const { port, suggest } = fakePort({
-      suggestion: { summary: '', sections: [], heroes: [] },
+      suggestion: EMPTY_RAW_SUGGESTION,
       model: 'gpt-6-luna',
       usage: { input_tokens: 3700, output_tokens: 2800 },
     });
@@ -58,7 +64,7 @@ describe('FlyerProStructureSuggestionService: o pedido de exemplo com o provedor
 
   it('o pedido ao provedor leva o nome do banco, os apelidos e 0 produto sem lugar sem o campo unplaced', async () => {
     const { port, suggest } = fakePort({
-      suggestion: { summary: '', sections: [], heroes: [] },
+      suggestion: EMPTY_RAW_SUGGESTION,
       model: 'm',
       usage: null,
     });
@@ -97,13 +103,15 @@ describe('FlyerProStructureSuggestionService: o pedido de exemplo com o provedor
     const { port } = fakePort({
       suggestion: {
         summary: 'x'.repeat(400),
+        campaign: { kind: 'none', label: '' },
         sections: [
-          { id: 's7', page: null, reason: '' },
-          { id: 's2', page: 1, reason: 'abre' },
-          { id: 's1', page: null, reason: '' },
-          { id: 's3', page: null, reason: '' },
+          rawSection('s7'),
+          rawSection('s2', 1, 'abre'),
+          rawSection('s1'),
+          rawSection('s3'),
         ],
         heroes: [{ item: 'p42', size: '2x1', reason: '' }],
+        unsuggest: [],
       },
       model: 'gpt-6-luna',
       usage: null,

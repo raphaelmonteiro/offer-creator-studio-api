@@ -1,9 +1,30 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`schema estrito da saída do modelo tem o nome flyer_pro_structure_suggestion e confere com o snapshot 1`] = `
+exports[`schema estrito da saída do modelo (versão 2) tem o nome flyer_pro_structure_suggestion e confere com o snapshot 1`] = `
 {
   "additionalProperties": false,
   "properties": {
+    "campaign": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "category",
+            "discount",
+            "none",
+          ],
+          "type": "string",
+        },
+        "label": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "kind",
+        "label",
+      ],
+      "type": "object",
+    },
     "heroes": {
       "items": {
         "additionalProperties": false,
@@ -38,6 +59,18 @@ exports[`schema estrito da saída do modelo tem o nome flyer_pro_structure_sugge
           "id": {
             "type": "string",
           },
+          "items": {
+            "items": {
+              "type": "string",
+            },
+            "type": [
+              "array",
+              "null",
+            ],
+          },
+          "itemsReason": {
+            "type": "string",
+          },
           "page": {
             "type": [
               "integer",
@@ -52,6 +85,8 @@ exports[`schema estrito da saída do modelo tem o nome flyer_pro_structure_sugge
           "id",
           "page",
           "reason",
+          "items",
+          "itemsReason",
         ],
         "type": "object",
       },
@@ -60,11 +95,32 @@ exports[`schema estrito da saída do modelo tem o nome flyer_pro_structure_sugge
     "summary": {
       "type": "string",
     },
+    "unsuggest": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "type": "string",
+          },
+          "reason": {
+            "type": "string",
+          },
+        },
+        "required": [
+          "item",
+          "reason",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
   },
   "required": [
     "summary",
+    "campaign",
     "sections",
     "heroes",
+    "unsuggest",
   ],
   "type": "object",
 }

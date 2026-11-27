@@ -7,6 +7,7 @@ import { REAL_CONFIG } from '../services/flyer-pro-structure-suggestion.service.
 import { RealFlyerProStructureAi } from './flyer-pro-structure-ai.real';
 import {
   fakeResponsesClient,
+  outputWith,
   responsesResult,
   USAGE,
   VALID_OUTPUT,
@@ -14,6 +15,16 @@ import {
 } from './flyer-pro-structure-ai.testutil';
 
 const OPTIONS = { timeoutMs: 25_000 };
+
+/** Uma seção válida da saída, com campos trocados ou acrescidos. */
+const sectionWith = (over: Record<string, unknown>) => ({
+  id: 's1',
+  page: null,
+  reason: '',
+  items: null,
+  itemsReason: '',
+  ...over,
+});
 
 function makeReal(outcome?: unknown, config: Partial<StructureAiConfig> = {}) {
   const { client, create } = fakeResponsesClient(outcome);
@@ -69,19 +80,21 @@ describe('RealFlyerProStructureAi: o corpo da chamada a /responses', () => {
     expect(create.mock.calls[0][1]).toEqual({ timeout: 25_000, maxRetries: 0 });
   });
 
-  it('o schema no corpo é o schema fechado, com additionalProperties false nos três objetos', async () => {
+  it('Schema no corpo: o schema fechado, com additionalProperties false nos cinco objetos', async () => {
     const { provider, create } = makeReal();
     await provider.suggest(exampleAiRequest(), OPTIONS);
 
     const schema = bodyOf(create).text.format.schema as {
       additionalProperties: boolean;
-      properties: { sections: { items: object }; heroes: { items: object } };
+      properties: {
+        campaign: object;
+        sections: { items: object };
+        heroes: { items: object };
+        unsuggest: { items: object };
+      };
     };
-    for (const object of [
-      schema,
-      schema.properties.sections.items,
-      schema.properties.heroes.items,
-    ]) {
+    const { campaign, sections, heroes, unsuggest } = schema.properties;
+    for (const object of [schema, campaign, sections.items, heroes.items, unsuggest.items]) {
       expect(object).toMatchObject({ additionalProperties: false });
     }
   });
@@ -143,33 +156,24 @@ describe('RealFlyerProStructureAi: a saída do modelo', () => {
     ['resposta sem mensagem', { status: 'completed', output: [] }],
     ['texto que não é JSON', responsesResult('Claro! Aqui está a estrutura')],
     ['sections como texto', responsesResult('{"sections": "x"}')],
-    ['campo a mais na raiz', responsesResult('{"summary":"","sections":[],"heroes":[],"pages":3}')],
+    ['campo a mais na raiz', responsesResult(outputWith({ pages: 3 }))],
     ['campo que falta na raiz', responsesResult('{"summary":"","sections":[]}')],
-    [
-      'campo a mais numa seção',
-      responsesResult(
-        '{"summary":"","sections":[{"id":"s1","page":null,"reason":"","x":1}],"heroes":[]}',
-      ),
-    ],
+    ['saída no formato da versão 1', responsesResult('{"summary":"","sections":[],"heroes":[]}')],
+    ['campo a mais numa seção', responsesResult(outputWith({ sections: [sectionWith({ x: 1 })] }))],
     [
       'page que não é inteiro',
-      responsesResult('{"summary":"","sections":[{"id":"s1","page":1.5,"reason":""}],"heroes":[]}'),
+      responsesResult(outputWith({ sections: [sectionWith({ page: 1.5 })] })),
     ],
-    [
-      'page em texto',
-      responsesResult('{"summary":"","sections":[{"id":"s1","page":"1","reason":""}],"heroes":[]}'),
-    ],
+    ['page em texto', responsesResult(outputWith({ sections: [sectionWith({ page: '1' })] }))],
     [
       'tamanho 3x3',
-      responsesResult(
-        '{"summary":"","sections":[],"heroes":[{"item":"p01","size":"3x3","reason":""}]}',
-      ),
+      responsesResult(outputWith({ heroes: [{ item: 'p01', size: '3x3', reason: '' }] })),
     ],
     [
       'destaque sem reason',
-      responsesResult('{"summary":"","sections":[],"heroes":[{"item":"p01","size":"2x1"}]}'),
+      responsesResult(outputWith({ heroes: [{ item: 'p01', size: '2x1' }] })),
     ],
-    ['summary que não é texto', responsesResult('{"summary":3,"sections":[],"heroes":[]}')],
+    ['summary que não é texto', responsesResult(outputWith({ summary: 3 }))],
     ['JSON que é lista', responsesResult('[]')],
     ['JSON nulo', responsesResult('null')],
   ])('%s é INVALID_OUTPUT, e o cliente foi chamado uma vez só', async (_name, outcome) => {

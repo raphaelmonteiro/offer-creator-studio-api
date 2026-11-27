@@ -78,11 +78,25 @@ export interface DiscardedEntry {
   code: DiscardedCode;
 }
 
+export const STRUCTURE_CAMPAIGN_KINDS = ['category', 'discount', 'none'] as const;
+export type StructureCampaignKind = (typeof STRUCTURE_CAMPAIGN_KINDS)[number];
+
+/** Uma seção da resposta do provedor: a página, o motivo e a ordem dos produtos (`items`, apelidos; `null` mantém). */
+export interface RawStructureSection {
+  id: string;
+  page: number | null;
+  reason: string;
+  items: string[] | null;
+  itemsReason: string;
+}
+
 /** A resposta do provedor, com apelidos (`s1`, `p01`): nada dela vale antes do saneamento. */
 export interface RawStructureSuggestion {
   summary: string;
-  sections: Array<{ id: string; page: number | null; reason: string }>;
+  campaign: { kind: StructureCampaignKind; label: string };
+  sections: RawStructureSection[];
   heroes: Array<{ item: string; size: StructureHeroSize; reason: string }>;
+  unsuggest: Array<{ item: string; reason: string }>;
 }
 
 export interface SuggestedSection {

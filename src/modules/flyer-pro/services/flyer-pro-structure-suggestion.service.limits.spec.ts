@@ -1,4 +1,4 @@
-import { exampleRequest } from '../domain/structure-suggestion.testutil';
+import { EMPTY_RAW_SUGGESTION, exampleRequest } from '../domain/structure-suggestion.testutil';
 import { StructureAiFailure } from '../providers/flyer-pro-structure-ai.port';
 import { FlyerProStructureLimiter } from './flyer-pro-structure-limiter';
 import {
@@ -12,7 +12,7 @@ import {
 import type { StructureAiResult } from '../domain/structure-ai-request';
 
 const EMPTY: StructureAiResult = {
-  suggestion: { summary: '', sections: [], heroes: [] },
+  suggestion: EMPTY_RAW_SUGGESTION,
   model: 'gpt-6-luna',
   usage: null,
 };

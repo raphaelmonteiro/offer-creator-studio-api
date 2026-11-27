@@ -65,12 +65,16 @@ const tableOrder = (request: StructureAiRequest): StructureAiSection[] =>
 function sameOrder(request: StructureAiRequest): RawStructureSuggestion {
   return {
     summary: '[simulado] A estrutura atual já segue as recomendações.',
+    campaign: { kind: 'none', label: '' },
     sections: categorySections(request).map((section) => ({
       id: section.alias,
       page: null,
       reason: `[simulado] ${section.category} fica onde está.`,
+      items: null,
+      itemsReason: '',
     })),
     heroes: [],
+    unsuggest: [],
   };
 }
 
@@ -95,12 +99,16 @@ function tableSuggestion(request: StructureAiRequest): RawStructureSuggestion {
   });
   return {
     summary: '[simulado] Ordem fixa do simulado: Carnes e Hortifruti abrem o encarte.',
+    campaign: { kind: 'none', label: '' },
     sections: ordered.map((section, index) => ({
       id: section.alias,
       page: index === 0 ? 1 : null,
       reason: `[simulado] ${section.category} na posição ${index + 1}.`,
+      items: null,
+      itemsReason: '',
     })),
     heroes,
+    unsuggest: [],
   };
 }
 

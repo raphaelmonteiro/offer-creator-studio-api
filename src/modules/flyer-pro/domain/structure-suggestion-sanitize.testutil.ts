@@ -1,7 +1,11 @@
 import { buildAliases } from './structure-suggestion-aliases';
 import type { SanitizeContext } from './structure-suggestion-sanitize';
 import { EXAMPLE_ITEMS, exampleRequest } from './structure-suggestion.testutil';
-import type { RawStructureSuggestion, StructureRequest } from './structure-suggestion.types';
+import type {
+  RawStructureSection,
+  RawStructureSuggestion,
+  StructureRequest,
+} from './structure-suggestion.types';
 
 /** Ajudantes dos specs do saneamento (só testes): o contexto do exemplo e a resposta bruta do provedor, com apelidos. */
 
@@ -20,11 +24,21 @@ export function sanitizeContext(
   };
 }
 
-export const rawSection = (id: string, page: number | null = null, reason = '') => ({
+/** Uma seção da saída do provedor; `order` traz a ordem dos produtos (`items`, apelidos) e o motivo dela. */
+export const rawSection = (
+  id: string,
+  page: number | null = null,
+  reason = '',
+  order: { items?: string[] | null; itemsReason?: string } = {},
+): RawStructureSection => ({
   id,
   page,
   reason,
+  items: order.items ?? null,
+  itemsReason: order.itemsReason ?? '',
 });
+
+export const rawUnsuggest = (item: string, reason = '') => ({ item, reason });
 
 export const rawHero = (item: string, size: '2x1' | '2x2' = '2x1', reason = '') => ({
   item,
@@ -37,8 +51,10 @@ export const rawSuggestion = (
   over: Partial<RawStructureSuggestion> = {},
 ): RawStructureSuggestion => ({
   summary: '',
+  campaign: { kind: 'none', label: '' },
   sections: [rawSection('s1'), rawSection('s2'), rawSection('s3')],
   heroes: [],
+  unsuggest: [],
   ...over,
 });
 

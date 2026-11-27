@@ -1,7 +1,12 @@
 import { openAiError } from '../../ai/utils/openai-chat.testutil';
-import { PICANHA_ID } from '../domain/structure-suggestion.testutil';
+import { rawSection } from '../domain/structure-suggestion-sanitize.testutil';
+import { EMPTY_RAW_SUGGESTION, PICANHA_ID } from '../domain/structure-suggestion.testutil';
 import { RealFlyerProStructureAi } from '../providers/flyer-pro-structure-ai.real';
-import { responsesResult, validResult } from '../providers/flyer-pro-structure-ai.testutil';
+import {
+  outputWith,
+  responsesResult,
+  validResult,
+} from '../providers/flyer-pro-structure-ai.testutil';
 import {
   bodyOf,
   DOCUMENT_ID,
@@ -51,13 +56,8 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
 
   it('id inventado pelo modelo (seção s7 e destaque p42) sai no saneamento, com UNKNOWN_SECTION e UNKNOWN_ITEM', async () => {
     const output = {
-      summary: '',
-      sections: [
-        { id: 's7', page: null, reason: '' },
-        { id: 's2', page: 1, reason: 'abre' },
-        { id: 's1', page: null, reason: '' },
-        { id: 's3', page: null, reason: '' },
-      ],
+      ...EMPTY_RAW_SUGGESTION,
+      sections: [rawSection('s7'), rawSection('s2', 1, 'abre'), rawSection('s1'), rawSection('s3')],
       heroes: [{ item: 'p42', size: '2x1', reason: '' }],
     };
     const { service } = makeRealSuggestionService(responsesResult(JSON.stringify(output)));
@@ -105,8 +105,28 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
 
   it.each([
     [
-      'saída fora do schema',
-      responsesResult('{"summary":"","sections":[],"heroes":[],"pages":3}'),
+      'saída fora do schema (campo a mais "pages")',
+      responsesResult(outputWith({ pages: 3 })),
+      'INVALID_OUTPUT',
+    ],
+    [
+      'saída no formato da versão 1',
+      responsesResult('{"summary":"","sections":[],"heroes":[]}'),
+      'INVALID_OUTPUT',
+    ],
+    [
+      'página a mais na saída (pageCount na raiz)',
+      responsesResult(outputWith({ pageCount: 3 })),
+      'INVALID_OUTPUT',
+    ],
+    [
+      'divisão de seção na saída (split na seção s2)',
+      responsesResult(outputWith({ sections: [{ ...rawSection('s2'), split: 2 }] })),
+      'INVALID_OUTPUT',
+    ],
+    [
+      'tipo de campanha fora da lista',
+      responsesResult(outputWith({ campaign: { kind: 'natal', label: 'Natal' } })),
       'INVALID_OUTPUT',
     ],
     ['status incomplete', responsesResult('{}', { status: 'incomplete' }), 'INVALID_OUTPUT'],

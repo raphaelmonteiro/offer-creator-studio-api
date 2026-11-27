@@ -6,13 +6,19 @@ import type { StructureResponsesClient } from './flyer-pro-structure-ai.real';
 /** Uma saída válida do modelo para o encarte de exemplo: Carnes na capa e a PICANHA em destaque. */
 export const VALID_OUTPUT: RawStructureSuggestion = {
   summary: 'Carnes abre o encarte com a picanha em destaque.',
+  campaign: { kind: 'none', label: '' },
   sections: [
-    { id: 's2', page: 1, reason: 'Carnes tem a oferta mais forte.' },
-    { id: 's1', page: null, reason: 'Perecível: fica na capa.' },
-    { id: 's3', page: 2, reason: '' },
+    { id: 's2', page: 1, reason: 'Carnes tem a oferta mais forte.', items: null, itemsReason: '' },
+    { id: 's1', page: null, reason: 'Perecível: fica na capa.', items: null, itemsReason: '' },
+    { id: 's3', page: 2, reason: '', items: null, itemsReason: '' },
   ],
   heroes: [{ item: 'p04', size: '2x1', reason: 'Preço de/por com foto.' }],
+  unsuggest: [],
 };
+
+/** A saída válida com campos trocados ou acrescidos (o JSON que o cliente simulado devolve em `responsesResult`). */
+export const outputWith = (over: Record<string, unknown>) =>
+  JSON.stringify({ ...VALID_OUTPUT, ...over });
 
 /** O tamanho do `usage` do exemplo de custo: 3.700 tokens de entrada e 2.800 de saída. */
 export const USAGE = { input_tokens: 3700, output_tokens: 2800 };

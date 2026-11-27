@@ -1,7 +1,7 @@
 import { In } from 'typeorm';
 import type { StructureExampleRow } from '../domain/read-structure-example';
 import type { StructureAiResult } from '../domain/structure-ai-request';
-import { exampleRequest } from '../domain/structure-suggestion.testutil';
+import { EMPTY_RAW_SUGGESTION, exampleRequest } from '../domain/structure-suggestion.testutil';
 import {
   bodyOf,
   CLIENT_ID,
@@ -12,7 +12,7 @@ import {
 } from './flyer-pro-structure-suggestion.service.testutil';
 
 const EMPTY: StructureAiResult = {
-  suggestion: { summary: '', sections: [], heroes: [] },
+  suggestion: EMPTY_RAW_SUGGESTION,
   model: 'gpt-6-luna',
   usage: null,
 };
