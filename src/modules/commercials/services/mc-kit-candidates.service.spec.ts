@@ -732,6 +732,8 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
     const originalProvider = process.env.MC_KIT_PROVIDER;
     let fetchSpy: jest.SpyInstance;
     let real: McKitCandidatesService;
+    /** Variáveis de modelo e chave da configuração simulada (a mesma referência durante o teste). */
+    const modelEnv: Record<string, string> = {};
     const json = (status: number, body: unknown) =>
       new Response(JSON.stringify(body), {
         status,
@@ -741,9 +743,14 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
     beforeEach(() => {
       process.env.MC_KIT_PROVIDER = 'gemini';
       fetchSpy = jest.spyOn(global, 'fetch');
+      for (const key of Object.keys(modelEnv)) delete modelEnv[key];
       const config = {
         get: jest.fn((key: string, def?: string) =>
-          key === 'OPENAI_API_KEY' ? 'sk-test' : key === 'UPLOAD_DEST' ? tmpDir : def,
+          key === 'OPENAI_API_KEY'
+            ? 'sk-test'
+            : key === 'UPLOAD_DEST'
+              ? tmpDir
+              : (modelEnv[key] ?? def),
         ),
       };
       real = new McKitCandidatesService(
@@ -766,6 +773,7 @@ describe('McKitCandidatesService — rodadas de candidatos, escolha e "usar como
     });
 
     it('com o kit: devolve a tradução e registra o custo da chamada (gpt-4o-mini pelos tokens do usage)', async () => {
+      modelEnv.OPENAI_FAST_TEXT_MODEL = 'gpt-4o-mini'; // volta ao modelo de hoje (o padrão é gpt-6-luna)
       fetchSpy.mockResolvedValue(
         json(200, {
           id: 'chatcmpl-1',

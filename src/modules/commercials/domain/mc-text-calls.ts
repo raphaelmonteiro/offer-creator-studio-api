@@ -35,3 +35,30 @@ export const KIT_CANONICAL_DESC_CALL: TextCallPoint = {
   maxCompletionTokens: 4096,
   timeoutMs: KIT_CANONICAL_DESC_TIMEOUT_MS,
 };
+
+/** Tradução do ajuste do usuário (pt-BR → inglês, texto livre curto): `max_tokens: 300`, sem `temperature` hoje. */
+export const KIT_ADJUSTMENTS_TRANSLATION_CALL: TextCallPoint = {
+  effort: 'none',
+  legacyMaxTokens: 300,
+  maxCompletionTokens: 1200,
+  timeoutMs: 30_000,
+};
+
+/** Tradução da ficha do kit (inglês → pt-BR, JSON estrito): `max_tokens: 900`, sem `temperature` hoje. */
+export const KIT_SHEET_TRANSLATION_CALL: TextCallPoint = {
+  effort: 'none',
+  legacyMaxTokens: 900,
+  maxCompletionTokens: 3600,
+  timeoutMs: 30_000,
+};
+
+/**
+ * Derivação PT → EN de uma cena (JSON estrito com dois textos curtos): hoje sem teto e com `temperature: 0`, que a
+ * família nova mantém porque o esforço é `none`.
+ */
+export const SCENE_DERIVATION_CALL: TextCallPoint = {
+  effort: 'none',
+  temperature: 0,
+  maxCompletionTokens: 1024,
+  timeoutMs: 30_000,
+};

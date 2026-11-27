@@ -14,9 +14,11 @@ import * as path from 'path';
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
 import { sniffImageMime } from '../../../shared/providers/gemini-image.provider';
-import { OPENAI_NO_SDK_RETRY, withOpenAiRetry } from '../../../shared/providers/openai-errors';
+import { withOpenAiRetry } from '../../../shared/providers/openai-errors';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
+import { getOpenAiModelConfig } from '../../ai/config/openai-models.config';
+import { callProductChat } from '../../ai/utils/ai-product-chat.util';
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import {
@@ -31,6 +33,7 @@ import { McKitIdentityMode, McKitStyle } from '../domain/mc-kit-identity';
 import { decideMouthGate, McKitMouthGate } from '../domain/mc-mouth-gate';
 import { mcKitCandidatesExpireS, mcKitReferencesExpireS } from '../domain/mc-pipeline.config';
 import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
+import { KIT_ADJUSTMENTS_TRANSLATION_CALL } from '../domain/mc-text-calls';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
 import { McKitCandidate, McKitCandidateKind } from '../entities/mc-kit-candidate.entity';
 import { recordKitProviderCost } from './mc-kit-costs';
@@ -119,6 +122,9 @@ export async function listStyleReferences(
   }
   return files;
 }
+
+/** Consumidor da tradução do ajuste no log (`AI operation started|finished|failed`). */
+const KIT_ADJUSTMENTS_TRANSLATION_FEATURE = 'commercials.kit-adjustments-translation';
 
 /** Candidatos por rodada (MC_KIT_CANDIDATE_COUNT), sempre dentro de 4..6. */
 export function candidateCount(env: NodeJS.ProcessEnv = process.env): number {
@@ -567,25 +573,24 @@ export class McKitCandidatesService {
     if (!apiKey || (process.env.MC_KIT_PROVIDER ?? 'mock') === 'mock') return textPt;
     try {
       const openai = new OpenAI({ apiKey });
-      const model = this.config.get<string>('OPENAI_FAST_TEXT_MODEL', 'gpt-4o-mini');
+      const model = getOpenAiModelConfig(this.config).fastTextModel;
       const response = await withOpenAiRetry(() =>
-        openai.chat.completions.create(
-          {
-            model,
-            max_tokens: 300,
-            messages: [
-              {
-                role: 'system',
-                content:
-                  'Translate the user instruction about a cartoon mascot from Brazilian ' +
-                  'Portuguese to English. It will be appended to an image generation prompt. ' +
-                  'Reply with the translation only, imperative and literal, no quotes.',
-              },
-              { role: 'user', content: textPt },
-            ],
-          },
-          OPENAI_NO_SDK_RETRY,
-        ),
+        callProductChat({
+          openai,
+          logger: this.logger,
+          feature: KIT_ADJUSTMENTS_TRANSLATION_FEATURE,
+          spec: { model, ...KIT_ADJUSTMENTS_TRANSLATION_CALL },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Translate the user instruction about a cartoon mascot from Brazilian ' +
+                'Portuguese to English. It will be appended to an image generation prompt. ' +
+                'Reply with the translation only, imperative and literal, no quotes.',
+            },
+            { role: 'user', content: textPt },
+          ],
+        }),
       );
       if (kit) {
         const cost = kitProviderCost({

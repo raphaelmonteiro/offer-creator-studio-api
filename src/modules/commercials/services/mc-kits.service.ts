@@ -14,10 +14,12 @@ import {
   ModerationResult,
 } from '../../../shared/providers/moderation.provider';
 import { sniffImageMime } from '../../../shared/providers/gemini-image.provider';
-import { OPENAI_NO_SDK_RETRY, withOpenAiRetry } from '../../../shared/providers/openai-errors';
+import { withOpenAiRetry } from '../../../shared/providers/openai-errors';
 import { MC_EVENTS_CHANNEL } from '../../../shared/events/animation-events.service';
 import { AnimationQueueService, QUEUES } from '../../../shared/queue/animation-queue.service';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
+import { getOpenAiModelConfig } from '../../ai/config/openai-models.config';
+import { callProductChat } from '../../ai/utils/ai-product-chat.util';
 import { ClientsService } from '../../clients/clients.service';
 import { MascotsService, MascotView } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
@@ -43,6 +45,7 @@ import {
   type KitSheetTranslation,
 } from '../domain/kit-prompts';
 import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
+import { KIT_SHEET_TRANSLATION_CALL } from '../domain/mc-text-calls';
 import { CreateKitDto } from '../dto/create-kit.dto';
 import { ApproveKitDto, RegenerateReferenceDto, UpdateKitSheetDto } from '../dto/kit-actions.dto';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -56,6 +59,29 @@ import { McStorageService } from './mc-storage.service';
 
 export { MC_IMAGE_EXPIRE_S } from './mc-kit-candidates.service';
 export type { KitReferenceView, McKitView } from './mc-kit-view.service';
+
+/** Consumidor da tradução da ficha do kit no log (`AI operation started|finished|failed`). */
+const KIT_SHEET_TRANSLATION_FEATURE = 'commercials.kit-sheet-translation';
+
+/** Saída estrita da tradução da ficha: as quatro listas e o estilo em pt-BR. */
+const SHEET_TRANSLATION_RESPONSE_FORMAT: OpenAI.ResponseFormatJSONSchema = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'kit_sheet_translation',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['traits', 'accessories', 'doNots', 'style'],
+      properties: {
+        traits: { type: 'array', items: { type: 'string' } },
+        accessories: { type: 'array', items: { type: 'string' } },
+        doNots: { type: 'array', items: { type: 'string' } },
+        style: { type: 'string' },
+      },
+    },
+  },
+};
 
 /**
  * Fluxo REAL do kit do personagem (plano §4), substituindo o stub da Fase 0:
@@ -864,51 +890,33 @@ export class McKitsService {
     apiKey: string,
   ): Promise<KitSheetTranslation> {
     const openai = new OpenAI({ apiKey });
-    const model = this.config.get<string>('OPENAI_FAST_TEXT_MODEL', 'gpt-4o-mini');
+    const model = getOpenAiModelConfig(this.config).fastTextModel;
     const response = await withOpenAiRetry(() =>
-      openai.chat.completions.create(
-        {
-          model,
-          max_tokens: 900,
-          response_format: {
-            type: 'json_schema',
-            json_schema: {
-              name: 'kit_sheet_translation',
-              strict: true,
-              schema: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['traits', 'accessories', 'doNots', 'style'],
-                properties: {
-                  traits: { type: 'array', items: { type: 'string' } },
-                  accessories: { type: 'array', items: { type: 'string' } },
-                  doNots: { type: 'array', items: { type: 'string' } },
-                  style: { type: 'string' },
-                },
-              },
-            },
+      callProductChat({
+        openai,
+        logger: this.logger,
+        feature: KIT_SHEET_TRANSLATION_FEATURE,
+        spec: { model, ...KIT_SHEET_TRANSLATION_CALL },
+        responseFormat: SHEET_TRANSLATION_RESPONSE_FORMAT,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Translate a cartoon mascot character sheet from English to Brazilian ' +
+              'Portuguese. Keep the SAME number of items in each list, in the same order. ' +
+              'Translate hex color codes as-is. Reply with JSON only.',
           },
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Translate a cartoon mascot character sheet from English to Brazilian ' +
-                'Portuguese. Keep the SAME number of items in each list, in the same order. ' +
-                'Translate hex color codes as-is. Reply with JSON only.',
-            },
-            {
-              role: 'user',
-              content: JSON.stringify({
-                traits: desc.traits,
-                accessories: desc.accessories ?? [],
-                doNots: desc.doNots,
-                style: desc.style,
-              }),
-            },
-          ],
-        },
-        OPENAI_NO_SDK_RETRY,
-      ),
+          {
+            role: 'user',
+            content: JSON.stringify({
+              traits: desc.traits,
+              accessories: desc.accessories ?? [],
+              doNots: desc.doNots,
+              style: desc.style,
+            }),
+          },
+        ],
+      }),
     );
     const cost = kitProviderCost({
       call: 'sheet_translation',
