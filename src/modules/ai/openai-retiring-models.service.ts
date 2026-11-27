@@ -17,7 +17,7 @@ const MODEL_VARS = [
   ...PRODUCT_AI_MODEL_VARS,
 ];
 
-/** Variáveis do fallback DALL-E, sem efeito depois da task 1.14 (`dall-e-3` foi desligado em 2026-05-12). */
+/** Variáveis do fallback DALL-E, sem efeito depois da task 1.14 (o `dall-e-3` está desligado, conferido na task 1.1). */
 const DALLE_VARS = ['OPENAI_ENABLE_DALLE_FALLBACK', 'OPENAI_DALLE_FALLBACK_MODEL'];
 
 /**

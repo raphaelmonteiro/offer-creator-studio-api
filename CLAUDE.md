@@ -41,8 +41,11 @@ BASE_URL         # Backend base URL used in email verification links
 
 # AI integrations (ai module)
 OPENAI_API_KEY                # OpenAI (text/vision/image/embeddings)
-OPENAI_TEXT_MODEL             # default gpt-4o
-OPENAI_FAST_TEXT_MODEL        # default gpt-4o-mini
+OPENAI_TEXT_MODEL             # default gpt-6-luna: Gerar template, assistente de elemento, template por imagem e em camadas,
+                              # layout social e plano de montagem (config/openai-models.config.ts); gpt-4o volta o grupo (sai do ar em 2027-01-14)
+OPENAI_FAST_TEXT_MODEL        # default gpt-6-luna: roteiro do mascote, traduções dos comerciais e intenção da imagem do template
+MC_DIRECTOR_MODEL / MC_KIT_VISION_MODEL / EAN_JUDGE_MODEL_A (+ EAN_JUDGE_MODEL_B, que vale o A)
+                              # default gpt-6.1-terra, sem herdar OPENAI_TEXT_MODEL (config/openai-strong-models.config.ts); vazio vale o padrão
 OPENAI_SPELLCHECK_MODEL / OPENAI_CATEGORIZATION_MODEL / OPENAI_NAME_PARSER_MODEL / OPENAI_TRANSLATION_MODEL
                               # as 4 features de texto do encarte: default gpt-6-luna; NÃO herdam OPENAI_TEXT_MODEL / OPENAI_FAST_TEXT_MODEL
 OPENAI_GALLERY_VISION_MODEL   # leitura da foto da Galeria: default gpt-6.1-terra
@@ -50,9 +53,11 @@ OPENAI_<SPELLCHECK|CATEGORIZATION|NAME_PARSER|GALLERY_VISION|TRANSLATION>_TIMEOU
                               # prazo por chamada das 5 (30/60/60/60/10 s por padrão); sem repetição do SDK; NÃO herdam OPENAI_TIMEOUT_MS
 AI_SPELLCHECK_CONCURRENCY / AI_SPELLCHECK_ENABLED
                               # ortografia: chamadas em paralelo por revisão (padrão 4) e liga/desliga (ausente = ligada)
-OPENAI_IMAGE_MODEL            # default gpt-image-2.5-sunburst (+ OPENAI_IMAGE_PREVIEW_MODEL, default gpt-image-2.5-flare)
+OPENAI_IMAGE_MODEL            # default gpt-image-2.6-sunburst (+ OPENAI_IMAGE_PREVIEW_MODEL, default gpt-image-2.6-flare); vazio vale o padrão
 OPENAI_IMAGE_*                # quality, format, concurrency, retry, cost knobs
-OPENAI_ENABLE_DALLE_FALLBACK  # opt-in DALL-E 3 fallback
+OPENAI_ENABLE_DALLE_FALLBACK  # SEM EFEITO desde a change 42 (o fallback DALL-E saiu e o dall-e-3 está desligado); o aviso ao subir pede para tirar a linha
+# O backend/.env.example é o PERFIL DE PRODUÇÃO (todas as variáveis de IA e de função, valor de produção, efeito e custo);
+# o docker-compose.yml local o sobrepõe com mock; src/common/config/env-example.guard.spec.ts trava variável sem linha, linha sem leitor e segredo com valor.
 PIXABAY_API_KEY               # product image search
 REPLICATE_API_TOKEN           # SAM image segmentation
 ADMIN_API_TOKEN               # gates /ai/gallery/* admin routes (x-admin-token header)
@@ -70,8 +75,7 @@ DOTCOMPANY_RESERVE_CREDITS    # abaixo disso os jobs em lote param; o encarte co
 DOTCOMPANY_ALERT_CREDITS / DOTCOMPANY_ALERT_EMAIL / DOTCOMPANY_BALANCE_REFRESH_MIN
 EAN_IMPORT_RUNNER_ENABLED / EAN_IMPORT_DEFAULT_CAP_CREDITS
 EAN_FLYER_RESOLVE_ENABLED / EAN_FLYER_RESOLVE_TIMEOUT_MS
-EAN_ANCHOR_LINKER_MODE        # fase 2 (off | measure | write), default off
-EAN_JOB_RUNNER_ENABLED        # pipeline antigo de vínculo EAN por juízes — default false
+EAN_JOB_RUNNER_ENABLED        # pipeline antigo de vínculo EAN por juízes (Terra, preço da tabela única) — default false
 
 # Comerciais com mascote (módulo commercials) — bloco completo em .env.example
 MC_ENABLED                    # liga rotas e consumers; sem isso as rotas respondem 404 MC_DISABLED
@@ -82,7 +86,7 @@ MC_FORMATS                    # formatos novos admitidos (talking_art, offer_car
                               # 'scenes' sempre passa; token desconhecido derruba o boot (parseMcFormats)
 MC_TALK_ENGINE_ECONOMICO / _PREMIUM / _LOGO
                               # "modelo fal | US$/s | máx. s por chamada" — motor de fala por tier e origem
-GEMINI_IMAGE_MODEL_REFS       # modelo das referências do kit (default GEMINI_IMAGE_MODEL)
+GEMINI_IMAGE_MODEL_REFS       # modelo das referências do kit (vazio = nano-banana-pro-preview, GEMINI_IMAGE_MODEL em shared/providers/gemini-image.provider.ts)
 MC_KIT_PRICES                 # tarifas do custo registrado do kit: "modelo|US$/imagem|US$/1M entrada|US$/1M saída",
                               # vírgula entre modelos; vazio = tabela padrão (domain/mc-kit-costs.ts); substitui/acrescenta
                               # por modelo; mal escrita derruba o boot
@@ -769,7 +773,7 @@ Executor v2 (`pipelineVersion = 2`) para projetos novos com `MC_PIPELINE_V2=all`
 (`identityMode = logo_as_is`), gate de boca (visão; `MOUTH_NOT_LEGIBLE`, `MOUTH_GATE_UNDECIDED` +
 `acceptMouthRisk`) e tile com alfa (recorte do rosto ≥ 60%, 1:1–3:4, ≥ 720 px; rosto mais largo que 5:3 fica
 abaixo de 60% com `tile.faceBelowMinimum` e aviso, sem bloquear) usado pelos motores de fala.
-**Custo do kit** (tarefa 2.6): cada chamada paga (descrição canônica gpt-4o pelos tokens do `usage`, referências e
+**Custo do kit** (tarefa 2.6): cada chamada paga (descrição canônica em `MC_KIT_VISION_MODEL`, padrão gpt-6.1-terra, pelos tokens do `usage`, referências e
 candidatos pelo modelo efetivo, gate de boca, variante, traduções) vira evento `provider_cost` em `mc_events` e
 soma em `mc_character_kits.providerCostUsd` (numeric(12,6)); o asset gerado leva `providerCostUsd`/`usage` no
 metadata. `GET kits/:id` devolve `providerCostUsd` (número) e `providerCosts[]` (uma linha por chamada); a lista
@@ -946,15 +950,15 @@ frontend resends the full conversation history on every call.
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| POST | `/spell-check` | JWT | Batch spell-check of product `name`/`observation`/`badgeText` (gpt-4o-mini) |
-| POST | `/product-categorization` | JWT | Batch categorize products (gpt-4o-mini) |
+| POST | `/spell-check` | JWT | Batch spell-check of product `name`/`observation`/`badgeText` (gpt-6-luna) |
+| POST | `/product-categorization` | JWT | Batch categorize products (gpt-6-luna) |
 | POST | `/flyer-assembly-plan` | JWT | Auto-assembly plan for a flyer |
 | GET | `/image-search` | JWT | Search product images on Pixabay (term translated to EN) |
 | POST | `/image-download` | JWT | Download a chosen image and save via UploadsService |
 | POST | `/product-image-match` | JWT | Match a product to the best gallery image (vector similarity) |
 | POST | `/product-image-candidates` | JWT | Return top-N gallery candidates for a product |
-| POST | `/social-section-layout` | JWT | Auto-layout for a social art section (gpt-4o) |
-| POST | `/template-generate` | JWT | Multi-turn assisted template generation (gpt-4o vision) |
+| POST | `/social-section-layout` | JWT | Auto-layout for a social art section (gpt-6-luna) |
+| POST | `/template-generate` | JWT | Multi-turn assisted template generation (gpt-6-luna vision) |
 | POST | `/template-element` | JWT | Assist a single template element |
 | POST | `/template-image-generate` | JWT | Generate a template from an image |
 | POST | `/template-layers-generate` | JWT | Generate a layered template |
@@ -974,7 +978,7 @@ frontend resends the full conversation history on every call.
 | `product-categorization.service` | Product categorization in batches |
 | `flyer-assembly-plan.service` | Builds the flyer assembly plan |
 | `pixabay.service` | Pixabay search + EN translation + download/save |
-| `openai-image.service` | Image generate/edit wrapper — uses `options.model` when the caller passes one, otherwise the model of the mode (`imageModel` for `final`, `imagePreviewModel` for `preview`); no chained model fallback inside the service. The DALL-E fallback (`legacy` asset, `OPENAI_DALLE_FALLBACK_MODEL`) lives in the callers `template-generate.service.ts:274` and `template-element-assistant.service.ts:320`, enabled by `OPENAI_ENABLE_DALLE_FALLBACK`. `input_fidelity` only sent for `gpt-image-1.5`/`gpt-image-1-mini`; concurrency limit, retry/backoff, cost metrics |
+| `openai-image.service` | Image generate/edit wrapper — uses `options.model` when the caller passes one, otherwise the model of the mode (`imageModel` for `final`, `imagePreviewModel` for `preview`); no chained model fallback inside the service and no DALL-E fallback (removed in change 42). `input_fidelity` only sent for `gpt-image-1.5`/`gpt-image-1-mini`; concurrency limit, retry/backoff, cost metrics |
 | `template-generate.service` | Chat template generation; resolves `GENERATE: <prompt>` placeholders into generated images saved to the bucket |
 | `template-element-assistant.service` | Per-element template assistant |
 | `template-image-generator.service` / `template-layers-generator.service` | Template-from-image / layered template generation |

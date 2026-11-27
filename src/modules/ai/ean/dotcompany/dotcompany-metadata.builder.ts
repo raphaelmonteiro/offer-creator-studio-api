@@ -20,7 +20,7 @@ function quantityFrom(product: DotcompanyProduct): ProductMetadata['quantity'] {
 /**
  * Monta o `ProductMetadata` de uma foto importada da DotCompany SEM visão.
  *
- * O parser de nomes (gpt-4o-mini, em lote) dá categoria da taxonomia,
+ * O parser de nomes (`OPENAI_NAME_PARSER_MODEL`, padrão gpt-6-luna, em lote) dá categoria da taxonomia,
  * quantidade, embalagem e variante; por cima vão os dados do catálogo — título,
  * marca e o EAN exato (a DotCompany é consultada pelo próprio EAN). Se o parser
  * falhar ou estiver desligado, sai um metadata mínimo determinístico.
