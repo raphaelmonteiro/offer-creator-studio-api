@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -28,6 +29,10 @@ function cand(imageId: string, filename: string): EanCandidateRecord {
   };
 }
 
+const SEM_IMAGENS = { referencia: null, candidatas: [], detail: 'low' as const };
+const NONE = '{"decision":"none","images":[],"labels":[],"reason":"x"}';
+const INVALIDA = 'não é json';
+
 describe('EanJudgeService', () => {
   let dir: string;
 
@@ -48,7 +53,10 @@ describe('EanJudgeService', () => {
   function criar(
     respostas: string[],
     env: Record<string, string> = {},
-    usage = { prompt_tokens: 2000, completion_tokens: 150 },
+    usage: { prompt_tokens: number; completion_tokens: number } | null = {
+      prompt_tokens: 2000,
+      completion_tokens: 150,
+    },
   ) {
     const vars: Record<string, string> = { OPENAI_API_KEY: 'sk-test', UPLOAD_DEST: dir, ...env };
     const service = new EanJudgeService({ get: (k: string, d?: string) => vars[k] ?? d } as never);
@@ -56,7 +64,7 @@ describe('EanJudgeService', () => {
     for (const r of respostas) {
       create.mockResolvedValueOnce({
         choices: [{ message: { content: r } }],
-        usage,
+        ...(usage ? { usage } : {}),
       });
     }
     (service as unknown as { openai: unknown }).openai = { chat: { completions: { create } } };
@@ -216,5 +224,130 @@ describe('EanJudgeService', () => {
     );
     const j = await service.julgar('A', input, await service.prepararImagens(input));
     expect(j.costUsd).toBeCloseTo(0.008, 8);
+  });
+
+  describe('modelos e parâmetros por família', () => {
+    it('Padrão Terra: os dois juízes chamam gpt-6.1-terra com esforço low, teto da família nova e prazo', async () => {
+      const { service, create } = criar([NONE, NONE]);
+
+      const a = await service.julgar('A', input, SEM_IMAGENS);
+      const b = await service.julgar('B', input, SEM_IMAGENS);
+
+      expect([a.model, b.model]).toEqual(['gpt-6.1-terra', 'gpt-6.1-terra']);
+      const [body, options] = create.mock.calls[0];
+      expect(body).toEqual({
+        model: 'gpt-6.1-terra',
+        reasoning_effort: 'low',
+        max_completion_tokens: 4096,
+        response_format: { type: 'json_object' },
+        messages: expect.any(Array),
+      });
+      expect(options).toEqual({ timeout: 60_000, maxRetries: 0 });
+    });
+
+    it('Volta ao modelo de hoje: max_tokens 700 e temperature 0, sem esforço nem teto novo', async () => {
+      const { service, create } = criar([NONE], { EAN_JUDGE_MODEL_A: 'gpt-4o' });
+
+      await service.julgar('A', input, SEM_IMAGENS);
+
+      const [body, options] = create.mock.calls[0];
+      expect(body).toEqual({
+        model: 'gpt-4o',
+        max_tokens: 700,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: expect.any(Array),
+      });
+      expect(options).toEqual({ timeout: 60_000, maxRetries: 0 });
+    });
+
+    it('Juiz B segue o A quando a variável do B está vazia', async () => {
+      const { service } = criar([NONE], { EAN_JUDGE_MODEL_A: 'gpt-6-luna', EAN_JUDGE_MODEL_B: '' });
+      expect((await service.julgar('B', input, SEM_IMAGENS)).model).toBe('gpt-6-luna');
+    });
+
+    it('Variável vazia ou só com espaços vale o padrão Terra nos dois juízes', async () => {
+      const { service } = criar([NONE, NONE], {
+        EAN_JUDGE_MODEL_A: '   ',
+        EAN_JUDGE_MODEL_B: '  ',
+      });
+      expect((await service.julgar('A', input, SEM_IMAGENS)).model).toBe('gpt-6.1-terra');
+      expect((await service.julgar('B', input, SEM_IMAGENS)).model).toBe('gpt-6.1-terra');
+    });
+
+    it('Identidade nova: a versão muda quando o modelo troca de gpt-4o para gpt-6.1-terra', () => {
+      const antiga = criar([], { EAN_JUDGE_MODEL_A: 'gpt-4o' }).service.version();
+      expect(criar([]).service.version()).not.toBe(antiga);
+    });
+  });
+
+  describe('custo e disponibilidade (requisito "Custo dos juízes de EAN")', () => {
+    it('Modelo sem preço: o juiz fica indisponível e nenhuma chamada sai', async () => {
+      const { service, create } = criar([], { EAN_JUDGE_MODEL_A: 'gpt-5-mini' });
+      expect(service.isEnabled()).toBe(false);
+
+      const j = await service.julgar('A', input, SEM_IMAGENS);
+
+      expect(create).not.toHaveBeenCalled();
+      expect(j).toMatchObject({
+        decision: 'none',
+        costUsd: 0,
+        error: 'modelo sem preço na tabela: gpt-5-mini',
+      });
+    });
+
+    it('Modelo sem preço: o log traz o motivo, uma vez, ao criar o juiz', () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      criar([], { EAN_JUDGE_MODEL_A: 'gpt-5-mini' });
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      warn.mockRestore();
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('modelo sem preço na tabela (gpt-5-mini)');
+    });
+
+    it('Juiz B sem preço deixa o par indisponível; o A, com preço, ainda julga', async () => {
+      const { service, create } = criar([NONE], { EAN_JUDGE_MODEL_B: 'gpt-5-mini' });
+      expect(service.isEnabled()).toBe(false);
+
+      const a = await service.julgar('A', input, SEM_IMAGENS);
+      const b = await service.julgar('B', input, SEM_IMAGENS);
+
+      expect(a.error).toBeUndefined();
+      expect(b.error).toBe('modelo sem preço na tabela: gpt-5-mini');
+      expect(create).toHaveBeenCalledTimes(1);
+    });
+
+    it('Com a chave e os dois modelos na tabela o juiz está disponível; sem a chave, não', () => {
+      expect(criar([]).service.isEnabled()).toBe(true);
+      expect(criar([], { EAN_JUDGE_MODEL_A: 'gpt-4o' }).service.isEnabled()).toBe(true);
+      const semChave = { OPENAI_API_KEY: '', UPLOAD_DEST: dir } as Record<string, string>;
+      const service = new EanJudgeService({
+        get: (k: string, d?: string) => semChave[k] ?? d,
+      } as never);
+      expect(service.isEnabled()).toBe(false);
+    });
+
+    it('Resposta sem uso em Terra: o custo é o teto de saída (4.096) a US$ 5,00 por milhão, nunca zero', async () => {
+      const { service } = criar([INVALIDA], { EAN_JUDGE_MAX_RETRIES: '0' }, null);
+      const j = await service.julgar('A', input, SEM_IMAGENS);
+      expect(j.costUsd).toBeCloseTo((4096 * 5) / 1e6, 8);
+    });
+
+    it('Resposta sem uso na volta: o teto de saída de hoje (700) a US$ 10 por milhão', async () => {
+      const env = { EAN_JUDGE_MODEL_A: 'gpt-4o', EAN_JUDGE_MAX_RETRIES: '0' };
+      const { service } = criar([INVALIDA], env, null);
+      const j = await service.julgar('A', input, SEM_IMAGENS);
+      expect(j.costUsd).toBeCloseTo((700 * 10) / 1e6, 8);
+    });
+
+    it('Cada tentativa soma o seu custo: a primeira com uso e a repetição sem uso', async () => {
+      const { service, create } = criar([INVALIDA]);
+      create.mockResolvedValueOnce({ choices: [{ message: { content: INVALIDA } }] });
+
+      const j = await service.julgar('A', input, SEM_IMAGENS);
+
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(j.costUsd).toBeCloseTo((2000 * 1 + 150 * 5) / 1e6 + (4096 * 5) / 1e6, 8);
+    });
   });
 });

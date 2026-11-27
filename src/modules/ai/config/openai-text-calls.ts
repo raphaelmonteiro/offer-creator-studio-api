@@ -73,6 +73,18 @@ export const TEMPLATE_LAYERS_COMPOSITION_CALL: TextCallPoint = {
   timeoutMs: 90_000,
 };
 
+/**
+ * Juízes de EAN (A e B): visão com `json_object`, `temperature: 0` na família de hoje. O teto de saída também é o
+ * que um julgamento sem `usage` custa ao teto em dólar do job (`custoDe`), por isso os dois tetos são obrigatórios.
+ */
+export const EAN_JUDGE_CALL: TextCallPoint & { legacyMaxTokens: number } = {
+  effort: 'low',
+  temperature: 0,
+  legacyMaxTokens: 700,
+  maxCompletionTokens: 4096,
+  timeoutMs: 60_000,
+};
+
 /** Ações do assistente de elemento: JSON estrito, com imagens possíveis. */
 export const TEMPLATE_ELEMENT_CALL: TextCallPoint = {
   effort: 'low',

@@ -103,7 +103,10 @@ export class EanItemPipelineService implements EanItemProcessor {
       custo += ref.costUsd;
 
       // 5) Juízes independentes.
-      if (!this.juiz.isEnabled()) throw new Error('juiz indisponível: OPENAI_API_KEY ausente');
+      if (!this.juiz.isEnabled())
+        throw new Error(
+          'juiz indisponível: OPENAI_API_KEY ausente ou modelo sem preço (ver o aviso do log)',
+        );
       const input = {
         itemId: item.id,
         ean: item.ean,

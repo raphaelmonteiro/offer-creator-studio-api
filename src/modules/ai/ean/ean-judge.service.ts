@@ -5,8 +5,10 @@ import * as fs from 'fs/promises';
 import OpenAI from 'openai';
 import * as path from 'path';
 import * as sharp from 'sharp';
-import { getOpenAiModelConfig } from '../config/openai-models.config';
-import { llmCostUsdIncludingLegacy } from '../openai-llm-pricing';
+import { isGpt6Family } from '../config/openai-chat-params';
+import { EAN_JUDGE_CALL } from '../config/openai-text-calls';
+import { getStrongModelConfig } from '../config/openai-strong-models.config';
+import { llmCostUsdIncludingLegacy, llmPricesIncludingLegacy } from '../openai-llm-pricing';
 import {
   buildEanJudgeSystemPrompt,
   buildEanJudgeUserText,
@@ -14,7 +16,7 @@ import {
   JudgeOutputSchema,
   JudgeVariant,
 } from '../prompts/ean-judge.prompts';
-import { withAiLogging } from '../utils/ai-telemetry.util';
+import { callProductChat } from '../utils/ai-product-chat.util';
 import type { EanCandidateRecord, EanReferenceRecord, JudgmentRecord } from './ean-match.types';
 import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 
@@ -48,22 +50,31 @@ export class EanJudgeService {
   private readonly openai: OpenAI | null;
   private readonly modelA: string;
   private readonly modelB: string;
+  private readonly unpricedModels: string[];
   private readonly maxRetries: number;
   private readonly uploadDest: string;
 
   constructor(configService: ConfigService) {
-    const models = getOpenAiModelConfig(configService);
-    this.modelA = configService.get<string>('EAN_JUDGE_MODEL_A') || models.textModel;
-    this.modelB = configService.get<string>('EAN_JUDGE_MODEL_B') || this.modelA;
+    const models = getStrongModelConfig(configService);
+    this.modelA = models.eanJudgeModelA;
+    this.modelB = models.eanJudgeModelB;
     const r = Number.parseInt(configService.get<string>('EAN_JUDGE_MAX_RETRIES', '1'), 10);
     this.maxRetries = Number.isFinite(r) && r >= 0 ? Math.min(r, 3) : 1;
     this.uploadDest = resolveUploadsDir(configService.get<string>('UPLOAD_DEST'));
     const apiKey = configService.get<string>('OPENAI_API_KEY');
     this.openai = apiKey ? new OpenAI({ apiKey }) : null;
+    this.unpricedModels = [...new Set([this.modelA, this.modelB])].filter(semPreco);
+    if (this.unpricedModels.length > 0) {
+      this.logger.warn(
+        `Juiz de EAN indisponível: modelo sem preço na tabela (${this.unpricedModels.join(', ')}); ` +
+          'o job tem teto em dólar e custo desconhecido nunca vira zero. Ajuste EAN_JUDGE_MODEL_A/B ou a tabela de preços.',
+      );
+    }
   }
 
+  /** Chave da OpenAI presente e os dois modelos com preço na tabela (sem preço o teto em dólar do job não vale). */
   isEnabled(): boolean {
-    return this.openai !== null;
+    return this.openai !== null && this.unpricedModels.length === 0;
   }
 
   /**
@@ -118,64 +129,18 @@ export class EanJudgeService {
       model,
       costUsd: 0,
     };
-    if (!this.openai) {
-      return {
-        ...base,
-        decision: 'none',
-        imageIds: [],
-        labelReadout: [],
-        reason: '',
-        error: 'OpenAI não configurada',
-      };
-    }
+    const indisponivel = this.motivoIndisponivel(model);
+    if (indisponivel) return { ...base, ...semDecisao(), error: indisponivel };
 
     const ordem = embaralhar(imagens.candidatas, `${input.itemId}:${variant}`);
     const letraParaId = new Map(ordem.map((img, i) => [LETRAS[i], img.imageId as string]));
-    const texto = buildEanJudgeUserText({
-      ean: input.ean,
-      descricaoErp: input.descricao,
-      referencia: input.reference,
-      temFotoReferencia: Boolean(imagens.referencia),
-      letras: [...letraParaId.keys()],
-    });
-
-    const content: OpenAI.Chat.ChatCompletionContentPart[] = [{ type: 'text', text: texto }];
-    if (imagens.referencia) {
-      content.push({
-        type: 'image_url',
-        image_url: { url: imagens.referencia.dataUrl, detail: imagens.detail },
-      });
-    }
-    ordem.forEach((img, i) => {
-      content.push({ type: 'text', text: `Candidata ${LETRAS[i]}:` });
-      content.push({ type: 'image_url', image_url: { url: img.dataUrl, detail: imagens.detail } });
-    });
+    const content = montarConteudo(input, imagens, ordem, [...letraParaId.keys()]);
 
     let custo = 0;
     let ultimoErro = '';
     for (let tentativa = 0; tentativa <= this.maxRetries; tentativa++) {
-      const resp = (await withAiLogging(
-        this.logger,
-        {
-          feature: 'ean-judge',
-          endpoint: 'chat.completions',
-          model,
-          mode: `${variant}/${imagens.detail}`,
-        },
-        () =>
-          this.openai!.chat.completions.create({
-            model,
-            temperature: 0,
-            max_tokens: 700,
-            response_format: { type: 'json_object' },
-            messages: [
-              { role: 'system', content: buildEanJudgeSystemPrompt(variant) },
-              { role: 'user', content },
-            ],
-          }),
-      )) as OpenAI.Chat.ChatCompletion;
-      // Modelo sem preço ou resposta sem `usage`: 0 até a task 1.9 (indisponível sem preço, teto de saída sem uso).
-      custo += llmCostUsdIncludingLegacy(model, resp.usage) ?? 0;
+      const resp = await this.chamar(variant, model, imagens.detail, content);
+      custo += custoDe(model, resp.usage);
 
       const parsed = interpretar(resp.choices[0]?.message?.content ?? '', letraParaId);
       if ('erro' in parsed) {
@@ -186,15 +151,33 @@ export class EanJudgeService {
       return { ...base, ...parsed, costUsd: custo };
     }
 
-    return {
-      ...base,
-      decision: 'none',
-      imageIds: [],
-      labelReadout: [],
-      reason: '',
-      costUsd: custo,
-      error: ultimoErro || 'saída inválida',
-    };
+    return { ...base, ...semDecisao(), costUsd: custo, error: ultimoErro || 'saída inválida' };
+  }
+
+  /** Por que o juiz não chama o modelo, ou `null` quando pode chamar. */
+  private motivoIndisponivel(model: string): string | null {
+    if (!this.openai) return 'OpenAI não configurada';
+    return semPreco(model) ? `modelo sem preço na tabela: ${model}` : null;
+  }
+
+  private chamar(
+    variant: JudgeVariant,
+    model: string,
+    detail: 'low' | 'high',
+    content: OpenAI.Chat.ChatCompletionContentPart[],
+  ): Promise<OpenAI.Chat.ChatCompletion> {
+    return callProductChat({
+      openai: this.openai!,
+      logger: this.logger,
+      feature: 'ean-judge',
+      mode: `${variant}/${detail}`,
+      spec: { model, ...EAN_JUDGE_CALL },
+      messages: [
+        { role: 'system', content: buildEanJudgeSystemPrompt(variant) },
+        { role: 'user', content },
+      ],
+      responseFormat: { type: 'json_object' },
+    });
   }
 
   /**
@@ -227,6 +210,60 @@ export class EanJudgeService {
       return null;
     }
   }
+}
+
+/** Julgamento sem decisão: o item vai para revisão. */
+function semDecisao(): Pick<JudgmentRecord, 'decision' | 'imageIds' | 'labelReadout' | 'reason'> {
+  return { decision: 'none', imageIds: [], labelReadout: [], reason: '' };
+}
+
+/** O modelo não tem preço na tabela única (a família de hoje, só para a volta, tem). */
+function semPreco(model: string): boolean {
+  return llmPricesIncludingLegacy(model) === null;
+}
+
+/** Teto de saída da chamada do juiz no modelo: o que a OpenAI pode cobrar no máximo por uma resposta. */
+function tetoDeSaida(model: string): number {
+  return isGpt6Family(model) ? EAN_JUDGE_CALL.maxCompletionTokens : EAN_JUDGE_CALL.legacyMaxTokens;
+}
+
+/**
+ * Custo de uma chamada pela tabela única. Resposta sem `usage` (ou sem a contagem de entrada) conta pelo teto de
+ * saída ao preço de saída: o custo desconhecido nunca vira zero, porque entra no teto em dólar do job.
+ */
+function custoDe(model: string, usage: OpenAI.Completions.CompletionUsage | undefined): number {
+  const custo = llmCostUsdIncludingLegacy(model, usage);
+  if (custo !== null) return custo;
+  const preco = llmPricesIncludingLegacy(model)!;
+  return Math.round(tetoDeSaida(model) * preco.output) / 1e6;
+}
+
+/** Texto do pedido, a foto de referência e as candidatas na ordem embaralhada, cada uma com a sua letra. */
+function montarConteudo(
+  input: JudgeInput,
+  imagens: { referencia: ImagemPronta | null; detail: 'low' | 'high' },
+  ordem: ImagemPronta[],
+  letras: string[],
+): OpenAI.Chat.ChatCompletionContentPart[] {
+  const texto = buildEanJudgeUserText({
+    ean: input.ean,
+    descricaoErp: input.descricao,
+    referencia: input.reference,
+    temFotoReferencia: Boolean(imagens.referencia),
+    letras,
+  });
+  const content: OpenAI.Chat.ChatCompletionContentPart[] = [{ type: 'text', text: texto }];
+  if (imagens.referencia) {
+    content.push({
+      type: 'image_url',
+      image_url: { url: imagens.referencia.dataUrl, detail: imagens.detail },
+    });
+  }
+  ordem.forEach((img, i) => {
+    content.push({ type: 'text', text: `Candidata ${LETRAS[i]}:` });
+    content.push({ type: 'image_url', image_url: { url: img.dataUrl, detail: imagens.detail } });
+  });
+  return content;
 }
 
 /**
