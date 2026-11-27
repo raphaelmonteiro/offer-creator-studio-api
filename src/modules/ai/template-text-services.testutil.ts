@@ -1,6 +1,8 @@
+import { ConfigService } from '@nestjs/config';
 import { TemplateElementAssistantService } from './template-element-assistant.service';
 import { TemplateGenerateService } from './template-generate.service';
 import { TemplateImageGeneratorService } from './template-image-generator.service';
+import { TemplateLayersGeneratorService } from './template-layers-generator.service';
 import {
   chatResponse,
   fakeConfig,
@@ -31,19 +33,29 @@ export function buildTemplateElement(env: Record<string, string> = {}) {
   );
 }
 
-/** Template por imagem: o provedor de imagem e o envio ao disco também simulados (sem chamada real). */
-export function buildTemplateImage(env: Record<string, string> = {}) {
+/** Serviço de template que também gera imagem: o provedor de imagem e o envio ao disco simulados (sem chamada real). */
+function withImageFakes<T extends object>(
+  Service: new (config: ConfigService, uploads: never, images: never) => T,
+  env: Record<string, string>,
+) {
   const images = {
     editImage: jest.fn().mockResolvedValue(GENERATED_IMAGE),
     generateImage: jest.fn().mockResolvedValue(GENERATED_IMAGE),
   };
   const uploads = { uploadFile: jest.fn().mockResolvedValue({ url: '/uploads/templates/x.png' }) };
   const built = withFakes(
-    (vars) =>
-      new TemplateImageGeneratorService(fakeConfig(vars), uploads as never, images as never),
+    (vars) => new Service(fakeConfig(vars), uploads as never, images as never),
     env,
   );
   return { ...built, images, uploads };
+}
+
+export function buildTemplateImage(env: Record<string, string> = {}) {
+  return withImageFakes(TemplateImageGeneratorService, env);
+}
+
+export function buildTemplateLayers(env: Record<string, string> = {}) {
+  return withImageFakes(TemplateLayersGeneratorService, env);
 }
 
 const GENERATED_IMAGE = {
@@ -84,4 +96,16 @@ export const CONFIGURATION_ANSWER = chatResponse({
 
 export const ACTIONS_ANSWER = chatResponse({
   content: JSON.stringify({ assistantMessage: 'Feito', actions: [] }),
+});
+
+/** Composição do template em camadas sem elementos: só o fundo é gerado. */
+export const COMPOSITION_ANSWER = chatResponse({
+  content: JSON.stringify({
+    palette: { primary: '#0044cc', secondary: '#ffcc00', dark: '#001133', light: '#ffffff' },
+    backgroundPrompt: 'blue gradient',
+    elements: [],
+    bodyBackground: { type: 'solid', color: '#ffffff' },
+    footerBackground: { type: 'solid', color: '#001133' },
+    assistantMessagePt: 'Camadas prontas',
+  }),
 });

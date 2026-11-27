@@ -661,7 +661,7 @@ export class AiController {
 
   @Post('template-layers-generate')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Gera template em camadas separadas via GPT-4o Image (Feature 6)' })
+  @ApiOperation({ summary: 'Gera template em camadas separadas via GPT Image (Feature 6)' })
   @ApiResponse({ status: 200, description: 'Camadas geradas com sucesso' })
   async templateLayersGenerate(@Body() dto: TemplateLayersGenerateRequestDto) {
     try {

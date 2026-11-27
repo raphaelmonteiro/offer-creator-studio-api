@@ -56,6 +56,23 @@ export const IMAGE_INTENT_CALL: TextCallPoint = {
   timeoutMs: 20_000,
 };
 
+/** Leitura das referências do template em camadas: `detail: high`, texto livre, sem `temperature` hoje. */
+export const TEMPLATE_LAYERS_REFERENCE_CALL: TextCallPoint = {
+  effort: 'low',
+  legacyMaxTokens: 400,
+  maxCompletionTokens: 3000,
+  timeoutMs: 60_000,
+};
+
+/** Composição do template em camadas (paleta e elementos): JSON estrito. */
+export const TEMPLATE_LAYERS_COMPOSITION_CALL: TextCallPoint = {
+  effort: 'low',
+  temperature: 0.4,
+  legacyMaxTokens: 1000,
+  maxCompletionTokens: 8000,
+  timeoutMs: 90_000,
+};
+
 /** Ações do assistente de elemento: JSON estrito, com imagens possíveis. */
 export const TEMPLATE_ELEMENT_CALL: TextCallPoint = {
   effort: 'low',
