@@ -11,26 +11,11 @@ import {
   exampleRequest,
   PICANHA_ID,
 } from '../domain/structure-suggestion.testutil';
-import type { StructureRequest } from '../domain/structure-suggestion.types';
 import { StructureAiFailure } from './flyer-pro-structure-ai.port';
-import { MOCK_SLOW_MS, MockFlyerProStructureAi } from './flyer-pro-structure-ai.mock';
+import { MOCK_SLOW_MS } from './flyer-pro-structure-ai.mock';
+import { makeMock, suggestionFor } from './flyer-pro-structure-ai.testutil';
 
 const OPTIONS = { timeoutMs: 25_000 };
-
-function makeMock() {
-  const sleep = jest.fn().mockResolvedValue(undefined);
-  return { mock: new MockFlyerProStructureAi(sleep), sleep };
-}
-
-/** A resposta do simulado para o retrato, já saneada como a rota a entrega. */
-async function suggestionFor(name: string, request: StructureRequest = exampleRequest()) {
-  const { mock } = makeMock();
-  const { suggestion } = await mock.suggest(
-    exampleAiRequest({ documentName: name, request }),
-    OPTIONS,
-  );
-  return sanitizeSuggestion(suggestion, sanitizeContext(request));
-}
 
 describe('MockFlyerProStructureAi: tabela fixa', () => {
   it('é o provedor simulado, sem chave nem preço, sem tokens', async () => {

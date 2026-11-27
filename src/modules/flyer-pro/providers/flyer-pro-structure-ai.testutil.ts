@@ -1,4 +1,12 @@
-import type { RawStructureSuggestion } from '../domain/structure-suggestion.types';
+import { exampleAiRequest } from '../domain/structure-ai-request.testutil';
+import { sanitizeSuggestion } from '../domain/structure-suggestion-sanitize';
+import { sanitizeContext } from '../domain/structure-suggestion-sanitize.testutil';
+import { exampleRequest } from '../domain/structure-suggestion.testutil';
+import type {
+  RawStructureSuggestion,
+  StructureRequest,
+} from '../domain/structure-suggestion.types';
+import { MockFlyerProStructureAi } from './flyer-pro-structure-ai.mock';
 import type { StructureResponsesClient } from './flyer-pro-structure-ai.real';
 
 /** Ajudantes dos testes do provedor real (só testes): o cliente da OpenAI simulado e as respostas de `/responses`. */
@@ -45,4 +53,19 @@ export function fakeResponsesClient(outcome: unknown = validResult()) {
   );
   const client = { responses: { create } } as unknown as StructureResponsesClient;
   return { client, create };
+}
+
+/** O provedor simulado sem espera real: o `sleep` é um espião que resolve na hora. */
+export function makeMock() {
+  const sleep = jest.fn().mockResolvedValue(undefined);
+  return { mock: new MockFlyerProStructureAi(sleep), sleep };
+}
+
+/** A resposta do simulado para o retrato (e o nome do encarte, com os marcadores), já saneada como a rota a entrega. */
+export async function suggestionFor(name: string, request: StructureRequest = exampleRequest()) {
+  const { mock } = makeMock();
+  const { suggestion } = await mock.suggest(exampleAiRequest({ documentName: name, request }), {
+    timeoutMs: 25_000,
+  });
+  return sanitizeSuggestion(suggestion, sanitizeContext(request));
 }
