@@ -135,9 +135,9 @@ TEMPLATE_SCENE_E2E_DB_URL     # só testes: banco descartável chroma_x_e2e (nun
 FLYER_PRO_STRUCTURE_AI_ENABLED  # só false desliga a rota (422 FLYER_PRO_STRUCTURE_AI_DISABLED)
 FLYER_PRO_STRUCTURE_AI_PROVIDER # real (OpenAI, gasta crédito; padrão do código) | mock (sem rede e sem custo; padrão do compose local; valor desconhecido cai em mock)
 FLYER_PRO_STRUCTURE_AI_MODEL    # gpt-6-luna; precisa ter preço em openai-llm-pricing.ts, senão 422 MODEL_PRICE_UNKNOWN
-FLYER_PRO_STRUCTURE_AI_EFFORT   # esforço de raciocínio: none | low | medium (padrão low; outro valor vira low)
+FLYER_PRO_STRUCTURE_AI_EFFORT   # esforço de raciocínio: none | low | medium (padrão medium; outro valor vira medium; padrão em config/structure-ai.config.ts; cerca de US$ 0,003 a 0,006 por pedido)
 FLYER_PRO_STRUCTURE_AI_TIMEOUT_MS
-                                # prazo da chamada ao provedor, vale para o mock também (padrão 25000); estourou, 503 TIMEOUT
+                                # prazo da chamada ao provedor, vale para o mock também (padrão 45000, em domain/flyer-pro.limits.ts; o proxy da frente da API precisa de 50 s); estourou, 503 TIMEOUT
 FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR
                                 # sugestões atendidas por encarte em 60 minutos (padrão 20); acima, 429 HOURLY_LIMIT
 FLYER_PRO_STRUCTURE_AI_MAX_HEROES
