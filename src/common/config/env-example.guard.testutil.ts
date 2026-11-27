@@ -1,5 +1,4 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import { listSourceFiles, SourceFile, stripComments } from './source-files.testutil';
 
 /**
  * Regras do teste de guarda do `.env.example` (capability backend-env-profile): quais variáveis o código lê e
@@ -64,24 +63,12 @@ export const DYNAMIC_PREFIXES = ['OPENAI_COST_', 'MC_TALK_ENGINE_'] as const;
 const SOURCE_SKIP_DIRS = new Set(['node_modules', 'migrations']);
 const TEST_FILE = /\.(spec|test|testutil|fixture)\.ts$/;
 
-export interface SourceFile {
-  rel: string;
-  text: string;
-}
-
 /** Os `.ts` de produção (e os ajudantes de harness) sob `dir`, sem testes, fixtures e migrations. */
-export function listSources(dir: string, root = dir): SourceFile[] {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return SOURCE_SKIP_DIRS.has(entry.name) ? [] : listSources(full, root);
-    if (!entry.name.endsWith('.ts') || TEST_FILE.test(entry.name)) return [];
-    const rel = path.relative(root, full).split(path.sep).join('/');
-    return [{ rel, text: fs.readFileSync(full, 'utf8') }];
+export function listSources(dir: string): SourceFile[] {
+  return listSourceFiles(dir, {
+    skipDirs: SOURCE_SKIP_DIRS,
+    skipFile: (name) => TEST_FILE.test(name),
   });
-}
-
-export function stripComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
 const CAPS_LITERAL = /(['"`])([A-Z][A-Z0-9_]{2,})\1/g;

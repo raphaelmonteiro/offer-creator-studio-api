@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { listSourceFiles } from '../../common/config/source-files.testutil';
 
 const SRC = path.join(__dirname, '..', '..');
 
@@ -77,19 +78,19 @@ const REMOVED_FILES = [
   'modules/template-scenes/domain/__fixtures__/director-plans-1.42-1.43.json',
 ];
 
-function sourcesUnder(dir: string): string[] {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return sourcesUnder(full);
-    return full.endsWith('.ts') && !full.endsWith('scene-removed-paths.spec.ts') ? [full] : [];
+/** Os `.ts` sob `modules/<pasta>` (ou `shared`), testes inclusos, menos este arquivo, com `rel` relativo a `src/`. */
+function sourcesUnder(...dir: string[]) {
+  return listSourceFiles(path.join(SRC, ...dir), {
+    root: SRC,
+    skipFile: (name) => name === 'scene-removed-paths.spec.ts',
   });
 }
 
 describe('Nenhum caminho de recomposição', () => {
   const files = [
-    ...sourcesUnder(path.join(SRC, 'modules', 'template-scenes')),
-    ...sourcesUnder(path.join(SRC, 'modules', 'ai')),
-    ...sourcesUnder(path.join(SRC, 'shared')),
+    ...sourcesUnder('modules', 'template-scenes'),
+    ...sourcesUnder('modules', 'ai'),
+    ...sourcesUnder('shared'),
   ];
 
   it('os arquivos da recomposição e da edição recortada não existem mais', () => {
@@ -102,8 +103,8 @@ describe('Nenhum caminho de recomposição', () => {
   });
 
   it.each(REMOVED)('nenhum arquivo de src/ cita "%s"', (name) => {
-    const hits = files.filter((file) => fs.readFileSync(file, 'utf8').includes(name));
-    expect(hits.map((file) => path.relative(SRC, file))).toEqual([]);
+    const hits = files.filter((file) => file.text.includes(name));
+    expect(hits.map((file) => file.rel)).toEqual([]);
   });
 
   it('o código da cena não envia mask ao provedor de imagem', () => {
@@ -121,8 +122,8 @@ describe('Nenhum caminho de recomposição', () => {
 
   it('a morfologia fica: os comerciais a usam (mc-cutout-*), com a mesma semântica', () => {
     expect(fs.existsSync(path.join(SRC, 'shared/image/morphology.ts'))).toBe(true);
-    const users = sourcesUnder(path.join(SRC, 'modules', 'commercials')).filter((file) =>
-      fs.readFileSync(file, 'utf8').includes('shared/image/morphology'),
+    const users = sourcesUnder('modules', 'commercials').filter((file) =>
+      file.text.includes('shared/image/morphology'),
     );
     expect(users.length).toBeGreaterThan(0);
   });

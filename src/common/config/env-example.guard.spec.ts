@@ -1,11 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import {
-  listSources,
-  profileProblems,
-  SourceFile,
-  TEST_ONLY_VARS,
-} from './env-example.guard.testutil';
+import { listSources, profileProblems, TEST_ONLY_VARS } from './env-example.guard.testutil';
+import { SourceFile } from './source-files.testutil';
 
 /**
  * Trava do `backend/.env.example` (capability backend-env-profile, D-orq-193): o que o código lê e o que o exemplo traz
