@@ -1,4 +1,11 @@
 import { ConfigService } from '@nestjs/config';
+import { readModelConfig } from './openai-product-features.config';
+
+/**
+ * Padrão de `OPENAI_TEXT_MODEL` e `OPENAI_FAST_TEXT_MODEL` (change 42, D-1): ausente, vazia ou só com espaços vale
+ * este. Os pontos que vão para `gpt-6.1-terra` têm variável própria (`openai-strong-models.config.ts`).
+ */
+export const DEFAULT_TEXT_MODEL = 'gpt-6-luna';
 
 export interface OpenAiModelConfig {
   textModel: string;
@@ -15,8 +22,8 @@ export interface OpenAiModelConfig {
 
 export function getOpenAiModelConfig(configService: ConfigService): OpenAiModelConfig {
   return {
-    textModel: configService.get<string>('OPENAI_TEXT_MODEL', 'gpt-4o'),
-    fastTextModel: configService.get<string>('OPENAI_FAST_TEXT_MODEL', 'gpt-4o-mini'),
+    textModel: readModelConfig(configService, 'OPENAI_TEXT_MODEL', DEFAULT_TEXT_MODEL),
+    fastTextModel: readModelConfig(configService, 'OPENAI_FAST_TEXT_MODEL', DEFAULT_TEXT_MODEL),
     imageModel: configService.get<string>('OPENAI_IMAGE_MODEL', 'gpt-image-2.5-sunburst'),
     imagePreviewModel: configService.get<string>(
       'OPENAI_IMAGE_PREVIEW_MODEL',

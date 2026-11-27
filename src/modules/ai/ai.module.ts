@@ -16,6 +16,7 @@ import { GalleryEmbeddingService } from './gallery-embedding.service';
 import { SocialSectionLayoutService } from './social-section-layout.service';
 import { BackgroundRemovalService } from './background-removal.service';
 import { MascotScriptService } from './mascot-script.service';
+import { OpenAiRetiringModelsWarning } from './openai-retiring-models.service';
 import { UploadsModule } from '../uploads/uploads.module';
 import { GalleryModule } from '../gallery/gallery.module';
 import { TaxonomyService } from './metadata/taxonomy/taxonomy.service';
@@ -74,6 +75,8 @@ import { FlyerEanResolutionService } from './ean/dotcompany/flyer-ean-resolution
     SocialSectionLayoutService,
     BackgroundRemovalService,
     MascotScriptService,
+    // aviso ao subir (API e worker) de variável de modelo que sai do ar em 2027-01-14 (change 42)
+    OpenAiRetiringModelsWarning,
     TaxonomyService,
     ImageMetadataService,
     ProductNameParserService,

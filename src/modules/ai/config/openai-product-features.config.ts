@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 /**
  * As cinco features de IA de produto que o encarte usa (change 01-upgrade-openai-product-models):
  * cada uma tem a sua variável de modelo e a sua variável de prazo. Nenhuma herda
- * `OPENAI_TEXT_MODEL`, `OPENAI_FAST_TEXT_MODEL` (que continuam valendo para o resto do backend)
+ * `OPENAI_TEXT_MODEL`, `OPENAI_FAST_TEXT_MODEL` (que valem para o resto do backend, change 42)
  * nem `OPENAI_TIMEOUT_MS` (180 s, do provedor de imagem do Template Pro).
  */
 export type ProductAiFeature =
@@ -59,6 +59,9 @@ const FEATURES: Record<ProductAiFeature, FeatureDefinition> = {
     defaultTimeoutMs: 10_000,
   },
 };
+
+/** Variáveis de modelo das cinco features (o aviso ao subir lê a lista). */
+export const PRODUCT_AI_MODEL_VARS: string[] = Object.values(FEATURES).map((def) => def.modelVar);
 
 /** Inteiro positivo da variável; ausente, vazio, zero, negativo ou não numérico vale o padrão. */
 export function readPositiveIntegerConfig(
