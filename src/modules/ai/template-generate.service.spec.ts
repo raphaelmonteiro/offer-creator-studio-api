@@ -67,6 +67,32 @@ describe('TemplateGenerateService (chat da configuração do template)', () => {
     });
   });
 
+  it('Falha no placeholder: uma única chamada de imagem, sem segunda tentativa em outro modelo, e a rota responde a falha de hoje', async () => {
+    const { service, create, images } = buildTemplateGenerateWithImages();
+    create.mockResolvedValueOnce(PLACEHOLDER_ANSWER);
+    images.generateImage.mockRejectedValue(new Error('recusado pelo provedor'));
+
+    const result = await service.generateTemplate(FORMAT, USER_MESSAGES);
+
+    expect(images.generateImage).toHaveBeenCalledTimes(1);
+    expect(result.imagesGenerated).toBe(false);
+    expect(result.configuration.header.background).toMatchObject({ type: 'image', url: '' });
+  });
+
+  it('Flag antiga ligada no Gerar template: OPENAI_ENABLE_DALLE_FALLBACK=true não abre segunda chamada', async () => {
+    const { service, create, images } = buildTemplateGenerateWithImages({
+      OPENAI_ENABLE_DALLE_FALLBACK: 'true',
+      OPENAI_DALLE_FALLBACK_MODEL: 'dall-e-3',
+    });
+    create.mockResolvedValueOnce(PLACEHOLDER_ANSWER);
+    images.generateImage.mockRejectedValue(new Error('recusado pelo provedor'));
+
+    await service.generateTemplate(FORMAT, USER_MESSAGES);
+
+    expect(images.generateImage).toHaveBeenCalledTimes(1);
+    expect(images.generateImage.mock.calls[0][0].model).toBe('gpt-image-2.6-sunburst');
+  });
+
   it('Limite de taxa no Gerar template: uma única chamada ao provedor e o erro sobe', async () => {
     const { service, create } = buildTemplateGenerate();
     create.mockRejectedValue(openAiError(429, 'rate limit', 'rate_limit_exceeded'));

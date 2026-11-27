@@ -3,7 +3,7 @@ import { OpenAiImageService } from './openai-image.service';
 
 /**
  * Snapshot (change add-template-scene-persistence, task 1.1): o corpo enviado ao SDK pelos
- * chamadores atuais (template, social, transparente, legado, prévia `flare`) NÃO pode mudar
+ * chamadores atuais (template, social, transparente, prévia `flare`) NÃO pode mudar
  * quando o serviço ganhar o modo `sceneCall`. Gravado antes de qualquer mudança no serviço.
  */
 const PNG_B64 = Buffer.from('imagem-falsa').toString('base64');
@@ -132,25 +132,6 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       ]);
     });
 
-    it('preset legado (dall-e) sem campos de formato', async () => {
-      const { service, generate } = buildService();
-      await service.generateImage({
-        feature: 'legacy',
-        prompt: 'fundo antigo',
-        size: '1024x1024',
-        assetKind: 'legacy',
-      });
-      expect(generate.mock.calls[0]).toEqual([
-        {
-          model: 'dall-e-3',
-          prompt: 'fundo antigo',
-          size: '1024x1024',
-          quality: 'standard',
-          n: 1,
-        },
-      ]);
-    });
-
     it('prévia flare (mode preview)', async () => {
       const { service, generate } = buildService();
       await service.generateImage({
@@ -244,19 +225,6 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
         n: 1,
         background: 'transparent',
         output_format: 'png',
-      });
-    });
-
-    it('preset legado (dall-e) mantém background/formato do preset', async () => {
-      const { service, edit } = buildService();
-      await service.editImage({ ...base, assetKind: 'legacy' });
-      expect(edit.mock.calls[0][0]).toEqual({
-        model: 'dall-e-3',
-        image: expect.anything(),
-        prompt: 'edite',
-        size: '1024x1536',
-        quality: 'standard',
-        n: 1,
       });
     });
 

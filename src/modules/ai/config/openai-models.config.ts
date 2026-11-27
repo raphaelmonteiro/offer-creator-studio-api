@@ -23,8 +23,6 @@ export interface OpenAiModelConfig {
   imageInputFidelity: 'low' | 'high';
   imageDefaultMode: 'final' | 'preview';
   structuredResponseRetryAttempts: number;
-  enableDalleFallback: boolean;
-  dalleFallbackModel: string;
 }
 
 export function getOpenAiModelConfig(configService: ConfigService): OpenAiModelConfig {
@@ -48,9 +46,6 @@ export function getOpenAiModelConfig(configService: ConfigService): OpenAiModelC
       'OPENAI_STRUCTURED_RESPONSE_RETRY_ATTEMPTS',
       1,
     ),
-    enableDalleFallback:
-      configService.get<string>('OPENAI_ENABLE_DALLE_FALLBACK', 'false') === 'true',
-    dalleFallbackModel: configService.get<string>('OPENAI_DALLE_FALLBACK_MODEL', 'dall-e-3'),
   };
 }
 

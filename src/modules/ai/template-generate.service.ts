@@ -184,38 +184,18 @@ export class TemplateGenerateService {
     return result.url;
   }
 
-  private async generatePlaceholderImage(prompt: string) {
-    try {
-      return await this.openAiImageService.generateImage({
-        feature: 'template-generate.placeholder-image',
-        prompt,
-        size: '1024x1024',
-        assetKind: 'template',
-        mode: 'final',
-        model: this.models.imageModel,
-        outputFormat: 'jpeg',
-        outputCompression: 85,
-        background: 'opaque',
-      });
-    } catch (error) {
-      if (!this.models.enableDalleFallback) {
-        throw error;
-      }
-
-      this.logger.warn(
-        `GPT Image placeholder generation failed; trying DALL-E fallback: ${(error as Error).message}`,
-      );
-
-      return this.openAiImageService.generateImage({
-        feature: 'template-generate.placeholder-image-fallback',
-        prompt,
-        size: '1024x1024',
-        assetKind: 'legacy',
-        mode: 'final',
-        model: this.models.dalleFallbackModel,
-        quality: 'standard',
-      });
-    }
+  private generatePlaceholderImage(prompt: string) {
+    return this.openAiImageService.generateImage({
+      feature: 'template-generate.placeholder-image',
+      prompt,
+      size: '1024x1024',
+      assetKind: 'template',
+      mode: 'final',
+      model: this.models.imageModel,
+      outputFormat: 'jpeg',
+      outputCompression: 85,
+      background: 'opaque',
+    });
   }
 
   private validateConfiguration(config: Record<string, unknown>): void {

@@ -118,6 +118,20 @@ export const PLACEHOLDER_ANSWER = chatResponse({
   }),
 });
 
+/** Ação `update-background` cujo fundo é um placeholder `GENERATE:` (chave `url`, sem fundo transparente). */
+export const BACKGROUND_PLACEHOLDER_ANSWER = chatResponse({
+  content: JSON.stringify({
+    assistantMessage: 'Feito',
+    actions: [
+      {
+        type: 'update-background',
+        section: 'header',
+        background: { type: 'image', url: 'GENERATE: sol laranja' },
+      },
+    ],
+  }),
+});
+
 export const ACTIONS_ANSWER = chatResponse({
   content: JSON.stringify({ assistantMessage: 'Feito', actions: [] }),
 });

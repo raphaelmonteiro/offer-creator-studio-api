@@ -1,7 +1,9 @@
 import { AI_RESPONSE_FORMATS } from './schemas/ai-response.schemas';
 import {
   ACTIONS_ANSWER,
+  BACKGROUND_PLACEHOLDER_ANSWER,
   buildTemplateElement,
+  buildTemplateElementWithImages,
   FORMAT,
   USER_MESSAGES,
 } from './template-text-services.testutil';
@@ -41,6 +43,47 @@ describe('TemplateElementAssistantService (chat das ações do elemento)', () =>
       response_format: AI_RESPONSE_FORMATS.templateElementActions,
       messages: expect.any(Array),
     });
+  });
+
+  it('Falha no placeholder do assistente de elemento: uma única chamada de imagem e a rota responde a falha de hoje', async () => {
+    const { service, create, images } = buildTemplateElementWithImages();
+    create.mockResolvedValueOnce(BACKGROUND_PLACEHOLDER_ANSWER);
+    images.generateImage.mockRejectedValue(new Error('recusado pelo provedor'));
+
+    const result = await run(service);
+
+    expect(images.generateImage).toHaveBeenCalledTimes(1);
+    expect(result.actions[0].background).toMatchObject({ type: 'image', url: '' });
+  });
+
+  it('Flag antiga ligada: OPENAI_ENABLE_DALLE_FALLBACK=true não manda nenhuma chamada para dall-e-3', async () => {
+    const { service, create, images } = buildTemplateElementWithImages({
+      OPENAI_ENABLE_DALLE_FALLBACK: 'true',
+      OPENAI_DALLE_FALLBACK_MODEL: 'dall-e-3',
+    });
+    create.mockResolvedValueOnce(BACKGROUND_PLACEHOLDER_ANSWER);
+    images.generateImage.mockRejectedValue(new Error('recusado pelo provedor'));
+
+    const result = await run(service);
+
+    expect(images.generateImage).toHaveBeenCalledTimes(1);
+    expect(images.generateImage.mock.calls[0][0].model).toBe('gpt-image-2.6-sunburst');
+    expect(result.actions[0].background).toMatchObject({ type: 'image', url: '' });
+  });
+
+  it('Placeholder do assistente de elemento no 2.6: uma chamada com o modelo novo e a imagem entra no fundo', async () => {
+    const { service, create, images } = buildTemplateElementWithImages();
+    create.mockResolvedValueOnce(BACKGROUND_PLACEHOLDER_ANSWER);
+
+    const result = await run(service);
+
+    expect(images.generateImage).toHaveBeenCalledTimes(1);
+    expect(images.generateImage.mock.calls[0][0]).toMatchObject({
+      feature: 'template-element.placeholder-image',
+      model: 'gpt-image-2.6-sunburst',
+      size: '1024x1024',
+    });
+    expect(result.actions[0].background).toMatchObject({ url: '/uploads/templates/x.png' });
   });
 
   it('Limite de taxa: uma única chamada ao provedor', async () => {
