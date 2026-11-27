@@ -15,13 +15,15 @@ import { KIT_CANONICAL_DESC_TIMEOUT_MS } from './mc-pipeline.config';
 /**
  * Diretor dos comerciais (job `script`, os quatro formatos): JSON estrito com 1 a 8 cenas ou as falas de até 8
  * ofertas. Hoje sem teto e com `temperature: 0.7`; a família nova ganha teto e esforço `low`. Um roteiro de 8 cenas
- * com raciocínio `low` cabe folgado em 16.000. O prazo de 100 s fica abaixo da expiração de 120 s da fila `mc.llm`: a falha é registrada por nós, não pela expiração do job (PV-11).
+ * com raciocínio `low` cabe folgado em 16.000. O prazo de 100 s fica abaixo da expiração de 120 s da fila `mc.llm`: a falha é registrada por nós, não pela expiração do job (PV-11). Vale para o conjunto de tentativas e esperas do job, não por tentativa (R2 da rodada 1): `requestDirectorJson` entrega a cada tentativa só o que resta.
  */
+export const MC_DIRECTOR_TOTAL_MS = 100_000;
+
 export const MC_DIRECTOR_CALL: TextCallPoint = {
   effort: 'low',
   temperature: 0.7,
   maxCompletionTokens: 16_000,
-  timeoutMs: 100_000,
+  timeoutMs: MC_DIRECTOR_TOTAL_MS,
 };
 
 /**

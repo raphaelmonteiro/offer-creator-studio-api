@@ -1,5 +1,5 @@
 import { APIConnectionError, APIConnectionTimeoutError } from 'openai';
-import { chatResponse, openAiError } from '../../ai/utils/openai-chat.testutil';
+import { chatResponse, openAiError, sentTo } from '../../ai/utils/openai-chat.testutil';
 import {
   directorRig,
   finishedLine,
@@ -114,5 +114,67 @@ describe('McScriptProcessor — falhas e repetição do diretor (42, 1.10)', () 
     const { harness, processor } = directorRig('v2', config, chatResponse({ content: null }));
     await processor.process({ stepId: SCRIPT_STEP_ID });
     expect(stepFailure(harness)).toBe('script_failed: resposta do OpenAI sem conteúdo');
+  });
+
+  describe('prazo total de 100 s para tentativas e esperas (R2)', () => {
+    const TOTAL_MS = 100_000;
+    const rateLimited = (retryAfterS: string) =>
+      Object.assign(openAiError(429, 'Rate limit', 'rate_limit_exceeded'), {
+        headers: { 'retry-after': retryAfterS },
+      });
+
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    /** A chamada que gasta `elapsedMs` do relógio antes de responder com `reply`. */
+    const afterMs = (elapsedMs: number, reply: unknown) => () => {
+      jest.advanceTimersByTime(elapsedMs);
+      return reply instanceof Error ? Promise.reject(reply) : Promise.resolve(reply);
+    };
+
+    async function runUntilDone(processor: {
+      process: (job: { stepId: string }) => Promise<void>;
+    }) {
+      const done = processor.process({ stepId: SCRIPT_STEP_ID });
+      await jest.advanceTimersByTimeAsync(2 * TOTAL_MS);
+      await done;
+    }
+
+    it('429 com retry-after de 60 s depois de 50 s: a espera não cabe, não há segunda chamada e a falha é a do provedor', async () => {
+      const { harness, processor, create } = directorRig('v2', config);
+      create.mockImplementationOnce(afterMs(50_000, rateLimited('60')));
+      await runUntilDone(processor);
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(stepFailure(harness)).toBe('script_failed: OpenAI HTTP 429: Rate limit');
+    });
+
+    it('503 depois de 95 s: o que sobra não dá para outra tentativa útil, sem segunda chamada', async () => {
+      const { harness, processor, create } = directorRig('v2', config);
+      create.mockImplementationOnce(afterMs(95_000, openAiError(503, 'Servidor ocupado')));
+      await runUntilDone(processor);
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(stepFailure(harness)).toBe('script_failed: OpenAI HTTP 503: Servidor ocupado');
+    });
+
+    it('429 com retry-after de 20 s depois de 50 s: a segunda chamada leva só o que resta do prazo (30 s) e termina em 100 s', async () => {
+      const { harness, processor, create } = directorRig('v2', config);
+      const startedAt = Date.now();
+      let secondStartedAt = 0;
+      create.mockImplementationOnce(afterMs(50_000, rateLimited('20')));
+      create.mockImplementationOnce(() => {
+        secondStartedAt = Date.now() - startedAt;
+        return Promise.resolve(okReply('v2'));
+      });
+      await runUntilDone(processor);
+
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(sentTo(create, 0).options.timeout).toBe(TOTAL_MS);
+      const secondTimeout = sentTo(create, 1).options.timeout as number;
+      expect(secondTimeout).toBe(30_000);
+      expect(secondStartedAt + secondTimeout).toBeLessThanOrEqual(TOTAL_MS);
+      expect(harness.saved().scenes).toHaveLength(1);
+    });
   });
 });

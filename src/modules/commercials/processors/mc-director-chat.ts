@@ -2,7 +2,10 @@ import { Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { callProductChat } from '../../ai/utils/ai-product-chat.util';
 import { withOpenAiRetry } from '../../../shared/providers/openai-errors';
-import { MC_DIRECTOR_CALL } from '../domain/mc-text-calls';
+import { MC_DIRECTOR_CALL, MC_DIRECTOR_TOTAL_MS } from '../domain/mc-text-calls';
+
+/** Menos que isto de prazo restante não paga outra tentativa: a chamada só estouraria o prazo e esconderia o erro do provedor. */
+const DIRECTOR_MIN_ATTEMPT_MS = 10_000;
 
 /** Consumidor do diretor no log (`AI operation started|finished|failed`). */
 export const MC_DIRECTOR_FEATURE = 'commercials.director';
@@ -20,7 +23,9 @@ export interface DirectorChatRequest {
 /**
  * Chamada do diretor, a mesma nos quatro formatos (change 42, A-3): cliente do SDK sem repetição própria, prazo e
  * parâmetros pela família do modelo (`callProductChat`), e `withOpenAiRetry` como a única camada de repetição, que
- * repete só 429 de taxa e 5xx (conta sem crédito, rede e prazo estourado param na primeira resposta). Devolve o JSON do roteiro já lido; cada
+ * repete só 429 de taxa e 5xx (conta sem crédito, rede e prazo estourado param na primeira resposta). O prazo de 100 s
+ * (`MC_DIRECTOR_TOTAL_MS`) é do conjunto de tentativas e esperas, abaixo da expiração de 120 s do job: cada tentativa leva
+ * só o que resta, e uma espera que não deixa uma tentativa útil encerra com o erro do provedor (R2). Devolve o JSON do roteiro já lido; cada
  * formato monta o seu `McScript`. As mensagens de falha são as de sempre (`script_failed: ...`).
  */
 export async function requestDirectorJson<T>(request: DirectorChatRequest): Promise<T> {
@@ -36,29 +41,41 @@ export async function requestDirectorJson<T>(request: DirectorChatRequest): Prom
 
 async function sendWithRetry(request: DirectorChatRequest): Promise<OpenAI.Chat.ChatCompletion> {
   let providerError: unknown;
+  let startedAt: number | undefined;
+  const remainingMs = (now = Date.now()) => MC_DIRECTOR_TOTAL_MS - (now - (startedAt ?? now));
   try {
     return await withOpenAiRetry(
       async () => {
+        const now = Date.now();
+        startedAt ??= now;
         try {
-          return await callDirector(request);
+          return await callDirector(request, remainingMs(now));
         } catch (err) {
           providerError = err;
           throw err;
         }
       },
-      { retryConnectionErrors: false },
+      {
+        retryConnectionErrors: false,
+        onRetry: (err, _nextAttempt, delayMs) => {
+          if (remainingMs() - delayMs < DIRECTOR_MIN_ATTEMPT_MS) throw err;
+        },
+      },
     );
   } catch (err) {
     throw new Error(directorFailureMessage(providerError ?? err));
   }
 }
 
-function callDirector(request: DirectorChatRequest): Promise<OpenAI.Chat.ChatCompletion> {
+function callDirector(
+  request: DirectorChatRequest,
+  timeoutMs: number,
+): Promise<OpenAI.Chat.ChatCompletion> {
   return callProductChat({
     openai: request.openai,
     logger: request.logger,
     feature: MC_DIRECTOR_FEATURE,
-    spec: { model: request.model, ...MC_DIRECTOR_CALL },
+    spec: { model: request.model, ...MC_DIRECTOR_CALL, timeoutMs },
     messages: [
       { role: 'system', content: request.system },
       { role: 'user', content: request.user },

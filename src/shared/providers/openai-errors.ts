@@ -146,7 +146,13 @@ export function classifyOpenAiErrorStrict(
  */
 export function withOpenAiRetry<T>(
   fn: () => Promise<T>,
-  options?: { attempts?: number; baseDelayMs?: number; retryConnectionErrors?: boolean },
+  options?: {
+    attempts?: number;
+    baseDelayMs?: number;
+    retryConnectionErrors?: boolean;
+    /** Antes de cada espera; lançar daqui encerra a repetição com esse erro (o chamador limita o prazo total). */
+    onRetry?: (err: TransientProviderError, nextAttempt: number, delayMs: number) => void;
+  },
 ): Promise<T> {
   const { retryConnectionErrors = true, ...retry } = options ?? {};
   return withRetry(async () => {
