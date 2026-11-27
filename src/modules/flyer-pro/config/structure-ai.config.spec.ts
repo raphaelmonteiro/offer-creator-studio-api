@@ -17,7 +17,7 @@ describe('readStructureAiConfig', () => {
         provider: 'real',
         model: 'gpt-6-luna',
         effort: 'medium',
-        timeoutMs: 45_000,
+        timeoutMs: 60_000,
         maxPerHour: 20,
         maxHeroes: 12,
         examples: 3,
@@ -26,9 +26,9 @@ describe('readStructureAiConfig', () => {
     });
   });
 
-  it('Sem as variáveis de esforço e prazo: valem o esforço medium e os 45.000 ms, sem aviso', () => {
+  it('Sem as variáveis de esforço e prazo: valem o esforço medium e os 60.000 ms, sem aviso', () => {
     expect(read({ FLYER_PRO_STRUCTURE_AI_PROVIDER: 'mock' })).toMatchObject({
-      config: { effort: 'medium', timeoutMs: 45_000 },
+      config: { effort: 'medium', timeoutMs: 60_000 },
       warnings: [],
     });
   });
@@ -48,7 +48,7 @@ describe('readStructureAiConfig', () => {
       FLYER_PRO_STRUCTURE_AI_TIMEOUT_MS: '',
       FLYER_PRO_STRUCTURE_AI_PROVIDER: '',
     });
-    expect(config).toMatchObject({ model: 'gpt-6-luna', timeoutMs: 45_000, provider: 'real' });
+    expect(config).toMatchObject({ model: 'gpt-6-luna', timeoutMs: 60_000, provider: 'real' });
     expect(warnings).toEqual([]);
   });
 
@@ -105,7 +105,7 @@ describe('readStructureAiConfig', () => {
       FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR: value,
       FLYER_PRO_STRUCTURE_AI_MAX_HEROES: value,
     });
-    expect(config).toMatchObject({ timeoutMs: 45_000, maxPerHour: 20, maxHeroes: 12 });
+    expect(config).toMatchObject({ timeoutMs: 60_000, maxPerHour: 20, maxHeroes: 12 });
     expect(warnings).toHaveLength(3);
   });
 

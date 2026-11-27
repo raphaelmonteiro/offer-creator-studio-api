@@ -40,7 +40,7 @@ describe('FlyerProStructureSuggestionService: uma sugestão em andamento por enc
     const first = service.suggest(DOCUMENT_ID, bodyOf());
     await Promise.resolve();
     await expect(service.suggest(DOCUMENT_ID, bodyOf())).rejects.toMatchObject(
-      busy('IN_FLIGHT', 45),
+      busy('IN_FLIGHT', 60),
     );
     await new Promise((resolve) => setImmediate(resolve));
     expect(suggest).toHaveBeenCalledTimes(1);

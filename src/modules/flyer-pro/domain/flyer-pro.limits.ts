@@ -62,7 +62,7 @@ export const FLYER_PRO_LIMITS = {
   structureMaxPerHourDefault: 20,
   structureMaxHeroesDefault: 12,
   structureExamplesDefault: 3,
-  structureTimeoutMsDefault: 45_000,
+  structureTimeoutMsDefault: 60_000,
   /** O provedor real: teto de saída de `/responses` (o raciocínio conta) e a temperatura da família que a usa (A-13). */
   structureMaxOutputTokens: 16_000,
   structureTemperature: 0.2,

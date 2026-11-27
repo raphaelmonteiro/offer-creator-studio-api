@@ -26,7 +26,7 @@ const sectionWith = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-/** O prazo padrão que a configuração lê sem nenhuma variável (45.000 ms). */
+/** O prazo padrão que a configuração lê sem nenhuma variável (60.000 ms). */
 const readDefaultTimeout = () => readStructureAiConfig(fakeConfig({})).timeoutMs;
 
 function makeReal(outcome?: unknown, config: Partial<StructureAiConfig> = {}) {
@@ -70,7 +70,7 @@ describe('RealFlyerProStructureAi: o corpo da chamada a /responses', () => {
     expect(body).not.toHaveProperty('previous_response_id');
   });
 
-  it('Padrão: reasoning medium e 16.000 tokens de saída, sem temperature, max_tokens nem max_completion_tokens; prazo de 45.000 ms e sem repetição', async () => {
+  it('Padrão: reasoning medium e 16.000 tokens de saída, sem temperature, max_tokens nem max_completion_tokens; prazo de 60.000 ms e sem repetição', async () => {
     const { provider, create } = makeReal();
     await provider.suggest(exampleAiRequest(), { timeoutMs: readDefaultTimeout() });
 
@@ -80,7 +80,7 @@ describe('RealFlyerProStructureAi: o corpo da chamada a /responses', () => {
     for (const field of ['temperature', 'max_tokens', 'max_completion_tokens']) {
       expect(body).not.toHaveProperty(field);
     }
-    expect(create.mock.calls[0][1]).toEqual({ timeout: 45_000, maxRetries: 0 });
+    expect(create.mock.calls[0][1]).toEqual({ timeout: 60_000, maxRetries: 0 });
   });
 
   it('Sem temperatura com esforço low: o corpo não leva temperature, max_tokens nem max_completion_tokens', async () => {

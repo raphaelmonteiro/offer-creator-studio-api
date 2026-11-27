@@ -137,7 +137,7 @@ FLYER_PRO_STRUCTURE_AI_PROVIDER # real (OpenAI, gasta crédito; padrão do códi
 FLYER_PRO_STRUCTURE_AI_MODEL    # gpt-6-luna; precisa ter preço em openai-llm-pricing.ts, senão 422 MODEL_PRICE_UNKNOWN
 FLYER_PRO_STRUCTURE_AI_EFFORT   # esforço de raciocínio: none | low | medium (padrão medium; outro valor vira medium; padrão em config/structure-ai.config.ts; cerca de US$ 0,003 a 0,006 por pedido)
 FLYER_PRO_STRUCTURE_AI_TIMEOUT_MS
-                                # prazo da chamada ao provedor, vale para o mock também (padrão 45000, em domain/flyer-pro.limits.ts; o proxy da frente da API precisa de 50 s); estourou, 503 TIMEOUT
+                                # prazo da chamada ao provedor, vale para o mock também (padrão 60000, em domain/flyer-pro.limits.ts; o proxy da frente da API precisa de 70 s); estourou, 503 TIMEOUT
 FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR
                                 # sugestões atendidas por encarte em 60 minutos (padrão 20); acima, 429 HOURLY_LIMIT
 FLYER_PRO_STRUCTURE_AI_MAX_HEROES

@@ -54,7 +54,7 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
       },
     });
     expect(create.mock.calls[0][0]).not.toHaveProperty('previous_response_id');
-    expect(create.mock.calls[0][1]).toEqual({ timeout: 45_000, maxRetries: 0 });
+    expect(create.mock.calls[0][1]).toEqual({ timeout: 60_000, maxRetries: 0 });
   });
 
   it('id inventado pelo modelo (seção s7 e destaque p42) sai no saneamento, com UNKNOWN_SECTION e UNKNOWN_ITEM', async () => {

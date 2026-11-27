@@ -198,7 +198,7 @@ describeIfE2eDb('POST /v1/flyer-pro/documents/:id/structure-suggestion (e2e)', (
     });
     const { retryAfterSeconds } = refusal?.details as { retryAfterSeconds: number };
     expect(retryAfterSeconds).toBeGreaterThanOrEqual(1);
-    expect(retryAfterSeconds).toBeLessThanOrEqual(45);
+    expect(retryAfterSeconds).toBeLessThanOrEqual(60);
     expect(free.status).toBe(200);
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(2900);
   });

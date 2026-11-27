@@ -25,7 +25,7 @@ export const CONFIG: StructureAiConfig = {
   provider: 'mock',
   model: 'gpt-6-luna',
   effort: 'medium',
-  timeoutMs: 45_000,
+  timeoutMs: 60_000,
   maxPerHour: 20,
   maxHeroes: 12,
   examples: 3,
