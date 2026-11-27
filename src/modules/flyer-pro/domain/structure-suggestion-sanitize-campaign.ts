@@ -1,5 +1,5 @@
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
-import { clipText } from './structure-suggestion-discard';
+import { clipText } from './structure-suggestion-clip-text';
 import type { RawStructureSuggestion, SuggestedCampaign } from './structure-suggestion.types';
 
 /**

@@ -1,5 +1,6 @@
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
-import { clipText, dropEntries, type Staged } from './structure-suggestion-discard';
+import { clipText } from './structure-suggestion-clip-text';
+import { dropEntries, type Staged } from './structure-suggestion-discard';
 import { suggestedHeroesOf } from './structure-suggestion-rules';
 import type { SanitizeContext } from './structure-suggestion-sanitize';
 import type {

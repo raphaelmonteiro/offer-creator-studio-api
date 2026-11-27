@@ -9,6 +9,7 @@ import type {
   RawStructureSection,
   RawStructureSuggestion,
 } from '../domain/structure-suggestion.types';
+import { sameSequence } from '../domain/structure-suggestion-sanitize-items';
 import {
   FlyerProStructureAiPort,
   StructureAiCallOptions,
@@ -101,9 +102,6 @@ const firstPhotoItem = (
   );
 
 const isFromTo = (item: StructureAiItem) => item.price.kind === 'from_to';
-
-const sameSequence = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((alias, index) => alias === b[index]);
 
 /**
  * A ordem dos produtos de uma seção (A-10): os de/por primeiro e depois os outros, cada grupo na ordem do pedido. Sem

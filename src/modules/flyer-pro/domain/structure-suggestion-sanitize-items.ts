@@ -1,5 +1,6 @@
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
-import { clipText, discardedEntry } from './structure-suggestion-discard';
+import { clipText } from './structure-suggestion-clip-text';
+import { discardedEntry } from './structure-suggestion-discard';
 import type { StructureAliases } from './structure-suggestion-aliases';
 import type { DiscardedEntry } from './structure-suggestion.types';
 
@@ -20,7 +21,7 @@ export interface RawItemOrder {
 
 const NO_ORDER: SectionItemOrder = { itemIds: null, itemsReason: '' };
 
-const sameSequence = (a: readonly string[], b: readonly string[]) =>
+export const sameSequence = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((alias, index) => alias === b[index]);
 
 /** Cada apelido dos itens da seção exatamente uma vez: nem falta, nem sobra, nem repete, nem apelido desconhecido. */

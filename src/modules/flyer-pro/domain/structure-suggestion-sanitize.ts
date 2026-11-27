@@ -1,6 +1,7 @@
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
 import { categorySections, LOOSE_SECTION_ID } from './structure-suggestion-rules';
-import { clipText, discardedEntry, dropEntries, type Staged } from './structure-suggestion-discard';
+import { clipText } from './structure-suggestion-clip-text';
+import { discardedEntry, dropEntries, type Staged } from './structure-suggestion-discard';
 import { sanitizeCampaign } from './structure-suggestion-sanitize-campaign';
 import { sanitizeUnsuggest } from './structure-suggestion-sanitize-unsuggest';
 import { sanitizeItemOrders, type SectionItemOrder } from './structure-suggestion-sanitize-items';

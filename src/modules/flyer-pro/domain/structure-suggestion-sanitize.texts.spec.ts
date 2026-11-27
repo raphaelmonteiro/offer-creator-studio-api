@@ -1,4 +1,4 @@
-import { clipText } from './structure-suggestion-discard';
+import { clipText } from './structure-suggestion-clip-text';
 import { sanitizeSuggestion } from './structure-suggestion-sanitize';
 import {
   discardedCodes,
