@@ -60,7 +60,7 @@ export interface StructureIssue {
   code: StructureIssueCode;
 }
 
-export type DiscardedKind = 'section' | 'page' | 'itemOrder' | 'hero';
+export type DiscardedKind = 'section' | 'page' | 'itemOrder' | 'hero' | 'unsuggest';
 
 export type DiscardedCode =
   | 'UNKNOWN_SECTION'
@@ -71,7 +71,10 @@ export type DiscardedCode =
   | 'HERO_WITHOUT_PHOTO'
   | 'ITEMS_MISMATCH'
   | 'HERO_ALREADY_SET'
-  | 'HERO_LIMIT';
+  | 'HERO_USER_SET'
+  | 'HERO_LIMIT'
+  | 'NOT_SUGGESTED'
+  | 'CONFLICTS_WITH_HERO';
 
 /** O que o saneamento tirou: uma entrada por coisa tirada, só com o tipo e o código. */
 export interface DiscardedEntry {
@@ -117,11 +120,18 @@ export interface SuggestedHero {
   reason: string;
 }
 
+/** Um sugerido do motor (de `suggestedHeroes`) que a IA propõe desfazer. */
+export interface SuggestedUnsuggest {
+  itemId: string;
+  reason: string;
+}
+
 /** A proposta depois do saneamento, com ids reais. */
 export interface SanitizedSuggestion {
   summary: string;
   sections: SuggestedSection[];
   heroes: SuggestedHero[];
+  unsuggest: SuggestedUnsuggest[];
   discarded: DiscardedEntry[];
   noChange: boolean;
 }
