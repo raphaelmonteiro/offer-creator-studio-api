@@ -6,6 +6,7 @@ import OpenAI from 'openai';
 import * as path from 'path';
 import * as sharp from 'sharp';
 import { getOpenAiModelConfig } from '../config/openai-models.config';
+import { llmCostUsdIncludingLegacy } from '../openai-llm-pricing';
 import {
   buildEanJudgeSystemPrompt,
   buildEanJudgeUserText,
@@ -22,14 +23,6 @@ const FETCH_TIMEOUT_MS = 10_000;
 /** Lado maior da miniatura enviada: `low` custa 85 tokens fixos; `high` escala com o tamanho. */
 const SIZE_LOW = 512;
 const SIZE_HIGH = 1024;
-
-/** Preço por 1M tokens (entrada, saída). Modelo desconhecido cai no do gpt-4o. */
-const PRICES: Record<string, [number, number]> = {
-  'gpt-4o': [2.5, 10],
-  'gpt-4o-mini': [0.15, 0.6],
-  'gpt-4.1': [2, 8],
-  'gpt-4.1-mini': [0.4, 1.6],
-};
 
 export interface JudgeInput {
   itemId: string;
@@ -181,7 +174,8 @@ export class EanJudgeService {
             ],
           }),
       )) as OpenAI.Chat.ChatCompletion;
-      custo += custoDe(model, resp.usage);
+      // Modelo sem preço ou resposta sem `usage`: 0 até a task 1.9 (indisponível sem preço, teto de saída sem uso).
+      custo += llmCostUsdIncludingLegacy(model, resp.usage) ?? 0;
 
       const parsed = interpretar(resp.choices[0]?.message?.content ?? '', letraParaId);
       if ('erro' in parsed) {
@@ -301,15 +295,6 @@ export function interpretar(
       })),
     reason: r.data.reason,
   };
-}
-
-export function custoDe(model: string, usage: OpenAI.CompletionUsage | undefined): number {
-  if (!usage) return 0;
-  const chave = Object.keys(PRICES)
-    .sort((a, b) => b.length - a.length)
-    .find((k) => model.startsWith(k));
-  const [pin, pout] = PRICES[chave ?? 'gpt-4o'];
-  return (usage.prompt_tokens * pin + usage.completion_tokens * pout) / 1_000_000;
 }
 
 function safePathname(url: string): string | null {

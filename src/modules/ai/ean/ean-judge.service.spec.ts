@@ -5,7 +5,6 @@ import * as sharp from 'sharp';
 import { EAN_JUDGE_PROMPT_VERSION } from '../prompts/ean-judge.prompts';
 import type { EanCandidateRecord } from './ean-match.types';
 import {
-  custoDe,
   EanJudgeService,
   embaralhar,
   interpretar,
@@ -46,14 +45,18 @@ describe('EanJudgeService', () => {
     }
   });
 
-  function criar(respostas: string[], env: Record<string, string> = {}) {
+  function criar(
+    respostas: string[],
+    env: Record<string, string> = {},
+    usage = { prompt_tokens: 2000, completion_tokens: 150 },
+  ) {
     const vars: Record<string, string> = { OPENAI_API_KEY: 'sk-test', UPLOAD_DEST: dir, ...env };
     const service = new EanJudgeService({ get: (k: string, d?: string) => vars[k] ?? d } as never);
     const create = jest.fn();
     for (const r of respostas) {
       create.mockResolvedValueOnce({
         choices: [{ message: { content: r } }],
-        usage: { prompt_tokens: 2000, completion_tokens: 150 },
+        usage,
       });
     }
     (service as unknown as { openai: unknown }).openai = { chat: { completions: { create } } };
@@ -93,7 +96,7 @@ describe('EanJudgeService', () => {
   });
 
   it('traduz letra para id, guarda o rótulo lido e o custo', async () => {
-    const { service, create } = criar([]);
+    const { service, create } = criar([], { EAN_JUDGE_MODEL_A: 'gpt-4o' });
     const imgs = await service.prepararImagens(input);
     create.mockImplementation(async (req: { messages: Array<{ content: unknown }> }) => {
       // Descobre qual letra recebeu a imagem "cristal" olhando a ordem enviada.
@@ -188,12 +191,30 @@ describe('EanJudgeService', () => {
     ).toEqual({ erro: 'letra inexistente: B' });
   });
 
-  it('custo por modelo, com prefixo mais específico', () => {
-    expect(
-      custoDe('gpt-4o-mini-2024', { prompt_tokens: 1e6, completion_tokens: 0 } as never),
-    ).toBeCloseTo(0.15);
-    expect(custoDe('gpt-4o', { prompt_tokens: 1e6, completion_tokens: 0 } as never)).toBeCloseTo(
-      2.5,
+  it('Juiz em Terra: o custo sai da tabela única (2.000 de entrada e 300 de saída = US$ 0,0035)', async () => {
+    const { service } = criar(
+      ['não é json'],
+      { EAN_JUDGE_MODEL_A: 'gpt-6.1-terra', EAN_JUDGE_MAX_RETRIES: '0' },
+      {
+        prompt_tokens: 2000,
+        completion_tokens: 300,
+      },
     );
+    const j = await service.julgar('A', input, await service.prepararImagens(input));
+    expect(j.model).toBe('gpt-6.1-terra');
+    expect(j.costUsd).toBeCloseTo(0.0035, 8);
+  });
+
+  it('Volta ao modelo de hoje: o mesmo uso custa US$ 0,008 pelo preço de hoje (2,5 e 10 por milhão)', async () => {
+    const { service } = criar(
+      ['não é json'],
+      { EAN_JUDGE_MODEL_A: 'gpt-4o', EAN_JUDGE_MAX_RETRIES: '0' },
+      {
+        prompt_tokens: 2000,
+        completion_tokens: 300,
+      },
+    );
+    const j = await service.julgar('A', input, await service.prepararImagens(input));
+    expect(j.costUsd).toBeCloseTo(0.008, 8);
   });
 });

@@ -2,6 +2,7 @@ import type {
   GeminiBilledFailure,
   GeminiUsage,
 } from '../../../shared/providers/gemini-image.provider';
+import { llmPricesIncludingLegacy } from '../../ai/openai-llm-pricing';
 
 /**
  * Custo de FORNECEDOR do kit do personagem (change video-formatos-personagem,
@@ -90,18 +91,27 @@ export const MC_KIT_PRICES_ENV = 'MC_KIT_PRICES';
  *   Nano Banana 2.1 0,034). Tokens das imagens: tarifa pública do Gemini 3 Pro
  *   Image (entrada US$ 2/1M, texto e raciocínio US$ 12/1M); a 2.1 não tem
  *   tarifa de tokens no design e usa a da Pro como teto (conservador).
- * - gpt-4o e gpt-4o-mini: mesma tabela do repositório
- *   (modules/ai/ean/ean-judge.service.ts, PRICES) — US$ 2,5/10 e 0,15/0,6 por 1M.
+ * - modelos da OpenAI: lidos do lugar único do preço (modules/ai/openai-llm-pricing.ts, change 42 task 1.4):
+ *   gpt-6-luna US$ 0,10/0,50 e gpt-6.1-terra US$ 1/5 por 1M (os mesmos valores do log das cinco features) e, só para a
+ *   volta por variável, gpt-4o 2,5/10 e gpt-4o-mini 0,15/0,6. Tokens em cache pagam a entrada cheia (ver acima).
  * - gemini-3.8-flash (visão do gate de boca): sem tarifa no design; valor de
  *   referência do Gemini 3 Flash (US$ 0,50 entrada, 3 saída por 1M) até a
  *   tarifa do 3.8 ser confirmada — ajuste por `MC_KIT_PRICES`.
  */
+const KIT_OPENAI_MODELS = ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-4o', 'gpt-4o-mini'] as const;
+
+/** Tarifa de texto de um modelo da OpenAI, lida do lugar único do preço. */
+function openAiTextPrice(model: string): McModelPrice {
+  const price = llmPricesIncludingLegacy(model);
+  if (!price) throw new Error(`mc-kit-costs: ${model} sem preço em openai-llm-pricing.ts`);
+  return { model, usdPerImage: 0, inputUsdPer1M: price.input, outputUsdPer1M: price.output };
+}
+
 export const MC_MODEL_PRICE_DEFAULTS: readonly McModelPrice[] = [
   { model: 'nano-banana-pro-preview', usdPerImage: 0.134, inputUsdPer1M: 2, outputUsdPer1M: 12 },
   { model: 'gemini-3-pro-image-preview', usdPerImage: 0.134, inputUsdPer1M: 2, outputUsdPer1M: 12 },
   { model: 'gemini-nano-banana-2.1', usdPerImage: 0.034, inputUsdPer1M: 2, outputUsdPer1M: 12 },
-  { model: 'gpt-4o', usdPerImage: 0, inputUsdPer1M: 2.5, outputUsdPer1M: 10 },
-  { model: 'gpt-4o-mini', usdPerImage: 0, inputUsdPer1M: 0.15, outputUsdPer1M: 0.6 },
+  ...KIT_OPENAI_MODELS.map(openAiTextPrice),
   { model: 'gemini-3.8-flash', usdPerImage: 0, inputUsdPer1M: 0.5, outputUsdPer1M: 3 },
 ];
 

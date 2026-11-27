@@ -2,7 +2,9 @@
  * Preço dos modelos de texto e visão, por 1 milhão de tokens em USD. Entrada acima de 272 mil tokens custa o
  * dobro (e a saída 1,5 vez), o que nenhuma chamada daqui atinge. Modelo sem entrada aqui: custo `null`, e a
  * cena do Template Pro não o chama (G7: custo desconhecido nunca vira zero). `gpt-4o` e `gpt-4o-mini` não
- * entram de propósito: custo `null` no log, e continuam fora da trava do Template Pro (D-11).
+ * entram de propósito: custo `null` no log, e continuam fora da trava do Template Pro (D-11). O preço da família
+ * de hoje, só para a volta por variável (change 42), fica à parte em `LEGACY_LLM_PRICES`, lido por
+ * `llmPricesIncludingLegacy` (tabela do kit dos comerciais e juízes de EAN), nunca por `llmCostUsd`.
  *
  * Fontes (https://developers.openai.com/api/docs/models/<modelo> e /api/docs/pricing):
  * - `gpt-6-luna`: entrada US$ 0,10, entrada em cache US$ 0,01, escrita em cache US$ 0,125, saída US$ 0,50;
@@ -27,6 +29,20 @@ const LLM_PRICES: Record<string, LlmPrices> = {
   'gpt-6.1-terra': { input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 },
 };
 
+/**
+ * Preço da família de hoje por 1 milhão de tokens em USD (change 42, task 1.4), copiado da tabela que os juízes de
+ * EAN e os comerciais tinham (`ean-judge.service.ts`, `mc-kit-costs.ts`). Existe só para a volta por variável
+ * (`OPENAI_TEXT_MODEL=gpt-4o`) enquanto a OpenAI não desliga os modelos (2027-01-14): fica FORA de `llmPricesFor`
+ * e de `llmCostUsd`, para o log das cinco features e a trava do Template Pro e da sugestão de estrutura
+ * continuarem tratando `gpt-4o*` como sem preço. Sem preço de cache: paga a entrada cheia (D-11).
+ */
+const LEGACY_LLM_PRICES: Record<string, LlmPrices> = {
+  'gpt-4o': { input: 2.5, output: 10 },
+  'gpt-4o-mini': { input: 0.15, output: 0.6 },
+  'gpt-4.1': { input: 2, output: 8 },
+  'gpt-4.1-mini': { input: 0.4, output: 1.6 },
+};
+
 /** `usage` das duas APIs: `/responses` (`input_tokens`) e `chat.completions` (`prompt_tokens`). */
 export interface LlmUsage {
   input_tokens?: number;
@@ -41,6 +57,32 @@ const MILLION = 1_000_000;
 
 export function llmPricesFor(model: string): LlmPrices | null {
   return LLM_PRICES[model] ?? null;
+}
+
+/**
+ * Preço de qualquer modelo que o backend sabe precificar, a família de hoje inclusive: nome exato, senão o maior
+ * prefixo seguido de hífen (a OpenAI responde com o snapshot datado: `gpt-4o-mini-2024-07-18` casa com
+ * `gpt-4o-mini`, não com `gpt-4o`). Só para a tabela do kit dos comerciais e os juízes de EAN; a trava e o log das
+ * cinco features usam `llmPricesFor`. `null` = sem preço (nunca zero).
+ */
+export function llmPricesIncludingLegacy(model: string | null | undefined): LlmPrices | null {
+  const name = (model ?? '').trim();
+  if (!name) return null;
+  const table = { ...LEGACY_LLM_PRICES, ...LLM_PRICES };
+  if (table[name]) return table[name];
+  const key = Object.keys(table)
+    .filter((candidate) => name.startsWith(`${candidate}-`))
+    .sort((a, b) => b.length - a.length)[0];
+  return key ? table[key] : null;
+}
+
+/** `llmCostUsd` com a família de hoje: para os juízes de EAN. `null` sem `usage` ou sem preço. */
+export function llmCostUsdIncludingLegacy(
+  model: string,
+  usage: LlmUsage | null | undefined,
+): number | null {
+  const price = llmPricesIncludingLegacy(model);
+  return price ? costFromPrices(price, usage) : null;
 }
 
 /**
