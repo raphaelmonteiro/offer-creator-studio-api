@@ -862,6 +862,7 @@ describe('McKitProcessor — geração do kit na fila mc.image (plano §4)', () 
     });
 
     it('cada chamada paga vira uma linha de custo: descrição pelos tokens do usage (gpt-4o) e cada referência pelo modelo EFETIVO; a soma vai para o kit', async () => {
+      env.MC_KIT_VISION_MODEL = 'gpt-4o'; // volta ao modelo de hoje (o padrão é gpt-6.1-terra)
       const create = jest.fn().mockResolvedValue(descResponse);
       withOpenAi(processor, create);
       gemini.generateImageWithModel

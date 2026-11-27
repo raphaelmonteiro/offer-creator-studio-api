@@ -1,4 +1,5 @@
 import { TextCallPoint } from '../../ai/config/openai-text-calls';
+import { KIT_CANONICAL_DESC_TIMEOUT_MS } from './mc-pipeline.config';
 
 /**
  * Esforço, teto, temperatura e prazo das chamadas de texto e visão dos comerciais (change 42, requisitos
@@ -21,4 +22,16 @@ export const MC_DIRECTOR_CALL: TextCallPoint = {
   temperature: 0.7,
   maxCompletionTokens: 16_000,
   timeoutMs: 100_000,
+};
+
+/**
+ * Descrição canônica do kit (visão + JSON estrito): `max_tokens: 600` e sem `temperature` hoje. O prazo é o de hoje
+ * (`KIT_CANONICAL_DESC_TIMEOUT_MS`, 60 s), que também entra na conta da expiração do job do kit; o teto da família
+ * nova (4096) deixa folga para o raciocínio `low` sobre a ficha com a versão em pt-BR.
+ */
+export const KIT_CANONICAL_DESC_CALL: TextCallPoint = {
+  effort: 'low',
+  legacyMaxTokens: 600,
+  maxCompletionTokens: 4096,
+  timeoutMs: KIT_CANONICAL_DESC_TIMEOUT_MS,
 };
