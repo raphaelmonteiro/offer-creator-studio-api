@@ -1,4 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import OpenAI from 'openai';
+import { getStrongModelConfig } from '../../ai/config/openai-strong-models.config';
+import { requestDirectorJson } from './mc-director-chat';
 import { kitTileIdForFraming } from '../domain/mc-cutout-request';
 import { isTalkContinuousFormat } from '../domain/mc-talk-continuous.config';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -87,12 +91,15 @@ import { McStep } from '../entities/mc-step.entity';
 @Injectable()
 export class McScriptProcessor {
   private readonly logger = new Logger(McScriptProcessor.name);
+  /** Cliente do SDK, criado na primeira chamada do diretor (a chave é lida na hora, como antes). */
+  private openai: OpenAI | null = null;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly transitions: TaskTransitionService,
     private readonly commercials: CommercialsService,
     private readonly credits: CreditsService,
+    private readonly config: ConfigService,
   ) {}
 
   async process({ stepId }: { stepId: string; projectId?: string }): Promise<void> {
@@ -442,6 +449,28 @@ export class McScriptProcessor {
     return key?.chosen ?? null;
   }
 
+  /** Modelo do diretor (`MC_DIRECTOR_MODEL`, padrão `gpt-6.1-terra`; vazio vale ausente), o mesmo nos quatro formatos. */
+  private directorModel(): string {
+    return getStrongModelConfig(this.config).directorModel;
+  }
+
+  /** A chamada do diretor, igual nos quatro formatos (`requestDirectorJson`); sem chave, falha como sempre. */
+  private askDirector<T>(prompt: {
+    schema: Record<string, unknown>;
+    system: string;
+    user: string;
+  }): Promise<T> {
+    const apiKey = this.config.get<string>('OPENAI_API_KEY');
+    if (!apiKey) throw new Error('script_failed: OPENAI_API_KEY ausente');
+    this.openai ??= new OpenAI({ apiKey });
+    return requestDirectorJson<T>({
+      openai: this.openai,
+      logger: this.logger,
+      model: this.directorModel(),
+      ...prompt,
+    });
+  }
+
   /**
    * Diretor F2 real: UMA chamada com json_schema estrito (abertura, exatamente
    * uma fala por oferta, fechamento). Nome e preço por extenso são conferidos
@@ -453,43 +482,16 @@ export class McScriptProcessor {
     project: McProject,
     ctx: DirectorF2Context,
   ): Promise<McScript> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error('script_failed: OPENAI_API_KEY ausente');
-    const model = process.env.MC_DIRECTOR_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o';
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.7,
-        response_format: {
-          type: 'json_schema',
-          json_schema: buildDirectorJsonSchemaF2(ctx.offers.length),
-        },
-        messages: [
-          {
-            role: 'system',
-            content: buildDirectorSystemPromptF2({
-              offers: ctx.offers,
-              storeName: ctx.storeName,
-              maxChunkS: ctx.maxChunkS,
-              closingHint: (ctx as Partial<DirectorPieceContext>).closingHint ?? null,
-            }),
-          },
-          { role: 'user', content: `Briefing: ${project.briefing}` },
-        ],
+    const parsed = await this.askDirector<RawDirectorF2>({
+      schema: buildDirectorJsonSchemaF2(ctx.offers.length),
+      system: buildDirectorSystemPromptF2({
+        offers: ctx.offers,
+        storeName: ctx.storeName,
+        maxChunkS: ctx.maxChunkS,
+        closingHint: (ctx as Partial<DirectorPieceContext>).closingHint ?? null,
       }),
+      user: `Briefing: ${project.briefing}`,
     });
-    const body = (await res.json().catch(() => ({}))) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      error?: { message?: string };
-    };
-    if (!res.ok) {
-      throw new Error(`script_failed: OpenAI HTTP ${res.status}: ${body?.error?.message ?? ''}`);
-    }
-    const content = body.choices?.[0]?.message?.content;
-    if (!content) throw new Error('script_failed: resposta do OpenAI sem conteúdo');
-    const parsed = JSON.parse(content) as RawDirectorF2;
     return project.format === 'offer_piece'
       ? buildOfferPieceScript(parsed, ctx as DirectorPieceContext, () => randomUUID())
       : buildOfferCarouselScript(parsed, ctx, () => randomUUID());
@@ -505,39 +507,15 @@ export class McScriptProcessor {
     project: McProject,
     ctx: DirectorF1Context,
   ): Promise<McScript> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error('script_failed: OPENAI_API_KEY ausente');
-    const model = process.env.MC_DIRECTOR_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o';
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.7,
-        response_format: { type: 'json_schema', json_schema: buildDirectorJsonSchemaF1() },
-        messages: [
-          {
-            role: 'system',
-            content: buildDirectorSystemPromptF1({
-              products: ctx.products,
-              storeName: ctx.storeName,
-              maxChunkS: ctx.maxChunkS,
-            }),
-          },
-          { role: 'user', content: `Briefing da arte: ${project.briefing}` },
-        ],
+    const parsed = await this.askDirector<RawDirectorF1>({
+      schema: buildDirectorJsonSchemaF1(),
+      system: buildDirectorSystemPromptF1({
+        products: ctx.products,
+        storeName: ctx.storeName,
+        maxChunkS: ctx.maxChunkS,
       }),
+      user: `Briefing da arte: ${project.briefing}`,
     });
-    const body = (await res.json().catch(() => ({}))) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      error?: { message?: string };
-    };
-    if (!res.ok) {
-      throw new Error(`script_failed: OpenAI HTTP ${res.status}: ${body?.error?.message ?? ''}`);
-    }
-    const content = body.choices?.[0]?.message?.content;
-    if (!content) throw new Error('script_failed: resposta do OpenAI sem conteúdo');
-    const parsed = JSON.parse(content) as RawDirectorF1;
     return buildTalkingArtScript(parsed, ctx, () => randomUUID());
   }
 
@@ -582,34 +560,14 @@ export class McScriptProcessor {
     optionProducts: McSealProduct[],
     storeName: string | null,
   ): Promise<McScript> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error('script_failed: OPENAI_API_KEY ausente');
-    const model = process.env.MC_DIRECTOR_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o';
+    const model = this.directorModel();
     const targetDurationS = Math.min(60, Math.max(8, project.targetDurationS || 10));
     const products = buildProductsSnapshot(optionProducts, () => randomUUID());
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.7,
-        response_format: { type: 'json_schema', json_schema: buildDirectorJsonSchemaV2() },
-        messages: [
-          { role: 'system', content: buildDirectorSystemPromptV2({ targetDurationS, products }) },
-          { role: 'user', content: `Briefing: ${project.briefing}` },
-        ],
-      }),
+    const parsed = await this.askDirector<{ scenes?: RawDirectorSceneV2[] }>({
+      schema: buildDirectorJsonSchemaV2(),
+      system: buildDirectorSystemPromptV2({ targetDurationS, products }),
+      user: `Briefing: ${project.briefing}`,
     });
-    const body = (await res.json().catch(() => ({}))) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      error?: { message?: string };
-    };
-    if (!res.ok) {
-      throw new Error(`script_failed: OpenAI HTTP ${res.status}: ${body?.error?.message ?? ''}`);
-    }
-    const content = body.choices?.[0]?.message?.content;
-    if (!content) throw new Error('script_failed: resposta do OpenAI sem conteúdo');
-    const parsed = JSON.parse(content) as { scenes?: RawDirectorSceneV2[] };
     const scenes = normalizeDirectorScenesV2(
       parsed.scenes ?? [],
       products,
@@ -633,38 +591,16 @@ export class McScriptProcessor {
     products: McSealProduct[],
     storeName: string | null,
   ): Promise<McScript> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error('script_failed: OPENAI_API_KEY ausente');
     // Modelo FORTE de propósito (1 chamada por projeto, centavos): o diretor
     // precisa respeitar contagem de palavras por cena, continuidade de cenário
     // e preço por extenso ao mesmo tempo — o modelo rápido entregava falas
     // curtas demais e truncava o comercial (achado da 1ª produção real).
-    const model = process.env.MC_DIRECTOR_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o';
     const targetDurationS = Math.min(60, Math.max(8, project.targetDurationS || 10));
-
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        temperature: 0.7,
-        response_format: { type: 'json_schema', json_schema: buildDirectorJsonSchema() },
-        messages: [
-          { role: 'system', content: buildDirectorSystemPrompt({ targetDurationS, products }) },
-          { role: 'user', content: `Briefing: ${project.briefing}` },
-        ],
-      }),
+    const parsed = await this.askDirector<{ scenes?: RawDirectorScene[] }>({
+      schema: buildDirectorJsonSchema(),
+      system: buildDirectorSystemPrompt({ targetDurationS, products }),
+      user: `Briefing: ${project.briefing}`,
     });
-    const body = (await res.json().catch(() => ({}))) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      error?: { message?: string };
-    };
-    if (!res.ok) {
-      throw new Error(`script_failed: OpenAI HTTP ${res.status}: ${body?.error?.message ?? ''}`);
-    }
-    const content = body.choices?.[0]?.message?.content;
-    if (!content) throw new Error('script_failed: resposta do OpenAI sem conteúdo');
-    const parsed = JSON.parse(content) as { scenes?: RawDirectorScene[] };
     const scenes = normalizeDirectorScenes(parsed.scenes ?? []);
     const seal = buildScriptSeal(products);
     const endcard = buildEndcard(storeName);

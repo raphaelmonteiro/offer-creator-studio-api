@@ -1,16 +1,10 @@
-import { DataSource, EntityManager } from 'typeorm';
-import { CreditsService } from '../../../shared/credits/credits.service';
-import { TaskTransitionService } from '../../../shared/state/task-transition.service';
-import { CommercialsService } from '../commercials.service';
+import { chatResponse, installFakeOpenAi, sentTo } from '../../ai/utils/openai-chat.testutil';
 import { defaultPieceDocument, McPieceDocument } from '../domain/mc-piece';
 import { MC_PIPELINE_V2 } from '../domain/mc-quality';
 import { validateScriptV2 } from '../domain/mc-script-v2';
-import { McStepStatus } from '../domain/mc-state-machines';
-import { McScript, McStepType } from '../domain/mc-types';
-import { McCharacterKit } from '../entities/mc-character-kit.entity';
-import { McProject } from '../entities/mc-project.entity';
-import { McStep } from '../entities/mc-step.entity';
+import { McScript } from '../domain/mc-types';
 import { McScriptProcessor } from './mc-script.processor';
+import { newScriptProcessor } from './mc-script.processor.testutil';
 
 function snapshot(): McPieceDocument {
   const doc = defaultPieceDocument('9:16');
@@ -66,14 +60,8 @@ function snapshot(): McPieceDocument {
 
 /** Tarefa 5.2 — o step `script` de um projeto `offer_piece` usa o diretor do F2 sobre a peça congelada. */
 describe('McScriptProcessor — diretor da peça de ofertas (tarefa 5.2)', () => {
-  const env = { provider: process.env.MC_SCRIPT_PROVIDER, key: process.env.OPENAI_API_KEY };
-  const step = {
-    id: 'st',
-    projectId: 'p1',
-    type: McStepType.SCRIPT,
-    status: McStepStatus.QUEUED,
-    attempts: 0,
-  };
+  const env = { provider: process.env.MC_SCRIPT_PROVIDER };
+  const configEnv: Record<string, string> = {};
   const project = {
     id: 'p1',
     userId: 'u1',
@@ -99,61 +87,22 @@ describe('McScriptProcessor — diretor da peça de ofertas (tarefa 5.2)', () =>
     pieceId: 'piece-1',
     pieceSnapshot: snapshot(),
   };
-  let manager: { update: jest.Mock; insert: jest.Mock };
+  let harness: ReturnType<typeof newScriptProcessor>;
   let processor: McScriptProcessor;
-  let fetchMock: jest.SpyInstance;
+  let manager: ReturnType<typeof newScriptProcessor>['manager'];
 
   beforeEach(() => {
-    manager = { update: jest.fn().mockResolvedValue(undefined), insert: jest.fn() };
-    const dataSource = {
-      getRepository: jest.fn((entity: unknown) => ({
-        findOneBy: jest
-          .fn()
-          .mockResolvedValue(
-            entity === McStep
-              ? step
-              : entity === McProject
-                ? project
-                : entity === McCharacterKit
-                  ? { id: 'k1', identityMode: 'generated' }
-                  : null,
-          ),
-      })),
-      transaction: jest.fn((cb: (m: EntityManager) => Promise<unknown>) =>
-        cb(manager as unknown as EntityManager),
-      ),
-      query: jest.fn().mockResolvedValue([{ establishment: { tradeName: 'Mercado Bom Preço' } }]),
-    };
-    processor = new McScriptProcessor(
-      dataSource as unknown as DataSource,
-      {
-        casTransition: jest.fn().mockResolvedValue(true),
-        notify: jest.fn().mockResolvedValue(undefined),
-      } as unknown as TaskTransitionService,
-      { appendEvent: jest.fn().mockResolvedValue(undefined) } as unknown as CommercialsService,
-      { refundUnconsumed: jest.fn() } as unknown as CreditsService,
-    );
+    for (const key of Object.keys(configEnv)) delete configEnv[key];
+    harness = newScriptProcessor({ project, tradeName: 'Mercado Bom Preço', config: configEnv });
+    ({ processor, manager } = harness);
   });
 
   afterEach(() => {
-    fetchMock?.mockRestore();
-    for (const [key, value] of [
-      ['MC_SCRIPT_PROVIDER', env.provider],
-      ['OPENAI_API_KEY', env.key],
-    ] as const) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
+    if (env.provider === undefined) delete process.env.MC_SCRIPT_PROVIDER;
+    else process.env.MC_SCRIPT_PROVIDER = env.provider;
   });
 
-  const saved = (): McScript =>
-    (
-      manager.update.mock.calls.find(([entity]) => entity === McProject) as [
-        unknown,
-        unknown,
-        { script: McScript },
-      ]
-    )[2].script;
+  const saved = (): McScript => harness.saved();
 
   it('mock: abertura + uma fala por item FALADO (ids dos itens, na ordem da peça) + fechamento com a validade; janela e painel da peça', async () => {
     process.env.MC_SCRIPT_PROVIDER = 'mock';
@@ -195,43 +144,27 @@ describe('McScriptProcessor — diretor da peça de ofertas (tarefa 5.2)', () =>
 
   it('openai: o prompt leva a validade para o fechamento e o roteiro sai como peça', async () => {
     process.env.MC_SCRIPT_PROVIDER = 'openai';
-    process.env.OPENAI_API_KEY = 'sk-test';
-    let body: { messages: Array<{ content: string }> } | null = null;
-    fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (_url, init) => {
-      body = JSON.parse((init as { body: string }).body);
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          choices: [
+    configEnv.OPENAI_API_KEY = 'sk-test';
+    const create = installFakeOpenAi(processor);
+    create.mockResolvedValue(
+      chatResponse({
+        content: JSON.stringify({
+          opening: 'Olá! Ofertas de hoje no Mercado Bom Preço!',
+          offerLines: [
             {
-              message: {
-                content: JSON.stringify({
-                  opening: 'Olá! Ofertas de hoje no Mercado Bom Preço!',
-                  offerLines: [
-                    {
-                      offerIndex: 0,
-                      text: 'Picanha bovina por cinquenta e nove reais e noventa centavos o quilo!',
-                    },
-                    {
-                      offerIndex: 1,
-                      text: 'Arroz tipo 1 por vinte e quatro reais e noventa centavos!',
-                    },
-                    {
-                      offerIndex: 2,
-                      text: 'Refrigerante por sete reais e noventa e nove centavos!',
-                    },
-                  ],
-                  closing: 'Válido só até 16/04. Corre pra cá!',
-                }),
-              },
+              offerIndex: 0,
+              text: 'Picanha bovina por cinquenta e nove reais e noventa centavos o quilo!',
             },
+            { offerIndex: 1, text: 'Arroz tipo 1 por vinte e quatro reais e noventa centavos!' },
+            { offerIndex: 2, text: 'Refrigerante por sete reais e noventa e nove centavos!' },
           ],
+          closing: 'Válido só até 16/04. Corre pra cá!',
         }),
-      } as Response;
-    });
+      }),
+    );
     await processor.process({ stepId: 'st' });
-    expect(body!.messages[0].content).toContain('valem até 16/04');
+    const body = sentTo(create).body as { messages: Array<{ content: string }> };
+    expect(body.messages[0].content).toContain('valem até 16/04');
     const script = saved();
     expect(script.format).toBe('offer_piece');
     expect(script.scenes.map((s) => s.dialogue)).toEqual([
