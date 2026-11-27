@@ -198,7 +198,7 @@ describe('ai-response.schemas', () => {
             actions: [{ type: 'add-text', section: 'sidebar' }],
           }),
         ),
-      ).toThrow('Ação inválida retornada pelo GPT-4o');
+      ).toThrow('Ação inválida retornada pela IA');
     });
   });
 
@@ -225,7 +225,7 @@ describe('ai-response.schemas', () => {
             configuration: null,
           }),
         ),
-      ).toThrow('Estrutura inválida retornada pelo GPT-4o');
+      ).toThrow('Estrutura inválida retornada pela IA');
     });
   });
 
@@ -319,7 +319,7 @@ describe('ai-response.schemas', () => {
             footerBackground: { type: 'gradient', color: '#111111' },
           }),
         ),
-      ).toThrow('GPT-4o retornou composição inválida');
+      ).toThrow('A IA retornou composição inválida');
     });
   });
 });

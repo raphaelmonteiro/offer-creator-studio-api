@@ -23,6 +23,18 @@ export function openAiError(status: number, message = 'erro do provedor', code?:
   return Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 }
 
+/** Corpo e opções de requisição da chamada `index` ao cliente simulado (`create(body, options)`). */
+export function sentTo(
+  create: jest.Mock,
+  index = 0,
+): { body: Record<string, unknown>; options: Record<string, unknown> } {
+  const [body, options] = create.mock.calls[index] as [
+    Record<string, unknown>,
+    Record<string, unknown>,
+  ];
+  return { body, options };
+}
+
 /** Troca o cliente real do serviço por um simulado (o serviço guarda o SDK em `openai`). */
 export function installFakeOpenAi(service: object): jest.Mock {
   const create = jest.fn();

@@ -5,8 +5,9 @@ import { UploadsService } from '../uploads/uploads.service';
 import { FormatDto, ChatMessageDto } from './dto/template-generate-request.dto';
 import { TemplateGenerateResponseDto } from './dto/template-generate-response.dto';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
+import { TEMPLATE_CONFIGURATION_CALL } from './config/openai-text-calls';
 import { uploadGeneratedAsset } from './utils/ai-image.util';
-import { withAiLogging } from './utils/ai-telemetry.util';
+import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
 import {
   LayoutNormalizationAdjustment,
   normalizeTemplateConfigurationLayout,
@@ -14,14 +15,6 @@ import {
 import { OpenAiImageService } from './openai-image.service';
 import { AI_RESPONSE_FORMATS, parseTemplateGenerateResponse } from './schemas/ai-response.schemas';
 import { TEMPLATE_GENERATE_SYSTEM_PROMPT } from './prompts/template-generate.prompts';
-
-interface StructuredChatCompletionOptions<T> {
-  feature: string;
-  model: string;
-  request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
-  parse: (raw: string) => T;
-  emptyResponseMessage: string;
-}
 
 const GENERATE_PREFIX = 'GENERATE:';
 
@@ -86,17 +79,16 @@ export class TemplateGenerateService {
       }
     }
 
-    const result = await this.createStructuredChatCompletion({
+    const result = await createStructuredChatCompletion({
+      openai: this.openai,
+      logger: this.logger,
       feature: 'template-generate.configuration',
-      model: this.models.textModel,
-      emptyResponseMessage: 'Resposta vazia do GPT-4o',
+      spec: { model: this.models.textModel, ...TEMPLATE_CONFIGURATION_CALL },
+      messages: openaiMessages,
+      responseFormat: AI_RESPONSE_FORMATS.templateConfiguration,
       parse: parseTemplateGenerateResponse,
-      request: {
-        model: this.models.textModel,
-        response_format: AI_RESPONSE_FORMATS.templateConfiguration,
-        max_tokens: 4000,
-        messages: openaiMessages,
-      },
+      emptyResponseMessage: 'Resposta vazia da IA',
+      retryAttempts: this.models.structuredResponseRetryAttempts,
     });
     let configuration = result.configuration;
 
@@ -123,71 +115,6 @@ export class TemplateGenerateService {
       configuration,
       imagesGenerated,
     };
-  }
-
-  private async createStructuredChatCompletion<T>(
-    options: StructuredChatCompletionOptions<T>,
-  ): Promise<T> {
-    const maxAttempts = this.models.structuredResponseRetryAttempts + 1;
-    const messages = [...options.request.messages];
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const response = await withAiLogging(
-        this.logger,
-        {
-          feature: options.feature,
-          endpoint: 'chat.completions',
-          model: options.model,
-        },
-        () =>
-          this.openai!.chat.completions.create({
-            ...options.request,
-            messages,
-          }),
-      );
-
-      const raw = response.choices[0]?.message?.content;
-      try {
-        if (!raw) throw new Error(options.emptyResponseMessage);
-        return options.parse(raw);
-      } catch (error) {
-        lastError = error;
-        if (attempt >= maxAttempts) {
-          throw error;
-        }
-
-        const reason = this.getStructuredResponseRetryReason(error);
-        this.logger.warn(
-          `Structured response retry ${JSON.stringify({
-            feature: options.feature,
-            attempt,
-            nextAttempt: attempt + 1,
-            maxAttempts,
-            reason,
-            model: options.model,
-          })}`,
-        );
-
-        messages.push({
-          role: 'user',
-          content:
-            'The previous response was invalid for the expected JSON schema. ' +
-            `Validation error: ${reason}. ` +
-            'Return only valid JSON for the expected schema, without markdown or explanations.',
-        });
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('Resposta estruturada inválida da IA');
-  }
-
-  private getStructuredResponseRetryReason(error: unknown): string {
-    if (error instanceof Error && error.message) {
-      return error.message.slice(0, 180);
-    }
-
-    return 'structured-response-validation-failed';
   }
 
   private logLayoutNormalization(

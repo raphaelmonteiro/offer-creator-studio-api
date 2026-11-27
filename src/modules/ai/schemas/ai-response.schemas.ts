@@ -434,13 +434,13 @@ export function parseFlyerAssemblyPlanResponse(raw: string): FlyerAssemblyPlanSc
 }
 
 export function parseTemplateElementResponse(raw: string): TemplateElementResponseDto {
-  const parsed = parseJsonObject(raw, 'JSON inválido retornado pelo GPT-4o');
+  const parsed = parseJsonObject(raw, 'JSON inválido retornado pela IA');
   const assistantMessage =
     typeof parsed.assistantMessage === 'string' ? parsed.assistantMessage : 'Pronto!';
   const actions = parsed.actions;
 
   if (!Array.isArray(actions)) {
-    throw new Error('Estrutura inválida retornada pelo GPT-4o');
+    throw new Error('Estrutura inválida retornada pela IA');
   }
 
   return {
@@ -450,10 +450,10 @@ export function parseTemplateElementResponse(raw: string): TemplateElementRespon
 }
 
 export function parseTemplateGenerateResponse(raw: string): TemplateGenerateSchemaResult {
-  const parsed = parseJsonObject(raw, 'JSON inválido retornado pelo GPT-4o');
+  const parsed = parseJsonObject(raw, 'JSON inválido retornado pela IA');
 
   if (typeof parsed.assistantMessage !== 'string' || !isRecord(parsed.configuration)) {
-    throw new Error('Estrutura inválida retornada pelo GPT-4o');
+    throw new Error('Estrutura inválida retornada pela IA');
   }
 
   return {
@@ -485,7 +485,7 @@ export function parseImageIntentClassification(raw: string): ImageIntentSchemaRe
 }
 
 export function parseTemplateLayersComposition(raw: string): TemplateLayersCompositionSchemaResult {
-  const parsed = parseJsonObject(raw, 'GPT-4o retornou composição inválida (não é JSON)');
+  const parsed = parseJsonObject(raw, 'A IA retornou composição inválida (não é JSON)');
 
   if (
     !isPalette(parsed.palette) ||
@@ -494,7 +494,7 @@ export function parseTemplateLayersComposition(raw: string): TemplateLayersCompo
     !isBodyBackground(parsed.bodyBackground) ||
     !isFooterBackground(parsed.footerBackground)
   ) {
-    throw new Error('GPT-4o retornou composição inválida');
+    throw new Error('A IA retornou composição inválida');
   }
 
   return {
@@ -511,9 +511,9 @@ export function parseTemplateLayersComposition(raw: string): TemplateLayersCompo
 }
 
 function validateElementAction(item: unknown): ElementAction {
-  const action = asRecord(item, 'Ação inválida retornada pelo GPT-4o');
+  const action = asRecord(item, 'Ação inválida retornada pela IA');
   if (!isElementActionType(action.type) || !isTemplateSection(action.section)) {
-    throw new Error('Ação inválida retornada pelo GPT-4o');
+    throw new Error('Ação inválida retornada pela IA');
   }
 
   return {
