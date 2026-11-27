@@ -10,6 +10,13 @@ import { parseExample } from './env-example.guard.testutil';
 const EXAMPLE_PATH = path.resolve(__dirname, '..', '..', '..', '.env.example');
 const TEXT = fs.readFileSync(EXAMPLE_PATH, 'utf8');
 const LINES = parseExample(TEXT);
+/** O bloco de comentários do topo, até a primeira linha que não é comentário. */
+const TOP = TEXT.split('\n')
+  .slice(
+    0,
+    TEXT.split('\n').findIndex((row) => !row.startsWith('#')),
+  )
+  .join(' ');
 
 const lineOf = (name: string) => {
   const found = LINES.filter((line) => line.name === name);
@@ -113,12 +120,41 @@ describe('perfil de produção do .env.example', () => {
   });
 
   it('Compose local sobrepõe o perfil: o topo diz perfil de produção, mock, chaves zeradas e que fora do compose gasta crédito', () => {
-    const top = TEXT.split('\n').slice(0, 20).join(' ');
-    expect(top).toMatch(/PERFIL DE PRODU/);
-    expect(top).toMatch(/docker-compose\.yml/);
-    expect(top).toMatch(/mock/);
-    expect(top).toMatch(/chaves[\s\S]*zeradas/);
-    expect(top).toMatch(/GASTA crédito/);
+    expect(TOP).toMatch(/PERFIL DE PRODU/);
+    expect(TOP).toMatch(/docker-compose\.yml/);
+    expect(TOP).toMatch(/mock/);
+    expect(TOP).toMatch(/chaves[\s\S]*zeradas/);
+    expect(TOP).toMatch(/GASTA crédito/);
+  });
+
+  it('Topo diz o que preencher: segredos em branco (com como gerar), valores da VM e o que já vem pronto (R3)', () => {
+    expect(TOP).toMatch(/JWT_SECRET[\s\S]*JWT_REFRESH_SECRET[\s\S]*openssl rand -hex 32/);
+    ['DB_PASSWORD', 'SMTP_PASS', 'ADMIN_API_TOKEN', 'OPENAI_API_KEY'].forEach((name) =>
+      expect(TOP).toContain(name),
+    );
+    expect(TOP).toMatch(/placeholders de desenvolvimento/);
+    ['DB_HOST', 'BASE_URL', 'CDN_URL', 'FRONTEND_URL', 'SMTP_HOST'].forEach((name) =>
+      expect(TOP).toContain(name),
+    );
+    expect(TOP).toMatch(/NODE_ENV=production já vem/);
+    expect(TOP).toMatch(/blocos de IA e de função[\s\S]*só as chaves/);
+    expect(TOP).not.toMatch(/preencha SÓ os segredos/);
+  });
+
+  it('Valores de desenvolvimento não vazam para a produção: NODE_ENV=production e segredos do servidor vazios (R3)', () => {
+    expect(lineOf('NODE_ENV')).toMatchObject({ value: 'production', commented: false });
+    ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'DB_PASSWORD', 'SMTP_PASS'].forEach((name) =>
+      expect(lineOf(name)).toMatchObject({ value: '', commented: false }),
+    );
+    expect(commentAbove('JWT_SECRET')).toMatch(/openssl rand -hex 32/);
+  });
+
+  it('Qualidade da prévia da imagem: high, como a D-8 (high em tudo)', () => {
+    expect(lineOf('OPENAI_IMAGE_PREVIEW_QUALITY')).toMatchObject({
+      value: 'high',
+      commented: false,
+    });
+    expect(lineOf('OPENAI_IMAGE_QUALITY').value).toBe('high');
   });
 
   it('Formatos novos de comerciais ligados só com o executor v2 que eles exigem (PV-16)', () => {

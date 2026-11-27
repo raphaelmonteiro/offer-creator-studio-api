@@ -40,7 +40,8 @@ npm install
 cp .env.example .env
 ```
 
-Edite o arquivo `.env` com suas configurações:
+O `.env.example` é o perfil de produção (`NODE_ENV=production`, `JWT_*`, `DB_PASSWORD` e `SMTP_PASS` em branco): no
+desenvolvimento local, edite o arquivo `.env` com suas configurações, pondo `NODE_ENV=development` e os segredos abaixo:
 
 ```env
 DB_HOST=localhost

@@ -103,6 +103,26 @@ describe('guarda do .env.example contra o código', () => {
       ).toEqual([]);
     });
 
+    it('Segredo do servidor com valor de exemplo: JWT_SECRET, JWT_REFRESH_SECRET, DB_PASSWORD e SMTP_PASS reprovam, vazios passam', () => {
+      const example = [
+        'JWT_SECRET=your-secret-key-change-in-production-min-32-chars',
+        '# JWT_REFRESH_SECRET=your-refresh-secret',
+        'DB_PASSWORD=secret123',
+        'SMTP_PASS=senha',
+      ].join('\n');
+
+      expect(profileProblems([], example).secretsWithValue).toEqual([
+        'JWT_SECRET (linha 1)',
+        'JWT_REFRESH_SECRET (linha 2)',
+        'DB_PASSWORD (linha 3)',
+        'SMTP_PASS (linha 4)',
+      ]);
+      expect(
+        profileProblems([], 'JWT_SECRET=\nJWT_REFRESH_SECRET=\nDB_PASSWORD=\nSMTP_PASS=\n')
+          .secretsWithValue,
+      ).toEqual([]);
+    });
+
     it('não confunde com leitura: código de erro, token de injeção, comentário e arquivo de erros', () => {
       const files = [
         reader(

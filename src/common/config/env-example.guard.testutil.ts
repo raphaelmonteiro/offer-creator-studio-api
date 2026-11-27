@@ -24,6 +24,20 @@ export const SECRET_NAMES = [
 ] as const;
 
 /**
+ * Segredos do servidor que o exemplo também não pode trazer com valor, mesmo fora do escopo de IA (R3): sem eles a API não
+ * sobe (JWT) ou não conecta (banco, SMTP), então um valor de exemplo só serviria para subir a produção com ele.
+ */
+export const SERVER_SECRET_NAMES = [
+  'JWT_SECRET',
+  'JWT_REFRESH_SECRET',
+  'DB_PASSWORD',
+  'SMTP_PASS',
+] as const;
+
+/** Nomes que o exemplo traz sempre em branco: as chaves de provedor, o token de administração e os segredos do servidor. */
+const BLANK_NAMES: readonly string[] = [...SECRET_NAMES, ...SERVER_SECRET_NAMES];
+
+/**
  * Lidas só pelos testes (banco de integração, harness de e2e, binário de teste): ficam fora do exemplo de produção.
  * Cada uma cita o arquivo que a lê.
  */
@@ -152,7 +166,7 @@ export interface ProfileProblems {
   unlisted: string[];
   /** Linha de variável de IA ou de função sem leitor, com o número da linha. */
   unread: string[];
-  /** Chave, token ou senha de provedor com valor, com o número da linha. */
+  /** Chave, token ou senha (de provedor ou do servidor) com valor, com o número da linha. */
   secretsWithValue: string[];
 }
 
@@ -173,7 +187,7 @@ export function profileProblems(files: SourceFile[], exampleText: string): Profi
     )
     .map((line) => `${line.name} (linha ${line.line})`);
   const secretsWithValue = lines
-    .filter((line) => (SECRET_NAMES as readonly string[]).includes(line.name) && line.value !== '')
+    .filter((line) => BLANK_NAMES.includes(line.name) && line.value !== '')
     .map((line) => `${line.name} (linha ${line.line})`);
   return { unlisted, unread, secretsWithValue };
 }
