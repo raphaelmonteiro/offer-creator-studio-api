@@ -3,10 +3,10 @@ import type { FlyerProFormat } from '../domain/flyer-pro.types';
 import type { StructureExample } from '../domain/read-structure-example';
 import type {
   StructureAiItem,
+  StructureAiPage,
   StructureAiRequest,
   StructureAiSection,
 } from '../domain/structure-ai-request';
-import type { StructurePageInput } from '../domain/structure-suggestion.types';
 
 /**
  * A mensagem "DADOS" do pedido ao modelo (anexo 11 § 3.4): o encarte, as páginas, as seções na ordem atual, os produtos e
@@ -44,6 +44,14 @@ interface PriceText {
   kind: string;
 }
 
+/** O desconto do de/por em % inteiro, arredondado ("-22%"); sem texto quando o "de" não é maior que o "por" (A-9). */
+function discountText(cents: unknown, fromCents: unknown): string {
+  const to = Number(cents);
+  const from = Number(fromCents);
+  const percent = Math.round(((from - to) / from) * 100);
+  return from > to && percent > 0 ? `, -${percent}%` : '';
+}
+
 /** O preço com a unidade e o tipo em português, para os cinco tipos de `FlyerProPrice`. */
 function priceText(item: StructureAiItem): PriceText {
   const { price, unit } = item;
@@ -52,7 +60,10 @@ function priceText(item: StructureAiItem): PriceText {
     case 'simple':
       return { price: base, kind: 'simples' };
     case 'from_to':
-      return { price: `${base} (de ${money(price.fromCents)})`, kind: 'de/por' };
+      return {
+        price: `${base} (de ${money(price.fromCents)}${discountText(price.cents, price.fromCents)})`,
+        kind: 'de/por',
+      };
     case 'second_price':
       return {
         price: `${base} (${String(price.secondLabel)} ${money(price.secondCents)})`,
@@ -71,7 +82,7 @@ function priceText(item: StructureAiItem): PriceText {
 }
 
 /** A observação da página: capa, última, face externa da folha dupla de 4 páginas, cabeçalho e rodapé. */
-function pageNote(page: StructurePageInput, request: StructureAiRequest): string {
+function pageNote(page: StructureAiPage, request: StructureAiRequest): string {
   const notes: string[] = [];
   if (page.page === 1) notes.push('capa');
   if (page.page === request.pageCount) notes.push('última');
@@ -82,8 +93,8 @@ function pageNote(page: StructurePageInput, request: StructureAiRequest): string
   return notes.length > 0 ? notes.join(', ') : '-';
 }
 
-const pageLine = (page: StructurePageInput, request: StructureAiRequest) =>
-  `${page.page} | ${page.capacityCells} | ${page.usedCells} | ${pageNote(page, request)}`;
+const pageLine = (page: StructureAiPage, request: StructureAiRequest) =>
+  `${page.page} | ${page.capacityCells} | ${page.usedCells} | ${page.suggestedCells} | ${pageNote(page, request)}`;
 
 /** A seção: apelido, título, itens (com a cota quando existe), células, página atual e se o usuário a fixou. */
 function sectionLine(section: StructureAiSection): string {
@@ -94,10 +105,16 @@ function sectionLine(section: StructureAiSection): string {
   return `${section.alias} | ${title} | ${items} | ${section.cells} | ${current} | ${pinned}`;
 }
 
+/** O destaque atual: "2x1" do usuário, "sugerido 2x1" do motor ou "-". */
+const heroText = (item: StructureAiItem): string => {
+  if (item.hero !== null) return item.hero;
+  return item.suggestedHero !== null ? `sugerido ${item.suggestedHero}` : '-';
+};
+
 function productLine(item: StructureAiItem): string {
   const { price, kind } = priceText(item);
   const photo = item.hasPhoto ? 'sim' : 'não';
-  return `${item.alias} | ${item.sectionAlias} | ${oneLine(item.name)} | ${price} | ${kind} | ${photo} | ${item.hero ?? '-'}`;
+  return `${item.alias} | ${item.sectionAlias} | ${oneLine(item.name)} | ${price} | ${kind} | ${photo} | ${heroText(item)}`;
 }
 
 /** "folha simples 27x40, 2 páginas: Carnes (1) > Hortifruti (1) > Bebidas"; seção sem página fica sem parênteses. */
@@ -116,7 +133,7 @@ export function buildStructureDataMessage(request: StructureAiRequest): string {
     `ENCARTE: ${oneLine(request.documentName)} | ${formatLabel(request.format)} | ${pagesText(request.pageCount)} | cards no nível ${request.level} de 3`,
     `PRODUTOS SEM LUGAR HOJE: ${request.unplaced}`,
     `TETO DE DESTAQUES NOVOS: ${request.maxHeroes}`,
-    'PÁGINAS (página | capacidade em células | ocupadas | observação)',
+    'PÁGINAS (página | capacidade em células | ocupadas | dessas, em sugeridos do motor | observação)',
     ...request.pages.map((page) => pageLine(page, request)),
     'SEÇÕES NA ORDEM ATUAL (id | título | itens | células | página atual | fixada)',
     ...request.sections.map(sectionLine),

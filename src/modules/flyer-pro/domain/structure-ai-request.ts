@@ -36,6 +36,13 @@ export interface StructureAiItem {
   hasPhoto: boolean;
   /** O destaque que o usuário já tem neste item. */
   hero: StructureHeroSize | null;
+  /** O destaque que o motor mostra neste item como sugerido (`suggestedHeroes` do pedido). */
+  suggestedHero: StructureHeroSize | null;
+}
+
+/** A página do retrato com as células que os sugeridos do motor ocupam nela (2×1 = 1 a mais, 2×2 = 3 a mais). */
+export interface StructureAiPage extends StructurePageInput {
+  suggestedCells: number;
 }
 
 export interface StructureAiRequest {
@@ -46,7 +53,7 @@ export interface StructureAiRequest {
   unplaced: number;
   /** Teto de destaques novos (`FLYER_PRO_STRUCTURE_AI_MAX_HEROES`). */
   maxHeroes: number;
-  pages: StructurePageInput[];
+  pages: StructureAiPage[];
   sections: StructureAiSection[];
   items: StructureAiItem[];
   examples: StructureExample[];
@@ -70,11 +77,35 @@ export interface StructureAiRequestInput {
   maxHeroes: number;
 }
 
+/** As células a mais que um card sugerido ocupa além da célula de um card comum. */
+const SUGGESTED_EXTRA_CELLS: Record<StructureHeroSize, number> = { '2x1': 1, '2x2': 3 };
+
+/** Os sugeridos do motor que são itens do encarte: o resto do campo `suggestedHeroes` é ignorado. */
+const realSuggested = (request: StructureRequest, aliases: StructureAliases) =>
+  (request.suggestedHeroes ?? []).filter((hero) => aliases.aliasByItem.has(hero.itemId));
+
+/** As páginas do retrato, cada uma com as células em sugeridos do motor. */
+function pagesWithSuggested(
+  request: StructureRequest,
+  aliases: StructureAliases,
+): StructureAiPage[] {
+  const suggested = realSuggested(request, aliases);
+  return request.pages.map((page) => ({
+    ...page,
+    suggestedCells: suggested
+      .filter((hero) => hero.page === page.page)
+      .reduce((sum, hero) => sum + SUGGESTED_EXTRA_CELLS[hero.size], 0),
+  }));
+}
+
 /** O pedido ao provedor: seções e itens por apelido, o nome do encarte e os exemplos do cliente. */
 export function buildStructureAiRequest(input: StructureAiRequestInput): StructureAiRequest {
   const { request, aliases } = input;
   const rows = new Map(input.items.map((item) => [item.id, item]));
   const heroOf = new Map(request.heroes.map((hero) => [hero.itemId, hero.size]));
+  const suggestedOf = new Map(
+    realSuggested(request, aliases).map((hero) => [hero.itemId, hero.size]),
+  );
   const sections = request.sections.map(
     (section): StructureAiSection => ({
       alias: aliases.aliasBySection.get(section.id),
@@ -98,6 +129,7 @@ export function buildStructureAiRequest(input: StructureAiRequestInput): Structu
         unit: row.unit,
         hasPhoto: Boolean(row.imageUrl),
         hero: heroOf.get(id) ?? null,
+        suggestedHero: suggestedOf.get(id) ?? null,
       };
     }),
   );
@@ -108,7 +140,7 @@ export function buildStructureAiRequest(input: StructureAiRequestInput): Structu
     level: request.level,
     unplaced: request.unplaced ?? 0,
     maxHeroes: input.maxHeroes,
-    pages: request.pages,
+    pages: pagesWithSuggested(request, aliases),
     sections,
     items,
     examples: [...input.examples],
