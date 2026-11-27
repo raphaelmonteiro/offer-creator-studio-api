@@ -36,12 +36,15 @@ const readInteger = (
   spec: { name: string; fallback: number; min: number; max?: number },
 ): number => readIntegerEnv(config, logger, { ...spec, name: PREFIX + spec.name });
 
+/** O esforço padrão da sugestão (D-6 (b) da change 45); o valor inválido cai nele, com aviso (A-19). */
+const DEFAULT_EFFORT: ProductReasoningEffort = 'medium';
+
 function readEffort(config: ConfigService, logger: Warner): ProductReasoningEffort {
   const raw = rawOf(config, 'EFFORT');
-  if (raw === undefined) return 'low';
+  if (raw === undefined) return DEFAULT_EFFORT;
   if ((EFFORTS as readonly string[]).includes(raw)) return raw as ProductReasoningEffort;
-  logger.warn(`${PREFIX}EFFORT="${raw}" inválido; vale "low"`);
-  return 'low';
+  logger.warn(`${PREFIX}EFFORT="${raw}" inválido; vale "${DEFAULT_EFFORT}"`);
+  return DEFAULT_EFFORT;
 }
 
 function readProvider(config: ConfigService, logger: Warner): StructureAiProviderName {

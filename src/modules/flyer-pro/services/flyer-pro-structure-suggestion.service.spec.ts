@@ -28,7 +28,7 @@ describe('FlyerProStructureSuggestionService: o pedido de exemplo com o provedor
       stateDigest: '5b1f0c9a27d3e846',
       source: 'mock',
       model: 'mock',
-      promptVersion: 1,
+      promptVersion: 2,
       noChange: false,
       discarded: [],
       basedOn: { items: 8, sections: 3, clientFlyers: 0 },
@@ -59,7 +59,7 @@ describe('FlyerProStructureSuggestionService: o pedido de exemplo com o provedor
     expect(JSON.stringify(view)).not.toMatch(/usage|tokens|costUsd|estimatedCostUsd/);
     expect(view).toMatchObject({ source: 'ai', model: 'gpt-6-luna' });
     expect(suggest).toHaveBeenCalledTimes(1);
-    expect(suggest).toHaveBeenCalledWith(expect.anything(), { timeoutMs: 25_000 });
+    expect(suggest).toHaveBeenCalledWith(expect.anything(), { timeoutMs: 45_000 });
   });
 
   it('o pedido ao provedor leva o nome do banco, os apelidos e 0 produto sem lugar sem o campo unplaced', async () => {

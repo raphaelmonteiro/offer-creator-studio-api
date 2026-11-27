@@ -19,7 +19,7 @@ import {
 const orderOfExample = () => [rawSection('s1'), rawSection('s2'), rawSection('s3')];
 
 describe('FlyerProStructureSuggestionService com o provedor real (cliente simulado)', () => {
-  it('200 com source ai, o modelo configurado e a versão 1 do prompt, sem tokens nem custo na resposta', async () => {
+  it('200 com source ai, o modelo configurado e a versão 2 do prompt, sem tokens nem custo na resposta', async () => {
     const { service, create } = makeRealSuggestionService();
 
     const view = await service.suggest(DOCUMENT_ID, bodyOf());
@@ -27,7 +27,7 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
     expect(view).toMatchObject({
       source: 'ai',
       model: 'gpt-6-luna',
-      promptVersion: 1,
+      promptVersion: 2,
       noChange: false,
     });
     expect(JSON.stringify(view)).not.toMatch(/usage|tokens|costUsd|estimatedCostUsd/);
@@ -47,14 +47,14 @@ describe('FlyerProStructureSuggestionService com o provedor real (cliente simula
     expect(create.mock.calls[0][0]).toMatchObject({
       model: 'gpt-6-luna',
       store: false,
-      reasoning: { effort: 'low' },
-      max_output_tokens: 4000,
+      reasoning: { effort: 'medium' },
+      max_output_tokens: 16_000,
       text: {
         format: { type: 'json_schema', name: 'flyer_pro_structure_suggestion', strict: true },
       },
     });
     expect(create.mock.calls[0][0]).not.toHaveProperty('previous_response_id');
-    expect(create.mock.calls[0][1]).toEqual({ timeout: 25_000, maxRetries: 0 });
+    expect(create.mock.calls[0][1]).toEqual({ timeout: 45_000, maxRetries: 0 });
   });
 
   it('id inventado pelo modelo (seção s7 e destaque p42) sai no saneamento, com UNKNOWN_SECTION e UNKNOWN_ITEM', async () => {

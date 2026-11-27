@@ -1,6 +1,6 @@
 import { APIConnectionTimeoutError } from 'openai';
-import { openAiError } from '../../ai/utils/openai-chat.testutil';
-import type { StructureAiConfig } from '../config/structure-ai.config';
+import { fakeConfig, openAiError } from '../../ai/utils/openai-chat.testutil';
+import { readStructureAiConfig, type StructureAiConfig } from '../config/structure-ai.config';
 import { exampleAiRequest } from '../domain/structure-ai-request.testutil';
 import { STRUCTURE_SUGGESTION_INSTRUCTIONS } from '../prompts/structure-suggestion.prompt';
 import { REAL_CONFIG } from '../services/flyer-pro-structure-suggestion.service.testutil';
@@ -25,6 +25,9 @@ const sectionWith = (over: Record<string, unknown>) => ({
   itemsReason: '',
   ...over,
 });
+
+/** O prazo padrão que a configuração lê sem nenhuma variável (45.000 ms). */
+const readDefaultTimeout = () => readStructureAiConfig(fakeConfig({})).timeoutMs;
 
 function makeReal(outcome?: unknown, config: Partial<StructureAiConfig> = {}) {
   const { client, create } = fakeResponsesClient(outcome);
@@ -67,17 +70,28 @@ describe('RealFlyerProStructureAi: o corpo da chamada a /responses', () => {
     expect(body).not.toHaveProperty('previous_response_id');
   });
 
-  it('parâmetros do helper: reasoning low e 4.000 tokens de saída, sem temperature, max_tokens nem max_completion_tokens; prazo e sem repetição', async () => {
+  it('Padrão: reasoning medium e 16.000 tokens de saída, sem temperature, max_tokens nem max_completion_tokens; prazo de 45.000 ms e sem repetição', async () => {
     const { provider, create } = makeReal();
+    await provider.suggest(exampleAiRequest(), { timeoutMs: readDefaultTimeout() });
+
+    const body = bodyOf(create);
+    expect(body.reasoning).toEqual({ effort: 'medium' });
+    expect(body.max_output_tokens).toBe(16_000);
+    for (const field of ['temperature', 'max_tokens', 'max_completion_tokens']) {
+      expect(body).not.toHaveProperty(field);
+    }
+    expect(create.mock.calls[0][1]).toEqual({ timeout: 45_000, maxRetries: 0 });
+  });
+
+  it('Sem temperatura com esforço low: o corpo não leva temperature, max_tokens nem max_completion_tokens', async () => {
+    const { provider, create } = makeReal(validResult(), { effort: 'low' });
     await provider.suggest(exampleAiRequest(), OPTIONS);
 
     const body = bodyOf(create);
     expect(body.reasoning).toEqual({ effort: 'low' });
-    expect(body.max_output_tokens).toBe(4000);
     for (const field of ['temperature', 'max_tokens', 'max_completion_tokens']) {
       expect(body).not.toHaveProperty(field);
     }
-    expect(create.mock.calls[0][1]).toEqual({ timeout: 25_000, maxRetries: 0 });
   });
 
   it('Schema no corpo: o schema fechado, com additionalProperties false nos cinco objetos', async () => {

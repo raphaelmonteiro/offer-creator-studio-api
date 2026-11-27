@@ -16,8 +16,8 @@ describe('readStructureAiConfig', () => {
         enabled: true,
         provider: 'real',
         model: 'gpt-6-luna',
-        effort: 'low',
-        timeoutMs: 25_000,
+        effort: 'medium',
+        timeoutMs: 45_000,
         maxPerHour: 20,
         maxHeroes: 12,
         examples: 3,
@@ -26,13 +26,29 @@ describe('readStructureAiConfig', () => {
     });
   });
 
+  it('Sem as variáveis de esforço e prazo: valem o esforço medium e os 45.000 ms, sem aviso', () => {
+    expect(read({ FLYER_PRO_STRUCTURE_AI_PROVIDER: 'mock' })).toMatchObject({
+      config: { effort: 'medium', timeoutMs: 45_000 },
+      warnings: [],
+    });
+  });
+
+  it('Esforço low ainda aceito: low e 25.000 ms fixados (como o .env deste Linux tinha antes da change 45) valem, sem aviso', () => {
+    expect(
+      read({
+        FLYER_PRO_STRUCTURE_AI_EFFORT: 'low',
+        FLYER_PRO_STRUCTURE_AI_TIMEOUT_MS: '25000',
+      }),
+    ).toMatchObject({ config: { effort: 'low', timeoutMs: 25_000 }, warnings: [] });
+  });
+
   it('variáveis vazias valem o padrão, sem aviso', () => {
     const { config, warnings } = read({
       FLYER_PRO_STRUCTURE_AI_MODEL: '  ',
       FLYER_PRO_STRUCTURE_AI_TIMEOUT_MS: '',
       FLYER_PRO_STRUCTURE_AI_PROVIDER: '',
     });
-    expect(config).toMatchObject({ model: 'gpt-6-luna', timeoutMs: 25_000, provider: 'real' });
+    expect(config).toMatchObject({ model: 'gpt-6-luna', timeoutMs: 45_000, provider: 'real' });
     expect(warnings).toEqual([]);
   });
 
@@ -69,18 +85,18 @@ describe('readStructureAiConfig', () => {
     });
   });
 
-  it('números e esforço inválidos: o padrão, com um aviso para cada um', () => {
+  it('Números e esforço inválidos: o padrão (esforço medium), com um aviso para cada um', () => {
     const { config, warnings } = read({
       FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR: 'abc',
       FLYER_PRO_STRUCTURE_AI_EXAMPLES: '11',
       FLYER_PRO_STRUCTURE_AI_EFFORT: 'alto',
     });
-    expect(config).toMatchObject({ maxPerHour: 20, examples: 3, effort: 'low' });
+    expect(config).toMatchObject({ maxPerHour: 20, examples: 3, effort: 'medium' });
     expect(warnings).toHaveLength(3);
     const text = warnings.join('\n');
     expect(text).toContain('FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR="abc"');
     expect(text).toContain('FLYER_PRO_STRUCTURE_AI_EXAMPLES="11"');
-    expect(text).toContain('FLYER_PRO_STRUCTURE_AI_EFFORT="alto"');
+    expect(text).toContain('FLYER_PRO_STRUCTURE_AI_EFFORT="alto" inválido; vale "medium"');
   });
 
   it.each(['0', '-3', '2.5', 'NaN'])('prazo, teto por hora e destaques recusam "%s"', (value) => {
@@ -89,7 +105,7 @@ describe('readStructureAiConfig', () => {
       FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR: value,
       FLYER_PRO_STRUCTURE_AI_MAX_HEROES: value,
     });
-    expect(config).toMatchObject({ timeoutMs: 25_000, maxPerHour: 20, maxHeroes: 12 });
+    expect(config).toMatchObject({ timeoutMs: 45_000, maxPerHour: 20, maxHeroes: 12 });
     expect(warnings).toHaveLength(3);
   });
 
