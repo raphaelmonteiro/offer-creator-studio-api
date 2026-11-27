@@ -132,7 +132,11 @@ describe('readStructureAiConfig', () => {
       EXAMPLES: String(config.examples),
     };
     for (const [name, value] of Object.entries(defaults)) {
-      expect(example).toMatch(new RegExp(`^FLYER_PRO_STRUCTURE_AI_${name}=${value}(\\s|$)`, 'm'));
+      // O modelo tem padrão no código e fica em linha comentada com o valor (D-11 da change 42); as outras ficam ativas.
+      const comment = name === 'MODEL' ? '(# )?' : '';
+      expect(example).toMatch(
+        new RegExp(`^${comment}FLYER_PRO_STRUCTURE_AI_${name}=${value}(\\s|$)`, 'm'),
+      );
     }
   });
 });
