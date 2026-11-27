@@ -1,31 +1,17 @@
-import { DataSource, EntityManager } from 'typeorm';
-import { CreditsService } from '../../../shared/credits/credits.service';
 import { AnimationAsset } from '../../../shared/media-assets/animation-asset.entity';
-import { TaskTransitionService } from '../../../shared/state/task-transition.service';
-import { CommercialsService } from '../commercials.service';
 import { fixturePieceDocument } from '../domain/__fixtures__/mc-piece.fixtures';
 import { MC_PIPELINE_V2 } from '../domain/mc-quality';
-import { McStepStatus } from '../domain/mc-state-machines';
-import { McScript, McStepType } from '../domain/mc-types';
-import { McCharacterKit } from '../entities/mc-character-kit.entity';
-import { McProject } from '../entities/mc-project.entity';
-import { McStep } from '../entities/mc-step.entity';
 import { McScriptProcessor } from './mc-script.processor';
+import { newScriptProcessor } from './mc-script.processor.testutil';
 
 /** O step `script` congela modo sem fundo, enquadramento e cor-chave (video-mascote-transparente, D9). */
 describe('McScriptProcessor — roteiro com personagem sem fundo (F1 e peça)', () => {
   const originalProvider = process.env.MC_SCRIPT_PROVIDER;
-  const step = {
-    id: 'st',
-    projectId: 'p1',
-    type: McStepType.SCRIPT,
-    status: McStepStatus.QUEUED,
-    attempts: 0,
-  };
   let project: Record<string, unknown>;
   let kit: Record<string, unknown>;
-  let manager: { update: jest.Mock; insert: jest.Mock };
+  let manager: ReturnType<typeof newScriptProcessor>['manager'];
   let processor: McScriptProcessor;
+  let saved: ReturnType<typeof newScriptProcessor>['saved'];
 
   const products = [
     { id: 'o1', name: 'Arroz 5kg', price: '24,90' },
@@ -56,7 +42,6 @@ describe('McScriptProcessor — roteiro com personagem sem fundo (F1 e peça)', 
       logoBox: null,
       options: { musicEnabled: false, captionsEnabled: false, products },
     };
-    manager = { update: jest.fn().mockResolvedValue(undefined), insert: jest.fn() };
     const assets: Record<string, Record<string, unknown>> = {
       'tile-1': { id: 'tile-1', width: 720, height: 960 },
       'body-1': {
@@ -67,45 +52,18 @@ describe('McScriptProcessor — roteiro com personagem sem fundo (F1 e peça)', 
       },
       'art-1': { id: 'art-1', width: 1080, height: 1920 },
     };
-    const dataSource = {
-      getRepository: jest.fn((entity: unknown) => ({
-        findOneBy: jest.fn((where: { id: string }) => {
-          if (entity === McStep) return Promise.resolve(step);
-          if (entity === McProject) return Promise.resolve(project);
-          if (entity === McCharacterKit) return Promise.resolve(kit);
-          if (entity === AnimationAsset) return Promise.resolve(assets[where.id] ?? null);
-          return Promise.resolve(null);
-        }),
-      })),
-      transaction: jest.fn((cb: (m: EntityManager) => Promise<unknown>) =>
-        cb(manager as unknown as EntityManager),
-      ),
-      query: jest.fn().mockResolvedValue([{ establishment: { tradeName: 'Mercadão' } }]),
-    };
-    processor = new McScriptProcessor(
-      dataSource as unknown as DataSource,
-      {
-        casTransition: jest.fn().mockResolvedValue(true),
-        notify: jest.fn().mockResolvedValue(undefined),
-      } as unknown as TaskTransitionService,
-      { appendEvent: jest.fn().mockResolvedValue(undefined) } as unknown as CommercialsService,
-      { refundUnconsumed: jest.fn() } as unknown as CreditsService,
-    );
+    ({ processor, manager, saved } = newScriptProcessor({
+      project,
+      kit,
+      lookup: (entity, where) =>
+        entity === AnimationAsset ? (assets[where.id] ?? null) : undefined,
+    }));
   });
 
   afterEach(() => {
     if (originalProvider === undefined) delete process.env.MC_SCRIPT_PROVIDER;
     else process.env.MC_SCRIPT_PROVIDER = originalProvider;
   });
-
-  const saved = (): McScript =>
-    (
-      manager.update.mock.calls.find(([entity]) => entity === McProject) as [
-        unknown,
-        unknown,
-        { script: McScript },
-      ]
-    )[2].script;
 
   it('arte que fala sem o modo: roteiro sem os campos novos e janela com o aspecto do tile de busto', async () => {
     await processor.process({ stepId: 'st' });

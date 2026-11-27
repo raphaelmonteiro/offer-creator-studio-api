@@ -641,7 +641,7 @@ export class AiController {
 
   @Post('template-image-generate')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Gera imagem de fundo para template via GPT-4o Image (Feature 5)' })
+  @ApiOperation({ summary: 'Gera imagem de fundo para template via GPT Image (Feature 5)' })
   @ApiResponse({ status: 200, description: 'Imagem gerada com sucesso' })
   async templateImageGenerate(@Body() dto: TemplateImageGenerateRequestDto) {
     try {
@@ -661,7 +661,7 @@ export class AiController {
 
   @Post('template-layers-generate')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Gera template em camadas separadas via GPT-4o Image (Feature 6)' })
+  @ApiOperation({ summary: 'Gera template em camadas separadas via GPT Image (Feature 6)' })
   @ApiResponse({ status: 200, description: 'Camadas geradas com sucesso' })
   async templateLayersGenerate(@Body() dto: TemplateLayersGenerateRequestDto) {
     try {
@@ -707,7 +707,7 @@ export class AiController {
 
   @Post('template-generate')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Gera um template completo via GPT-4o com suporte a GPT Image' })
+  @ApiOperation({ summary: 'Gera um template completo via IA com suporte a GPT Image' })
   @ApiResponse({ status: 200, description: 'Template gerado com sucesso' })
   async templateGenerate(@Body() dto: TemplateGenerateRequestDto) {
     try {

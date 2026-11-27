@@ -7,7 +7,7 @@ import { ChatCallSpec } from './openai-chat-params';
  * (`max_completion_tokens`): maior, porque o raciocínio é cobrado como saída e conta no teto, e um teto
  * apertado devolve texto vazio ou JSON cortado.
  */
-export type OutputCeiling = Pick<ChatCallSpec, 'legacyMaxTokens' | 'maxCompletionTokens'>;
+export type OutputCeiling = Required<Pick<ChatCallSpec, 'legacyMaxTokens' | 'maxCompletionTokens'>>;
 
 /** Ortografia: 10 campos por lote, esforço `low`. */
 export const SPELLCHECK_CEILING: OutputCeiling = {

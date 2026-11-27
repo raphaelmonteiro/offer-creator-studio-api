@@ -72,6 +72,14 @@ const SUNBURST_PRICE_SOURCE =
  */
 const SUNBURST_2_6_PRICE_SOURCE =
   'https://developers.openai.com/api/docs/models/gpt-image-2.6-sunburst; https://developers.openai.com/api/docs/pricing';
+/**
+ * Prévia da imagem geral (change 42, D-orq-202, F-4 da task 1.1). Preço: páginas `models/gpt-image-2.6-flare` e `pricing`,
+ * consultadas em 2026-11-27: o mesmo do `gpt-image-2.6-sunburst` (imagem de entrada US$ 8, texto de entrada US$ 5 e imagem de
+ * saída US$ 30 por milhão de tokens). Tamanhos recomendados, livres em múltiplos de 16 e qualidades como os do sunburst;
+ * fundo transparente com png ou webp. `markup` não foi conferido para este modelo e fica de fora.
+ */
+const FLARE_2_6_PRICE_SOURCE =
+  'https://developers.openai.com/api/docs/models/gpt-image-2.6-flare; https://developers.openai.com/api/docs/pricing';
 /** Limite de pixels da imagem e da camada `markup` (guia de imagens, 2026-11-06). */
 export const MARKUP_MAX_PIXELS = 16_777_216;
 
@@ -89,6 +97,19 @@ export const IMAGE_MODEL_CAPABILITIES: readonly ImageModelCapabilities[] = [
     priceConsultedAt: '2026-11-06',
     capabilitiesSource: CAPABILITIES_SOURCE,
     capabilitiesConsultedAt: '2026-11-06',
+  },
+  {
+    prefix: 'gpt-image-2.6-flare',
+    customSizes: true,
+    fixedSizes: CLASSIC_SIZES,
+    qualities: GPT_IMAGE_2_QUALITIES,
+    inputFidelity: false,
+    transparentBackground: true,
+    prices: { imageInput: 8, textInput: 5, imageOutput: 30 },
+    priceSource: FLARE_2_6_PRICE_SOURCE,
+    priceConsultedAt: '2026-11-27',
+    capabilitiesSource: FLARE_2_6_PRICE_SOURCE,
+    capabilitiesConsultedAt: '2026-11-27',
   },
   {
     prefix: 'gpt-image-2.5-sunburst',

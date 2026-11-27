@@ -1,4 +1,10 @@
-import { costFromPrices, llmCostUsd, llmPricesFor } from './openai-llm-pricing';
+import {
+  costFromPrices,
+  llmCostUsd,
+  llmCostUsdIncludingLegacy,
+  llmPricesFor,
+  llmPricesIncludingLegacy,
+} from './openai-llm-pricing';
 
 describe('llmCostUsd', () => {
   it('chamada sem cache do ledger da Etapa 0: 602 de entrada e 272 de saída = US$ 0,000196', () => {
@@ -113,5 +119,55 @@ describe('costFromPrices, preço de cache que a página não informa (D-11)', ()
       output_tokens: 0,
     };
     expect(costFromPrices({ ...onlyInputOutput, cachedInput: 0.2 }, usage)).toBeLessThan(2);
+  });
+});
+
+describe('preço dos modelos num lugar só (change 42, requisito "Preço dos modelos num lugar só")', () => {
+  const usage = { prompt_tokens: 2000, completion_tokens: 300 };
+
+  it('Luna e Terra valem o mesmo preço nas duas leituras', () => {
+    expect(llmPricesIncludingLegacy('gpt-6-luna')).toEqual(llmPricesFor('gpt-6-luna'));
+    expect(llmPricesIncludingLegacy('gpt-6.1-terra')).toEqual(llmPricesFor('gpt-6.1-terra'));
+  });
+
+  it.each([
+    ['gpt-4o', 2.5, 10],
+    ['gpt-4o-mini', 0.15, 0.6],
+    ['gpt-4.1', 2, 8],
+    ['gpt-4.1-mini', 0.4, 1.6],
+  ])('a volta tem o preço de hoje de %s: %s e %s por milhão', (model, input, output) => {
+    expect(llmPricesIncludingLegacy(model)).toEqual({ input, output });
+  });
+
+  it('Template Pro continua recusando a família de hoje: sem preço para a cena e para o log das cinco features', () => {
+    for (const model of ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini']) {
+      expect(llmPricesFor(model)).toBeNull();
+      expect(llmCostUsd(model, usage)).toBeNull();
+    }
+  });
+
+  it('o snapshot datado casa pelo maior prefixo com hífen: o mini não cai no gpt-4o', () => {
+    expect(llmPricesIncludingLegacy('gpt-4o-mini-2024-07-18')).toEqual({
+      input: 0.15,
+      output: 0.6,
+    });
+    expect(llmPricesIncludingLegacy('gpt-4o-2024-08-06')).toEqual({ input: 2.5, output: 10 });
+    expect(llmPricesIncludingLegacy('gpt-6.1-terra-2026-10-01')).toEqual(
+      llmPricesFor('gpt-6.1-terra'),
+    );
+    expect(llmPricesIncludingLegacy('gpt-4omni')).toBeNull();
+  });
+
+  it('modelo sem preço, vazio ou ausente dá nulo, nunca um preço de outro modelo', () => {
+    expect(llmPricesIncludingLegacy('gpt-5-mini')).toBeNull();
+    expect(llmPricesIncludingLegacy('')).toBeNull();
+    expect(llmPricesIncludingLegacy(undefined)).toBeNull();
+    expect(llmCostUsdIncludingLegacy('gpt-5-mini', usage)).toBeNull();
+  });
+
+  it('custo com a volta: Terra 2.000 e 300 = US$ 0,0035; gpt-4o o mesmo uso = US$ 0,008', () => {
+    expect(llmCostUsdIncludingLegacy('gpt-6.1-terra', usage)).toBe(0.0035);
+    expect(llmCostUsdIncludingLegacy('gpt-4o', usage)).toBe(0.008);
+    expect(llmCostUsdIncludingLegacy('gpt-4o', undefined)).toBeNull();
   });
 });

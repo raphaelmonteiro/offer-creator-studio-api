@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { APIConnectionError, APIConnectionTimeoutError } from 'openai';
 import {
   classifyOpenAiError,
   isOpenAiQuotaError,
@@ -63,6 +63,31 @@ describe('openai-errors — conta sem crédito é terminal (tarefa 2.6)', () => 
       .mockResolvedValue('ok');
     await expect(withOpenAiRetry(rate, { baseDelayMs: 1 })).resolves.toBe('ok');
     expect(rate).toHaveBeenCalledTimes(2);
+  });
+
+  it('withOpenAiRetry com retryConnectionErrors: false: rede e prazo estourado saem na primeira resposta; taxa e 5xx seguem repetindo', async () => {
+    for (const failure of [new APIConnectionError({}), new APIConnectionTimeoutError()]) {
+      const call = jest.fn().mockRejectedValue(failure);
+      await expect(
+        withOpenAiRetry(call, { baseDelayMs: 1, retryConnectionErrors: false }),
+      ).rejects.toBe(failure);
+      expect(call).toHaveBeenCalledTimes(1);
+    }
+
+    const server = jest.fn().mockRejectedValueOnce(apiError(503, null)).mockResolvedValue('ok');
+    await expect(
+      withOpenAiRetry(server, { baseDelayMs: 1, retryConnectionErrors: false }),
+    ).resolves.toBe('ok');
+    expect(server).toHaveBeenCalledTimes(2);
+  });
+
+  it('withOpenAiRetry sem a opção: rede e prazo estourado continuam repetindo, como antes', async () => {
+    const call = jest
+      .fn()
+      .mockRejectedValueOnce(new APIConnectionTimeoutError())
+      .mockResolvedValue('ok');
+    await expect(withOpenAiRetry(call, { baseDelayMs: 1 })).resolves.toBe('ok');
+    expect(call).toHaveBeenCalledTimes(2);
   });
 
   it('SDK real com OPENAI_NO_SDK_RETRY: 429 insufficient_quota faz UMA requisição HTTP e vira quota', async () => {

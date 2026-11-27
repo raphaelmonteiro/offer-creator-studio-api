@@ -3,13 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { UploadsService } from '../uploads/uploads.service';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
+import { TEMPLATE_ELEMENT_CALL } from './config/openai-text-calls';
 import { FormatDto, ChatMessageDto } from './dto/template-generate-request.dto';
 import { TemplateElementResponseDto } from './dto/template-element-request.dto';
 import { OpenAiImageService } from './openai-image.service';
 import { TEMPLATE_ELEMENT_SYSTEM_PROMPT } from './prompts/template-element.prompts';
 import { AI_RESPONSE_FORMATS, parseTemplateElementResponse } from './schemas/ai-response.schemas';
 import { uploadGeneratedAsset } from './utils/ai-image.util';
-import { withAiLogging } from './utils/ai-telemetry.util';
+import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
 import {
   LayoutNormalizationAdjustment,
   normalizeCanvasBackgroundRecord,
@@ -17,14 +18,6 @@ import {
 } from './utils/ai-layout.util';
 
 const GENERATE_PREFIX = 'GENERATE:';
-
-interface StructuredChatCompletionOptions<T> {
-  feature: string;
-  model: string;
-  request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
-  parse: (raw: string) => T;
-  emptyResponseMessage: string;
-}
 
 @Injectable()
 export class TemplateElementAssistantService {
@@ -103,17 +96,16 @@ export class TemplateElementAssistantService {
       }
     }
 
-    const { assistantMessage, actions } = await this.createStructuredChatCompletion({
+    const { assistantMessage, actions } = await createStructuredChatCompletion({
+      openai: this.openai,
+      logger: this.logger,
       feature: 'template-element.actions',
-      model: this.models.textModel,
-      emptyResponseMessage: 'Resposta vazia do GPT-4o',
+      spec: { model: this.models.textModel, ...TEMPLATE_ELEMENT_CALL },
+      messages: openaiMessages,
+      responseFormat: AI_RESPONSE_FORMATS.templateElementActions,
       parse: parseTemplateElementResponse,
-      request: {
-        model: this.models.textModel,
-        response_format: AI_RESPONSE_FORMATS.templateElementActions,
-        max_tokens: 2000,
-        messages: openaiMessages,
-      },
+      emptyResponseMessage: 'Resposta vazia da IA',
+      retryAttempts: this.models.structuredResponseRetryAttempts,
     });
 
     const layoutAdjustments: LayoutNormalizationAdjustment[] = [];
@@ -159,71 +151,6 @@ export class TemplateElementAssistantService {
     this.logLayoutNormalization('template-element.actions', layoutAdjustments);
 
     return { assistantMessage, actions };
-  }
-
-  private async createStructuredChatCompletion<T>(
-    options: StructuredChatCompletionOptions<T>,
-  ): Promise<T> {
-    const maxAttempts = this.models.structuredResponseRetryAttempts + 1;
-    const messages = [...options.request.messages];
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const response = await withAiLogging(
-        this.logger,
-        {
-          feature: options.feature,
-          endpoint: 'chat.completions',
-          model: options.model,
-        },
-        () =>
-          this.openai!.chat.completions.create({
-            ...options.request,
-            messages,
-          }),
-      );
-
-      const raw = response.choices[0]?.message?.content;
-      try {
-        if (!raw) throw new Error(options.emptyResponseMessage);
-        return options.parse(raw);
-      } catch (error) {
-        lastError = error;
-        if (attempt >= maxAttempts) {
-          throw error;
-        }
-
-        const reason = this.getStructuredResponseRetryReason(error);
-        this.logger.warn(
-          `Structured response retry ${JSON.stringify({
-            feature: options.feature,
-            attempt,
-            nextAttempt: attempt + 1,
-            maxAttempts,
-            reason,
-            model: options.model,
-          })}`,
-        );
-
-        messages.push({
-          role: 'user',
-          content:
-            'The previous response was invalid for the expected JSON schema. ' +
-            `Validation error: ${reason}. ` +
-            'Return only valid JSON for the expected schema, without markdown or explanations.',
-        });
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('Resposta estruturada inválida da IA');
-  }
-
-  private getStructuredResponseRetryReason(error: unknown): string {
-    if (error instanceof Error && error.message) {
-      return error.message.slice(0, 180);
-    }
-
-    return 'structured-response-validation-failed';
   }
 
   private logLayoutNormalization(
@@ -303,38 +230,18 @@ export class TemplateElementAssistantService {
     return result.url;
   }
 
-  private async generatePlaceholderImage(prompt: string) {
-    try {
-      return await this.openAiImageService.generateImage({
-        feature: 'template-element.placeholder-image',
-        prompt,
-        size: '1024x1024',
-        assetKind: 'template',
-        mode: 'final',
-        model: this.models.imageModel,
-        outputFormat: 'jpeg',
-        outputCompression: 85,
-        background: 'opaque',
-      });
-    } catch (error) {
-      if (!this.models.enableDalleFallback) {
-        throw error;
-      }
-
-      this.logger.warn(
-        `GPT Image placeholder generation failed; trying DALL-E fallback: ${(error as Error).message}`,
-      );
-
-      return this.openAiImageService.generateImage({
-        feature: 'template-element.placeholder-image-fallback',
-        prompt,
-        size: '1024x1024',
-        assetKind: 'legacy',
-        mode: 'final',
-        model: this.models.dalleFallbackModel,
-        quality: 'standard',
-      });
-    }
+  private generatePlaceholderImage(prompt: string) {
+    return this.openAiImageService.generateImage({
+      feature: 'template-element.placeholder-image',
+      prompt,
+      size: '1024x1024',
+      assetKind: 'template',
+      mode: 'final',
+      model: this.models.imageModel,
+      outputFormat: 'jpeg',
+      outputCompression: 85,
+      background: 'opaque',
+    });
   }
 
   private slugify(text: string): string {

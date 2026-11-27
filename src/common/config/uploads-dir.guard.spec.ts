@@ -1,5 +1,5 @@
-import * as fs from 'fs';
 import * as path from 'path';
+import { listSourceFiles, stripComments } from './source-files.testutil';
 
 /** Trava contra regressão (design A2): o caminho de uploads só é resolvido por `uploads-dir.ts`. */
 const SRC = path.resolve(__dirname, '..', '..');
@@ -9,7 +9,7 @@ const UPLOAD_DEST_READ =
 
 /** Leituras de UPLOAD_DEST (código, sem comentários) que não são argumento direto de `resolveUploadsDir(`. */
 function findUnresolvedUploadDestReads(text: string): string[] {
-  const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const code = stripComments(text);
   const bad: string[] = [];
   for (const m of code.matchAll(UPLOAD_DEST_READ)) {
     const before = code.slice(0, m.index);
@@ -20,19 +20,8 @@ function findUnresolvedUploadDestReads(text: string): string[] {
   return bad;
 }
 
-function listSources(dir: string): string[] {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return listSources(full);
-    return entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts') ? [full] : [];
-  });
-}
-
 describe('guarda do diretório de uploads', () => {
-  const files = listSources(SRC).map((f) => ({
-    rel: path.relative(SRC, f).split(path.sep).join('/'),
-    text: fs.readFileSync(f, 'utf8'),
-  }));
+  const files = listSourceFiles(SRC, { skipFile: (name) => name.endsWith('.spec.ts') });
 
   it('process.cwd() só aparece no helper e nos entry points', () => {
     const offenders = files.filter(

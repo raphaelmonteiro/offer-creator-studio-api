@@ -20,8 +20,8 @@ import {
 } from './utils/ai-image.util';
 import { withAiLogging } from './utils/ai-telemetry.util';
 
-type ImageAssetKind = 'template' | 'background' | 'transparent' | 'legacy';
-type OpenAiImageQuality = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'standard' | 'auto';
+type ImageAssetKind = 'template' | 'background' | 'transparent';
+type OpenAiImageQuality = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
 type OpenAiImageBackground = 'transparent' | 'opaque' | 'auto';
 type OpenAiImageOutputFormat = 'png' | 'jpeg' | 'webp';
 type OpenAiImageInputFidelity = 'low' | 'high';
@@ -166,7 +166,7 @@ export class OpenAiImageService {
     // Public endpoints still default to final. Internal callers can opt into preview
     // with mode: 'preview' without changing request/response contracts.
     const mode = options.mode ?? this.models.imageDefaultMode;
-    const model = options.model ?? this.resolveModel(mode, options.assetKind);
+    const model = options.model ?? this.resolveModel(mode);
     const preset = this.resolvePreset(options.assetKind, mode);
     const quality = options.quality ?? preset.quality;
     const background = options.background ?? preset.background;
@@ -185,7 +185,6 @@ export class OpenAiImageService {
       background,
       outputFormat,
       outputCompression,
-      legacy: options.assetKind === 'legacy',
     });
 
     const response = await this.dispatchImageCall({
@@ -223,7 +222,7 @@ export class OpenAiImageService {
     // Public endpoints still default to final. Internal callers can opt into preview
     // with mode: 'preview' without changing request/response contracts.
     const mode = options.mode ?? this.models.imageDefaultMode;
-    const model = options.model ?? this.resolveModel(mode, assetKind);
+    const model = options.model ?? this.resolveModel(mode);
     const preset = this.resolvePreset(assetKind, mode);
     const quality = options.quality ?? preset.quality;
     const background = options.background ?? preset.background;
@@ -414,13 +413,6 @@ export class OpenAiImageService {
       };
     }
 
-    if (assetKind === 'legacy') {
-      return {
-        quality: 'standard',
-        fallbackMimeType: 'image/jpeg',
-      };
-    }
-
     return {
       quality: mode === 'preview' ? previewQuality : defaultQuality,
       background: this.configService.get<OpenAiImageBackground>(
@@ -436,11 +428,7 @@ export class OpenAiImageService {
     };
   }
 
-  private resolveModel(mode: OpenAiImageMode, assetKind: ImageAssetKind): string {
-    if (assetKind === 'legacy') {
-      return this.models.dalleFallbackModel;
-    }
-
+  private resolveModel(mode: OpenAiImageMode): string {
     return mode === 'preview' ? this.models.imagePreviewModel : this.models.imageModel;
   }
 
@@ -452,7 +440,6 @@ export class OpenAiImageService {
     background?: OpenAiImageBackground;
     outputFormat?: OpenAiImageOutputFormat;
     outputCompression?: number;
-    legacy: boolean;
   }) {
     const request: Record<string, unknown> = {
       model: options.model,
@@ -462,12 +449,10 @@ export class OpenAiImageService {
       n: 1,
     };
 
-    if (!options.legacy) {
-      if (options.background) request.background = options.background;
-      if (options.outputFormat) request.output_format = options.outputFormat;
-      if (options.outputCompression !== undefined)
-        request.output_compression = options.outputCompression;
-    }
+    if (options.background) request.background = options.background;
+    if (options.outputFormat) request.output_format = options.outputFormat;
+    if (options.outputCompression !== undefined)
+      request.output_compression = options.outputCompression;
 
     return request;
   }

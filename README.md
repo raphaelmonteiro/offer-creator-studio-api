@@ -40,7 +40,8 @@ npm install
 cp .env.example .env
 ```
 
-Edite o arquivo `.env` com suas configurações:
+O `.env.example` é o perfil de produção (`NODE_ENV=production`, `JWT_*`, `DB_PASSWORD` e `SMTP_PASS` em branco): no
+desenvolvimento local, edite o arquivo `.env` com suas configurações, pondo `NODE_ENV=development` e os segredos abaixo:
 
 ```env
 DB_HOST=localhost
@@ -68,25 +69,23 @@ FRONTEND_URL=http://localhost:8080
 SMTP_HOST=smtp.mailtrap.io
 SMTP_PORT=587
 SMTP_SECURE=false
-SMTP_USER=ef642424243806
-SMTP_PASS=bda716512b15ae
+SMTP_USER=   # pegar no painel do provedor SMTP (Mailtrap: Email Testing > Inboxes > SMTP Settings); nunca versionar
+SMTP_PASS=   # idem: pegar no painel do provedor; nunca versionar
 MAIL_FROM="Encartes" <no-reply@encartes.local>
 
 # IA / OpenAI
 OPENAI_API_KEY=sk-...
-OPENAI_TEXT_MODEL=gpt-4o
-OPENAI_FAST_TEXT_MODEL=gpt-4o-mini
-OPENAI_IMAGE_MODEL=gpt-image-2.5-sunburst
-OPENAI_IMAGE_PREVIEW_MODEL=gpt-image-2.5-flare
+# OPENAI_TEXT_MODEL=gpt-6-luna
+# OPENAI_FAST_TEXT_MODEL=gpt-6-luna
+# OPENAI_IMAGE_MODEL=gpt-image-2.6-sunburst
+# OPENAI_IMAGE_PREVIEW_MODEL=gpt-image-2.6-flare
 OPENAI_IMAGE_QUALITY=high
 OPENAI_IMAGE_PREVIEW_QUALITY=medium
 OPENAI_IMAGE_DEFAULT_MODE=final
 OPENAI_IMAGE_BACKGROUND=opaque
-OPENAI_IMAGE_OUTPUT_FORMAT=jpeg
-OPENAI_IMAGE_OUTPUT_COMPRESSION=85
-OPENAI_IMAGE_INPUT_FIDELITY=high
-OPENAI_ENABLE_DALLE_FALLBACK=false
-OPENAI_DALLE_FALLBACK_MODEL=dall-e-3
+OPENAI_IMAGE_OUTPUT_FORMAT=png
+# OPENAI_IMAGE_OUTPUT_COMPRESSION=85
+# OPENAI_IMAGE_INPUT_FIDELITY=high
 OPENAI_COST_TEXT_INPUT_1M_USD=
 OPENAI_COST_TEXT_OUTPUT_1M_USD=
 OPENAI_COST_IMAGE_FINAL_USD=
@@ -105,13 +104,15 @@ A estrategia de modelos fica documentada em [`docs/OPENAI_MODEL_STRATEGY.md`](./
 
 Resumo da decisao inicial:
 
-- `OPENAI_TEXT_MODEL`: modelo textual principal para templates, composicao, visao e prompts.
-- `OPENAI_FAST_TEXT_MODEL`: modelo textual rapido para tarefas curtas, como traducao de termos.
-- `OPENAI_IMAGE_MODEL`: modelo principal de imagem, default `gpt-image-2.5-sunburst`.
-- `OPENAI_IMAGE_PREVIEW_MODEL`: modelo para previews/baixo custo, default `gpt-image-2.5-flare`.
+- O `backend/.env.example` e o perfil de producao (todas as variaveis de IA e de funcao, com valor, efeito e custo); o `docker-compose.yml` local o sobrepoe com mock. Um teste de guarda (`src/common/config/env-example.guard.spec.ts`) impede variavel lida sem linha, linha sem leitor e segredo com valor.
+- `OPENAI_TEXT_MODEL`: modelo textual principal para templates, composicao, visao e prompts, default `gpt-6-luna`. `gpt-4o` volta o grupo, mas sai do ar em 2027-01-14.
+- `OPENAI_FAST_TEXT_MODEL`: modelo textual rapido para tarefas curtas, como roteiro do mascote e traducoes, default `gpt-6-luna`.
+- `MC_DIRECTOR_MODEL`, `MC_KIT_VISION_MODEL`, `EAN_JUDGE_MODEL_A` e `EAN_JUDGE_MODEL_B`: modelo forte do diretor dos comerciais, da descricao canonica do kit e dos juizes de EAN, default `gpt-6.1-terra`.
+- `OPENAI_IMAGE_MODEL`: modelo principal de imagem, default `gpt-image-2.6-sunburst`.
+- `OPENAI_IMAGE_PREVIEW_MODEL`: modelo para previews/baixo custo, default `gpt-image-2.6-flare`.
 - `OPENAI_IMAGE_QUALITY`, `OPENAI_IMAGE_PREVIEW_QUALITY`, `OPENAI_IMAGE_DEFAULT_MODE`, `OPENAI_IMAGE_BACKGROUND`, `OPENAI_IMAGE_OUTPUT_FORMAT` e `OPENAI_IMAGE_OUTPUT_COMPRESSION`: defaults de saida usados pelo service de imagem.
-- `OPENAI_IMAGE_INPUT_FIDELITY`: fidelidade usada em edicoes e geracao com referencias visuais, inicialmente `high`.
-- `OPENAI_ENABLE_DALLE_FALLBACK`: deve ficar `false` por padrao; DALL-E 3 sai do caminho principal.
+- `OPENAI_IMAGE_INPUT_FIDELITY`: fidelidade das edicoes; so vale com `gpt-image-1.5` e `gpt-image-1-mini` (sem efeito nos modelos 2.x).
+- `OPENAI_ENABLE_DALLE_FALLBACK` e `OPENAI_DALLE_FALLBACK_MODEL`: sem efeito (o fallback DALL-E saiu na change 42; o `dall-e-3` esta desligado); o aviso ao subir pede para tirar a linha do `.env`.
 - `OPENAI_COST_TEXT_INPUT_1M_USD`, `OPENAI_COST_TEXT_OUTPUT_1M_USD`, `OPENAI_COST_IMAGE_FINAL_USD` e `OPENAI_COST_IMAGE_PREVIEW_USD`: opcionais para estimativa de custo nos logs estruturados.
 - `OPENAI_IMAGE_CONCURRENCY_LIMIT`, `OPENAI_IMAGE_RETRY_ATTEMPTS`, `OPENAI_IMAGE_RETRY_BASE_DELAY_MS` e `OPENAI_IMAGE_RETRY_MAX_DELAY_MS`: controlam concorrencia e retry transiente das chamadas de imagem.
 - `OPENAI_STRUCTURED_RESPONSE_RETRY_ATTEMPTS`: controla quantas retentativas curtas o backend faz quando uma resposta estruturada falha no parse/schema.
@@ -312,19 +313,17 @@ SMTP_USER=seu_usuario_smtp
 SMTP_PASS=sua_senha_smtp
 MAIL_FROM="Encartes" <no-reply@encartes.local>
 OPENAI_API_KEY=sk-...
-OPENAI_TEXT_MODEL=gpt-4o
-OPENAI_FAST_TEXT_MODEL=gpt-4o-mini
-OPENAI_IMAGE_MODEL=gpt-image-2.5-sunburst
-OPENAI_IMAGE_PREVIEW_MODEL=gpt-image-2.5-flare
+# OPENAI_TEXT_MODEL=gpt-6-luna
+# OPENAI_FAST_TEXT_MODEL=gpt-6-luna
+# OPENAI_IMAGE_MODEL=gpt-image-2.6-sunburst
+# OPENAI_IMAGE_PREVIEW_MODEL=gpt-image-2.6-flare
 OPENAI_IMAGE_QUALITY=high
 OPENAI_IMAGE_PREVIEW_QUALITY=medium
 OPENAI_IMAGE_DEFAULT_MODE=final
 OPENAI_IMAGE_BACKGROUND=opaque
-OPENAI_IMAGE_OUTPUT_FORMAT=jpeg
-OPENAI_IMAGE_OUTPUT_COMPRESSION=85
-OPENAI_IMAGE_INPUT_FIDELITY=high
-OPENAI_ENABLE_DALLE_FALLBACK=false
-OPENAI_DALLE_FALLBACK_MODEL=dall-e-3
+OPENAI_IMAGE_OUTPUT_FORMAT=png
+# OPENAI_IMAGE_OUTPUT_COMPRESSION=85
+# OPENAI_IMAGE_INPUT_FIDELITY=high
 OPENAI_COST_TEXT_INPUT_1M_USD=
 OPENAI_COST_TEXT_OUTPUT_1M_USD=
 OPENAI_COST_IMAGE_FINAL_USD=

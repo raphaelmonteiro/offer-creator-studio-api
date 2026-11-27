@@ -52,8 +52,8 @@ export const MC_QUEUE_EXPIRE_S: Partial<Record<QueueName, number>> = {
 // ───────────────────────── expiração dos jobs do kit ─────────────────────────
 
 /**
- * Timeout de UMA chamada da descrição canônica (gpt-4o visão, `max_tokens`
- * 600): responde em 5 a 15 s; 60 s cobre a cauda sem segurar o job.
+ * Timeout de UMA chamada da descrição canônica (visão em `MC_KIT_VISION_MODEL`, padrão gpt-6.1-terra,
+ * esforço `low`; na volta a gpt-4o, `max_tokens` 600): responde em 5 a 15 s; 60 s cobre a cauda sem segurar o job.
  */
 export const KIT_CANONICAL_DESC_TIMEOUT_MS = 60_000;
 

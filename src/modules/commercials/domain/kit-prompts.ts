@@ -323,7 +323,7 @@ export function buildKitReferencePrompt(
   return lines.join('\n');
 }
 
-// ───────────────────── descrição canônica (gpt-4o visão) ─────────────────────
+// ─────────── descrição canônica (visão, `MC_KIT_VISION_MODEL`, padrão gpt-6.1-terra) ───────────
 
 /**
  * Regra de identidade ancorada na IMAGEM de referência — vai como primeiro

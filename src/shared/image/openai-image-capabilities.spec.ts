@@ -20,6 +20,20 @@ describe('openai-image-capabilities', () => {
       expect(findImageModelCapabilities('gpt-image-2')?.prefix).toBe('gpt-image-2');
     });
 
+    it('gpt-image-2.6-flare tem entrada própria (e o 2.6-flare datado cai nela), com o preço do sunburst e a data da conferência', () => {
+      const flare = findImageModelCapabilities('gpt-image-2.6-flare');
+      const sunburst = findImageModelCapabilities('gpt-image-2.6-sunburst');
+      expect(flare?.prefix).toBe('gpt-image-2.6-flare');
+      expect(findImageModelCapabilities('gpt-image-2.6-flare-2026-11-20')?.prefix).toBe(
+        'gpt-image-2.6-flare',
+      );
+      expect(flare?.prices).toEqual(sunburst?.prices);
+      expect(flare?.priceConsultedAt).toBe('2026-11-27');
+      expect(flare?.priceSource).toContain('/models/gpt-image-2.6-flare');
+      expect(flare).toMatchObject({ transparentBackground: true, inputFidelity: false });
+      expect(flare?.markup).toBeUndefined();
+    });
+
     it('devolve null para modelo desconhecido', () => {
       expect(findImageModelCapabilities('dall-e-3')).toBeNull();
       expect(findImageModelCapabilities('modelo-novo')).toBeNull();
@@ -101,6 +115,18 @@ describe('openai-image-capabilities', () => {
       expect(estimateCostUsd('gpt-image-2.5-sunburst', usage)).toBe(0.0465);
     });
 
+    it('gpt-image-2.6-flare custa o mesmo que o sunburst para o mesmo usage', () => {
+      const usage = {
+        input_tokens: 200,
+        output_tokens: 1000,
+        input_tokens_details: { image_tokens: 100, text_tokens: 100 },
+      };
+      expect(estimateCostUsd('gpt-image-2.6-flare', usage)).toBe(0.0313);
+      expect(estimateCostUsd('gpt-image-2.6-flare', usage)).toBe(
+        estimateCostUsd('gpt-image-2.6-sunburst', usage),
+      );
+    });
+
     it('sem detalhe da entrada, conta tudo como texto', () => {
       expect(
         estimateCostUsd('gpt-image-2.5-sunburst', { input_tokens: 200, output_tokens: 0 }),
@@ -168,7 +194,7 @@ describe('gpt-image-2.6-sunburst (modelo da cena)', () => {
   it('preço conferido: só entradas com `prices`', () => {
     expect(hasConfirmedPrice('gpt-image-2.6-sunburst')).toBe(true);
     expect(hasConfirmedPrice('gpt-image-2.5-sunburst')).toBe(true);
-    expect(hasConfirmedPrice('gpt-image-2.6-flare')).toBe(false);
+    expect(hasConfirmedPrice('gpt-image-2.6-flare')).toBe(true);
     expect(hasConfirmedPrice('gpt-image-2.5-flare')).toBe(false);
     expect(hasConfirmedPrice('modelo-novo')).toBe(false);
   });

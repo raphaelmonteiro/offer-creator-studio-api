@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import OpenAI from 'openai';
 
 /** Apoio dos testes das cinco features de IA de produto: cliente simulado, sem nenhuma chamada real à OpenAI. */
 export interface FakeUsage {
@@ -23,11 +24,36 @@ export function openAiError(status: number, message = 'erro do provedor', code?:
   return Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 }
 
+/** Corpo e opções de requisição da chamada `index` ao cliente simulado (`create(body, options)`). */
+export function sentTo(
+  create: jest.Mock,
+  index = 0,
+): { body: Record<string, unknown>; options: Record<string, unknown> } {
+  const [body, options] = create.mock.calls[index] as [
+    Record<string, unknown>,
+    Record<string, unknown>,
+  ];
+  return { body, options };
+}
+
 /** Troca o cliente real do serviço por um simulado (o serviço guarda o SDK em `openai`). */
 export function installFakeOpenAi(service: object): jest.Mock {
   const create = jest.fn();
   (service as { openai: unknown }).openai = { chat: { completions: { create } } };
   return create;
+}
+
+/**
+ * Troca o `create` de `chat.completions` do SDK por um simulado, para o serviço que cria o próprio cliente
+ * (`new OpenAI({ apiKey })` na hora da chamada): o corpo e as opções chegam a ele como em `sentTo`. O chamador
+ * restaura com `jest.restoreAllMocks()`; sem resposta definida o simulado falha, nunca chama a OpenAI de verdade.
+ */
+export function stubSdkChatCreate(): jest.Mock {
+  const stub = jest.spyOn(OpenAI.Chat.Completions.prototype, 'create');
+  stub.mockImplementation(() => {
+    throw new Error('stubSdkChatCreate: nenhuma resposta definida para a chamada');
+  });
+  return stub as unknown as jest.Mock;
 }
 
 export interface LoggerSpies {

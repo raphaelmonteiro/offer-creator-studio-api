@@ -1,23 +1,13 @@
-import { DataSource, EntityManager } from 'typeorm';
-import { CreditsService } from '../../../shared/credits/credits.service';
-import { TaskTransitionService } from '../../../shared/state/task-transition.service';
-import { CommercialsService } from '../commercials.service';
 import { McProjectStatus, McStepStatus } from '../domain/mc-state-machines';
-import { McScript, McStepType } from '../domain/mc-types';
+import { McScript } from '../domain/mc-types';
 import { McProject } from '../entities/mc-project.entity';
 import { McStep } from '../entities/mc-step.entity';
 import { McScriptProcessor } from './mc-script.processor';
+import { newScriptProcessor } from './mc-script.processor.testutil';
 
 describe('McScriptProcessor — estorno da mini-reserva na falha terminal (plano §6.7)', () => {
   const originalProvider = process.env.MC_SCRIPT_PROVIDER;
 
-  const step = {
-    id: 'step-1',
-    projectId: 'proj-1',
-    type: McStepType.SCRIPT,
-    status: McStepStatus.QUEUED,
-    attempts: 0,
-  };
   const project = {
     id: 'proj-1',
     userId: 'u1',
@@ -32,39 +22,19 @@ describe('McScriptProcessor — estorno da mini-reserva na falha terminal (plano
     },
   };
 
-  let manager: { update: jest.Mock; insert: jest.Mock };
-  let dataSource: { getRepository: jest.Mock; transaction: jest.Mock; query: jest.Mock };
-  let transitions: { casTransition: jest.Mock; notify: jest.Mock };
-  let commercials: { appendEvent: jest.Mock };
-  let credits: { refundUnconsumed: jest.Mock };
+  let manager: ReturnType<typeof newScriptProcessor>['manager'];
+  let dataSource: ReturnType<typeof newScriptProcessor>['dataSource'];
+  let transitions: ReturnType<typeof newScriptProcessor>['transitions'];
+  let commercials: ReturnType<typeof newScriptProcessor>['commercials'];
+  let credits: ReturnType<typeof newScriptProcessor>['credits'];
   let processor: McScriptProcessor;
 
   beforeEach(() => {
-    manager = { update: jest.fn().mockResolvedValue(undefined), insert: jest.fn() };
-    dataSource = {
-      getRepository: jest.fn((entity: unknown) => ({
-        findOneBy: jest
-          .fn()
-          .mockResolvedValue(entity === McStep ? step : entity === McProject ? project : null),
-      })),
-      transaction: jest.fn((cb: (m: EntityManager) => Promise<unknown>) =>
-        cb(manager as unknown as EntityManager),
-      ),
-      // users.establishment.tradeName → cartela final (query crua, sem acoplar auth)
-      query: jest.fn().mockResolvedValue([{ establishment: { tradeName: 'Mercado do Zé' } }]),
-    };
-    transitions = {
-      casTransition: jest.fn().mockResolvedValue(true),
-      notify: jest.fn().mockResolvedValue(undefined),
-    };
-    commercials = { appendEvent: jest.fn().mockResolvedValue(undefined) };
-    credits = { refundUnconsumed: jest.fn().mockResolvedValue(10) };
-    processor = new McScriptProcessor(
-      dataSource as unknown as DataSource,
-      transitions as unknown as TaskTransitionService,
-      commercials as unknown as CommercialsService,
-      credits as unknown as CreditsService,
-    );
+    // sem OPENAI_API_KEY na configuração (nem a do ambiente de quem roda a suíte)
+    ({ processor, manager, dataSource, transitions, commercials, credits } = newScriptProcessor({
+      project,
+      tradeName: 'Mercado do Zé',
+    }));
   });
 
   afterEach(() => {
@@ -73,7 +43,7 @@ describe('McScriptProcessor — estorno da mini-reserva na falha terminal (plano
   });
 
   it('falha terminal do script → estorno TOTAL da mini-reserva na mesma transação', async () => {
-    process.env.MC_SCRIPT_PROVIDER = 'openai'; // sem OPENAI_API_KEY no teste → falha terminal
+    process.env.MC_SCRIPT_PROVIDER = 'openai'; // sem chave na configuração → falha terminal
     await processor.process({ stepId: 'step-1' });
 
     expect(credits.refundUnconsumed).toHaveBeenCalledTimes(1);
@@ -87,7 +57,7 @@ describe('McScriptProcessor — estorno da mini-reserva na falha terminal (plano
   });
 
   it('falha terminal do roteiro grava o texto pt-BR do catálogo no projeto, sem a mensagem crua', async () => {
-    process.env.MC_SCRIPT_PROVIDER = 'openai'; // sem OPENAI_API_KEY no teste → falha terminal
+    process.env.MC_SCRIPT_PROVIDER = 'openai'; // sem chave na configuração → falha terminal
     await processor.process({ stepId: 'step-1' });
 
     const stepPatch = transitions.casTransition.mock.calls.find(

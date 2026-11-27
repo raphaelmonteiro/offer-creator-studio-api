@@ -114,8 +114,18 @@ describe('OpenAiImageService: modo sceneCall', () => {
     });
   });
 
+  describe('Preço da prévia 2.6', () => {
+    it('gpt-image-2.6-flare: custo vem da entrada própria da tabela (o mesmo do sunburst), não é recusado nem null', async () => {
+      const { service, generate } = buildService();
+      generate.mockReturnValue(sdkOk());
+      const result = await service.generateImage({ ...baseOptions, model: 'gpt-image-2.6-flare' });
+      expect(result.costUsd).toBe(0.13655);
+      expect(generate).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('Modelo sem preço conferido', () => {
-    it.each(['gpt-image-2.5-flare', 'gpt-image-2.6-flare', 'modelo-novo'])(
+    it.each(['gpt-image-2.5-flare', 'modelo-novo'])(
       'recusa %s antes da rede, com erro de pedido inválido',
       async (model) => {
         const { service, generate, edit } = buildService();

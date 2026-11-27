@@ -3,7 +3,7 @@ import { OpenAiImageService } from './openai-image.service';
 
 /**
  * Snapshot (change add-template-scene-persistence, task 1.1): o corpo enviado ao SDK pelos
- * chamadores atuais (template, social, transparente, legado, prévia `flare`) NÃO pode mudar
+ * chamadores atuais (template, social, transparente, prévia `flare`) NÃO pode mudar
  * quando o serviço ganhar o modo `sceneCall`. Gravado antes de qualquer mudança no serviço.
  */
 const PNG_B64 = Buffer.from('imagem-falsa').toString('base64');
@@ -32,8 +32,53 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       expect(generate).toHaveBeenCalledTimes(1);
       expect(generate.mock.calls[0]).toEqual([
         {
-          model: 'gpt-image-2.5-sunburst',
+          model: 'gpt-image-2.6-sunburst',
           prompt: 'fundo de encarte',
+          size: '1024x1536',
+          quality: 'high',
+          n: 1,
+          background: 'opaque',
+          output_format: 'jpeg',
+          output_compression: 85,
+        },
+      ]);
+    });
+
+    it('Placeholder do Gerar template no 2.6: corpo com 1024x1024, high, jpeg, compressão 85, fundo opaco e sem input_fidelity', async () => {
+      const { service, generate } = buildService({ OPENAI_IMAGE_MODEL: '' });
+      await service.generateImage({
+        feature: 'template-generate',
+        prompt: 'fundo',
+        size: '1024x1024',
+        assetKind: 'template',
+      });
+      expect(generate.mock.calls[0]).toEqual([
+        {
+          model: 'gpt-image-2.6-sunburst',
+          prompt: 'fundo',
+          size: '1024x1024',
+          quality: 'high',
+          n: 1,
+          background: 'opaque',
+          output_format: 'jpeg',
+          output_compression: 85,
+        },
+      ]);
+      expect(generate.mock.calls[0][0]).not.toHaveProperty('input_fidelity');
+    });
+
+    it('Volta ao 2.5: imagem base de animação 9:16 leva o modelo da variável e o resto do corpo igual', async () => {
+      const { service, generate } = buildService({ OPENAI_IMAGE_MODEL: 'gpt-image-2.5-sunburst' });
+      await service.generateImage({
+        feature: 'animations',
+        prompt: 'fundo vertical',
+        size: '1024x1536',
+        assetKind: 'background',
+      });
+      expect(generate.mock.calls[0]).toEqual([
+        {
+          model: 'gpt-image-2.5-sunburst',
+          prompt: 'fundo vertical',
           size: '1024x1536',
           quality: 'high',
           n: 1,
@@ -54,7 +99,7 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       });
       expect(generate.mock.calls[0]).toEqual([
         {
-          model: 'gpt-image-2.5-sunburst',
+          model: 'gpt-image-2.6-sunburst',
           prompt: 'arte social',
           size: '1024x1024',
           quality: 'high',
@@ -76,32 +121,13 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       });
       expect(generate.mock.calls[0]).toEqual([
         {
-          model: 'gpt-image-2.5-sunburst',
+          model: 'gpt-image-2.6-sunburst',
           prompt: 'sol',
           size: '1024x1024',
           quality: 'high',
           n: 1,
           background: 'transparent',
           output_format: 'png',
-        },
-      ]);
-    });
-
-    it('preset legado (dall-e) sem campos de formato', async () => {
-      const { service, generate } = buildService();
-      await service.generateImage({
-        feature: 'legacy',
-        prompt: 'fundo antigo',
-        size: '1024x1024',
-        assetKind: 'legacy',
-      });
-      expect(generate.mock.calls[0]).toEqual([
-        {
-          model: 'dall-e-3',
-          prompt: 'fundo antigo',
-          size: '1024x1024',
-          quality: 'standard',
-          n: 1,
         },
       ]);
     });
@@ -117,7 +143,7 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       });
       expect(generate.mock.calls[0]).toEqual([
         {
-          model: 'gpt-image-2.5-flare',
+          model: 'gpt-image-2.6-flare',
           prompt: 'prévia',
           size: '1536x1024',
           quality: 'medium',
@@ -149,12 +175,12 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       size: '1024x1536' as const,
     };
 
-    it('preset de template (final), sem input_fidelity no modelo 2.5', async () => {
+    it('preset de template (final), sem input_fidelity no modelo 2.6', async () => {
       const { service, edit } = buildService();
       await service.editImage({ ...base, assetKind: 'template' });
       expect(edit.mock.calls[0]).toEqual([
         {
-          model: 'gpt-image-2.5-sunburst',
+          model: 'gpt-image-2.6-sunburst',
           image: expect.anything(),
           prompt: 'edite',
           size: '1024x1536',
@@ -173,7 +199,7 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       await service.editImage({ ...base, assetKind: 'background' });
       expect(edit.mock.calls[0]).toEqual([
         {
-          model: 'gpt-image-2.5-sunburst',
+          model: 'gpt-image-2.6-sunburst',
           image: expect.anything(),
           prompt: 'edite',
           size: '1024x1536',
@@ -191,7 +217,7 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       const { service, edit } = buildService();
       await service.editImage({ ...base, assetKind: 'transparent' });
       expect(edit.mock.calls[0][0]).toEqual({
-        model: 'gpt-image-2.5-sunburst',
+        model: 'gpt-image-2.6-sunburst',
         image: expect.anything(),
         prompt: 'edite',
         size: '1024x1536',
@@ -202,24 +228,11 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
       });
     });
 
-    it('preset legado (dall-e) mantém background/formato do preset', async () => {
-      const { service, edit } = buildService();
-      await service.editImage({ ...base, assetKind: 'legacy' });
-      expect(edit.mock.calls[0][0]).toEqual({
-        model: 'dall-e-3',
-        image: expect.anything(),
-        prompt: 'edite',
-        size: '1024x1536',
-        quality: 'standard',
-        n: 1,
-      });
-    });
-
     it('prévia flare (mode preview)', async () => {
       const { service, edit } = buildService();
       await service.editImage({ ...base, assetKind: 'template', mode: 'preview' });
       expect(edit.mock.calls[0][0]).toEqual({
-        model: 'gpt-image-2.5-flare',
+        model: 'gpt-image-2.6-flare',
         image: expect.anything(),
         prompt: 'edite',
         size: '1024x1536',
@@ -228,6 +241,15 @@ describe('OpenAiImageService: corpo da requisição dos chamadores atuais', () =
         background: 'opaque',
         output_format: 'jpeg',
         output_compression: 85,
+      });
+    });
+
+    it('Modelo com fidelidade de entrada: OPENAI_IMAGE_MODEL=gpt-image-1.5 edita com input_fidelity, como hoje', async () => {
+      const { service, edit } = buildService({ OPENAI_IMAGE_MODEL: 'gpt-image-1.5' });
+      await service.editImage({ ...base, assetKind: 'template' });
+      expect(edit.mock.calls[0][0]).toMatchObject({
+        model: 'gpt-image-1.5',
+        input_fidelity: 'high',
       });
     });
 

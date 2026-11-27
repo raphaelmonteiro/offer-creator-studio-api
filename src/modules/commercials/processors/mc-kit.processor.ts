@@ -16,9 +16,11 @@ import {
   GeminiUsage,
   sniffImageMime,
 } from '../../../shared/providers/gemini-image.provider';
-import { OPENAI_NO_SDK_RETRY, withOpenAiRetry } from '../../../shared/providers/openai-errors';
+import { withOpenAiRetry } from '../../../shared/providers/openai-errors';
 import { TerminalProviderError } from '../../../shared/providers/provider-errors';
 import { TaskTransitionService } from '../../../shared/state/task-transition.service';
+import { getStrongModelConfig } from '../../ai/config/openai-strong-models.config';
+import { callProductChat } from '../../ai/utils/ai-product-chat.util';
 import { MascotsService } from '../../mascots/mascots.service';
 import { CommercialsService } from '../commercials.service';
 import {
@@ -44,8 +46,8 @@ import {
   openAiUsage,
 } from '../domain/mc-kit-costs';
 import { McKitSource, McKitStyle } from '../domain/mc-kit-identity';
+import { KIT_CANONICAL_DESC_CALL } from '../domain/mc-text-calls';
 import { McKitMouthGate } from '../domain/mc-mouth-gate';
-import { KIT_CANONICAL_DESC_TIMEOUT_MS } from '../domain/mc-pipeline.config';
 import { assertKitTransition, McKitStatus } from '../domain/mc-state-machines';
 import { computeKitReferenceHash, computeKitReferenceRequestHash } from '../domain/mc-step-hashes';
 import { McCharacterKit } from '../entities/mc-character-kit.entity';
@@ -55,6 +57,43 @@ import { McKitReferencesJob } from '../services/mc-kit-candidates.service';
 import { costMetadata, MC_KIT_COST_EVENT, recordKitProviderCost } from '../services/mc-kit-costs';
 import { McKitViewService } from '../services/mc-kit-view.service';
 import { resolveUploadsDir } from '../../../common/config/uploads-dir';
+
+/** Consumidor da descrição canônica no log (`AI operation started|finished|failed`). */
+const KIT_CANONICAL_DESC_FEATURE = 'commercials.kit-canonical-desc';
+
+/** Saída estrita da descrição canônica (ficha em inglês e o espelho pt-BR). */
+const CANONICAL_DESC_RESPONSE_FORMAT: OpenAI.ResponseFormatJSONSchema = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'kit_canonical_desc_v2',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['traits', 'accessories', 'colors', 'style', 'doNots', 'pt'],
+      properties: {
+        traits: { type: 'array', items: { type: 'string' } },
+        accessories: { type: 'array', items: { type: 'string' } },
+        colors: { type: 'array', items: { type: 'string' } },
+        style: { type: 'string' },
+        doNots: { type: 'array', items: { type: 'string' } },
+        // Espelho pt-BR: MESMA ordem e MESMO tamanho dos arrays em
+        // inglês (a UI parea por índice; tamanho diferente = descarta).
+        pt: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['traits', 'accessories', 'style', 'doNots'],
+          properties: {
+            traits: { type: 'array', items: { type: 'string' } },
+            accessories: { type: 'array', items: { type: 'string' } },
+            style: { type: 'string' },
+            doNots: { type: 'array', items: { type: 'string' } },
+          },
+        },
+      },
+    },
+  },
+};
 
 /** Identidade do kit resolvida para prompt e hash (kits anteriores: mascote, sem estilo, cinza claro). */
 type KitIdentity = Required<KitReferencePromptOptions> & {
@@ -112,7 +151,7 @@ const MOCK_SLOT_COLORS = ['#4F86C6', '#6BAA75', '#C68C4F', '#A05FB5'] as const;
  * CommercialsModule.onModuleInit), mesmo padrão do McScriptProcessor.
  *
  * Fluxo cheio ({kitId}): (a) descrição canônica via OpenAI vision
- * (OPENAI_TEXT_MODEL) — JSON {traits, colors[], style, doNots[]} serializado
+ * (MC_KIT_VISION_MODEL, padrão gpt-6.1-terra) — JSON {traits, colors[], style, doNots[]} serializado
  * em mc_character_kits.canonicalDesc; (b) 4 imagens de referência via
  * GeminiImageProvider com a imagem do mascote como referência (prompts fixos
  * em domain/kit-prompts.ts). Falha de UMA imagem não derruba o kit — segue
@@ -502,63 +541,31 @@ export class McKitProcessor {
     if (!this.openai) {
       throw new Error('OPENAI_API_KEY não configurada — necessária para a descrição canônica');
     }
-    const model = this.config.get<string>('OPENAI_TEXT_MODEL', 'gpt-4o');
+    const model = getStrongModelConfig(this.config).kitVisionModel;
     const mascotName = kit ? await this.mascotNameHint(kit) : null;
     const dataUri = `data:${sniffImageMime(mascotImage)};base64,${mascotImage.toString('base64')}`;
     const openai = this.openai;
     const response = await withOpenAiRetry(() =>
-      openai.chat.completions.create(
-        {
-          model,
-          max_tokens: 600,
-          response_format: {
-            type: 'json_schema',
-            json_schema: {
-              name: 'kit_canonical_desc_v2',
-              strict: true,
-              schema: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['traits', 'accessories', 'colors', 'style', 'doNots', 'pt'],
-                properties: {
-                  traits: { type: 'array', items: { type: 'string' } },
-                  accessories: { type: 'array', items: { type: 'string' } },
-                  colors: { type: 'array', items: { type: 'string' } },
-                  style: { type: 'string' },
-                  doNots: { type: 'array', items: { type: 'string' } },
-                  // Espelho pt-BR: MESMA ordem e MESMO tamanho dos arrays em
-                  // inglês (a UI parea por índice; tamanho diferente = descarta).
-                  pt: {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['traits', 'accessories', 'style', 'doNots'],
-                    properties: {
-                      traits: { type: 'array', items: { type: 'string' } },
-                      accessories: { type: 'array', items: { type: 'string' } },
-                      style: { type: 'string' },
-                      doNots: { type: 'array', items: { type: 'string' } },
-                    },
-                  },
-                },
-              },
-            },
+      callProductChat({
+        openai,
+        logger: this.logger,
+        feature: KIT_CANONICAL_DESC_FEATURE,
+        spec: { model, ...KIT_CANONICAL_DESC_CALL },
+        responseFormat: CANONICAL_DESC_RESPONSE_FORMAT,
+        messages: [
+          {
+            role: 'system',
+            content: buildCanonicalDescSystemPrompt(),
           },
-          messages: [
-            {
-              role: 'system',
-              content: buildCanonicalDescSystemPrompt(),
-            },
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: buildCanonicalDescUserPrompt({ name: mascotName }) },
-                { type: 'image_url', image_url: { url: dataUri } },
-              ],
-            },
-          ],
-        },
-        { ...OPENAI_NO_SDK_RETRY, timeout: KIT_CANONICAL_DESC_TIMEOUT_MS },
-      ),
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: buildCanonicalDescUserPrompt({ name: mascotName }) },
+              { type: 'image_url', image_url: { url: dataUri } },
+            ],
+          },
+        ],
+      }),
     );
     let parsed: KitCanonicalDesc | null = null;
     let invalid: string | null = null;

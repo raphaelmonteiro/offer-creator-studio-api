@@ -2,8 +2,8 @@
  * Prompts for the social media section layout endpoint.
  *
  * The LLM receives a header/footer band's elements + a free-text user
- * instruction and must return a list of patches to apply. The model is
- * GPT-4o in structured-output (JSON) mode — we don't need to parse free
+ * instruction and must return a list of patches to apply. The model runs
+ * in JSON mode (`OPENAI_TEXT_MODEL`) — we don't need to parse free
  * text, just validate the schema.
  *
  * Design choices baked into the system prompt:

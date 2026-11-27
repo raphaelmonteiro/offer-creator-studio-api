@@ -25,7 +25,8 @@ import {
   suggestProductCount,
 } from './utils/mascot-script.util';
 import { spellOutPricesPtBr } from './utils/price-to-words.util';
-import { withAiLogging } from './utils/ai-telemetry.util';
+import { mascotScriptCall } from './config/openai-text-calls';
+import { callProductChat } from './utils/ai-product-chat.util';
 
 const DEFAULT_MAX_VIDEO_DURATION_S = 30;
 
@@ -216,37 +217,29 @@ export class MascotScriptService {
       })),
     };
 
-    const response = await withAiLogging(
-      this.logger,
-      {
-        feature: 'mascot.script',
-        endpoint: 'chat.completions',
-        model: this.models.fastTextModel,
-      },
-      () =>
-        this.openai!.chat.completions.create({
-          model: this.models.fastTextModel,
-          temperature: dto.tone === 'animado' ? 0.7 : 0.4,
-          max_tokens: 600,
-          response_format: {
-            type: 'json_schema',
-            json_schema: {
-              name: 'mascot_script_v1',
-              strict: true,
-              schema: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['script'],
-                properties: { script: { type: 'string' } },
-              },
-            },
+    const response = await callProductChat({
+      openai: this.openai!,
+      logger: this.logger,
+      feature: 'mascot.script',
+      spec: { model: this.models.fastTextModel, ...mascotScriptCall(dto.tone === 'animado') },
+      responseFormat: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'mascot_script_v1',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['script'],
+            properties: { script: { type: 'string' } },
           },
-          messages: [
-            { role: 'system', content: MASCOT_SCRIPT_SYSTEM_PROMPT },
-            { role: 'user', content: buildMascotScriptUserPrompt(payload) },
-          ],
-        }),
-    );
+        },
+      },
+      messages: [
+        { role: 'system', content: MASCOT_SCRIPT_SYSTEM_PROMPT },
+        { role: 'user', content: buildMascotScriptUserPrompt(payload) },
+      ],
+    });
 
     const raw = response.choices[0]?.message?.content;
     if (!raw) throw new Error('Resposta vazia da IA');

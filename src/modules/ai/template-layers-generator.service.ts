@@ -4,6 +4,10 @@ import OpenAI from 'openai';
 import { UploadsService } from '../uploads/uploads.service';
 import { getOpenAiModelConfig, OpenAiModelConfig } from './config/openai-models.config';
 import {
+  TEMPLATE_LAYERS_COMPOSITION_CALL,
+  TEMPLATE_LAYERS_REFERENCE_CALL,
+} from './config/openai-text-calls';
+import {
   CurrentLayerElementDto,
   LayerElementDto,
   TemplateLayersFormatDto,
@@ -13,12 +17,9 @@ import {
 import { OpenAiImageInput, OpenAiImageService } from './openai-image.service';
 import {
   AI_RESPONSE_FORMATS,
-  ImageIntentCategory,
   TemplateLayersCompositionSchemaResult,
-  parseImageIntentClassification,
   parseTemplateLayersComposition,
 } from './schemas/ai-response.schemas';
-import { IMAGE_INTENT_CLASSIFICATION_SYSTEM_PROMPT } from './prompts/image-intent.prompts';
 import {
   TEMPLATE_LAYERS_REFERENCE_VISION_PROMPT,
   buildLayerIntentInstruction,
@@ -35,25 +36,9 @@ import {
   normalizeLayerBackgrounds,
   normalizeLayerElements,
 } from './utils/ai-layout.util';
-import { withAiLogging } from './utils/ai-telemetry.util';
-
-interface ImageIntentClassification {
-  category: ImageIntentCategory;
-  confidence: number;
-  shouldGenerateImage: boolean;
-  shouldEditExistingImage: boolean;
-  shouldUseLayerFlow: boolean;
-  shouldPreserveExistingImage: boolean;
-  reason?: string;
-}
-
-interface ImageIntentContext {
-  feature: string;
-  userMessage: string;
-  hasExistingImage: boolean;
-  hasReferenceImages: boolean;
-  hasCurrentLayers?: boolean;
-}
+import { callProductChat } from './utils/ai-product-chat.util';
+import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
+import { classifyImageIntent } from './utils/image-intent';
 
 @Injectable()
 export class TemplateLayersGeneratorService {
@@ -86,13 +71,16 @@ export class TemplateLayersGeneratorService {
     // Current layers state (for refinements — preserves elements not being changed)
     const currentLayers = lastUserMessage.currentLayers ?? { elements: [] };
     const isRefinement = currentLayers.elements.length > 0 || !!currentLayers.background;
-    const imageIntent = await this.classifyImageIntent({
-      feature: 'template-layers.intent',
-      userMessage: lastUserMessage.content,
-      hasExistingImage: !!currentLayers.background,
-      hasReferenceImages: userReferenceImages.length > 0,
-      hasCurrentLayers: isRefinement,
-    });
+    const imageIntent = await classifyImageIntent(
+      { openai: this.openai, logger: this.logger, models: this.models },
+      {
+        feature: 'template-layers.intent',
+        userMessage: lastUserMessage.content,
+        hasExistingImage: !!currentLayers.background,
+        hasReferenceImages: userReferenceImages.length > 0,
+        hasCurrentLayers: isRefinement,
+      },
+    );
     const shouldPreserveLayerAssets = imageIntent.shouldPreserveExistingImage && isRefinement;
     const referenceImageInputs = shouldPreserveLayerAssets
       ? []
@@ -118,24 +106,17 @@ export class TemplateLayersGeneratorService {
         ),
       ];
 
-      const visionResponse = await withAiLogging(
-        this.logger,
-        {
-          feature: 'template-layers.reference-vision',
-          endpoint: 'chat.completions',
-          model: this.models.textModel,
-        },
-        () =>
-          this.openai!.chat.completions.create({
-            model: this.models.textModel,
-            max_tokens: 400,
-            messages: [{ role: 'user', content: visionContent }],
-          }),
-      );
+      const visionResponse = await callProductChat({
+        openai: this.openai,
+        logger: this.logger,
+        feature: 'template-layers.reference-vision',
+        spec: { model: this.models.textModel, ...TEMPLATE_LAYERS_REFERENCE_CALL },
+        messages: [{ role: 'user', content: visionContent }],
+      });
       referenceStyleDescription = visionResponse.choices[0]?.message?.content?.trim() ?? '';
     }
 
-    // ── Step 2: GPT-4o decides the composition (palette + elements) ──────────
+    // ── Step 2: the text model decides the composition (palette + elements) ──
     const canvasWidthPx = Math.round(format.printWidthCm * 37.795);
     const headerHeightPx = Math.round(format.headerHeightCm * 37.795);
     const footerHeightPx = Math.round(format.footerHeightCm * 37.795);
@@ -154,23 +135,22 @@ export class TemplateLayersGeneratorService {
       currentLayers,
     });
 
-    const composition: TemplateLayersCompositionSchemaResult =
-      await this.createStructuredChatCompletion({
+    const composition: TemplateLayersCompositionSchemaResult = await createStructuredChatCompletion(
+      {
+        openai: this.openai,
+        logger: this.logger,
         feature: 'template-layers.composition',
-        model: this.models.textModel,
-        emptyResponseMessage: 'GPT-4o retornou composição vazia',
+        spec: { model: this.models.textModel, ...TEMPLATE_LAYERS_COMPOSITION_CALL },
+        messages: [
+          { role: 'system', content: compositionSystemPrompt },
+          { role: 'user', content: lastUserMessage.content },
+        ],
+        responseFormat: AI_RESPONSE_FORMATS.templateLayersComposition,
         parse: parseTemplateLayersComposition,
-        request: {
-          model: this.models.textModel,
-          max_tokens: 1000,
-          temperature: 0.4,
-          response_format: AI_RESPONSE_FORMATS.templateLayersComposition,
-          messages: [
-            { role: 'system', content: compositionSystemPrompt },
-            { role: 'user', content: lastUserMessage.content },
-          ],
-        },
-      });
+        emptyResponseMessage: 'A IA retornou composição vazia',
+        retryAttempts: this.models.structuredResponseRetryAttempts,
+      },
+    );
     const styleKeywords = Array.isArray(composition.styleKeywords)
       ? composition.styleKeywords.filter((item): item is string => typeof item === 'string')
       : [];
@@ -360,75 +340,6 @@ export class TemplateLayersGeneratorService {
     };
   }
 
-  private async createStructuredChatCompletion<T>(options: {
-    feature: string;
-    model: string;
-    request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
-    parse: (raw: string) => T;
-    emptyResponseMessage: string;
-  }): Promise<T> {
-    const maxAttempts = this.models.structuredResponseRetryAttempts + 1;
-    const messages = [...options.request.messages];
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const response = await withAiLogging(
-        this.logger,
-        {
-          feature: options.feature,
-          endpoint: 'chat.completions',
-          model: options.model,
-        },
-        () =>
-          this.openai!.chat.completions.create({
-            ...options.request,
-            messages,
-          }),
-      );
-
-      const raw = response.choices[0]?.message?.content;
-      try {
-        if (!raw) throw new Error(options.emptyResponseMessage);
-        return options.parse(raw);
-      } catch (error) {
-        lastError = error;
-        if (attempt >= maxAttempts) {
-          throw error;
-        }
-
-        const reason = this.getStructuredResponseRetryReason(error);
-        this.logger.warn(
-          `Structured response retry ${JSON.stringify({
-            feature: options.feature,
-            attempt,
-            nextAttempt: attempt + 1,
-            maxAttempts,
-            reason,
-            model: options.model,
-          })}`,
-        );
-
-        messages.push({
-          role: 'user',
-          content:
-            'The previous response was invalid for the expected JSON schema. ' +
-            `Validation error: ${reason}. ` +
-            'Return only valid JSON for the expected schema, without markdown or explanations.',
-        });
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error('Resposta estruturada inválida da IA');
-  }
-
-  private getStructuredResponseRetryReason(error: unknown): string {
-    if (error instanceof Error && error.message) {
-      return error.message.slice(0, 180);
-    }
-
-    return 'structured-response-validation-failed';
-  }
-
   private logLayoutNormalization(
     feature: string,
     adjustments: LayoutNormalizationAdjustment[],
@@ -473,164 +384,6 @@ export class TemplateLayersGeneratorService {
     );
 
     return inputs;
-  }
-
-  private async classifyImageIntent(
-    context: ImageIntentContext,
-  ): Promise<ImageIntentClassification> {
-    const fallback = this.getFallbackImageIntent(context);
-    if (!this.openai) return fallback;
-
-    try {
-      const parsed = await this.createStructuredChatCompletion({
-        feature: context.feature,
-        model: this.models.fastTextModel,
-        emptyResponseMessage: 'Resposta vazia da classificação de intenção',
-        parse: parseImageIntentClassification,
-        request: {
-          model: this.models.fastTextModel,
-          response_format: AI_RESPONSE_FORMATS.imageIntentClassification,
-          max_tokens: 300,
-          temperature: 0,
-          messages: [
-            {
-              role: 'system',
-              content: IMAGE_INTENT_CLASSIFICATION_SYSTEM_PROMPT,
-            },
-            {
-              role: 'user',
-              content: JSON.stringify({
-                message: context.userMessage,
-                hasExistingImage: context.hasExistingImage,
-                hasReferenceImages: context.hasReferenceImages,
-                hasCurrentLayers: !!context.hasCurrentLayers,
-              }),
-            },
-          ],
-        },
-      });
-      const confidence = parsed.confidence;
-
-      if (confidence < 0.55) {
-        this.logImageIntentClassification(context, fallback, 'low-confidence-fallback');
-        return fallback;
-      }
-
-      const classified = this.buildImageIntentClassification(
-        parsed.category,
-        confidence,
-        context,
-        parsed.reason,
-      );
-      this.logImageIntentClassification(context, classified, 'classified');
-      return classified;
-    } catch (error) {
-      this.logger.warn(
-        `Image intent classification failed ${JSON.stringify({
-          feature: context.feature,
-          error: (error as Error).message,
-        })}`,
-      );
-      return fallback;
-    }
-  }
-
-  private getFallbackImageIntent(context: ImageIntentContext): ImageIntentClassification {
-    const category: ImageIntentCategory = context.hasExistingImage
-      ? 'targeted_edit'
-      : context.hasReferenceImages
-        ? 'style_variation'
-        : 'new_full_image';
-
-    return this.buildImageIntentClassification(category, 0, context, 'fallback');
-  }
-
-  private buildImageIntentClassification(
-    category: ImageIntentCategory,
-    confidence: number,
-    context: ImageIntentContext,
-    reason?: string,
-  ): ImageIntentClassification {
-    const canPreserve = context.hasExistingImage || !!context.hasCurrentLayers;
-    const hasImageInput = context.hasExistingImage || context.hasReferenceImages;
-
-    switch (category) {
-      case 'text_change':
-      case 'layout_change':
-        return {
-          category,
-          confidence,
-          shouldGenerateImage: !canPreserve,
-          shouldEditExistingImage: false,
-          shouldUseLayerFlow: false,
-          shouldPreserveExistingImage: canPreserve,
-          reason,
-        };
-      case 'add_layer_element':
-      case 'replace_layer_element':
-        return {
-          category,
-          confidence,
-          shouldGenerateImage: true,
-          shouldEditExistingImage: hasImageInput,
-          shouldUseLayerFlow: true,
-          shouldPreserveExistingImage: false,
-          reason,
-        };
-      case 'targeted_edit':
-        return {
-          category,
-          confidence,
-          shouldGenerateImage: !context.hasExistingImage,
-          shouldEditExistingImage: context.hasExistingImage,
-          shouldUseLayerFlow: false,
-          shouldPreserveExistingImage: false,
-          reason,
-        };
-      case 'style_variation':
-        return {
-          category,
-          confidence,
-          shouldGenerateImage: !hasImageInput,
-          shouldEditExistingImage: hasImageInput,
-          shouldUseLayerFlow: false,
-          shouldPreserveExistingImage: false,
-          reason,
-        };
-      case 'new_full_image':
-      default:
-        return {
-          category: 'new_full_image',
-          confidence,
-          shouldGenerateImage: true,
-          shouldEditExistingImage: false,
-          shouldUseLayerFlow: false,
-          shouldPreserveExistingImage: false,
-          reason,
-        };
-    }
-  }
-
-  private logImageIntentClassification(
-    context: ImageIntentContext,
-    intent: ImageIntentClassification,
-    status: string,
-  ): void {
-    this.logger.log(
-      `Image intent ${JSON.stringify({
-        feature: context.feature,
-        status,
-        category: intent.category,
-        confidence: intent.confidence,
-        hasExistingImage: context.hasExistingImage,
-        hasReferenceImages: context.hasReferenceImages,
-        hasCurrentLayers: !!context.hasCurrentLayers,
-        shouldGenerateImage: intent.shouldGenerateImage,
-        shouldEditExistingImage: intent.shouldEditExistingImage,
-        shouldUseLayerFlow: intent.shouldUseLayerFlow,
-        shouldPreserveExistingImage: intent.shouldPreserveExistingImage,
-      })}`,
-    );
   }
 
   private mapCurrentLayerElements(elements: CurrentLayerElementDto[]): LayerElementDto[] {
