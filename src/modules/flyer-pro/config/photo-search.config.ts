@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { FLYER_PRO_LIMITS } from '../domain/flyer-pro.limits';
 import { ProviderName, readIntegerEnv, readProviderEnv, Warner } from './env-reader';
 
+/** Token de injeção da configuração da busca de fotos, lida uma vez ao subir (mudar exige reiniciar). */
+export const FLYER_PRO_PHOTO_SEARCH_CONFIG = 'FLYER_PRO_PHOTO_SEARCH_CONFIG';
+
 export type PhotoSearchProviderName = ProviderName;
 
 /** A busca de fotos no Google (rotas B1 e B2): sem a chave da Serper, que nunca entra aqui (`serper-api-key.ts`). */

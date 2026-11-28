@@ -12,6 +12,7 @@ import { GalleryModule } from '../gallery/gallery.module';
 import { FlyerProDocumentsController } from './controllers/flyer-pro-documents.controller';
 import { FlyerProEnrichmentController } from './controllers/flyer-pro-enrichment.controller';
 import { FlyerProExportsController } from './controllers/flyer-pro-exports.controller';
+import { FlyerProPhotoSearchController } from './controllers/flyer-pro-photo-search.controller';
 import { FlyerProStructureSuggestionController } from './controllers/flyer-pro-structure-suggestion.controller';
 import { FlyerProTemplatesController } from './controllers/flyer-pro-templates.controller';
 import {
@@ -19,6 +20,7 @@ import {
   FlyerProEnrichConfig,
   readEnrichConfig,
 } from './config/flyer-pro-enrich.config';
+import { FLYER_PRO_PHOTO_SEARCH_CONFIG, readPhotoSearchConfig } from './config/photo-search.config';
 import { readStructureAiConfig, STRUCTURE_AI_CONFIG } from './config/structure-ai.config';
 import { FlyerProDocument } from './entities/flyer-pro-document.entity';
 import { FlyerProExport } from './entities/flyer-pro-export.entity';
@@ -30,6 +32,8 @@ import { FlyerProEnrichProcessor } from './processors/flyer-pro-enrich.processor
 import type { BatchMessage } from './processors/flyer-pro-enrich.types';
 import { createEnrichPort } from './providers/flyer-pro-enrich.factory';
 import { FLYER_PRO_ENRICH_PORT } from './providers/flyer-pro-enrich.port';
+import { createPhotoSearchPort } from './providers/flyer-pro-photo-search.factory';
+import { FLYER_PRO_PHOTO_SEARCH_PORT } from './providers/flyer-pro-photo-search.port';
 import { createStructureAiPort } from './providers/flyer-pro-structure-ai.factory';
 import { FLYER_PRO_STRUCTURE_AI_PORT } from './providers/flyer-pro-structure-ai.port';
 import { FlyerProClientGuardService } from './services/flyer-pro-client-guard.service';
@@ -44,6 +48,8 @@ import { FlyerProSaveService } from './services/flyer-pro-save.service';
 import { FlyerProImageLinkService } from './services/flyer-pro-image-link.service';
 import { FlyerProImportsService } from './services/flyer-pro-imports.service';
 import { FlyerProItemsService } from './services/flyer-pro-items.service';
+import { FlyerProPhotoSearchService } from './services/flyer-pro-photo-search.service';
+import { FlyerProPhotoSearchStore } from './services/flyer-pro-photo-search-store';
 import { FlyerProSetupService } from './services/flyer-pro-setup.service';
 import { FlyerProStructureLimiter } from './services/flyer-pro-structure-limiter';
 import { FlyerProStructureSuggestionService } from './services/flyer-pro-structure-suggestion.service';
@@ -54,7 +60,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
 /**
  * Módulo do Encarte Pro (backend): a leitura dos templates das cenas do Templates v2 (N7), o montador da cópia congelada
  * do template, o encarte guardado no servidor (criar, listar, abrir e excluir: N1, N2, N3 e N6) e o serviço de guarda que
- * o módulo de clientes chama ao excluir um cliente, o registro e o histórico das exportações (N8 e N9) e a sugestão de estrutura por IA (N19, só leitura). Lê as tabelas das cenas sem passar pela flag `TEMPLATE_SCENE_ENABLED`.
+ * o módulo de clientes chama ao excluir um cliente, o registro e o histórico das exportações (N8 e N9), a sugestão de estrutura por IA (N19, só leitura) e a busca de fotos do item no Google (B1, só leitura). Lê as tabelas das cenas sem passar pela flag `TEMPLATE_SCENE_ENABLED`.
  * Importa a Galeria para registrar a escolha da foto depois do `PATCH` (change 27).
  */
 @Module({
@@ -76,6 +82,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProDocumentsController,
     FlyerProExportsController,
     FlyerProStructureSuggestionController,
+    FlyerProPhotoSearchController,
     FlyerProEnrichmentController,
   ],
   providers: [
@@ -92,6 +99,7 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProExportsService,
     FlyerProImageLinkService,
     FlyerProStructureSuggestionService,
+    FlyerProPhotoSearchService,
     FlyerProJobsService,
     FlyerProEnrichCommitter,
     FlyerProEnrichProcessor,
@@ -100,6 +108,8 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
     FlyerProImageSizeService,
     // Um limitador só por processo da API: a vaga em andamento e o teto por hora vivem na memória dele.
     { provide: FlyerProStructureLimiter, useFactory: () => new FlyerProStructureLimiter() },
+    // A resposta guardada da busca de fotos e os pedidos no ar: uma memória só por processo da API.
+    { provide: FlyerProPhotoSearchStore, useFactory: () => new FlyerProPhotoSearchStore() },
     {
       provide: FLYER_PRO_ENRICH_CONFIG,
       useFactory: (config: ConfigService) => readEnrichConfig(config),
@@ -127,6 +137,16 @@ import { FlyerProTemplatesService } from './services/flyer-pro-templates.service
       provide: FLYER_PRO_STRUCTURE_AI_PORT,
       useFactory: createStructureAiPort,
       inject: [STRUCTURE_AI_CONFIG, ConfigService],
+    },
+    {
+      provide: FLYER_PRO_PHOTO_SEARCH_CONFIG,
+      useFactory: (config: ConfigService) => readPhotoSearchConfig(config),
+      inject: [ConfigService],
+    },
+    {
+      provide: FLYER_PRO_PHOTO_SEARCH_PORT,
+      useFactory: createPhotoSearchPort,
+      inject: [FLYER_PRO_PHOTO_SEARCH_CONFIG, ConfigService],
     },
   ],
   exports: [FlyerProTemplateSnapshotService, FlyerProClientGuardService],
