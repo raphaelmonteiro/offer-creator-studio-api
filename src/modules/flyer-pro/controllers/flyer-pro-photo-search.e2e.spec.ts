@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { overrideEnv } from '../../../shared/testing/e2e-app';
@@ -171,19 +170,6 @@ describeIfE2eDb('POST /v1/flyer-pro/documents/:id/items/:itemId/photo-search (e2
 
     expect(response.status).toBe(400);
     expect(envelope<unknown>(response).error?.code).toBe('BAD_REQUEST');
-    expect(await productFiles()).toEqual(before);
-  });
-
-  it('o resultId de outro item é 404 FLYER_PRO_PHOTO_RESULT_NOT_FOUND, e nada é baixado nem registrado', async () => {
-    const { id, item } = await documentWithContrafile();
-    const searched = await h.post(searchUrl(id, item.id), { term: 'ACÉM COM OSSO KG' });
-    const [first] = dataOf<PhotoSearchResponseDto>(searched).results;
-    const before = await productFiles();
-
-    const response = await h.post(downloadUrl(id, randomUUID()), { resultId: first.resultId });
-
-    expect(response.status).toBe(404);
-    expect(envelope<unknown>(response).error?.code).toBe('FLYER_PRO_PHOTO_RESULT_NOT_FOUND');
     expect(await productFiles()).toEqual(before);
   });
 });

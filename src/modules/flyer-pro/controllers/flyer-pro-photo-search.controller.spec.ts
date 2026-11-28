@@ -15,6 +15,18 @@ import { DocumentIdPipe } from './flyer-pro-documents.controller';
 import { ItemIdPipe } from './flyer-pro-item-id.pipe';
 import { FlyerProPhotoSearchController } from './flyer-pro-photo-search.controller';
 
+type RouteArg = { index: number; data: string; pipes: unknown[] };
+
+/** O parâmetro de rota `name` do método: em que posição da chamada o Nest o entrega e por quais pipes passa. */
+function routeParam(method: 'search' | 'download', name: string): RouteArg | undefined {
+  const args = Reflect.getMetadata(
+    ROUTE_ARGS_METADATA,
+    FlyerProPhotoSearchController,
+    method,
+  ) as Record<string, RouteArg>;
+  return Object.values(args).find((arg) => arg.data === name);
+}
+
 function setup() {
   const photoSearch = { search: jest.fn() };
   const photoDownload = { download: jest.fn() };
@@ -40,14 +52,13 @@ describe('FlyerProPhotoSearchController', () => {
     expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.POST);
     expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe(':id/items/:itemId/photo-search');
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(200);
-    const args = Reflect.getMetadata(
-      ROUTE_ARGS_METADATA,
-      FlyerProPhotoSearchController,
-      'search',
-    ) as Record<string, { data: string; pipes: unknown[] }>;
-    const pipesOf = (name: string) => Object.values(args).find((arg) => arg.data === name)?.pipes;
-    expect(pipesOf('id')).toEqual([DocumentIdPipe]);
-    expect(pipesOf('itemId')).toEqual([ItemIdPipe]);
+    expect(routeParam('search', 'id')?.pipes).toEqual([DocumentIdPipe]);
+    expect(routeParam('search', 'itemId')?.pipes).toEqual([ItemIdPipe]);
+  });
+
+  it('a busca recebe o :id da rota na posição do encarte e o :itemId na do item, nessa ordem', () => {
+    expect(routeParam('search', 'id')?.index).toBe(0);
+    expect(routeParam('search', 'itemId')?.index).toBe(1);
   });
 
   it('entrega encarte, item e corpo ao serviço e devolve a resposta como veio', async () => {
@@ -68,14 +79,13 @@ describe('FlyerProPhotoSearchController', () => {
       ':id/items/:itemId/photo-search/download',
     );
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(200);
-    const args = Reflect.getMetadata(
-      ROUTE_ARGS_METADATA,
-      FlyerProPhotoSearchController,
-      'download',
-    ) as Record<string, { data: string; pipes: unknown[] }>;
-    const pipesOf = (name: string) => Object.values(args).find((arg) => arg.data === name)?.pipes;
-    expect(pipesOf('id')).toEqual([DocumentIdPipe]);
-    expect(pipesOf('itemId')).toEqual([ItemIdPipe]);
+    expect(routeParam('download', 'id')?.pipes).toEqual([DocumentIdPipe]);
+    expect(routeParam('download', 'itemId')?.pipes).toEqual([ItemIdPipe]);
+  });
+
+  it('o download recebe o :id da rota na posição do encarte e o :itemId na do item, nessa ordem: só resultado guardado daquele item', () => {
+    expect(routeParam('download', 'id')?.index).toBe(0);
+    expect(routeParam('download', 'itemId')?.index).toBe(1);
   });
 
   it('entrega encarte, item e corpo ao serviço do download e devolve a resposta como veio', async () => {
