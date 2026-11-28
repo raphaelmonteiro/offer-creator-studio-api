@@ -29,7 +29,7 @@ const register = (
 ) => service.register({ choices, items, clientId });
 
 describe('FlyerProImageLinkService: quando registrar a escolha', () => {
-  it.each(['suggestion', 'picker', 'upload', 'pixabay'])(
+  it.each(['suggestion', 'picker', 'upload', 'pixabay', 'google'])(
     'foto nova com origem %s registra o nome do item na foto',
     async (imageOrigin) => {
       const { service, linkProduct } = makeService();
