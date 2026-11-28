@@ -13,9 +13,11 @@ export interface PhotoPageScope {
   page: number;
 }
 
-/** Um resultado guardado: o do provedor, com o `resultId` que a tela devolve no download. */
+/** Um resultado guardado: o do provedor, com o `resultId` que a tela devolve no download e o termo que o achou (nome do arquivo baixado). */
 export interface StoredPhotoResult extends PhotoSearchResult {
   resultId: string;
+  /** O termo da busca, aparado, como o operador mandou (não é a chave: mantém caixa e espaços internos). */
+  term: string;
 }
 
 /** O que se guarda de uma página: os resultados já filtrados e se há página seguinte. */
@@ -85,7 +87,11 @@ export class FlyerProPhotoSearchStore {
       page: scope.page,
       at: this.now(),
       hasMore: page.hasMore,
-      results: page.results.map((result) => ({ ...result, resultId: this.nextResultId() })),
+      results: page.results.map((result) => ({
+        ...result,
+        resultId: this.nextResultId(),
+        term: scope.term,
+      })),
     };
     this.pages.set(key, stored);
     return { hasMore: stored.hasMore, results: stored.results };

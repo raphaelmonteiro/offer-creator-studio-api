@@ -1,13 +1,24 @@
 import type { DataSource } from 'typeorm';
+import type { DownloadedImage } from '../../../shared/http/download-image-safely';
+import type {
+  GalleryPhotoImportService,
+  RegisteredPhoto,
+} from '../../gallery/gallery-photo-import.service';
 import type { PhotoSearchConfig } from '../config/photo-search.config';
 import {
   type FlyerProPhotoSearchPort,
   PhotoSearchFailure,
   type PhotoSearchResult,
 } from '../providers/flyer-pro-photo-search.port';
+import type { PhotoDownloadDto } from '../dto/flyer-pro-photo-download.dto';
 import type { PhotoSearchDto } from '../dto/flyer-pro-photo-search.dto';
+import { FlyerProPhotoDownloadService } from './flyer-pro-photo-download.service';
 import { FlyerProPhotoSearchService } from './flyer-pro-photo-search.service';
-import { FlyerProPhotoSearchStore } from './flyer-pro-photo-search-store';
+import {
+  FlyerProPhotoSearchStore,
+  type PhotoPageScope,
+  type StoredPhotoResult,
+} from './flyer-pro-photo-search-store';
 
 /** Ajudantes dos unitários da busca de fotos (só testes): o serviço sobre um banco e um provedor simulados. */
 
@@ -40,7 +51,9 @@ type Outcome = PhotoSearchResult[] | Error | (() => Promise<PhotoSearchResult[]>
 /** O provedor de mentira: devolve (ou lança) o que o teste manda e guarda os pedidos recebidos. */
 export function fakePhotoPort(
   outcome: Outcome = tenPhotos(),
-  over: Partial<Pick<FlyerProPhotoSearchPort, 'source' | 'unavailableReason'>> = {},
+  over: Partial<
+    Pick<FlyerProPhotoSearchPort, 'source' | 'unavailableReason' | 'resolveLink' | 'fetchPhoto'>
+  > = {},
 ) {
   const search = jest.fn(() => {
     if (outcome instanceof Error) return Promise.reject(outcome);
@@ -82,4 +95,77 @@ export function makePhotoSearchService(options: ServiceOptions = {}) {
     store,
   );
   return { service, store, findOne };
+}
+
+export const bodyOfDownload = (resultId: string): PhotoDownloadDto => ({ resultId });
+
+/** A foto que o download seguro entrega: um JPEG do tamanho dado (os bytes não são lidos pelo serviço). */
+export const downloaded = (width = 1000, height = 1000): DownloadedImage => ({
+  buffer: Buffer.from('jpeg'),
+  format: 'jpeg',
+  width,
+  height,
+  extension: '.jpg',
+  mimeType: 'image/jpeg',
+});
+
+/** Guarda uma página de um resultado no `store` e devolve o resultado guardado (com o `resultId`). */
+export function storeResult(
+  store: FlyerProPhotoSearchStore,
+  result: PhotoSearchResult,
+  over: Partial<PhotoPageScope> = {},
+): StoredPhotoResult {
+  const scope = {
+    documentId: DOCUMENT_ID,
+    itemId: ITEM_ID,
+    term: 'COXÃO MOLE BIFE KG',
+    page: 1,
+    ...over,
+  };
+  return store.write(scope, { hasMore: true, results: [result] }).results[0];
+}
+
+/** O serviço comum da Galeria de mentira: cada registro devolve um `imageId` novo e a medida do arquivo que recebeu. */
+export function fakeGalleryImport(fail?: Error) {
+  let count = 0;
+  const registerDownloaded = jest.fn(
+    async (image: DownloadedImage, _productName: string): Promise<RegisteredPhoto> => {
+      if (fail) throw fail;
+      count += 1;
+      return {
+        url: `http://localhost:3101/uploads/products/foto-${count}.jpg`,
+        imageId: `galeria-${count}`,
+        width: image.width,
+        height: image.height,
+      };
+    },
+  );
+  return {
+    gallery: { registerDownloaded } as unknown as GalleryPhotoImportService,
+    registerDownloaded,
+  };
+}
+
+export interface DownloadServiceOptions {
+  /** O encarte lido (`null`: não existe ou foi excluído). */
+  document?: { id: string } | null;
+  port?: FlyerProPhotoSearchPort;
+  store?: FlyerProPhotoSearchStore;
+  gallery?: GalleryPhotoImportService;
+}
+
+export function makePhotoDownloadService(options: DownloadServiceOptions = {}) {
+  const findOne = jest
+    .fn()
+    .mockResolvedValue(options.document === undefined ? { id: DOCUMENT_ID } : options.document);
+  const dataSource = { manager: { findOne } } as unknown as DataSource;
+  const store = options.store ?? new FlyerProPhotoSearchStore();
+  const { gallery, registerDownloaded } = fakeGalleryImport();
+  const service = new FlyerProPhotoDownloadService(
+    dataSource,
+    options.port ?? fakePhotoPort().port,
+    store,
+    options.gallery ?? gallery,
+  );
+  return { service, store, findOne, registerDownloaded };
 }

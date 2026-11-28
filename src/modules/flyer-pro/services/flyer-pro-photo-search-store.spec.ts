@@ -166,6 +166,13 @@ describe('FlyerProPhotoSearchStore: download só de resultado guardado do item',
     expect(store.findResult(DOC, ITEM_A, r9.resultId)).toEqual(r9);
   });
 
+  it('o resultado guardado leva o termo da busca que o achou, como o operador mandou', () => {
+    const store = new FlyerProPhotoSearchStore();
+    const [r1] = store.write(scopeOf({ term: 'COXÃO  Mole' }), pageOf(1)).results;
+
+    expect(store.findResult(DOC, ITEM_A, r1.resultId)?.term).toBe('COXÃO  Mole');
+  });
+
   it('o resultId de outro item, de outro encarte, vencido ou inventado não é achado', () => {
     const store = new FlyerProPhotoSearchStore();
     const [r1] = store.write(scopeOf(), pageOf(1)).results;

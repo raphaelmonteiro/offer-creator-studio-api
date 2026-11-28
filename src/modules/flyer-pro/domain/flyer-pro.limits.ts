@@ -72,4 +72,6 @@ export const FLYER_PRO_LIMITS = {
   photoSearchTermMaxLength: 120,
   photoSearchPageMax: 10,
   photoSmallSidePx: 300,
+  /** O `resultId` do download da foto escolhida (de 1 a 64 caracteres; o real é `r<n>`, B2 do contrato). */
+  photoResultIdMaxLength: 64,
 } as const;
