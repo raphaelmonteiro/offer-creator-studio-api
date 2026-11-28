@@ -17,7 +17,11 @@ import {
 import { parseSerperImages, resolvedUrlOf } from './flyer-pro-photo-search.serper.response';
 
 const SERPER_URL = 'https://google.serper.dev';
-/** O prazo da busca e o da resolução do link (A-12, D-orq-251); passado ele, a chamada é abortada e nunca repetida. */
+/**
+ * O prazo da busca e o da resolução do link (A-12, D-orq-251); passado ele, a chamada é abortada e nunca repetida. Cobre
+ * também a leitura do corpo (`timeoutCoversBody`, D-orq-267): um corpo que trava depois dos cabeçalhos é `TIMEOUT`, e o
+ * pedido igual no ar (A-8) não fica preso junto.
+ */
 const SERPER_TIMEOUT_MS = 10_000;
 
 /** País, idioma e quantidade fixos no servidor (spec "País, idioma e quantidade fixos no servidor"). */
@@ -87,6 +91,7 @@ export class SerperPhotoSearch extends HttpProviderBase implements FlyerProPhoto
       headers: { 'X-API-KEY': this.apiKey ?? '', 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       timeoutMs: SERPER_TIMEOUT_MS,
+      timeoutCoversBody: true,
     });
   }
 }

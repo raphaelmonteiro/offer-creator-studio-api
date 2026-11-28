@@ -35,3 +35,26 @@ export const serperImage = (over: Record<string, unknown> = {}): Record<string, 
   domain: 'extrabom.com.br',
   ...over,
 });
+
+/**
+ * Faz o `fetch` espionado responder 200 com os cabeçalhos e um corpo que trava até o aborto do controller do provedor (o que
+ * o fetch real faz com o stream); devolve o `signal` do pedido, que só existe depois da chamada.
+ */
+export function respondWithHangingBody(fetchSpy: jest.SpyInstance): { signal?: AbortSignal } {
+  const seen: { signal?: AbortSignal } = {};
+  fetchSpy.mockImplementation((_url: string, init: RequestInit) => {
+    const signal = init.signal as AbortSignal;
+    seen.signal = signal;
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        signal.addEventListener('abort', () =>
+          stream.error(
+            Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }),
+          ),
+        );
+      },
+    });
+    return Promise.resolve(new Response(body, { status: 200 }));
+  });
+  return seen;
+}

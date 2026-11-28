@@ -1,7 +1,12 @@
 import { PROVIDER_ERROR_FIXTURES } from '../../../shared/providers/__fixtures__/provider-error-bodies';
 import { PhotoSearchFailure } from './flyer-pro-photo-search.port';
 import { SerperPhotoSearch } from './flyer-pro-photo-search.serper';
-import { captureLogs, jsonReply, TEST_SERPER_KEY } from './flyer-pro-photo-search.testutil';
+import {
+  captureLogs,
+  jsonReply,
+  respondWithHangingBody,
+  TEST_SERPER_KEY,
+} from './flyer-pro-photo-search.testutil';
 
 const fixture = (status: number) => {
   const found = PROVIDER_ERROR_FIXTURES.find((f) => f.provider === 'serper' && f.status === status);
@@ -90,6 +95,21 @@ describe('SerperPhotoSearch: falha da busca (uma chamada só, nunca repetida)', 
     const failure = await pending;
 
     expect(aborted.signal?.aborted).toBe(true);
+    expect(failure.reason).toBe('TIMEOUT');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('o corpo que trava depois dos cabeçalhos: abortado em 10 s e a falha é TIMEOUT (D-orq-267)', async () => {
+    jest.useFakeTimers();
+    const request = respondWithHangingBody(fetchSpy);
+
+    const pending = searchFailure();
+    await jest.advanceTimersByTimeAsync(9_999);
+    expect(request.signal?.aborted).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    const failure = await pending;
+
+    expect(request.signal?.aborted).toBe(true);
     expect(failure.reason).toBe('TIMEOUT');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });

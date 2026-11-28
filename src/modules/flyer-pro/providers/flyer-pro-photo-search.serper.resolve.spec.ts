@@ -1,7 +1,12 @@
 import * as downloadModule from '../../../shared/http/download-image-safely';
 import { PhotoLinkResolveFailure } from './flyer-pro-photo-search.port';
 import { SerperPhotoSearch } from './flyer-pro-photo-search.serper';
-import { captureLogs, jsonReply, TEST_SERPER_KEY } from './flyer-pro-photo-search.testutil';
+import {
+  captureLogs,
+  jsonReply,
+  respondWithHangingBody,
+  TEST_SERPER_KEY,
+} from './flyer-pro-photo-search.testutil';
 
 const RESOLVE_URL = 'https://google.serper.dev/resolve';
 const GOTO = 'https://www.google.com/goto?url=CAESYwHr';
@@ -113,6 +118,22 @@ describe('SerperPhotoSearch: a chave, a resolução do link e o download', () =>
       expect(failure.message + String(failure.stack) + logs().join('\n')).not.toContain(
         TEST_SERPER_KEY,
       );
+    });
+  });
+
+  describe('resolveLink: o corpo que trava depois dos cabeçalhos (D-orq-267)', () => {
+    it('abortado em 10 s e a falha é a da resolução, sem repetir', async () => {
+      jest.useFakeTimers();
+      const request = respondWithHangingBody(fetchSpy);
+
+      const pending = resolveFailure();
+      await jest.advanceTimersByTimeAsync(9_999);
+      expect(request.signal?.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
+      await pending;
+
+      expect(request.signal?.aborted).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 
