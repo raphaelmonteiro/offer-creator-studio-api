@@ -5,6 +5,7 @@ import {
   RedirectLimitError,
   RedirectLocationError,
 } from './follow-redirects';
+import { isHttpProtocol } from './is-http-protocol';
 import { createPinnedFetch } from './pinned-fetch';
 import { readBodyUpTo } from './read-body-up-to';
 import { SafeDownloadError } from './safe-download-error';
@@ -51,7 +52,7 @@ function checkUrlOf(allowUrl: DownloadImageOptions['allowUrl']) {
     } catch {
       throw new SafeDownloadError('SCHEME', 'URL inválida');
     }
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    if (!isHttpProtocol(url.protocol)) {
       throw new SafeDownloadError('SCHEME', `esquema não aceito (${url.protocol})`);
     }
     if (url.username || url.password) {

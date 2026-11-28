@@ -6,6 +6,7 @@ import {
 import { HttpProviderBase } from '../../../shared/providers/http-provider.base';
 import { isGoogleGotoLink } from '../domain/flyer-pro-photo-link';
 import type { PhotoSearchUnavailableReason } from '../domain/flyer-pro-photo-search.errors';
+import { isHttpImageUrl } from '../domain/flyer-pro-photo-search-rules';
 import { searchFailureOf } from './flyer-pro-photo-search.serper.failure';
 import {
   type FlyerProPhotoSearchPort,
@@ -29,13 +30,7 @@ const FIXED_PARAMS = { gl: 'br', hl: 'pt-br', num: 10 } as const;
 
 /** O endereço de uma resolução só vale se for http(s) e não for outro link do Google (nem o mesmo de volta). */
 function isResolvedAddress(link: string, resolved: string): boolean {
-  if (resolved === link || isGoogleGotoLink(resolved)) return false;
-  try {
-    const { protocol } = new URL(resolved);
-    return protocol === 'http:' || protocol === 'https:';
-  } catch {
-    return false;
-  }
+  return resolved !== link && !isGoogleGotoLink(resolved) && isHttpImageUrl(resolved);
 }
 
 /**

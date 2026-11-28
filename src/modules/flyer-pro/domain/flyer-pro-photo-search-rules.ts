@@ -1,3 +1,4 @@
+import { isHttpProtocol } from '../../../shared/http/is-http-protocol';
 import { FLYER_PRO_LIMITS } from './flyer-pro.limits';
 
 /** `small` (D-5): o menor lado abaixo de 300 px; o tamanho desconhecido (`null`) nunca é pequeno, o aviso fica para a medida do arquivo baixado. */
@@ -10,8 +11,7 @@ export function isSmallPhoto(width: number | null, height: number | null): boole
 /** O endereço de foto que serve: `http` ou `https` (o `data:` e o texto que não é URL não servem). */
 export function isHttpImageUrl(raw: string): boolean {
   try {
-    const { protocol } = new URL(raw);
-    return protocol === 'http:' || protocol === 'https:';
+    return isHttpProtocol(new URL(raw).protocol);
   } catch {
     return false;
   }
