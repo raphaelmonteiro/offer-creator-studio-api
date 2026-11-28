@@ -1,5 +1,10 @@
 import { SerperPhotoSearch } from './flyer-pro-photo-search.serper';
-import { jsonReply, serperImage, TEST_SERPER_KEY } from './flyer-pro-photo-search.testutil';
+import {
+  captureLogs,
+  jsonReply,
+  serperImage,
+  TEST_SERPER_KEY,
+} from './flyer-pro-photo-search.testutil';
 
 const SEARCH_URL = 'https://google.serper.dev/images';
 
@@ -114,10 +119,29 @@ describe('SerperPhotoSearch: a busca', () => {
       expect(await provider.search(query)).toHaveLength(2);
     });
 
-    it('página sem resultado é lista vazia', async () => {
+    it('página sem resultado é lista vazia, sem aviso', async () => {
+      const logs = captureLogs();
       fetchSpy.mockResolvedValue(jsonReply({ images: [] }));
 
       expect(await provider.search(query)).toEqual([]);
+      expect(logs()).toEqual([]);
     });
+
+    it.each([
+      ['objeto vazio', {}],
+      ['objeto só com os créditos', { credits: 1, searchParameters: { q: 'x' } }],
+    ])(
+      'resposta 200 %s, sem a lista images, é página vazia com um aviso sem o termo e sem a chave (D-orq-268)',
+      async (_name, body) => {
+        const logs = captureLogs();
+        fetchSpy.mockResolvedValue(jsonReply(body));
+
+        await expect(provider.search(query)).resolves.toEqual([]);
+
+        expect(logs()).toEqual(['Busca de fotos no Google: resposta sem a lista images']);
+        expect(logs().join('\n')).not.toContain(TEST_SERPER_KEY);
+        expect(logs().join('\n')).not.toContain(query.term);
+      },
+    );
   });
 });

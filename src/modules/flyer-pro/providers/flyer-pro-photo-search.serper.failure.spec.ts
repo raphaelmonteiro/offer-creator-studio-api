@@ -115,9 +115,10 @@ describe('SerperPhotoSearch: falha da busca (uma chamada só, nunca repetida)', 
   });
 
   it.each([
-    ['objeto sem a lista images', {}],
     ['images que não é lista', { images: 'x' }],
+    ['images nulo', { images: null }],
     ['lista na raiz', []],
+    ['texto JSON na raiz', '"erro"'],
     ['texto que não é JSON', '<html>erro</html>'],
   ])('resposta 200 fora da forma (%s) é PROVIDER_ERROR', async (_name, body) => {
     fetchSpy.mockResolvedValue(jsonReply(body));

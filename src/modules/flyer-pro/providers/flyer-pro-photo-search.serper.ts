@@ -62,10 +62,11 @@ export class SerperPhotoSearch extends HttpProviderBase implements FlyerProPhoto
     } catch (error) {
       throw searchFailureOf(error);
     }
-    const results = parseSerperImages(raw);
-    if (!results)
-      throw new PhotoSearchFailure('PROVIDER_ERROR', 'Resposta da Serper fora da forma');
-    return results;
+    const parsed = parseSerperImages(raw);
+    if (!parsed) throw new PhotoSearchFailure('PROVIDER_ERROR', 'Resposta da Serper fora da forma');
+    // Sem a lista `images` o termo não teve resultado: página vazia (não erro), com o aviso no log sem o termo e sem a chave.
+    if (!parsed.hasList) this.logger.warn('Busca de fotos no Google: resposta sem a lista images');
+    return parsed.results;
   }
 
   async resolveLink(link: string): Promise<string> {

@@ -16,7 +16,8 @@ const imageSchema = z.object({
   imageHeight: optionalSide,
 });
 
-const searchSchema = z.object({ images: z.array(z.unknown()) });
+/** A lista `images` pode faltar (um termo sem resultado); presente, tem de ser lista. */
+const searchSchema = z.object({ images: z.array(z.unknown()).optional() });
 
 const hostOf = (imageUrl: string): string => {
   try {
@@ -44,17 +45,28 @@ const toResult = (image: SerperImage): PhotoSearchResult => ({
   ...sizeOf(image),
 });
 
+/** Uma página de `/images` lida: os resultados e se a resposta trouxe a lista `images` (sem ela a página é vazia, D-orq-268). */
+export interface ParsedSerperPage {
+  results: PhotoSearchResult[];
+  hasList: boolean;
+}
+
 /**
- * Os resultados de uma resposta de `/images`: o item sem `imageUrl` sai (um item ruim não derruba a página). `null` quando a
- * resposta não tem a lista `images` (fora da forma: o provedor responde `PROVIDER_ERROR`).
+ * Os resultados de uma resposta de `/images`: o item sem `imageUrl` sai (um item ruim não derruba a página). Objeto sem a
+ * lista `images` é página vazia (`hasList: false`, D-orq-268). `null` quando a resposta não é um objeto ou traz `images` que
+ * não é lista (fora da forma: o provedor responde `PROVIDER_ERROR`).
  */
-export function parseSerperImages(raw: unknown): PhotoSearchResult[] | null {
+export function parseSerperImages(raw: unknown): ParsedSerperPage | null {
   const page = searchSchema.safeParse(raw);
   if (!page.success) return null;
-  return page.data.images.flatMap((item) => {
-    const image = imageSchema.safeParse(item);
-    return image.success ? [toResult(image.data)] : [];
-  });
+  const items = page.data.images ?? [];
+  return {
+    hasList: page.data.images !== undefined,
+    results: items.flatMap((item) => {
+      const image = imageSchema.safeParse(item);
+      return image.success ? [toResult(image.data)] : [];
+    }),
+  };
 }
 
 const resolveSchema = z.object({
