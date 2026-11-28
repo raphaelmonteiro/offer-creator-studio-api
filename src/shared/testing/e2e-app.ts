@@ -28,6 +28,7 @@ export const E2E_JWT_REFRESH_SECRET = 'segredo-refresh-e2e-do-flyer-pro';
 export const PAID_KEYS = [
   'OPENAI_API_KEY',
   'PIXABAY_API_KEY',
+  'SERPER_API_KEY',
   'REPLICATE_API_TOKEN',
   'RUNWAY_API_KEY',
   'ELEVENLABS_API_KEY',

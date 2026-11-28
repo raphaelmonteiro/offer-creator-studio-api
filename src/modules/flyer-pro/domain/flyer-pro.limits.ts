@@ -66,4 +66,6 @@ export const FLYER_PRO_LIMITS = {
   /** O provedor real: teto de saída de `/responses` (o raciocínio conta) e a temperatura da família que a usa (A-13). */
   structureMaxOutputTokens: 16_000,
   structureTemperature: 0.2,
+  /** Padrão de `FLYER_PRO_PHOTO_SEARCH_MAX_PER_HOUR`: buscas pagas por encarte em 60 minutos (D-8, change 47). */
+  photoSearchMaxPerHourDefault: 300,
 } as const;

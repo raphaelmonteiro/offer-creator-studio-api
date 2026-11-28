@@ -12,6 +12,16 @@ export function rawEnv(config: ConfigService, name: string): string | undefined 
   return text === '' ? undefined : text;
 }
 
+export type ProviderName = 'real' | 'mock';
+
+/** O provedor de uma variável `*_PROVIDER`: ausente ou `real` vale `real`; `mock` e qualquer valor desconhecido (com aviso) valem `mock`. */
+export function readProviderEnv(config: ConfigService, logger: Warner, name: string): ProviderName {
+  const raw = rawEnv(config, name);
+  if (raw === undefined || raw === 'real') return 'real';
+  if (raw !== 'mock') logger.warn(`${name}="${raw}" desconhecido; provedor em mock`);
+  return 'mock';
+}
+
 export interface IntegerSpec {
   /** O nome inteiro da variável, com o prefixo. */
   name: string;

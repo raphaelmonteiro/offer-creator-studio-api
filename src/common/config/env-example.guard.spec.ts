@@ -103,6 +103,27 @@ describe('guarda do .env.example contra o código', () => {
       ).toEqual([]);
     });
 
+    it('Chave da Serper com valor reprova e cita a linha; vazia passa (Chave com valor no exemplo)', () => {
+      const files = [
+        reader('flyer-pro/config/serper-api-key.ts', "rawEnv(config, 'SERPER_API_KEY')"),
+      ];
+
+      expect(profileProblems(files, 'SERPER_API_KEY=abc123\n').secretsWithValue).toEqual([
+        'SERPER_API_KEY (linha 1)',
+      ]);
+      expect(profileProblems(files, 'SERPER_API_KEY=\n')).toEqual(NO_PROBLEMS);
+    });
+
+    it('Chave da Serper lida pelo código sem linha no exemplo: reprova e cita o arquivo que a lê (Variável nova sem linha)', () => {
+      const files = [
+        reader('flyer-pro/config/serper-api-key.ts', "rawEnv(config, 'SERPER_API_KEY')"),
+      ];
+
+      expect(profileProblems(files, 'MC_ENABLED=true\n').unlisted).toEqual([
+        'SERPER_API_KEY (lida em flyer-pro/config/serper-api-key.ts)',
+      ]);
+    });
+
     it('Segredo do servidor com valor de exemplo: JWT_SECRET, JWT_REFRESH_SECRET, DB_PASSWORD e SMTP_PASS reprovam, vazios passam', () => {
       const example = [
         'JWT_SECRET=your-secret-key-change-in-production-min-32-chars',

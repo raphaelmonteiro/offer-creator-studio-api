@@ -47,13 +47,14 @@ describe('App de teste do e2e: nenhuma chamada paga', () => {
     expect(process.env.AI_SPELLCHECK_ENABLED).toBe('true');
   });
 
-  it('zera as nove chaves pagas e desliga as nove flags de boot; o process.env volta ao que era antes', async () => {
+  it('zera as dez chaves pagas e desliga as nove flags de boot; o process.env volta ao que era antes', async () => {
     const watched = PAID_KEYS.concat(BOOT_FLAGS);
     const before = watched.map((key) => process.env[key]);
     const { config, close } = await boot();
     for (const key of PAID_KEYS) expect(config.get(key)).toBe('');
     for (const flag of BOOT_FLAGS) expect(config.get(flag)).toBe('false');
-    expect(PAID_KEYS).toHaveLength(9);
+    expect(PAID_KEYS).toHaveLength(10);
+    expect(PAID_KEYS).toContain('SERPER_API_KEY');
     expect(BOOT_FLAGS).toHaveLength(9);
     await close();
     running = undefined;

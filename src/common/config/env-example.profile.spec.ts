@@ -39,6 +39,7 @@ describe('perfil de produção do .env.example', () => {
       TEMPLATE_SCENE_IMAGE_PROVIDER: 'openai',
       FLYER_PRO_STRUCTURE_AI_PROVIDER: 'real',
       FLYER_PRO_ENRICH_PROVIDER: 'real',
+      FLYER_PRO_PHOTO_SEARCH_PROVIDER: 'real',
       MC_SCRIPT_PROVIDER: 'openai',
       MC_KIT_PROVIDER: 'gemini',
       MC_PIPELINE_PROVIDER: 'real',
@@ -117,6 +118,16 @@ describe('perfil de produção do .env.example', () => {
   it('Teto por hora da sugestão: 20, e acima disso a rota responde 429 HOURLY_LIMIT', () => {
     expect(lineOf('FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR').value).toBe('20');
     expect(commentAbove('FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR')).toMatch(/429 HOURLY_LIMIT/);
+  });
+
+  it('Teto por hora da busca de fotos: 300, e acima disso a rota responde 429 FLYER_PRO_PHOTO_SEARCH_BUSY', () => {
+    expect(lineOf('FLYER_PRO_PHOTO_SEARCH_MAX_PER_HOUR')).toMatchObject({
+      value: '300',
+      commented: false,
+    });
+    expect(commentAbove('FLYER_PRO_PHOTO_SEARCH_MAX_PER_HOUR')).toMatch(
+      /429 FLYER_PRO_PHOTO_SEARCH_BUSY/,
+    );
   });
 
   it('Compose local sobrepõe o perfil: o topo diz perfil de produção, mock, chaves zeradas e que fora do compose gasta crédito', () => {
