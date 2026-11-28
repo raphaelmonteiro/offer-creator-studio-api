@@ -7,6 +7,7 @@ import {
   createUploadDir,
   PRODUCT_ID,
   removeUploadDir,
+  servePhoto,
   until,
   USAGE,
 } from './ai-product-models.contract.testutil';
@@ -16,16 +17,6 @@ import { chatResponse } from './utils/openai-chat.testutil';
 
 beforeAll(createUploadDir);
 afterAll(removeUploadDir);
-
-/** A conexão simulada com o Pixabay no serviço de download do app de teste (nenhum soquete, nenhum DNS). */
-function servePhoto(
-  ctx: Awaited<ReturnType<typeof buildApp>>,
-  reply: Parameters<typeof pixabayFetch>[0],
-): ReturnType<typeof pixabayFetch> {
-  const connection = pixabayFetch(reply);
-  ctx.photoImport.fetchImpl = connection.fetch;
-  return connection;
-}
 
 const visionReply = () =>
   chatResponse({

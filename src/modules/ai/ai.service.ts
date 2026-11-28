@@ -23,6 +23,7 @@ import {
   GalleryPhotoImportService,
   RegisteredPhoto,
 } from '../gallery/gallery-photo-import.service';
+import { isPixabayImageUrl } from './pixabay-image-url';
 import { PixabayService } from './pixabay.service';
 import { SpellCheckService } from './spell-check.service';
 import { TemplateGenerateService } from './template-generate.service';
@@ -68,7 +69,9 @@ export class AiService {
 
   /** Baixa a foto escolhida no Pixabay, a grava em `uploads/products/` e a registra na Galeria. */
   async downloadAndSaveImage(imageUrl: string, productName: string): Promise<RegisteredPhoto> {
-    return this.galleryPhotoImport.downloadAndRegister(imageUrl, productName);
+    return this.galleryPhotoImport.downloadAndRegister(imageUrl, productName, {
+      allowUrl: isPixabayImageUrl,
+    });
   }
 
   async generateTemplateElement(

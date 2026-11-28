@@ -2,7 +2,8 @@ import { jpegOf, paddedTo } from '../../shared/image/image-fixtures.testutil';
 import type { ManualFetch } from '../../shared/http/follow-redirects';
 import { createPinnedFetch } from '../../shared/http/pinned-fetch';
 import type { PinnedResponse } from '../../shared/http/pinned-request';
-import { connectionReply, fakeLookup, fakeRequest } from '../../shared/http/pinned-fetch.testutil';
+import { connectionReply, fakeRequest } from '../../shared/http/pinned-fetch.testutil';
+import type { NameLookup } from '../../shared/http/resolve-public-address';
 
 /** A foto de teste do Pixabay: a mesma de `/v1/ai/image-download` nos specs do serviço e do contrato. */
 export const PIXABAY_PHOTO_URL = 'https://pixabay.com/get/g1a2b3c4d5e6f_1280.jpg';
@@ -27,14 +28,15 @@ export const pixabayMissing = (status = 404): PinnedResponse =>
   connectionReply(Buffer.alloc(0), status);
 
 /**
- * O `fetch` do download com a conexão simulada: `pixabay.com` e `cdn.pixabay.com` resolvem para um endereço público, e
+ * O `fetch` do download com a conexão simulada: todo nome resolve para um endereço público, e
  * `reply` decide a resposta de cada conexão (nenhum teste abre soquete nem consulta DNS). `request` conta as conexões.
  */
 export function pixabayFetch(reply: () => PinnedResponse | Error): {
   fetch: ManualFetch;
   request: ReturnType<typeof fakeRequest>;
 } {
-  const lookup = fakeLookup({ 'pixabay.com': ['203.0.113.7'], 'cdn.pixabay.com': ['203.0.113.8'] });
+  // Todo nome resolve para um endereço público: só a regra do Pixabay (e não o DNS) pode recusar `exemplo.com`.
+  const lookup: NameLookup = async () => [{ address: '203.0.113.7', family: 4 }];
   const request = fakeRequest(reply);
   return { fetch: createPinnedFetch({ lookup, request }), request };
 }

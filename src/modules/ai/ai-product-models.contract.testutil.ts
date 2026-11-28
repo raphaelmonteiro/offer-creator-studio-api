@@ -36,6 +36,7 @@ import { GalleryEmbeddingService } from './gallery-embedding.service';
 import { ImageMetadataService } from './metadata/image-metadata.service';
 import { ProductImageMatchV2Service } from './metadata/product-image-match-v2.service';
 import { ProductNameParserService } from './metadata/product-name-parser.service';
+import { pixabayFetch } from './pixabay.testutil';
 import { PixabayService } from './pixabay.service';
 import { ProductCategorizationService } from './product-categorization.service';
 import { SpellCheckService } from './spell-check.service';
@@ -305,6 +306,16 @@ export async function buildApp(env: Record<string, string> = {}) {
     gallery,
     photoImport,
   };
+}
+
+/** A conexão simulada com o Pixabay no serviço de download do app de teste (nenhum soquete, nenhum DNS). */
+export function servePhoto(
+  ctx: Awaited<ReturnType<typeof buildApp>>,
+  reply: Parameters<typeof pixabayFetch>[0],
+): ReturnType<typeof pixabayFetch> {
+  const connection = pixabayFetch(reply);
+  ctx.photoImport.fetchImpl = connection.fetch;
+  return connection;
 }
 
 export const bearer = () => `Bearer ${sign({ sub: 'user-1' }, SECRET)}`;
