@@ -16,6 +16,7 @@ import {
   normalizeCanvasBackgroundRecord,
   normalizeCanvasElementRecord,
 } from './utils/ai-layout.util';
+import { slugify } from '../../common/utils/slugify';
 
 const GENERATE_PREFIX = 'GENERATE:';
 
@@ -200,7 +201,7 @@ export class TemplateElementAssistantService {
       assetKind: 'transparent',
       mode: 'final',
     });
-    const slug = this.slugify(prompt.slice(0, 40));
+    const slug = slugify(prompt.slice(0, 40));
     const filename = `ai-element-${slug}-${Date.now()}.png`;
 
     const result = await uploadGeneratedAsset({
@@ -217,7 +218,7 @@ export class TemplateElementAssistantService {
     if (!this.openai) throw new Error('OpenAI não configurada');
 
     const generated = await this.generatePlaceholderImage(prompt);
-    const slug = this.slugify(prompt.slice(0, 40));
+    const slug = slugify(prompt.slice(0, 40));
     const filename = `ai-${slug}-${Date.now()}.jpg`;
 
     const result = await uploadGeneratedAsset({
@@ -242,15 +243,5 @@ export class TemplateElementAssistantService {
       outputCompression: 85,
       background: 'opaque',
     });
-  }
-
-  private slugify(text: string): string {
-    return text
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60);
   }
 }

@@ -58,10 +58,7 @@ describe('downloadImageSafely: esquema e credenciais', () => {
 
   it('a regra a mais do chamador (allowUrl) vale para o primeiro endereço e para cada salto, antes de conectar', async () => {
     const jpeg = await jpegOf(10, 10);
-    const allowUrl = jest.fn((url: URL) => {
-      if (url.hostname !== 'pixabay.com')
-        throw new SafeDownloadError('SCHEME', 'host fora do Pixabay');
-    });
+    const allowUrl = jest.fn((url: URL) => url.hostname === 'pixabay.com');
     const fetch = fetchFrom({
       'https://pixabay.com/get/a.jpg': () =>
         new Response(null, { status: 302, headers: { location: 'https://exemplo.com/x.jpg' } }),

@@ -17,8 +17,6 @@ const fetchMock = fetchWithTimeout as unknown as jest.Mock;
 function build(env: Record<string, string> = {}) {
   const service = new PixabayService(
     fakeConfig({ OPENAI_API_KEY: 'sk-teste', PIXABAY_API_KEY: 'pk-teste', ...env }),
-    {} as never,
-    {} as never,
   );
   const create = installFakeOpenAi(service);
   const logs = spyOnLogger(service);
@@ -163,11 +161,7 @@ describe('PixabayService, tradução do termo', () => {
   });
 
   it('sem a chave da OpenAI: busca com o termo original, sem chamada', async () => {
-    const service = new PixabayService(
-      fakeConfig({ PIXABAY_API_KEY: 'pk-teste' }),
-      {} as never,
-      {} as never,
-    );
+    const service = new PixabayService(fakeConfig({ PIXABAY_API_KEY: 'pk-teste' }));
     await service.searchImages('salsinha');
     expect(searchedTerm()).toBe('salsinha');
   });

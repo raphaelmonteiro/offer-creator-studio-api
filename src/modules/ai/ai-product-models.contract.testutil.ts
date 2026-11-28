@@ -16,6 +16,7 @@ import { HttpExceptionFilter } from '../../common/filters/http-exception.filter'
 import { ResponseInterceptor } from '../../common/interceptors/response.interceptor';
 import { SmartValidationPipe } from '../../common/pipes/smart-validation.pipe';
 import { GalleryController } from '../gallery/gallery.controller';
+import { GalleryPhotoImportService } from '../gallery/gallery-photo-import.service';
 import { GalleryService } from '../gallery/gallery.service';
 import { ClientPreferredImagesService } from '../gallery/client-preferred-images.service';
 import { GalleryImageEanService } from '../gallery/gallery-image-ean.service';
@@ -82,21 +83,23 @@ const SAVED_IMAGE = {
 function buildUploads() {
   return {
     uploadFile: jest.fn().mockResolvedValue({
+      id: 'arroz-uuid.jpg',
       filename: SAVED_IMAGE.filename,
       url: SAVED_IMAGE.url,
       mimeType: 'image/jpeg',
       size: 12,
     }),
+    deleteFile: jest.fn().mockResolvedValue(undefined),
   };
 }
 
 type Uploads = ReturnType<typeof buildUploads>;
 
 /** As cinco features reais, cada uma com o cliente da OpenAI trocado por um simulado (`fakes`). */
-function buildFeatures(config: ConfigService, uploads: Uploads, gallery: { registerImage: never }) {
+function buildFeatures(config: ConfigService) {
   const spell = new SpellCheckService(config);
   const categorization = new ProductCategorizationService(config);
-  const pixabay = new PixabayService(config, uploads as never, gallery as never);
+  const pixabay = new PixabayService(config);
   const parser = new ProductNameParserService(config, TAXONOMY);
   const vision = new ImageMetadataService(config, TAXONOMY);
   const fakes = {
@@ -246,12 +249,11 @@ export async function buildApp(env: Record<string, string> = {}) {
     ...env,
   });
   const uploads = buildUploads();
-  // O download do Pixabay registra a foto pela mesma Galeria real (que dispara a leitura simulada).
-  const slot = {} as { gallery: GalleryService };
-  const lazyGallery = { registerImage: (image: never) => slot.gallery.registerImage(image) };
-  const features = buildFeatures(config, uploads, lazyGallery as never);
+  const features = buildFeatures(config);
   const storage = buildStorage();
-  const gallery = (slot.gallery = buildGallery(features, storage, uploads));
+  const gallery = buildGallery(features, storage, uploads);
+  // O download do Pixabay registra a foto pela mesma Galeria real (que dispara a leitura simulada).
+  const photoImport = new GalleryPhotoImportService(uploads as never, gallery);
   const { matcher, eanResolution } = buildPhotoMatching(config, features, storage);
   const none = {} as never;
   const routes = buildRouteServices(config, env, storage);
@@ -265,6 +267,7 @@ export async function buildApp(env: Record<string, string> = {}) {
     layers.service,
     features.categorization,
     assembly,
+    photoImport,
   );
 
   const moduleFixture = await Test.createTestingModule({
@@ -299,6 +302,8 @@ export async function buildApp(env: Record<string, string> = {}) {
     embedding: storage.embedding,
     dataSource: storage.dataSource,
     uploads,
+    gallery,
+    photoImport,
   };
 }
 

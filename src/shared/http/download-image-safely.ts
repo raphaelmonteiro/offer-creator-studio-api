@@ -23,8 +23,8 @@ const FORMAT_FILES: Record<ReadableFormat, { extension: string; mimeType: string
 export interface DownloadImageOptions {
   /** Padrão: a conexão presa ao endereço conferido (`createPinnedFetch`). Injetável no teste. */
   fetch?: ManualFetch;
-  /** Regra a mais do chamador, conferida em cada salto (host e porta do Pixabay); lança para recusar. */
-  allowUrl?: (url: URL) => void;
+  /** Regra a mais do chamador, conferida no primeiro endereço e em cada salto (host e porta do Pixabay); `false` recusa com `SCHEME`. */
+  allowUrl?: (url: URL) => boolean;
   maxBytes?: number;
   timeoutMs?: number;
   maxRedirects?: number;
@@ -57,7 +57,9 @@ function checkUrlOf(allowUrl: DownloadImageOptions['allowUrl']) {
     if (url.username || url.password) {
       throw new SafeDownloadError('SCHEME', 'URL com usuário e senha');
     }
-    allowUrl?.(url);
+    if (allowUrl && !allowUrl(url)) {
+      throw new SafeDownloadError('SCHEME', `endereço não permitido (${url.host})`);
+    }
   };
 }
 
@@ -73,6 +75,9 @@ function toSafeDownloadError(error: unknown): SafeDownloadError {
   return new SafeDownloadError('NETWORK', `falha de rede${code ? ` (${code})` : ''}`);
 }
 
+const tooLargeMessage = (maxBytes: number): string =>
+  `Imagem excede o limite de ${Math.round(maxBytes / (1024 * 1024))}MB`;
+
 async function fetchBody(url: string, options: DownloadImageOptions, signal: AbortSignal) {
   const maxBytes = options.maxBytes ?? DOWNLOAD_MAX_BYTES;
   const response = await fetchFollowingRedirects(url, {
@@ -83,14 +88,17 @@ async function fetchBody(url: string, options: DownloadImageOptions, signal: Abo
   });
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
-    throw new SafeDownloadError('ORIGIN_STATUS', `a origem respondeu ${response.status}`);
+    throw new SafeDownloadError(
+      'ORIGIN_STATUS',
+      `Falha ao baixar imagem: status ${response.status}`,
+    );
   }
   if (Number(response.headers.get('content-length') ?? 0) > maxBytes) {
     await response.body?.cancel().catch(() => undefined);
-    throw new SafeDownloadError('TOO_LARGE', 'arquivo acima do teto declarado');
+    throw new SafeDownloadError('TOO_LARGE', tooLargeMessage(maxBytes));
   }
   const buffer = await readBodyUpTo(response, maxBytes);
-  if (buffer === null) throw new SafeDownloadError('TOO_LARGE', 'arquivo acima do teto');
+  if (buffer === null) throw new SafeDownloadError('TOO_LARGE', tooLargeMessage(maxBytes));
   return buffer;
 }
 

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { GalleryImage } from './entities/gallery-image.entity';
 import { GalleryFolder } from './entities/gallery-folder.entity';
 import { GalleryService } from './gallery.service';
+import { GalleryPhotoImportService } from './gallery-photo-import.service';
 import { GalleryController } from './gallery.controller';
 import { ClientPreferredImagesService } from './client-preferred-images.service';
 import { GalleryImageEanService } from './gallery-image-ean.service';
@@ -17,7 +18,8 @@ import { UploadsModule } from '../uploads/uploads.module';
     ClientPreferredImagesService,
     GalleryImageEanService,
     GalleryProductLinkService,
+    GalleryPhotoImportService,
   ],
-  exports: [GalleryService, GalleryProductLinkService],
+  exports: [GalleryService, GalleryProductLinkService, GalleryPhotoImportService],
 })
 export class GalleryModule {}

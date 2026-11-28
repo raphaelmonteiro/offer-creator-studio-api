@@ -1,7 +1,3 @@
-// O controller puxa (via resolução por EAN) o importador de fotos, que importa `sharp` (não carrega no host).
-jest.mock('sharp', () => jest.fn());
-jest.mock('./utils/fetch-with-timeout.util', () => ({ fetchWithTimeout: jest.fn() }));
-
 import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
 import {
@@ -14,22 +10,28 @@ import {
   until,
   USAGE,
 } from './ai-product-models.contract.testutil';
-import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
+import { pngOf } from '../../shared/image/image-fixtures.testutil';
+import { pixabayFetch, pixabayFile, pixabayMissing } from './pixabay.testutil';
 import { chatResponse } from './utils/openai-chat.testutil';
 
 beforeAll(createUploadDir);
 afterAll(removeUploadDir);
+
+/** A conexão simulada com o Pixabay no serviço de download do app de teste (nenhum soquete, nenhum DNS). */
+function servePhoto(
+  ctx: Awaited<ReturnType<typeof buildApp>>,
+  reply: Parameters<typeof pixabayFetch>[0],
+): ReturnType<typeof pixabayFetch> {
+  const connection = pixabayFetch(reply);
+  ctx.photoImport.fetchImpl = connection.fetch;
+  return connection;
+}
 
 const visionReply = () =>
   chatResponse({
     content: JSON.stringify({ title: 'ARROZ', fieldConfidence: { title: 0.9 } }),
     usage: USAGE,
   });
-const pixabayImage = () => ({
-  ok: true,
-  headers: { get: (name: string) => (name === 'content-type' ? 'image/png' : null) },
-  arrayBuffer: async () => new ArrayBuffer(8),
-});
 
 /**
  * Contrato das rotas dos dois editores que passam pela regravação dos dados da foto (change
@@ -40,12 +42,18 @@ const pixabayImage = () => ({
 describe('contrato das rotas que regravam os dados da foto (provedor simulado)', () => {
   let app: INestApplication;
   let ctx: Awaited<ReturnType<typeof buildApp>>;
+  let connection: ReturnType<typeof pixabayFetch>;
+  let png: Buffer;
+
+  beforeAll(async () => {
+    png = await pngOf(8, 8);
+  });
 
   beforeEach(async () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    (fetchWithTimeout as jest.Mock).mockReset().mockResolvedValue(pixabayImage());
     ctx = await buildApp();
     app = ctx.app;
+    connection = servePhoto(ctx, () => pixabayFile(png));
   });
   afterEach(async () => {
     await app.close();
@@ -77,7 +85,7 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
     });
 
     it('a falha do download continua HTTP 200 com success false, sem imageId e sem linha nova', async () => {
-      (fetchWithTimeout as jest.Mock).mockResolvedValue({ ok: false, status: 404 });
+      connection = servePhoto(ctx, () => pixabayMissing(404));
 
       const res = await download();
 
@@ -94,12 +102,10 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
     });
 
     it('arquivo de 12 MB: HTTP 200 com IMAGE_DOWNLOAD_ERROR, sem imageId e sem gravar nada', async () => {
-      (fetchWithTimeout as jest.Mock).mockResolvedValue({
-        ...pixabayImage(),
-        headers: {
-          get: (name: string) => (name === 'content-length' ? String(12 * 1024 * 1024) : null),
-        },
-      });
+      const twelveMb = 12 * 1024 * 1024;
+      connection = servePhoto(ctx, () =>
+        pixabayFile(Buffer.alloc(twelveMb), { contentLength: twelveMb }),
+      );
 
       const res = await download();
 
@@ -107,6 +113,18 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
       expect(body(res)).toMatchObject({ success: false, error: { code: 'IMAGE_DOWNLOAD_ERROR' } });
       expect(body(res)).not.toHaveProperty('data');
       expect(ctx.uploads.uploadFile).not.toHaveBeenCalled();
+    });
+
+    it('registro na Galeria que falha: HTTP 200 com IMAGE_DOWNLOAD_ERROR e o arquivo gravado é apagado', async () => {
+      jest.spyOn(ctx.gallery, 'registerImage').mockRejectedValue(new Error('banco fora do ar'));
+
+      const res = await download();
+
+      expect(res.status).toBe(200);
+      expect(body(res)).toMatchObject({ success: false, error: { code: 'IMAGE_DOWNLOAD_ERROR' } });
+      expect(body(res)).not.toHaveProperty('data');
+      expect(ctx.uploads.uploadFile).toHaveBeenCalledTimes(1);
+      expect(ctx.uploads.deleteFile).toHaveBeenCalledWith('products/arroz-uuid.jpg');
     });
 
     it('imageUrl que não é URL dá 400 BAD_REQUEST, sem baixar nada', async () => {
@@ -117,7 +135,7 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
 
       expect(res.status).toBe(400);
       expect(body(res)).toMatchObject({ success: false, error: { code: 'BAD_REQUEST' } });
-      expect(fetchWithTimeout).not.toHaveBeenCalled();
+      expect(connection.request).not.toHaveBeenCalled();
     });
   });
 
