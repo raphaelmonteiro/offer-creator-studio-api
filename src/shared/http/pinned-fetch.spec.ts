@@ -86,6 +86,9 @@ describe('createPinnedFetch: a conexão vai ao endereço conferido', () => {
     ['http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/x.jpg', {}],
     ['http://[2002:a00:5::1]/x.jpg', {}],
     ['http://[ff02::1]/x.jpg', {}],
+    ['http://[::ffff:0:a00:5]/x.jpg', {}],
+    ['http://[100::1]/x.jpg', {}],
+    ['http://[2001:db8::1]/x.jpg', {}],
     ['https://fotos.exemplo.com/x.jpg', { 'fotos.exemplo.com': ['64:ff9b::a00:5'] }],
   ])('endereço interno %s: PRIVATE_ADDRESS, nenhuma conexão', async (url, table) => {
     const { fetch, request } = fetchWith(table);

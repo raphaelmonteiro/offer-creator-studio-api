@@ -73,6 +73,8 @@ describe('isBlockedAddress: IPv4 mapeado em IPv6', () => {
     ['::ffff:7f00:1', true],
     ['::ffff:cb00:7107', false],
     ['::ffff:203.0.113.7', false],
+    ['::ffff:8.8.8.8', false],
+    ['::ffff:10.0.0.5', true],
   ])('escrito em hexadecimal ou por extenso: %s', (address, expected) => {
     expect(isBlockedAddress(address)).toBe(expected);
   });
@@ -129,6 +131,8 @@ describe('isBlockedAddress: IPv6', () => {
     ['2001:db8::/32 último', '2001:db8:ffff:ffff:ffff:ffff:ffff:ffff', true],
     ['2001:db8::/32 vizinho de cima', '2001:db9::', false],
     ['2001:db8::/32 vizinho de baixo', '2001:db7:ffff:ffff:ffff:ffff:ffff:ffff', false],
+    ['100::1 do cenário do descarte', '100::1', true],
+    ['2001:db8::1 do cenário da documentação IPv6', '2001:db8::1', true],
     ['público', '2606:4700:4700::1111', false],
     ['público do Google', '2001:4860:4860::8888', false],
   ];
