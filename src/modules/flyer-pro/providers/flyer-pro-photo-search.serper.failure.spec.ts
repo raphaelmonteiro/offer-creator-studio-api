@@ -50,22 +50,42 @@ describe('SerperPhotoSearch: falha da busca (uma chamada só, nunca repetida)', 
   };
 
   it.each([
-    ['401', 401, '{"message":"Unauthorized"}', 'AUTH'],
-    ['403 sem chave ou chave inválida (corpo observado)', 403, fixture(403).body, 'AUTH'],
-    ['400 saldo acabado (forma provável)', 400, fixture(400).body, 'QUOTA'],
-    ['400 insufficient credits', 400, '{"message":"Insufficient credits"}', 'QUOTA'],
-    ['402', 402, '', 'QUOTA'],
-    [
-      '400 outra recusa',
-      400,
-      '{"message":"Invalid parameters","statusCode":400}',
-      'PROVIDER_ERROR',
-    ],
-    ['422', 422, '{"message":"x"}', 'PROVIDER_ERROR'],
-    ['429 limite de taxa', 429, '{"message":"Too many requests"}', 'PROVIDER_ERROR'],
-    ['500', 500, '', 'PROVIDER_ERROR'],
-    ['502', 502, '', 'PROVIDER_ERROR'],
-  ])('%s vira o motivo %s', async (_name, status, body, reason) => {
+    { name: '401', status: 401, body: '{"message":"Unauthorized"}', reason: 'AUTH' },
+    {
+      name: '403 sem chave ou chave inválida (corpo observado)',
+      status: 403,
+      body: fixture(403).body,
+      reason: 'AUTH',
+    },
+    {
+      name: '400 saldo acabado (forma provável)',
+      status: 400,
+      body: fixture(400).body,
+      reason: 'QUOTA',
+    },
+    {
+      name: '400 insufficient credits',
+      status: 400,
+      body: '{"message":"Insufficient credits"}',
+      reason: 'QUOTA',
+    },
+    { name: '402', status: 402, body: '', reason: 'QUOTA' },
+    {
+      name: '400 outra recusa',
+      status: 400,
+      body: '{"message":"Invalid parameters","statusCode":400}',
+      reason: 'PROVIDER_ERROR',
+    },
+    { name: '422', status: 422, body: '{"message":"x"}', reason: 'PROVIDER_ERROR' },
+    {
+      name: '429 limite de taxa',
+      status: 429,
+      body: '{"message":"Too many requests"}',
+      reason: 'PROVIDER_ERROR',
+    },
+    { name: '500', status: 500, body: '', reason: 'PROVIDER_ERROR' },
+    { name: '502', status: 502, body: '', reason: 'PROVIDER_ERROR' },
+  ])('resposta $name (status $status) vira o motivo $reason', async ({ status, body, reason }) => {
     fetchSpy.mockResolvedValue(jsonReply(body, status));
 
     const failure = await searchFailure();
