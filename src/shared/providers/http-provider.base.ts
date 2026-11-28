@@ -1,5 +1,9 @@
 import { Logger } from '@nestjs/common';
-import { providerErrorFromResponse, TransientProviderError } from './provider-errors';
+import {
+  ProviderTimeoutError,
+  providerErrorFromResponse,
+  TransientProviderError,
+} from './provider-errors';
 
 /** Base HTTP dos adapters: classifica erros em transiente × terminal e respeita Retry-After. */
 export abstract class HttpProviderBase {
@@ -16,7 +20,11 @@ export abstract class HttpProviderBase {
     try {
       response = await fetch(url, { ...rest, signal: controller.signal });
     } catch (err) {
-      throw new TransientProviderError(`Falha de rede: ${(err as Error).message}`);
+      const message = `Falha de rede: ${(err as Error).message}`;
+      // O aborto foi do nosso prazo (e não uma queda de rede) só quando o sinal do próprio controller está abortado.
+      throw controller.signal.aborted
+        ? new ProviderTimeoutError(message)
+        : new TransientProviderError(message);
     } finally {
       clearTimeout(timer);
     }

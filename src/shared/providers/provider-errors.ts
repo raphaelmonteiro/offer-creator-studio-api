@@ -17,6 +17,13 @@ export class TransientProviderError extends Error {
   }
 }
 
+/**
+ * O prazo da chamada (`timeoutMs` do `HttpProviderBase`) venceu e o `fetch` foi abortado por ele: continua transitório
+ * para quem só testa `instanceof TransientProviderError`, e quem precisa distinguir prazo de queda de rede testa esta
+ * classe (a busca de fotos no Google devolve `TIMEOUT` só para ela, change 47, D-orq-253).
+ */
+export class ProviderTimeoutError extends TransientProviderError {}
+
 /** Erro terminal (política de conteúdo, input inválido) — NUNCA re-tentar. */
 export class TerminalProviderError extends Error {
   constructor(
