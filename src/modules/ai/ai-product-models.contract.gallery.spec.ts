@@ -122,7 +122,7 @@ describe('contrato das rotas que regravam os dados da foto (provedor simulado)',
       const res = await request(app.getHttpServer())
         .post('/v1/ai/image-download')
         .set('Authorization', bearer())
-        .send({ imageUrl: 'abc', productName: 'SALSINHA MAÇO' });
+        .send({ imageUrl: 'isto não é uma URL', productName: 'SALSINHA MAÇO' });
 
       expect(res.status).toBe(400);
       expect(body(res)).toMatchObject({ success: false, error: { code: 'BAD_REQUEST' } });

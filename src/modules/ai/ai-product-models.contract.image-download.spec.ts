@@ -77,6 +77,8 @@ describe('POST /v1/ai/image-download: só endereço do Pixabay (conexão simulad
     'https://pixabay.com:8443/get/g1a2b3c4d5e6f_1280.jpg',
     'http://169.254.169.254/latest/meta-data/',
     'http://localhost:3001/v1/health',
+    'pixabay.com/get/g1a2b3c4d5e6f_1280.jpg',
+    'abc',
   ])('%s: HTTP 200 com IMAGE_DOWNLOAD_ERROR, sem nenhuma conexão', async (url) => {
     const connection = servePhoto(ctx, () => pixabayFile(png));
 
