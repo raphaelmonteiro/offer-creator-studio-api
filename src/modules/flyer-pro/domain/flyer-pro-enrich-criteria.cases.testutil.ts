@@ -144,7 +144,7 @@ export const CRITERION_CASES: CriterionCase[] = [
     item: { imageStatus: 'applied', imageOrigin: 'match' },
     eligible: [false, true],
   },
-  ...['picker', 'upload', 'pixabay', 'suggestion'].map(
+  ...['picker', 'upload', 'pixabay', 'google', 'suggestion'].map(
     (origin): CriterionCase => ({
       label: `foto aplicada por escolha humana (${origin})`,
       phase: 'image_match',

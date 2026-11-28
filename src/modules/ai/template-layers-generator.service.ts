@@ -39,6 +39,7 @@ import {
 import { callProductChat } from './utils/ai-product-chat.util';
 import { createStructuredChatCompletion } from './utils/ai-structured-chat.util';
 import { classifyImageIntent } from './utils/image-intent';
+import { slugify } from '../../common/utils/slugify';
 
 @Injectable()
 export class TemplateLayersGeneratorService {
@@ -436,7 +437,7 @@ export class TemplateLayersGeneratorService {
           });
 
     const ext = transparent ? '.png' : generated.image.extension;
-    const slug = this.slugify(formatType);
+    const slug = slugify(formatType);
     const filename = `ai-layer-${slug}-${suffix}-${Date.now()}${ext}`;
 
     const uploaded = await uploadGeneratedAsset({
@@ -447,15 +448,5 @@ export class TemplateLayersGeneratorService {
       uploadsService: this.uploadsService,
     });
     return uploaded.url;
-  }
-
-  private slugify(text: string): string {
-    return text
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60);
   }
 }

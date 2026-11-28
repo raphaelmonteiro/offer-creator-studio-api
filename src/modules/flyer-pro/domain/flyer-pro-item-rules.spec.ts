@@ -166,13 +166,15 @@ describe('validateItem: foto e importação', () => {
     expect(issuesOfNew({ ...PHOTO, imageUrl: `http://${'a'.repeat(993)}` })).toEqual([]);
   });
 
-  it('origem fora de match, suggestion, picker, upload e pixabay é IMAGE_ORIGIN_UNKNOWN', () => {
-    for (const imageOrigin of ['match', 'suggestion', 'picker', 'upload', 'pixabay']) {
+  it('origem fora de match, suggestion, picker, upload, pixabay e google é IMAGE_ORIGIN_UNKNOWN', () => {
+    for (const imageOrigin of ['match', 'suggestion', 'picker', 'upload', 'pixabay', 'google']) {
       expect(issuesOfNew({ ...PHOTO, imageOrigin })).toEqual([]);
     }
-    expect(issuesOfNew({ ...PHOTO, imageOrigin: 'camera' })).toEqual([
-      issue('imageOrigin', 'IMAGE_ORIGIN_UNKNOWN'),
-    ]);
+    for (const imageOrigin of ['camera', 'serper']) {
+      expect(issuesOfNew({ ...PHOTO, imageOrigin })).toEqual([
+        issue('imageOrigin', 'IMAGE_ORIGIN_UNKNOWN'),
+      ]);
+    }
   });
 
   it('só a largura, ou a URL sem a imagem da Galeria, é IMAGE_GROUP_PARTIAL', () => {

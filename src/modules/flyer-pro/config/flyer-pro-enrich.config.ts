@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { rawEnv, readIntegerEnv, Warner } from './env-reader';
+import { rawEnv, readIntegerEnv, readProviderEnv, Warner } from './env-reader';
 
 /** Token de injeção da configuração do job de enriquecimento, lida uma vez ao subir (mudar exige reiniciar). */
 export const FLYER_PRO_ENRICH_CONFIG = 'FLYER_PRO_ENRICH_CONFIG';
@@ -28,13 +28,6 @@ export interface FlyerProEnrichConfig {
 
 const PREFIX = 'FLYER_PRO_ENRICH_';
 
-function readProvider(config: ConfigService, logger: Warner): EnrichProviderName {
-  const raw = rawEnv(config, PREFIX + 'PROVIDER');
-  if (raw === undefined || raw === 'real') return 'real';
-  if (raw !== 'mock') logger.warn(`${PREFIX}PROVIDER="${raw}" desconhecido; provedor em mock`);
-  return 'mock';
-}
-
 /** As dez variáveis `FLYER_PRO_ENRICH_*`, com os padrões do requisito e um aviso por valor inválido. */
 export function readEnrichConfig(
   config: ConfigService,
@@ -44,7 +37,7 @@ export function readEnrichConfig(
     readIntegerEnv(config, logger, { name: PREFIX + name, fallback, min: 1, multipleOf });
   return {
     enabled: rawEnv(config, PREFIX + 'ENABLED') !== 'false',
-    provider: readProvider(config, logger),
+    provider: readProviderEnv(config, logger, PREFIX + 'PROVIDER'),
     concurrency: integer('CONCURRENCY', 2),
     // Múltiplo de 8: cada chamada do leitor de nomes lê 8 nomes, e um lote de fotos usa chamadas inteiras.
     imageBatch: integer('IMAGE_BATCH', 16, 8),

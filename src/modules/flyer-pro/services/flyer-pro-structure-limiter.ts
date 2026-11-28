@@ -1,16 +1,12 @@
 import type { StructureAiBusyReason } from '../domain/flyer-pro.errors';
+import { HourlyWindow } from './flyer-pro-hourly-window';
+import { secondsUntil } from './flyer-pro-retry-after';
 
 /** A recusa de um dos dois freios: o motivo e os segundos (arredondados para cima) até poder tentar de novo. */
 export interface StructureRefusal {
   reason: StructureAiBusyReason;
   retryAfterSeconds: number;
 }
-
-const HOUR_MS = 3_600_000;
-
-/** Segundos até `untilMs`, arredondados para cima e nunca menos de 1. */
-const secondsUntil = (untilMs: number, nowMs: number): number =>
-  Math.max(1, Math.ceil((untilMs - nowMs) / 1000));
 
 /** A vaga dada: só quem tem o `token` consegue soltá-la. */
 export interface StructureSlot {
@@ -34,11 +30,13 @@ export const isRefusal = (result: StructureSlot | StructureRefusal): result is S
 export class FlyerProStructureLimiter {
   /** Encarte -> a vaga da chamada em andamento. */
   private readonly inFlight = new Map<string, HeldSlot>();
-  /** Encarte -> instantes (ms) das sugestões atendidas, do mais antigo para o mais novo. */
-  private readonly served = new Map<string, number[]>();
+  /** A janela de 60 minutos das sugestões atendidas, por encarte (a peça comum com a busca de fotos). */
+  private readonly served: HourlyWindow;
   private lastToken = 0;
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(private readonly now: () => number = Date.now) {
+    this.served = new HourlyWindow(now);
+  }
 
   /**
    * Toma a vaga do encarte para uma chamada de até `timeoutMs`; devolve a vaga (com o token para soltá-la) ou a recusa
@@ -64,27 +62,12 @@ export class FlyerProStructureLimiter {
    * antiga sair da janela; senão `null`.
    */
   checkHourly(documentId: string, max: number): StructureRefusal | null {
-    const now = this.now();
-    const recent = this.recentOf(documentId, now);
-    if (recent.length < max) return null;
-    return { reason: 'HOURLY_LIMIT', retryAfterSeconds: secondsUntil(recent[0] + HOUR_MS, now) };
+    const retryAfterSeconds = this.served.check(documentId, max);
+    return retryAfterSeconds === null ? null : { reason: 'HOURLY_LIMIT', retryAfterSeconds };
   }
 
   /** Conta uma sugestão atendida (só a resposta 200: a falha do provedor e a recusa não contam, D-2 (b)). */
   recordServed(documentId: string): void {
-    const now = this.now();
-    this.sweep(now);
-    this.served.set(documentId, [...this.recentOf(documentId, now), now]);
-  }
-
-  private recentOf(documentId: string, now: number): number[] {
-    return (this.served.get(documentId) ?? []).filter((at) => now - at < HOUR_MS);
-  }
-
-  /** Esquece os encartes sem nenhuma sugestão na última hora, para a memória não crescer sem fim. */
-  private sweep(now: number): void {
-    for (const [documentId, times] of this.served) {
-      if (times.every((at) => now - at >= HOUR_MS)) this.served.delete(documentId);
-    }
+    this.served.record(documentId);
   }
 }

@@ -8,7 +8,7 @@ import { HttpRejectionKind } from '../provider-errors';
  */
 export interface ProviderErrorFixture {
   name: string;
-  provider: 'fal' | 'elevenlabs';
+  provider: 'fal' | 'elevenlabs' | 'serper';
   status: number;
   body: string;
   origin: 'real' | 'docs' | 'fake' | 'control';
@@ -122,6 +122,25 @@ export const PROVIDER_ERROR_FIXTURES: readonly ProviderErrorFixture[] = [
     provider: 'elevenlabs',
     status: 400,
     body: eleven('max_character_limit_exceeded', 'Text too long'),
+    origin: 'docs',
+    expected: 'provider_rejected',
+  },
+  // Serper (change 47). `expected` é o do classificador comum; a falta de saldo é reconhecida pelo texto, só no provedor da
+  // Serper (`flyer-pro-photo-search.serper.failure.ts`, D-orq-252), porque o 400 não entra nas regras dos outros fornecedores.
+  {
+    name: 'Serper 403 sem chave ou com chave inválida',
+    provider: 'serper',
+    status: 403,
+    body: '{"message":"Unauthorized. Sign up for a free account.","statusCode":403}',
+    origin: 'real',
+    expected: 'provider_auth',
+  },
+  {
+    // Forma provável, a confirmar quando o saldo acabar de verdade (design.md da change 47, A3c).
+    name: 'Serper 400 saldo esgotado (forma provável, a confirmar)',
+    provider: 'serper',
+    status: 400,
+    body: '{"message":"Not enough credits","statusCode":400}',
     origin: 'docs',
     expected: 'provider_rejected',
   },

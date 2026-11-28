@@ -2,15 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import * as sharp from 'sharp';
 import { resolveUploadsDir } from '../../../common/config/uploads-dir';
 import { fileUploadOptions } from '../../../common/utils/multer.util';
+import { readBodyUpTo } from '../../../shared/http/read-body-up-to';
+import { ImageSize, sizeOf } from '../../../shared/image/image-size';
 import { DEFAULT_CDN_URL } from '../../uploads/uploads.service';
-
-export interface ImageSize {
-  width: number;
-  height: number;
-}
 
 /**
  * `signal` cancela o download (o lote do job passou do prazo). `offline` mede só o que está no disco, sem baixar nada: o
@@ -85,7 +81,7 @@ export class FlyerProImageSizeService {
     try {
       const response = await fetch(url, { signal: controller.signal });
       if (!response.ok || !response.body) return null;
-      return await readUpTo(response.body, MEASURE_DOWNLOAD_MAX_BYTES);
+      return await readBodyUpTo(response, MEASURE_DOWNLOAD_MAX_BYTES);
     } catch {
       return null;
     } finally {
@@ -101,38 +97,6 @@ async function isFile(file: string): Promise<boolean> {
     return (await fs.stat(file)).isFile();
   } catch {
     return false;
-  }
-}
-
-/** A medida do cabeçalho (arquivo ou bytes) com a orientação do arquivo aplicada; `null` se não é imagem. */
-async function sizeOf(input: string | Buffer): Promise<ImageSize | null> {
-  try {
-    const { width, height, orientation } = await sharp(input).metadata();
-    if (!width || !height) return null;
-    // EXIF 5 a 8: a imagem é exibida girada em 90 graus, e a proporção que o card usa é a da exibição.
-    return orientation && orientation >= 5 ? { width: height, height: width } : { width, height };
-  } catch {
-    return null;
-  }
-}
-
-/** Lê o corpo até o teto; passou dele, para a leitura e devolve `null`. */
-async function readUpTo(
-  body: ReadableStream<Uint8Array>,
-  maxBytes: number,
-): Promise<Buffer | null> {
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return Buffer.concat(chunks);
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
   }
 }
 

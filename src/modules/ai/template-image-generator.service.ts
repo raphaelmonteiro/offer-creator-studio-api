@@ -23,6 +23,7 @@ import {
   TEMPLATE_IMAGE_REPLY_SYSTEM_PROMPT,
   buildTemplateImageTranslationSystemPrompt,
 } from './prompts/template-image.prompts';
+import { slugify } from '../../common/utils/slugify';
 
 interface TemplateImageFormat {
   type: string;
@@ -238,7 +239,7 @@ export class TemplateImageGeneratorService {
 
     // Step 4: upload to our bucket
     const ext = generatedImage.extension;
-    const slug = this.slugify(format.type);
+    const slug = slugify(format.type);
     const filename = `ai-template-${slug}-${Date.now()}${ext}`;
 
     const uploaded = await uploadGeneratedAsset({
@@ -319,15 +320,5 @@ export class TemplateImageGeneratorService {
       return 'A imagem foi preservada porque o pedido parece ser uma alteração de layout.';
     }
     return 'A imagem atual foi preservada.';
-  }
-
-  private slugify(text: string): string {
-    return text
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60);
   }
 }

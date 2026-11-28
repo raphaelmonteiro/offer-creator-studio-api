@@ -3,6 +3,9 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import * as sharp from 'sharp';
 import { DataSource } from 'typeorm';
 import { GalleryService } from '../../../gallery/gallery.service';
+import { fetchFollowingRedirects } from '../../../../shared/http/follow-redirects';
+import { readBodyUpTo } from '../../../../shared/http/read-body-up-to';
+import { MAX_INPUT_PIXELS } from '../../../../shared/image/max-input-pixels';
 import { UploadsService } from '../../../uploads/uploads.service';
 import { DotcompanyLookupService } from './dotcompany-lookup.service';
 import { DotcompanyMetadataBuilder } from './dotcompany-metadata.builder';
@@ -15,8 +18,6 @@ export const DOTCOMPANY_GALLERY_FOLDER = 'DotCompany';
 const DOWNLOAD_TIMEOUT_MS = 20_000;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
-/** Teto de pixels decodificados pelo sharp (proteção contra imagem-bomba). */
-export const MAX_INPUT_PIXELS = 40_000_000;
 /** Hosts observados nas fotos devolvidas pelo catálogo, sem liberar domínios arbitrários. */
 const ALLOWED_HOSTS = [
   'app.dotcompany.com.br',
@@ -39,6 +40,13 @@ export function isAllowedImageUrl(raw: string): boolean {
   return (
     ALLOWED_HOSTS.includes(host) || ALLOWED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))
   );
+}
+
+/** Recusa o endereço fora da lista (o primeiro e cada salto), antes de qualquer requisição. */
+function assertAllowedImageUrl(url: string): void {
+  if (!isAllowedImageUrl(url)) {
+    throw new Error(`URL da foto fora da lista permitida (${safeHost(url)})`);
+  }
 }
 
 export type PhotoImportStatus = 'imported' | 'already_exists' | 'no_image' | 'error';
@@ -276,7 +284,12 @@ export class DotcompanyPhotoImporter {
       DOWNLOAD_TIMEOUT_MS,
     );
     try {
-      const res = await this.fetchFollowingAllowedRedirects(url, ctrl.signal);
+      const res = await fetchFollowingRedirects(url, {
+        fetch: (target, init) => this.fetchImpl(target, init),
+        signal: ctrl.signal,
+        maxRedirects: MAX_REDIRECTS,
+        checkUrl: assertAllowedImageUrl,
+      });
       if ([401, 403, 404, 410].includes(res.status)) {
         await res.body?.cancel().catch(() => undefined);
         throw new ExpiredImageUrlError(`download da foto → ${res.status}`);
@@ -303,48 +316,11 @@ export class DotcompanyPhotoImporter {
     }
   }
 
-  /** Segue redirects à mão (máx. 3), validando esquema e host a cada salto. */
-  private async fetchFollowingAllowedRedirects(
-    startUrl: string,
-    signal: AbortSignal,
-  ): Promise<Response> {
-    let url = startUrl;
-    for (let hop = 0; ; hop++) {
-      if (!isAllowedImageUrl(url)) {
-        throw new Error(`URL da foto fora da lista permitida (${safeHost(url)})`);
-      }
-      const res = await this.fetchImpl(url, { signal, redirect: 'manual' });
-      if (![301, 302, 303, 307, 308].includes(res.status)) return res;
-      await res.body?.cancel().catch(() => undefined);
-      const location = res.headers.get('location');
-      if (!location) throw new Error(`redirect sem Location (${res.status})`);
-      if (hop >= MAX_REDIRECTS) throw new Error(`redirects demais (mais de ${MAX_REDIRECTS})`);
-      url = new URL(location, url).toString();
-    }
-  }
-
-  /** Lê o corpo por stream e aborta ao passar de 10 MB, sem carregar o excedente. */
+  /** Lê o corpo até 10 MB sem carregar o excedente; passou do teto, é erro. */
   private async readLimited(res: Response): Promise<Buffer> {
-    const reader = res.body?.getReader();
-    if (!reader) {
-      const all = Buffer.from(await res.arrayBuffer());
-      if (all.length > MAX_IMAGE_BYTES)
-        throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
-      return all;
-    }
-    const chunks: Buffer[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_IMAGE_BYTES) {
-        await reader.cancel().catch(() => undefined);
-        throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
-      }
-      chunks.push(Buffer.from(value));
-    }
-    return Buffer.concat(chunks, total);
+    const buffer = await readBodyUpTo(res, MAX_IMAGE_BYTES);
+    if (buffer === null) throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
+    return buffer;
   }
 }
 

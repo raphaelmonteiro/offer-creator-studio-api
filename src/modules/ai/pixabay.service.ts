@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
-import { GalleryService } from '../gallery/gallery.service';
-import { UploadsService } from '../uploads/uploads.service';
 import { TRANSLATION_CEILING } from './config/openai-product-ceilings';
 import {
   getProductAiConfig,
@@ -31,13 +29,6 @@ const UNITS = [
   'fardo',
 ];
 const GENERIC_TERMS = ['tipo\\s+\\d+', 'especial', 'premium', 'tradicional'];
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
-
-/** A foto do Pixabay depois de salva: a URL do arquivo e o id da linha que a registrou em `gallery_images`. */
-export interface SavedPixabayImage {
-  url: string;
-  imageId: string;
-}
 
 interface PixabayHit {
   id: number;
@@ -58,11 +49,7 @@ export class PixabayService {
   private readonly openai: OpenAI | null;
   private readonly feature: ProductAiFeatureConfig;
 
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly uploadsService: UploadsService,
-    private readonly galleryService: GalleryService,
-  ) {
+  constructor(private readonly configService: ConfigService) {
     this.feature = getProductAiConfig(configService).translation;
 
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
@@ -133,52 +120,6 @@ export class PixabayService {
     return { searchTerm: normalizedTerm, images };
   }
 
-  /** Baixa a foto escolhida, grava o arquivo em `uploads/products/` e a registra na Galeria; devolve a URL e o id da linha criada. */
-  async downloadAndSaveImage(imageUrl: string, productName: string): Promise<SavedPixabayImage> {
-    const response = await fetchWithTimeout(imageUrl);
-    if (!response.ok) {
-      throw new Error(`Falha ao baixar imagem: status ${response.status}`);
-    }
-
-    const contentLength = response.headers.get('content-length');
-    if (contentLength && Number.parseInt(contentLength, 10) > MAX_IMAGE_SIZE) {
-      throw new Error('Imagem excede o limite de 10MB');
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    if (buffer.length > MAX_IMAGE_SIZE) {
-      throw new Error('Imagem excede o limite de 10MB');
-    }
-
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    const ext =
-      this.extensionFromMimeType(contentType) || this.extensionFromUrl(imageUrl) || '.jpg';
-    const slug = this.slugify(productName);
-    const filename = `${slug}-${Date.now()}${ext}`;
-
-    const fakeFile = {
-      buffer,
-      originalname: filename,
-      size: buffer.length,
-      mimetype: contentType,
-      fieldname: 'file',
-      encoding: '7bit',
-    } as Express.Multer.File;
-
-    const result = await this.uploadsService.uploadFile(fakeFile, 'products');
-
-    const image = await this.galleryService.registerImage({
-      filename,
-      url: result.url,
-      mimeType: contentType.split(';')[0].trim(),
-      size: buffer.length,
-    });
-
-    return { url: result.url, imageId: image.id };
-  }
-
   private async translateToEnglish(term: string, usage?: AiUsageCollector): Promise<string> {
     if (!this.openai) {
       return term;
@@ -229,37 +170,5 @@ export class PixabayService {
 
     const words = term.split(' ').filter(Boolean);
     return words.slice(0, 3).join(' ');
-  }
-
-  private slugify(text: string): string {
-    return text
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60);
-  }
-
-  private extensionFromMimeType(mimeType: string): string {
-    const map: Record<string, string> = {
-      'image/jpeg': '.jpg',
-      'image/jpg': '.jpg',
-      'image/png': '.png',
-      'image/webp': '.webp',
-      'image/gif': '.gif',
-    };
-    const base = mimeType.split(';')[0].trim();
-    return map[base] ?? '';
-  }
-
-  private extensionFromUrl(url: string): string {
-    try {
-      const pathname = new URL(url).pathname;
-      const match = pathname.match(/\.(jpg|jpeg|png|webp|gif)$/i);
-      return match ? `.${match[1].toLowerCase()}` : '';
-    } catch {
-      return '';
-    }
   }
 }

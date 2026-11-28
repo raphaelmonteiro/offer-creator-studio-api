@@ -19,7 +19,12 @@ import { ProductCategorizationRequestDto } from './dto/product-categorization-re
 import { ProductCategorizationResponseDto } from './dto/product-categorization-response.dto';
 import { FlyerAssemblyPlanRequestDto } from './dto/flyer-assembly-plan-request.dto';
 import { FlyerAssemblyPlanResponseDto } from './dto/flyer-assembly-plan-response.dto';
-import { PixabayService, SavedPixabayImage } from './pixabay.service';
+import {
+  GalleryPhotoImportService,
+  RegisteredPhoto,
+} from '../gallery/gallery-photo-import.service';
+import { isPixabayImageUrl } from './pixabay-image-url';
+import { PixabayService } from './pixabay.service';
 import { SpellCheckService } from './spell-check.service';
 import { TemplateGenerateService } from './template-generate.service';
 import { TemplateElementAssistantService } from './template-element-assistant.service';
@@ -39,6 +44,7 @@ export class AiService {
     private readonly templateLayersGeneratorService: TemplateLayersGeneratorService,
     private readonly productCategorizationService: ProductCategorizationService,
     private readonly flyerAssemblyPlanService: FlyerAssemblyPlanService,
+    private readonly galleryPhotoImport: GalleryPhotoImportService,
   ) {}
 
   async spellCheck(products: SpellCheckProductDto[]): Promise<SpellCheckResponseDto> {
@@ -61,8 +67,11 @@ export class AiService {
     return this.pixabayService.searchImages(rawName, category);
   }
 
-  async downloadAndSaveImage(imageUrl: string, productName: string): Promise<SavedPixabayImage> {
-    return this.pixabayService.downloadAndSaveImage(imageUrl, productName);
+  /** Baixa a foto escolhida no Pixabay, a grava em `uploads/products/` e a registra na Galeria. */
+  async downloadAndSaveImage(imageUrl: string, productName: string): Promise<RegisteredPhoto> {
+    return this.galleryPhotoImport.downloadAndRegister(imageUrl, productName, {
+      allowUrl: isPixabayImageUrl,
+    });
   }
 
   async generateTemplateElement(

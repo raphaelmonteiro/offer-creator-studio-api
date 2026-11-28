@@ -6,7 +6,7 @@ import {
   PHOTO_GROUP,
 } from '../testing/flyer-pro-photo-group.testutil';
 import { draftOf } from './flyer-pro-item-merge';
-import { photoChoiceOf } from './flyer-pro-photo-choice';
+import { isHumanPhotoChange, photoChoiceOf, PhotoChoice } from './flyer-pro-photo-choice';
 
 describe('photoChoiceOf', () => {
   it('item novo com o grupo da foto: a foto nova, sem foto antes', () => {
@@ -37,6 +37,20 @@ describe('photoChoiceOf', () => {
       previousGalleryImageId: PHOTO,
       imageOrigin: null,
     });
+  });
+
+  it('só a origem match deixa de ser escolha humana: google conta como pessoa', () => {
+    const choice = (imageOrigin: string): PhotoChoice => ({
+      itemId: 'i1',
+      galleryImageId: PHOTO,
+      previousGalleryImageId: null,
+      imageOrigin,
+    });
+
+    for (const origin of ['suggestion', 'picker', 'upload', 'pixabay', 'google']) {
+      expect(isHumanPhotoChange(choice(origin))).toBe(true);
+    }
+    expect(isHumanPhotoChange(choice('match'))).toBe(false);
   });
 
   it('corpo sem o grupo da foto (só o preço): nenhuma escolha', () => {

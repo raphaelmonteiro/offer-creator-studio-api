@@ -27,4 +27,5 @@ export const FLYER_PRO_IMAGE_ORIGINS = [
   'picker',
   'upload',
   'pixabay',
+  'google',
 ] as const;

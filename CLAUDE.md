@@ -59,6 +59,7 @@ OPENAI_ENABLE_DALLE_FALLBACK  # SEM EFEITO desde a change 42 (o fallback DALL-E 
 # O backend/.env.example é o PERFIL DE PRODUÇÃO (todas as variáveis de IA e de função, valor de produção, efeito e custo);
 # o docker-compose.yml local o sobrepõe com mock; src/common/config/env-example.guard.spec.ts trava variável sem linha, linha sem leitor e segredo com valor.
 PIXABAY_API_KEY               # product image search
+SERPER_API_KEY                # Encarte Pro: busca no Google Imagens pela Serper (≈ US$ 0,001 por busca); só no .env do servidor; vazia, a busca responde 503 NO_API_KEY e a API sobe; nunca em log, URL ou resposta (só no cabeçalho X-API-KEY)
 REPLICATE_API_TOKEN           # SAM image segmentation
 ADMIN_API_TOKEN               # gates /ai/gallery/* admin routes (x-admin-token header)
 AI_GALLERY_EMBEDDING_ENABLED  # toggles pgvector setup/backfill on boot
@@ -143,6 +144,10 @@ FLYER_PRO_STRUCTURE_AI_MAX_PER_HOUR
 FLYER_PRO_STRUCTURE_AI_MAX_HEROES
                                 # destaques novos por sugestão (padrão 12; os últimos são cortados)
 FLYER_PRO_STRUCTURE_AI_EXAMPLES # encartes anteriores do cliente usados como exemplo, de 0 a 10 (padrão 3; 0 desliga a leitura)
+# Encarte Pro: busca de fotos no Google (módulo flyer-pro, rotas B1 e B2, change 47) — bloco completo em .env.example; lidas uma vez, ao subir a API
+FLYER_PRO_PHOTO_SEARCH_PROVIDER # real (Serper, gasta crédito; padrão do código) | mock (sem rede e sem custo; padrão do compose local; valor desconhecido cai em mock)
+FLYER_PRO_PHOTO_SEARCH_MAX_PER_HOUR
+                                # buscas que saíram para a Serper por encarte em 60 minutos (padrão 300, em domain/flyer-pro.limits.ts); acima, 429 FLYER_PRO_PHOTO_SEARCH_BUSY
 # Encarte Pro: job de fotos, categorias e ortografia (módulo flyer-pro, rotas N14 a N16) — bloco completo em .env.example; lidas uma vez, ao subir o processo (API e worker)
 FLYER_PRO_ENRICH_ENABLED        # só false desliga o job (N14 responde 422 FLYER_PRO_ENRICHMENT_DISABLED; o worker não consome nem varre)
 FLYER_PRO_ENRICH_PROVIDER       # real (padrão do código; antes da change 29 só pula as três fases) | mock (padrão do compose local; valor desconhecido cai em mock)

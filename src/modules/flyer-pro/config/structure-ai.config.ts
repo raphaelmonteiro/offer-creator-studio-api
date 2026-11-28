@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { ProductReasoningEffort } from '../../ai/config/openai-chat-params';
 import { readModelConfig } from '../../ai/config/openai-product-features.config';
 import { FLYER_PRO_LIMITS } from '../domain/flyer-pro.limits';
-import { rawEnv, readIntegerEnv, Warner } from './env-reader';
+import { rawEnv, readIntegerEnv, readProviderEnv, Warner } from './env-reader';
 
 /** Token de injeção da configuração da sugestão de estrutura, lida uma vez ao subir (mudar exige reiniciar). */
 export const STRUCTURE_AI_CONFIG = 'FLYER_PRO_STRUCTURE_AI_CONFIG';
@@ -47,13 +47,6 @@ function readEffort(config: ConfigService, logger: Warner): ProductReasoningEffo
   return DEFAULT_EFFORT;
 }
 
-function readProvider(config: ConfigService, logger: Warner): StructureAiProviderName {
-  const raw = rawOf(config, 'PROVIDER');
-  if (raw === undefined || raw === 'real') return 'real';
-  if (raw !== 'mock') logger.warn(`${PREFIX}PROVIDER="${raw}" desconhecido; provedor em mock`);
-  return 'mock';
-}
-
 /** As oito variáveis `FLYER_PRO_STRUCTURE_AI_*`, com os padrões do contrato e um aviso por valor inválido. */
 export function readStructureAiConfig(
   config: ConfigService,
@@ -62,7 +55,7 @@ export function readStructureAiConfig(
   const limits = FLYER_PRO_LIMITS;
   return {
     enabled: rawOf(config, 'ENABLED') !== 'false',
-    provider: readProvider(config, logger),
+    provider: readProviderEnv(config, logger, PREFIX + 'PROVIDER'),
     model: readModelConfig(config, PREFIX + 'MODEL', 'gpt-6-luna'),
     effort: readEffort(config, logger),
     timeoutMs: readInteger(config, logger, {

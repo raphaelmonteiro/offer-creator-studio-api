@@ -15,6 +15,7 @@ import {
 import { OpenAiImageService } from './openai-image.service';
 import { AI_RESPONSE_FORMATS, parseTemplateGenerateResponse } from './schemas/ai-response.schemas';
 import { TEMPLATE_GENERATE_SYSTEM_PROMPT } from './prompts/template-generate.prompts';
+import { slugify } from '../../common/utils/slugify';
 
 const GENERATE_PREFIX = 'GENERATE:';
 
@@ -172,7 +173,7 @@ export class TemplateGenerateService {
     if (!this.openai) throw new Error('OpenAI não configurada');
 
     const generated = await this.generatePlaceholderImage(prompt);
-    const filename = `ai-${this.slugify(prompt.slice(0, 40))}-${Date.now()}.jpg`;
+    const filename = `ai-${slugify(prompt.slice(0, 40))}-${Date.now()}.jpg`;
 
     const result = await uploadGeneratedAsset({
       buffer: generated.image.buffer,
@@ -230,15 +231,5 @@ export class TemplateGenerateService {
     if (JSON.stringify(config).includes(GENERATE_PREFIX)) {
       throw new Error('Placeholders GENERATE: não resolvidos na configuration final');
     }
-  }
-
-  private slugify(text: string): string {
-    return text
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60);
   }
 }

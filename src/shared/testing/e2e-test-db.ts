@@ -4,6 +4,8 @@ import { Client } from '../../modules/clients/entities/client.entity';
 import { ClientContact } from '../../modules/clients/entities/client-contact.entity';
 import { ClientStore } from '../../modules/clients/entities/client-store.entity';
 import { Font } from '../../modules/fonts/entities/font.entity';
+import { GalleryFolder } from '../../modules/gallery/entities/gallery-folder.entity';
+import { GalleryImage } from '../../modules/gallery/entities/gallery-image.entity';
 import { FlyerProDocument } from '../../modules/flyer-pro/entities/flyer-pro-document.entity';
 import { FlyerProExport } from '../../modules/flyer-pro/entities/flyer-pro-export.entity';
 import { FlyerProImport } from '../../modules/flyer-pro/entities/flyer-pro-import.entity';
@@ -76,8 +78,10 @@ export function assertE2eDbUrl(url: string | undefined): URL {
 
 /**
  * As entidades que o `synchronize` monta. CADA TASK DE BACKEND ACRESCENTA AS SUAS aqui (e os dados dela à semente):
- * quem esquecer vê "relation does not exist" no próprio e2e. A Galeria não entra: as tabelas dela nascem pelo SQL do
- * app (`createGallerySchema`), e `GalleryImage` tem `synchronize: false`.
+ * quem esquecer vê "relation does not exist" no próprio e2e. A Galeria entra só para o TypeORM ter o metadado dela (o
+ * `GalleryService.registerImage` usa o repositório de `GalleryImage`, como a rota de download de foto do Encarte Pro,
+ * change 47): as tabelas nascem pelo SQL do app (`createGallerySchema`), e `GalleryImage` tem `synchronize: false`
+ * (`GalleryFolder`, que a relação pede, nasce igual pelos dois caminhos).
  */
 export const E2E_TEST_ENTITIES = [
   ...SCENE_TEST_ENTITIES,
@@ -91,6 +95,8 @@ export const E2E_TEST_ENTITIES = [
   FlyerProExport,
   FlyerBuilderV2Document,
   Font,
+  GalleryImage,
+  GalleryFolder,
 ];
 
 /** A mesma trava do harness das cenas (A-5): os dois nunca montam o banco ao mesmo tempo. */
