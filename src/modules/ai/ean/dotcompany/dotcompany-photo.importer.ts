@@ -3,6 +3,8 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import * as sharp from 'sharp';
 import { DataSource } from 'typeorm';
 import { GalleryService } from '../../../gallery/gallery.service';
+import { readBodyUpTo } from '../../../../shared/http/read-body-up-to';
+import { MAX_INPUT_PIXELS } from '../../../../shared/image/max-input-pixels';
 import { UploadsService } from '../../../uploads/uploads.service';
 import { DotcompanyLookupService } from './dotcompany-lookup.service';
 import { DotcompanyMetadataBuilder } from './dotcompany-metadata.builder';
@@ -15,8 +17,6 @@ export const DOTCOMPANY_GALLERY_FOLDER = 'DotCompany';
 const DOWNLOAD_TIMEOUT_MS = 20_000;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
-/** Teto de pixels decodificados pelo sharp (proteção contra imagem-bomba). */
-export const MAX_INPUT_PIXELS = 40_000_000;
 /** Hosts observados nas fotos devolvidas pelo catálogo, sem liberar domínios arbitrários. */
 const ALLOWED_HOSTS = [
   'app.dotcompany.com.br',
@@ -323,28 +323,11 @@ export class DotcompanyPhotoImporter {
     }
   }
 
-  /** Lê o corpo por stream e aborta ao passar de 10 MB, sem carregar o excedente. */
+  /** Lê o corpo até 10 MB sem carregar o excedente; passou do teto, é erro. */
   private async readLimited(res: Response): Promise<Buffer> {
-    const reader = res.body?.getReader();
-    if (!reader) {
-      const all = Buffer.from(await res.arrayBuffer());
-      if (all.length > MAX_IMAGE_BYTES)
-        throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
-      return all;
-    }
-    const chunks: Buffer[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_IMAGE_BYTES) {
-        await reader.cancel().catch(() => undefined);
-        throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
-      }
-      chunks.push(Buffer.from(value));
-    }
-    return Buffer.concat(chunks, total);
+    const buffer = await readBodyUpTo(res, MAX_IMAGE_BYTES);
+    if (buffer === null) throw new Error(`imagem maior que ${MAX_IMAGE_BYTES} bytes`);
+    return buffer;
   }
 }
 

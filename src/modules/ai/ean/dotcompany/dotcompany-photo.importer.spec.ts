@@ -16,9 +16,9 @@ import {
   DotcompanyPhotoImporter,
   DOTCOMPANY_GALLERY_FOLDER,
   isAllowedImageUrl,
-  MAX_INPUT_PIXELS,
 } from './dotcompany-photo.importer';
 import { DotcompanyLookup } from './entities/dotcompany-lookup.entity';
+import { MAX_INPUT_PIXELS } from '../../../../shared/image/max-input-pixels';
 
 const EAN = '7891000100103';
 const URL1 = 'https://app.dotcompany.com.br/publico/catalogo/img/7891000100103.png?exp=1';
